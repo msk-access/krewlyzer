@@ -6,8 +6,8 @@
 
 <p align="center">
   <a href="https://pypi.org/project/krewlyzer/"><img src="https://img.shields.io/pypi/v/krewlyzer.svg?color=blue" alt="PyPI version"></a>
-  <a href="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/actions"><img src="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/workflows/CI/badge.svg" alt="GitHub Actions"></a>
-  <a href="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/pkgs/container/krewlyzer"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
+  <a href="https://github.com/msk-acess/krewlyzer/actions"><img src="https://github.com//msk-acess/krewlyzer/workflows/CI/badge.svg" alt="GitHub Actions"></a>
+  <a href="https://github.com//msk-acess/krewlyzer/pkgs/container/krewlyzer"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
 </p>
 
 A command-line tool for extracting features from circulating tumor DNA (ctDNA) BAM files aligned to GRCh37.
