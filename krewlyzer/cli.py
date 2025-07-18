@@ -16,10 +16,12 @@ app = typer.Typer()
 from .extract_features import extract_features
 from .quality_control import quality_control
 from .motif import motif
+from .fsc import fsc
 
 app.command()(extract_features)
 app.command()(quality_control)
 app.command()(motif)
+app.command()(fsc)
 
 @app.command()
 def process_region(

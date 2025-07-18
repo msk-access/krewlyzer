@@ -20,12 +20,19 @@ def test_motif_help():
     assert "-g" in result.output
     assert "-o" in result.output
 
-# For real motif runs, you would need to provide a small BAM and genome file for testing.
+def test_fsc_help():
+    result = runner.invoke(app, ["fsc", "--help"])
+    assert result.exit_code == 0
+    assert "fragment size coverage" in result.output.lower() or "fsc" in result.output.lower()
+    assert "--bin-input" in result.output
+    assert "--output" in result.output
+
+# For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
-# def test_motif_dry(tmp_path):
-#     bam = "tests/data/test.bam"
-#     genome = "tests/data/test.fa"
+# def test_fsc_dry(tmp_path):
+#     bedgz = "tests/data/test.bed.gz"
 #     out = tmp_path / "out"
-#     result = runner.invoke(app, ["motif", str(bam), "-g", str(genome), "-o", str(out)])
+#     out.mkdir()
+#     result = runner.invoke(app, ["fsc", str(bedgz), "-o", str(out)])
 #     assert result.exit_code == 0
-#     assert (out / "EDM").exists()
+#     # Check output files exist, etc.

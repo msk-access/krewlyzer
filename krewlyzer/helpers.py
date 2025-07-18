@@ -7,9 +7,56 @@ import math
 from collections import defaultdict
 from rich.logging import RichHandler
 import logging
+from skmisc.loess import loess
+import numpy as np
 
 logging.basicConfig(level="INFO", handlers=[RichHandler()], format="%(message)s")
 logger = logging.getLogger("krewlyzer-helpers")
+
+def gc_correct(coverage, bias):
+    """
+    Perform GC bias correction on coverage values using LOESS regression.
+    Logs errors and raises commonError if fitting fails.
+    """
+    covl = len(coverage)
+    valid = [True for _ in range(covl)]
+    temp_cov = []
+    temp_bias = []
+    for i in range(covl):
+        if np.isnan(bias[i]):
+            valid[i] = False
+        else:
+            temp_cov.append(coverage[i])
+            temp_bias.append(bias[i])
+    if not temp_cov or not temp_bias:
+        logger.error("No valid coverage/bias values for GC correction.")
+        raise commonError("No valid coverage/bias values for GC correction.")
+    med = np.median(temp_cov)
+    correct_cov = []
+    try:
+        i = np.arange(np.min(temp_bias), np.max(temp_bias), 0.001)
+        coverage_trend = loess(temp_bias, temp_cov, span=0.75)
+        coverage_trend.fit()
+        coverage_model = loess(i, coverage_trend.predict(i, stderror=True).values)
+        coverage_model.fit()
+        coverage_pred = coverage_model.predict(temp_bias, stderror=True)
+        pred = np.array(coverage_pred.values)
+        coverage_corrected = temp_cov - pred + med
+    except Exception as e:
+        logger.error(f"GC correction failed: {e}")
+        raise commonError(f"GC correction failed: {e}")
+    i, j = 0, 0
+    while i < covl:
+        if valid[i]:
+            if coverage_corrected[j] < 0:
+                correct_cov.append(0)
+            else:
+                correct_cov.append(coverage_corrected[j])
+            j += 1
+        else:
+            correct_cov.append(0)
+        i += 1
+    return correct_cov
 
 class commonError(Exception):
     def __init__(self, message):
