@@ -27,6 +27,16 @@ def test_fsc_help():
     assert "--bin-input" in result.output
     assert "--output" in result.output
 
+def test_fsr_help():
+    result = runner.invoke(app, ["fsr", "--help"])
+    assert result.exit_code == 0
+    assert "fragment size ratio" in result.output.lower()
+
+def test_fsd_help():
+    result = runner.invoke(app, ["fsd", "--help"])
+    assert result.exit_code == 0
+    assert "fragment size distribution" in result.output.lower()
+
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
 # def test_fsc_dry(tmp_path):

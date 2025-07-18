@@ -75,19 +75,52 @@ krewlyzer version
 
 ## Input Data
 
-The tool expects:
-- BAM files aligned to GRCh37 reference genome
-- Reference genome FASTA file
-- Genomic regions in format chr:start-end
+- For motif-based feature extraction: BAM files aligned to GRCh37 reference genome and a reference genome FASTA file.
+- For FSC feature extraction: Directory containing `.bed.gz` files produced by the `motif` command (motif output directory).
 
 ## Output
 
 The tool generates:
-- Motif feature files: End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS) per sample
-- Quality control metrics
-- Region-specific feature files
+- Motif feature files: End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS) per sample (written to subfolders `EDM/`, `BPM/`, and `MDS/` under your motif output directory)
+- Fragment Size Coverage (FSC) feature files: one per input `.bed.gz` file, written to your specified FSC output directory
+- Fragment Size Ratio (FSR) feature files: one per input `.bed.gz` file, written to your specified FSR output directory
+- Fragment Size Distribution (FSD) feature files: one per input `.bed.gz` file, written to your specified FSD output directory
 
-Motif outputs are written to subfolders `EDM/`, `BPM/`, and `MDS/` under your output directory.
+---
+
+## FSC, FSR, and FSD CLI Usage
+
+### FSC: Fragment Size Coverage
+Calculates z-score normalized fragment size coverage for each region/bin.
+
+```bash
+krewlyzer fsc <motif_output_dir> --output <fsc_output_dir>
+```
+- Input: Directory of `.bed.gz` files from `motif` command
+- Output: `.FSC.txt` per sample
+- Options: `--bin-input`, `--windows`, `--continue-n`
+
+### FSR: Fragment Size Ratio
+Calculates the ratio of short, intermediate, and long fragments per region/bin.
+
+```bash
+krewlyzer fsr <motif_output_dir> --output <fsr_output_dir>
+```
+- Input: Directory of `.bed.gz` files from `motif` command
+- Output: `.FSR.txt` per sample
+- Options: `--bin-input`, `--windows`, `--continue-n`
+
+### FSD: Fragment Size Distribution
+Calculates the distribution of fragment sizes (in 5bp bins from 65-399bp) per region.
+
+```bash
+krewlyzer fsd <motif_output_dir> --arms-file <arms.bed> --output <fsd_output_dir>
+```
+- Input: Directory of `.bed.gz` files from `motif` command
+- Output: `.FSD.txt` per sample
+- Options: `--arms-file` (required)
+
+See `krewlyzer <command> --help` for all options and details.
 
 ## Requirements
 
@@ -117,4 +150,4 @@ This project was inspired by and references the [cfDNAFE](https://github.com/Cui
 
 ## License
 
-MIT License
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See the [LICENSE](./LICENSE) file for full terms.
