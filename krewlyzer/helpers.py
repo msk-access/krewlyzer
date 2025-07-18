@@ -9,7 +9,7 @@ from rich.logging import RichHandler
 import logging
 
 logging.basicConfig(level="INFO", handlers=[RichHandler()], format="%(message)s")
-logger = logging.getLogger("cfdnafe-helpers")
+logger = logging.getLogger("krewlyzer-helpers")
 
 class commonError(Exception):
     def __init__(self, message):

@@ -1,4 +1,14 @@
-# cfDNAFE - Circulating Tumor DNA Feature Extractor
+<p align="center">
+  <img src="krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
+</p>
+
+# Krewlyzer - Circulating Tumor DNA Feature Extractor
+
+<p align="center">
+  <a href="https://pypi.org/project/krewlyzer/"><img src="https://img.shields.io/pypi/v/krewlyzer.svg?color=blue" alt="PyPI version"></a>
+  <a href="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/actions"><img src="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/workflows/CI/badge.svg" alt="GitHub Actions"></a>
+  <a href="https://github.com/YOUR_GITHUB_USER/YOUR_REPO_NAME/pkgs/container/krewlyzer"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
+</p>
 
 A command-line tool for extracting features from circulating tumor DNA (ctDNA) BAM files aligned to GRCh37.
 
@@ -21,10 +31,10 @@ source .venv/bin/activate
 uv pip install .
 ```
 
-If cfdnafe is published to PyPI, you can use:
+If krewlyzer is published to PyPI, you can use:
 
 ```bash
-uv pip install cfdnafe
+uv pip install krewlyzer
 ```
 
 ## Usage
@@ -34,7 +44,7 @@ uv pip install cfdnafe
 Extract end motif, breakpoint motif, and Motif Diversity Score (MDS) from a BAM file:
 
 ```bash
-cfdnafe motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir \
+krewlyzer motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir \
     --minlen 65 --maxlen 400 -k 3 --verbose
 ```
 
@@ -44,25 +54,25 @@ cfdnafe motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir \
 ### Quality Control
 
 ```bash
-cfdnafe quality-control path/to/bam_file.bam path/to/qc_metrics.txt
+krewlyzer quality-control path/to/bam_file.bam path/to/qc_metrics.txt
 ```
 
 ### Basic Feature Extraction (legacy)
 
 ```bash
-cfdnafe extract-features path/to/bam_file.bam path/to/output_dir --reference-genome path/to/reference.fa
+krewlyzer extract-features path/to/bam_file.bam path/to/output_dir --reference-genome path/to/reference.fa
 ```
 
 ### Process Specific Region
 
 ```bash
-cfdnafe process-region chr1:1000000-2000000 path/to/bam_file.bam path/to/region_features.txt
+krewlyzer process-region chr1:1000000-2000000 path/to/bam_file.bam path/to/region_features.txt
 ```
 
 ### Show Version
 
 ```bash
-cfdnafe version
+krewlyzer version
 ```
 
 ## Input Data
@@ -101,6 +111,11 @@ pytest tests/
 ```
 
 This will test CLI argument parsing and help output. For full integration tests, provide small test BAM and reference files in `tests/data/`.
+
+
+## Reference
+
+This project was inspired by and references the [cfDNAFE](https://github.com/Cuiwanxin1998/cfDNAFE) repository. Please visit their repo for more information and tools related to cfDNA feature extraction.
 
 ## License
 

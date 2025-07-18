@@ -9,7 +9,7 @@ import logging
 
 console = Console()
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
-logger = logging.getLogger("cfdnafe-cli")
+logger = logging.getLogger("krewlyzer-cli")
 
 app = typer.Typer()
 

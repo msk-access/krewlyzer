@@ -1,6 +1,6 @@
 import pytest
 from typer.testing import CliRunner
-from cfdnafe.cli import app
+from krewlyzer.cli import app
 
 runner = CliRunner()
 

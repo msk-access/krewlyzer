@@ -19,5 +19,5 @@ RUN uv venv .venv && \
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Default command: show CLI help
-ENTRYPOINT ["cfdnafe"]
+ENTRYPOINT ["krewlyzer"]
 CMD ["--help"]

@@ -1,5 +1,5 @@
 [project]
-name = "cfdnafe"
+name = "krewlyzer"
 version = "0.1.0"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Your Name", email = "your.email@example.com"}]
