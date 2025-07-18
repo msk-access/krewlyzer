@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+.uv/
+.uv-cache/
+.uv-env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Test/coverage
+.coverage
+htmlcov/
+.tox/
+pytest_cache/
+
+# VSCode
+.vscode/
+
+# Docker
+*.log
+docker-compose.override.yml
+
+# Misc
+*.swp
+*.bak
+
+# Ignore BAM/FASTA test data
+*.bam
+*.bai
+*.fa
+*.fai
+*.bed
