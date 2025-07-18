@@ -51,6 +51,21 @@ krewlyzer motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir 
 - Output files are written to EDM, BPM, and MDS subfolders in the output directory.
 - Uses rich logging and progress bars for user-friendly feedback.
 
+### Fragment Size Coverage (FSC) Feature Calculation
+
+Calculate fragment size coverage (FSC) features from motif output:
+
+```bash
+krewlyzer fsc path/to/motif_output_dir -o path/to/fsc_output_dir
+```
+
+- `path/to/motif_output_dir` should be the directory containing `.bed.gz` files output by the `motif` command.
+- FSC features will be written to the specified output directory, with one result file per input `.bed.gz` file.
+- By default, the command uses the provided 100kb bin file (`data/ChormosomeBins/hg19_window_100kb.bed`); you can override this with `--bin-input`.
+- Additional options: `--windows` (window size), `--continue-n` (number of consecutive bins), `--threads` (parallelism).
+
+Each FSC output file contains region-based z-scores for short, intermediate, long, and total fragment sizes, GC-corrected.
+
 ### Quality Control
 
 ```bash
