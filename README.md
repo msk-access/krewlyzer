@@ -66,23 +66,6 @@ krewlyzer fsc path/to/motif_output_dir -o path/to/fsc_output_dir
 
 Each FSC output file contains region-based z-scores for short, intermediate, long, and total fragment sizes, GC-corrected.
 
-### Quality Control
-
-```bash
-krewlyzer quality-control path/to/bam_file.bam path/to/qc_metrics.txt
-```
-
-### Basic Feature Extraction (legacy)
-
-```bash
-krewlyzer extract-features path/to/bam_file.bam path/to/output_dir --reference-genome path/to/reference.fa
-```
-
-### Process Specific Region
-
-```bash
-krewlyzer process-region chr1:1000000-2000000 path/to/bam_file.bam path/to/region_features.txt
-```
 
 ### Show Version
 
