@@ -1,13 +1,7 @@
-<p align="center">
-  <img src="krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
-</p>
-
 # Krewlyzer - Circulating Tumor DNA Feature Extractor
 
 <p align="center">
-  <a href="https://pypi.org/project/krewlyzer/"><img src="https://img.shields.io/pypi/v/krewlyzer.svg?color=blue" alt="PyPI version"></a>
-  <a href="https://github.com/msk-acess/krewlyzer/actions"><img src="https://github.com//msk-acess/krewlyzer/workflows/CI/badge.svg" alt="GitHub Actions"></a>
-  <a href="https://github.com//msk-acess/krewlyzer/pkgs/container/krewlyzer"><img src="https://img.shields.io/badge/docker-ready-blue.svg" alt="Docker"></a>
+  <img src="krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
 </p>
 
 A command-line tool for extracting features from circulating tumor DNA (ctDNA) BAM files aligned to GRCh37.
@@ -65,14 +59,13 @@ krewlyzer fsc BEDGZ_PATH --output OUTDIR [options]
 ```
 
 **Options:**
-- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
-- `--output, -o`: Output folder for results
-- `--bin-input, -b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
-- `--windows, -w`: Window size (default: 100000)
-- `--continue-n, -c`: Consecutive window number (default: 50)
-- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
 
-Each FSC output file contains region-based z-scores for short, intermediate, long, and total fragment sizes, GC-corrected.
+| Option | Description | Default |
+| --- | --- | --- |
+| `--bin-input`, `-b` | Path to bin file | `data/ChormosomeBins/hg19_window_100kb.bed` |
+| `--windows`, `-w` | Window size | 100000 |
+| `--continue-n`, `-c` | Consecutive window number | 50 |
+| `--threads`, `-t` | Number of processes | 1 |
 
 ### Fragment Size Ratio (FSR) Feature Calculation
 
@@ -88,14 +81,13 @@ krewlyzer fsr BEDGZ_PATH --output OUTDIR [options]
 ```
 
 **Options:**
-- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
-- `--output, -o`: Output folder for results
-- `--bin-input, -b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
-- `--windows, -w`: Window size (default: 100000)
-- `--continue-n, -c`: Consecutive window number (default: 50)
-- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
 
-Each FSR output file contains the ratio of short, intermediate, and long fragments per region/bin.
+| Option | Description | Default |
+| --- | --- | --- |
+| `--bin-input`, `-b` | Path to bin file | `data/ChormosomeBins/hg19_window_100kb.bed` |
+| `--windows`, `-w` | Window size | 100000 |
+| `--continue-n`, `-c` | Consecutive window number | 50 |
+| `--threads`, `-t` | Number of processes | 1 |
 
 ### Fragment Size Distribution (FSD) Feature Calculation
 
@@ -111,12 +103,27 @@ krewlyzer fsd BEDGZ_PATH --arms-file ARMS_FILE --output OUTDIR [options]
 ```
 
 **Options:**
-- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
-- `--arms-file, -a`: Path to arms/region file (BED format)
-- `--output, -o`: Output folder for results
-- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
 
-Each FSD output file contains the distribution of fragment sizes (in 5bp bins from 65-399bp) per region.
+| Option | Description | Default |
+| --- | --- | --- |
+| `--arms-file`, `-a` | Path to arms/region file (BED format) |  |
+| `--threads`, `-t` | Number of processes | 1 |
+
+### Windowed Protection Score (WPS) Feature Calculation
+
+Calculate the Windowed Protection Score (WPS) for each region in a transcript/region file.
+
+```bash
+krewlyzer wps <motif_output_dir> --output <wps_output_dir>
+```
+
+- Input: Directory of `.bed.gz` files from `motif` command
+- Output: `.WPS.tsv.gz` per region/sample
+- Options:
+  - `--tsv-input` (optional, default: `data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`)
+  - `--wpstype` (`L` for long [default], `S` for short)
+  - `--empty` (keep files of empty regions)
+  - `--threads` (number of threads)
 
 ### Show Version
 
@@ -137,25 +144,38 @@ The tool generates:
 - Fragment Size Ratio (FSR) feature files: one per input `.bed.gz` file, written to your specified FSR output directory
 - Fragment Size Distribution (FSD) feature files: one per input `.bed.gz` file, written to your specified FSD output directory
 
----
+### Output Structure Example
 
-## FSC, FSR, and FSD CLI Usage
-
-### FSC: Fragment Size Coverage
-Calculates z-score normalized fragment size coverage for each region/bin.
-
-```bash
-krewlyzer fsc <motif_output_dir> --output <fsc_output_dir> [options]
 ```
-
-**Options:**
-- `--bin-input`, `-b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
-- `--windows`, `-w`: Window size (default: 100000)
-- `--continue-n`, `-c`: Consecutive window number (default: 50)
-- `--threads`, `-t`: Number of processes (default: 1; increase for faster parallel processing)
-
-### FSR: Fragment Size Ratio
-Calculates the ratio of short, intermediate, and long fragments per region/bin.
+output_dir/
+├── EDM/
+│   ├── sample1.edm
+│   ├── sample2.edm
+│   └── ...
+├── BPM/
+│   ├── sample1.bpm
+│   ├── sample2.bpm
+│   └── ...
+├── MDS/
+│   ├── sample1.mds
+│   ├── sample2.mds
+│   └── ...
+├── FSC/
+│   ├── sample1.fsc
+│   ├── sample2.fsc
+│   └── ...
+├── FSR/
+│   ├── sample1.fsr
+│   ├── sample2.fsr
+│   └── ...
+├── FSD/
+│   ├── sample1.fsd
+│   ├── sample2.fsd
+│   └── ...
+└── WPS/
+    ├── region1.wps.tsv.gz
+    ├── region2.wps.tsv.gz
+    └── ...
 
 ```bash
 krewlyzer fsr <motif_output_dir> --output <fsr_output_dir> [options]
