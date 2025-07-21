@@ -11,11 +11,12 @@ requires-python = ">=3.8"
 [project.scripts]
 krewlyzer = "krewlyzer.cli:app"
 
-[project.dependencies]
-typer = "^0.12.3"
-pysam = "^0.20.0"
-pandas = "^2.0.0"
-biopython = "^1.8"
+dependencies = [
+    "typer>=0.12.3",
+    "pysam>=0.20.0",
+    "pandas>=2.0.0",
+    "biopython>=1.81"
+]
 
 [build-system]
 requires = ["setuptools", "wheel"]
