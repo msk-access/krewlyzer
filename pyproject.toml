@@ -4,19 +4,18 @@ version = "0.1.0"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
 requires-python = ">=3.8"
-
-[project.urls]
-"Homepage" = "https://github.com/msk-access/krewlyzer"
-
-[project.scripts]
-krewlyzer = "krewlyzer.cli:app"
-
 dependencies = [
     "typer>=0.12.3",
     "pysam>=0.20.0",
     "pandas>=2.0.0",
     "biopython>=1.81"
 ]
+
+[project.urls]
+"Homepage" = "https://github.com/msk-access/krewlyzer"
+
+[project.scripts]
+krewlyzer = "krewlyzer.cli:app"
 
 [build-system]
 requires = ["setuptools", "wheel"]
