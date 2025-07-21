@@ -9,8 +9,10 @@ def test_cli_help():
     assert result.exit_code == 0
     assert "Usage" in result.output
     assert "motif" in result.output
-    assert "extract-features" in result.output or "extract_features" in result.output
-    assert "quality-control" in result.output or "quality_control" in result.output
+    assert "fsc" in result.output
+    assert "fsr" in result.output
+    assert "fsd" in result.output
+    assert "wps" in result.output
 
 def test_motif_help():
     result = runner.invoke(app, ["motif", "--help"])
