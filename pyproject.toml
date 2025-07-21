@@ -9,7 +9,8 @@ dependencies = [
     "pysam>=0.20.0",
     "pandas>=2.0.0",
     "biopython>=1.81",
-    "pybedtools>=0.9.0"
+    "pybedtools>=0.9.0",
+    "scikit-misc>=0.1.4"
 ]
 
 [project.urls]
