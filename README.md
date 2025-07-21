@@ -53,19 +53,70 @@ krewlyzer motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir 
 
 ### Fragment Size Coverage (FSC) Feature Calculation
 
-Calculate fragment size coverage (FSC) features from motif output:
+Calculate fragment size coverage (FSC) features for all `.bed.gz` files in a folder. The input folder should be the output directory produced by `motif`, containing the `.bed.gz` files. Output files are written to the output directory, one per `.bed.gz` file.
+
+**Parallel Processing:**
+- FSC now supports process-based parallel execution (multiprocessing) for per-file processing. Use the `--threads`/`-t` option to set the number of parallel processes (cores) to use. This can significantly improve performance on multi-core systems.
+
+**Usage:**
 
 ```bash
-krewlyzer fsc path/to/motif_output_dir -o path/to/fsc_output_dir
+krewlyzer fsc BEDGZ_PATH --output OUTDIR [options]
 ```
 
-- `path/to/motif_output_dir` should be the directory containing `.bed.gz` files output by the `motif` command.
-- FSC features will be written to the specified output directory, with one result file per input `.bed.gz` file.
-- By default, the command uses the provided 100kb bin file (`data/ChormosomeBins/hg19_window_100kb.bed`); you can override this with `--bin-input`.
-- Additional options: `--windows` (window size), `--continue-n` (number of consecutive bins), `--threads` (parallelism).
+**Options:**
+- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
+- `--output, -o`: Output folder for results
+- `--bin-input, -b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
+- `--windows, -w`: Window size (default: 100000)
+- `--continue-n, -c`: Consecutive window number (default: 50)
+- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
 
 Each FSC output file contains region-based z-scores for short, intermediate, long, and total fragment sizes, GC-corrected.
 
+### Fragment Size Ratio (FSR) Feature Calculation
+
+Calculate fragment size ratio (FSR) features for all `.bed.gz` files in a folder. The input folder should be the output directory produced by `motif`, containing the `.bed.gz` files. Output files are written to the output directory, one per `.bed.gz` file.
+
+**Parallel Processing:**
+- FSR now supports process-based parallel execution (multiprocessing) for per-file processing. Use the `--threads`/`-t` option to set the number of parallel processes (cores) to use. This can significantly improve performance on multi-core systems.
+
+**Usage:**
+
+```bash
+krewlyzer fsr BEDGZ_PATH --output OUTDIR [options]
+```
+
+**Options:**
+- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
+- `--output, -o`: Output folder for results
+- `--bin-input, -b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
+- `--windows, -w`: Window size (default: 100000)
+- `--continue-n, -c`: Consecutive window number (default: 50)
+- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
+
+Each FSR output file contains the ratio of short, intermediate, and long fragments per region/bin.
+
+### Fragment Size Distribution (FSD) Feature Calculation
+
+Calculate fragment size distribution (FSD) features for all `.bed.gz` files in a folder. The input folder should be the output directory produced by `motif`, containing the `.bed.gz` files. Output files are written to the output directory, one per `.bed.gz` file.
+
+**Parallel Processing:**
+- FSD now supports process-based parallel execution (multiprocessing) for per-file processing. Use the `--threads`/`-t` option to set the number of parallel processes (cores) to use. This can significantly improve performance on multi-core systems.
+
+**Usage:**
+
+```bash
+krewlyzer fsd BEDGZ_PATH --arms-file ARMS_FILE --output OUTDIR [options]
+```
+
+**Options:**
+- `BEDGZ_PATH`: Folder containing `.bed.gz` files (output from `motif`)
+- `--arms-file, -a`: Path to arms/region file (BED format)
+- `--output, -o`: Output folder for results
+- `--threads, -t`: Number of processes (default: 1; increase for faster parallel processing)
+
+Each FSD output file contains the distribution of fragment sizes (in 5bp bins from 65-399bp) per region.
 
 ### Show Version
 
@@ -94,19 +145,27 @@ The tool generates:
 Calculates z-score normalized fragment size coverage for each region/bin.
 
 ```bash
-krewlyzer fsc <motif_output_dir> --output <fsc_output_dir>
+krewlyzer fsc <motif_output_dir> --output <fsc_output_dir> [options]
 ```
-- Input: Directory of `.bed.gz` files from `motif` command
-- Output: `.FSC.txt` per sample
-- Options: `--bin-input`, `--windows`, `--continue-n`
+
+**Options:**
+- `--bin-input`, `-b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
+- `--windows`, `-w`: Window size (default: 100000)
+- `--continue-n`, `-c`: Consecutive window number (default: 50)
+- `--threads`, `-t`: Number of processes (default: 1; increase for faster parallel processing)
 
 ### FSR: Fragment Size Ratio
 Calculates the ratio of short, intermediate, and long fragments per region/bin.
 
 ```bash
-krewlyzer fsr <motif_output_dir> --output <fsr_output_dir>
+krewlyzer fsr <motif_output_dir> --output <fsr_output_dir> [options]
 ```
-- Input: Directory of `.bed.gz` files from `motif` command
+
+**Options:**
+- `--bin-input`, `-b`: Path to bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
+- `--windows`, `-w`: Window size (default: 100000)
+- `--continue-n`, `-c`: Consecutive window number (default: 50)
+- `--threads`, `-t`: Number of processes (default: 1; increase for faster parallel processing)
 - Output: `.FSR.txt` per sample
 - Options: `--bin-input`, `--windows`, `--continue-n`
 

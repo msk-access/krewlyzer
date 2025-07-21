@@ -30,7 +30,7 @@ logger = logging.getLogger("motif")
 
 
 def motif(
-    bam_path: Path = typer.Argument(..., help="Path to input BAM file (GRCh37 aligned)"),
+    bam_path: Path = typer.Argument(..., help="Path to input BAM file or directory of BAM files (GRCh37 aligned)"),
     genome_reference: Path = typer.Option(..., '-g', help="Path to genome reference file (GRCh37/hg19)"),
     output: Path = typer.Option(..., '-o', help="Output directory"),
     blacklist: Optional[Path] = typer.Option(None, '-b', help="Path to blacklist regions file"),
@@ -38,33 +38,67 @@ def motif(
     min_length: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
     max_length: int = typer.Option(400, '--maxlen', help="Maximum fragment length"),
     kmer: int = typer.Option(3, '-k', help="K-mer size for motif analysis"),
-    threads: int = typer.Option(1, '-t', help="Number of threads to use"),
+    threads: int = typer.Option(1, '-t', help="Number of processes to use for parallel BAM processing"),
     chromosomes: Optional[str] = typer.Option(None, '-c', help="Comma-separated list of chromosomes to process"),
     force: bool = typer.Option(False, '-f', help="Force overwrite existing files"),
     verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose output")
 ):
     """
-    Extracts end motif, breakpoint motif, and Motif-Diversity Score (MDS) from a BAM file.
+    Extracts end motif, breakpoint motif, and Motif-Diversity Score (MDS) from one or more BAM files.
+    If a directory is provided, all BAM files in the directory will be processed in parallel using multiple processes.
     Output files are written to the output directory, with EDM, BPM, and MDS subfolders.
     """
+    import concurrent.futures
     if verbose:
         logger.setLevel(logging.DEBUG)
-    logger.info(f"Processing BAM: {bam_path}")
     logger.info(f"Reference genome: {genome_reference}")
     logger.info(f"Output directory: {output}")
-    motif_process(
-        str(bam_path),
-        str(blacklist) if blacklist else None,
-        str(output / (bam_path.stem + '.bed')),
-        str(genome_reference),
-        chromosomes.split(',') if chromosomes else None,
-        map_quality,
-        kmer,
-        fragFilter=True,
-        minLen=min_length,
-        maxLen=max_length
-    )
-    logger.info("End motif, Breakpoint motif, and MDS extraction complete.")
+    if bam_path.is_dir():
+        bam_files = sorted([f for f in bam_path.iterdir() if f.suffix == '.bam'])
+        if not bam_files:
+            logger.error(f"No BAM files found in directory: {bam_path}")
+            raise typer.Exit(1)
+        logger.info(f"Processing {len(bam_files)} BAM files in parallel using {threads} processes...")
+        def run_motif_for_bam(bam_file):
+            logger.info(f"Processing BAM: {bam_file}")
+            motif_process(
+                str(bam_file),
+                str(blacklist) if blacklist else None,
+                str(output / (bam_file.stem + '.bed')),
+                str(genome_reference),
+                chromosomes.split(',') if chromosomes else None,
+                map_quality,
+                kmer,
+                fragFilter=True,
+                minLen=min_length,
+                maxLen=max_length
+            )
+            return str(bam_file)
+        with concurrent.futures.ProcessPoolExecutor(max_workers=threads) as executor:
+            futures = {executor.submit(run_motif_for_bam, bam_file): bam_file for bam_file in bam_files}
+            for future in concurrent.futures.as_completed(futures):
+                bam_file = futures[future]
+                try:
+                    result = future.result()
+                    logger.info(f"Motif extraction complete for: {result}")
+                except Exception as exc:
+                    logger.error(f"Motif extraction failed for {bam_file}: {exc}")
+        logger.info(f"All BAM files processed.")
+    else:
+        logger.info(f"Processing BAM: {bam_path}")
+        motif_process(
+            str(bam_path),
+            str(blacklist) if blacklist else None,
+            str(output / (bam_path.stem + '.bed')),
+            str(genome_reference),
+            chromosomes.split(',') if chromosomes else None,
+            map_quality,
+            kmer,
+            fragFilter=True,
+            minLen=min_length,
+            maxLen=max_length
+        )
+        logger.info("End motif, Breakpoint motif, and MDS extraction complete.")
 
 
 def motif_process(
