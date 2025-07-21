@@ -1,33 +1,41 @@
 import pytest
+import re
 from typer.testing import CliRunner
 from krewlyzer.cli import app
 
 runner = CliRunner()
 
+def strip_ansi(text):
+    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+    return ansi_escape.sub('', text)
+
 def test_cli_help():
     result = runner.invoke(app, ["--help"])
+    output = strip_ansi(result.output)
     assert result.exit_code == 0
-    assert "Usage" in result.output
-    assert "motif" in result.output
-    assert "fsc" in result.output
-    assert "fsr" in result.output
-    assert "fsd" in result.output
-    assert "wps" in result.output
+    assert "Usage" in output
+    assert "motif" in output
+    assert "fsc" in output
+    assert "fsr" in output
+    assert "fsd" in output
+    assert "wps" in output
 
 def test_motif_help():
     result = runner.invoke(app, ["motif", "--help"])
+    output = strip_ansi(result.output)
     assert result.exit_code == 0
-    assert "motif" in result.output
-    assert "--minlen" in result.output
-    assert "-g" in result.output
-    assert "-o" in result.output
+    assert "motif" in output
+    assert "--minlen" in output
+    assert "-g" in output
+    assert "-o" in output
 
 def test_fsc_help():
     result = runner.invoke(app, ["fsc", "--help"])
+    output = strip_ansi(result.output)
     assert result.exit_code == 0
-    assert "fragment size coverage" in result.output.lower() or "fsc" in result.output.lower()
-    assert "--bin-input" in result.output
-    assert "--output" in result.output
+    assert "fragment size coverage" in output.lower() or "fsc" in output.lower()
+    assert "--bin-input" in output
+    assert "--output" in output
 
 def test_fsr_help():
     result = runner.invoke(app, ["fsr", "--help"])
@@ -41,10 +49,11 @@ def test_fsd_help():
 
 def test_wps_help():
     result = runner.invoke(app, ["wps", "--help"])
+    output = strip_ansi(result.output)
     assert result.exit_code == 0
-    assert "windowed protection score" in result.output.lower() or "wps" in result.output.lower()
-    assert "--tsv-input" in result.output
-    assert "--output" in result.output
+    assert "windowed protection score" in output.lower() or "wps" in output.lower()
+    assert "--tsv-input" in output
+    assert "--output" in output
 
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
