@@ -17,11 +17,13 @@ from .motif import motif
 from .fsc import fsc
 from .fsr import fsr
 from .fsd import fsd
+from .wps import wps
 
 app.command()(motif)
 app.command()(fsc)
 app.command()(fsr)
 app.command()(fsd)
+app.command()(wps)
 
 @app.command()
 def version() -> None:

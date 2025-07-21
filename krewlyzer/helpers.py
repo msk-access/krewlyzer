@@ -70,6 +70,9 @@ def maxCore(nCore=None):
     else:
         return nCore
 
+# Alias for CLI import consistency
+max_core = maxCore
+
 def rmEndString(x, y):
     for item in y:
         if x.endswith(item):

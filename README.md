@@ -120,6 +120,22 @@ krewlyzer fsd <motif_output_dir> --arms-file <arms.bed> --output <fsd_output_dir
 - Output: `.FSD.txt` per sample
 - Options: `--arms-file` (required)
 
+### WPS: Windowed Protection Score
+Calculates the Windowed Protection Score (WPS) for each region in a transcript/region file.
+
+```bash
+krewlyzer wps <motif_output_dir> --output <wps_output_dir>
+```
+- Input: Directory of `.bed.gz` files from `motif` command
+- Output: `.WPS.tsv.gz` per region/sample
+- Options:
+  - `--tsv-input` (optional, default: `data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`)
+  - `--wpstype` (`L` for long [default], `S` for short)
+  - `--empty` (keep files of empty regions)
+  - `--threads` (number of threads)
+
+If `--tsv-input` is not specified, the default transcript annotation file (`data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`) will be used.
+
 See `krewlyzer <command> --help` for all options and details.
 
 ## Requirements

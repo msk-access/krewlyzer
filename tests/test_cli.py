@@ -37,6 +37,13 @@ def test_fsd_help():
     assert result.exit_code == 0
     assert "fragment size distribution" in result.output.lower()
 
+def test_wps_help():
+    result = runner.invoke(app, ["wps", "--help"])
+    assert result.exit_code == 0
+    assert "windowed protection score" in result.output.lower() or "wps" in result.output.lower()
+    assert "--tsv-input" in result.output
+    assert "--output" in result.output
+
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
 # def test_fsc_dry(tmp_path):
