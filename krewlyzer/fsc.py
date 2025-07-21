@@ -331,9 +331,21 @@ def fsc(
         logger.error(f"Bin input file does not exist: {bin_input}")
         raise typer.Exit(1)
     logger.info(f"Calculating FSC for {len(bedgz_files)} files...")
-    for bedgz_file in bedgz_files:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    logger.info(f"Starting parallel FSC calculation using {threads} processes...")
+    def run_fsc_file(bedgz_file):
         output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSC.txt')
         _calc_fsc(str(bedgz_file), str(bin_input), windows, continue_n, str(output_file))
+        return str(output_file)
+    with ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(run_fsc_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        for future in as_completed(futures):
+            bedgz_file = futures[future]
+            try:
+                result = future.result()
+                logger.info(f"FSC calculated: {result}")
+            except Exception as exc:
+                logger.error(f"FSC calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSC features calculated for {len(bedgz_files)} files.")
 
 
@@ -363,9 +375,21 @@ def fsr(
         logger.error(f"Bin input file does not exist: {bin_input}")
         raise typer.Exit(1)
     logger.info(f"Calculating FSR for {len(bedgz_files)} files...")
-    for bedgz_file in bedgz_files:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    logger.info(f"Starting parallel FSR calculation using {threads} processes...")
+    def run_fsr_file(bedgz_file):
         output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSR.txt')
         _calc_fsr(str(bedgz_file), str(bin_input), windows, continue_n, str(output_file))
+        return str(output_file)
+    with ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(run_fsr_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        for future in as_completed(futures):
+            bedgz_file = futures[future]
+            try:
+                result = future.result()
+                logger.info(f"FSR calculated: {result}")
+            except Exception as exc:
+                logger.error(f"FSR calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSR features calculated for {len(bedgz_files)} files.")
 
 
@@ -390,7 +414,19 @@ def fsd(
         logger.error(f"Arms/region file does not exist: {arms_file}")
         raise typer.Exit(1)
     logger.info(f"Calculating FSD for {len(bedgz_files)} files...")
-    for bedgz_file in bedgz_files:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    logger.info(f"Starting parallel FSD calculation using {threads} processes...")
+    def run_fsd_file(bedgz_file):
         output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSD.txt')
         _calc_fsd(str(bedgz_file), str(arms_file), str(output_file))
+        return str(output_file)
+    with ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(run_fsd_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        for future in as_completed(futures):
+            bedgz_file = futures[future]
+            try:
+                result = future.result()
+                logger.info(f"FSD calculated: {result}")
+            except Exception as exc:
+                logger.error(f"FSD calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSD features calculated for {len(bedgz_files)} files.")

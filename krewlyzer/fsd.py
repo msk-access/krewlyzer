@@ -102,7 +102,19 @@ def fsd(
         logger.error(f"Arms/region file does not exist: {arms_file}")
         raise typer.Exit(1)
     logger.info(f"Calculating FSD for {len(bedgz_files)} files...")
-    for bedgz_file in bedgz_files:
+    from concurrent.futures import ProcessPoolExecutor, as_completed
+    logger.info(f"Starting parallel FSD calculation using {threads} processes...")
+    def run_fsd_file(bedgz_file):
         output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSD.txt')
         _calc_fsd(str(bedgz_file), str(arms_file), str(output_file))
+        return str(output_file)
+    with ProcessPoolExecutor(max_workers=threads) as executor:
+        futures = {executor.submit(run_fsd_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        for future in as_completed(futures):
+            bedgz_file = futures[future]
+            try:
+                result = future.result()
+                logger.info(f"FSD calculated: {result}")
+            except Exception as exc:
+                logger.error(f"FSD calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSD features calculated for {len(bedgz_files)} files.")

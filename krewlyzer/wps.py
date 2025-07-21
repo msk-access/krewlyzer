@@ -125,17 +125,31 @@ def wps(
             max_size = 80
         output.mkdir(parents=True, exist_ok=True)
         logger.info(f"Calculating WPS for {len(bedgz_files)} files...")
-        for bedgz_file in bedgz_files:
-            output_file_pattern = str(output / (bedgz_file.stem.replace('.bed', '') + ".%s.WPS.tsv.gz"))
-            _calc_wps(
-                bedgz_input=str(bedgz_file),
-                tsv_input=str(tsv_input),
-                output_file_pattern=output_file_pattern,
-                empty=empty,
-                protect_input=protect_input,
-                min_size=min_size,
-                max_size=max_size
-            )
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+        import traceback
+        def wps_task(bedgz_file):
+            try:
+                output_file_pattern = str(output / (bedgz_file.stem.replace('.bed', '') + ".%s.WPS.tsv.gz"))
+                _calc_wps(
+                    bedgz_input=str(bedgz_file),
+                    tsv_input=str(tsv_input),
+                    output_file_pattern=output_file_pattern,
+                    empty=empty,
+                    protect_input=protect_input,
+                    min_size=min_size,
+                    max_size=max_size
+                )
+                return None
+            except Exception as exc:
+                return traceback.format_exc()
+        n_procs = max_core(threads) if threads else 1
+        logger.info(f"Calculating WPS for {len(bedgz_files)} files using {n_procs} processes...")
+        with ProcessPoolExecutor(max_workers=n_procs) as executor:
+            futures = {executor.submit(wps_task, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+            for future in as_completed(futures):
+                exc = future.result()
+                if exc:
+                    logger.error(f"WPS calculation failed for {futures[future]}:\n{exc}")
         logger.info(f"WPS features calculated for {len(bedgz_files)} files.")
     except Exception as e:
         logger.error(f"Fatal error in wps CLI: {e}")
