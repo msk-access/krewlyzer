@@ -131,6 +131,62 @@ krewlyzer wps <motif_output_dir> --output <wps_output_dir>
   - `--empty` (keep files of empty regions)
   - `--threads` (number of threads)
 
+### Orientation-aware cfDNA Fragmentation (OCF) Feature Calculation
+
+Calculate orientation-aware cfDNA fragmentation (OCF) features for all `.bed.gz` files in a folder. The input folder should be the output directory produced by `motif`, containing the `.bed.gz` files. Output files are written to the output directory, one subfolder per sample, with `.sync.end` files per tissue and a summary `all.ocf.csv`.
+
+**Parallel Processing:**
+- OCF supports process-based parallel execution (multiprocessing) for per-file processing. Use the `--threads`/`-t` option to set the number of parallel processes (cores) to use. This can significantly improve performance on multi-core systems.
+
+**Usage:**
+
+```bash
+krewlyzer ocf BEDGZ_PATH --output OUTDIR [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--ocr-input`, `-r` | Path to open chromatin region BED file | `data/OpenChromatinRegion/7specificTissue.all.OC.bed` |
+| `--threads`, `-t` | Number of processes | 1 |
+
+- Output: For each sample, `.sync.end` files for each tissue and a summary `all.ocf.csv` in the output directory.
+
+### UXM Fragment-level Methylation Feature Calculation
+
+Calculate fragment-level methylation (UXM: Unmethylated, Mixed, Methylated) for all `.bam` files in a folder. The input folder should contain sorted and indexed `.bam` files. Output files are written to the output directory, one `.UXM.tsv` file per sample.
+
+**Supports both single-end (SE) and paired-end (PE) BAM files!**
+- For PE mode, use `--type PE` (default is SE). PE mode will pair reads and compute methylation as in cfDNAFE.
+
+**Parallel Processing:**
+- UXM supports process-based parallel execution (multiprocessing) for per-file processing. Use the `--threads`/`-t` option to set the number of parallel processes (cores) to use. This can significantly improve performance on multi-core systems.
+
+**Usage:**
+
+```bash
+# Single-end (default)
+krewlyzer uxm BAM_PATH --output OUTDIR [options]
+
+# Paired-end mode
+krewlyzer uxm BAM_PATH --output OUTDIR --type PE [options]
+```
+
+**Options:**
+
+| Option | Description | Default |
+| --- | --- | --- |
+| `--mark-input`, `-m` | Marker BED file | `data/MethMark/Atlas.U25.l4.hg19.bed` |
+| `--map-quality`, `-q` | Minimum mapping quality | 30 |
+| `--min-cpg`, `-c` | Minimum CpG count per fragment | 4 |
+| `--methy-threshold`, `-tM` | Methylation threshold for M fragments | 0.75 |
+| `--unmethy-threshold`, `-tU` | Unmethylation threshold for U fragments | 0.25 |
+| `--type` | Fragment type: SE or PE | SE |
+| `--threads`, `-t` | Number of processes | 1 |
+
+- Output: For each sample, a `.UXM.tsv` file with columns: region, U, X, M (proportions) in the output directory.
+
 ### Show Version
 
 ```bash

@@ -55,6 +55,27 @@ def test_wps_help():
     assert "--tsv-input" in output
     assert "--output" in output
 
+def test_ocf_help():
+    result = runner.invoke(app, ["ocf", "--help"])
+    output = strip_ansi(result.output)
+    assert result.exit_code == 0
+    assert "orientation-aware cfDNA fragmentation" in output.lower() or "ocf" in output.lower()
+    assert "--ocr-input" in output
+    assert "--output" in output
+
+def test_uxm_help():
+    """
+    Test that the UXM CLI help includes all major options and documents both SE and PE mode.
+    """
+    result = runner.invoke(app, ["uxm", "--help"])
+    output = strip_ansi(result.output)
+    assert result.exit_code == 0
+    assert "uxm" in output.lower() or "fragment-level methylation" in output.lower()
+    assert "--mark-input" in output
+    assert "--output" in output
+    assert "--type" in output
+    assert "SE" in output or "PE" in output  # Should document both modes
+
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
 # def test_fsc_dry(tmp_path):
