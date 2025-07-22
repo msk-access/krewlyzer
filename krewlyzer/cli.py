@@ -41,7 +41,7 @@ app.command()(run_all)
 @app.command()
 def version() -> None:
     """Show version information"""
-    logger.info("krewlyzer 0.1.0")
+    logger.info("krewlyzer 0.1.1")
 
 if __name__ == "__main__":
     app()
