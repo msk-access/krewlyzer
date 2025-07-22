@@ -187,6 +187,24 @@ krewlyzer uxm BAM_PATH --output OUTDIR --type PE [options]
 
 - Output: For each sample, a `.UXM.tsv` file with columns: region, U, X, M (proportions) in the output directory.
 
+### Run All Features for a Single BAM
+
+Run all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm) in sequence for a single BAM file. This command is a convenient wrapper for a complete feature workflow.
+
+**Usage:**
+
+```bash
+krewlyzer run-all BAM_FILE --reference REFERENCE_FA --output OUTDIR [--threads N] [--type SE|PE]
+```
+
+- `BAM_FILE`: Input BAM file (sorted, indexed)
+- `--reference`: Reference genome FASTA for motif extraction
+- `--output`: Output directory for all results
+- `--threads`: Number of parallel processes for each step (default: 1)
+- `--type`: Fragment type for UXM: SE or PE (default: SE)
+
+This will run all feature modules in the correct order, placing results in subfolders of the output directory.
+
 ### Show Version
 
 ```bash

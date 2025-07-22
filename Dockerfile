@@ -1,6 +1,28 @@
 # syntax=docker/dockerfile:1
 FROM python:3.10-slim
 
+# Install OS-level dependencies for pybedtools, pysam, skmisc, numpy, etc.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    zlib1g-dev \
+    libbz2-dev \
+    liblzma-dev \
+    libcurl4-openssl-dev \
+    libssl-dev \
+    libncurses5-dev \
+    libncursesw5-dev \
+    libsqlite3-dev \
+    libgdbm-dev \
+    libreadline-dev \
+    libffi-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libatlas-base-dev \
+    gfortran \
+    libopenblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install uv (fast Python package/dependency manager)
 RUN pip install --no-cache-dir uv
 

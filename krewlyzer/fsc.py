@@ -310,15 +310,33 @@ def fsc(
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number (default: 50)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output folder for results"),
-    threads: int = typer.Option(1, "--threads", "-t", help="Number of threads (default: 1)")
+    threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
 ):
     """
     Calculate fragment size coverage (FSC) features for all .bed.gz files in a folder.
-    The input folder should be the output directory produced by motif.py, containing the .bed.gz files.
-    Output files are written to the output directory, one per .bed.gz file.
     """
-    if not output.exists():
+    # Input checks
+    if not bedgz_path.exists():
+        logger.error(f"Input directory not found: {bedgz_path}")
+        raise typer.Exit(1)
+    if bin_input and not bin_input.exists():
+        logger.error(f"Bin input file not found: {bin_input}")
+        raise typer.Exit(1)
+    try:
         output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
+    if not output.exists():
+        logger.error(f"Output directory not found: {output}")
+        raise typer.Exit(1)
+    if not output.is_dir():
+        logger.error(f"Output path is not a directory: {output}")
+        raise typer.Exit(1)
+    if not output.is_writable():
+        logger.error(f"Output directory is not writable: {output}")
+        raise typer.Exit(1)
+
     bedgz_files = [f for f in bedgz_path.iterdir() if f.suffixes == ['.bed', '.gz']]
     if not bedgz_files:
         logger.error("No .bed.gz files found in the specified folder.")

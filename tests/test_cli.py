@@ -76,6 +76,22 @@ def test_uxm_help():
     assert "--type" in output
     assert "SE" in output or "PE" in output  # Should document both modes
 
+def test_run_all_help():
+    """
+    Test the run-all CLI wrapper help output for all major options and feature mentions.
+    """
+    result = runner.invoke(app, ["run-all", "--help"])
+    output = strip_ansi(result.output)
+    assert result.exit_code == 0
+    # Check that each feature is mentioned in the help or docstring
+    for feat in ["motif", "fsc", "fsr", "fsd", "wps", "ocf", "uxm"]:
+        assert feat in output.lower()
+    # Check required options
+    assert "--reference" in output
+    assert "--output" in output
+    assert "--threads" in output
+    assert "--type" in output
+
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):
 # def test_fsc_dry(tmp_path):

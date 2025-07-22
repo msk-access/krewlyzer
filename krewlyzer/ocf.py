@@ -97,6 +97,18 @@ def ocf(
     """
     Calculate orientation-aware cfDNA fragmentation (OCF) features for all .bed.gz files in a folder.
     """
+    # Input checks
+    if not bedgz_path.exists():
+        logger.error(f"Input directory not found: {bedgz_path}")
+        raise typer.Exit(1)
+    if ocr_input and not ocr_input.exists():
+        logger.error(f"OCR region BED file not found: {ocr_input}")
+        raise typer.Exit(1)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
     # Set default OCR file if not provided
     if ocr_input is None:
         pkg_dir = Path(__file__).parent

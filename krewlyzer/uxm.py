@@ -142,8 +142,20 @@ def uxm(
     threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
 ):
     """
-    Calculate UXM (fragment-level methylation) for all .bam files in a folder.
+    Calculate fragment-level methylation (UXM) features for all BAM files in a folder.
     """
+    # Input checks
+    if not bam_path.exists():
+        logger.error(f"Input BAM directory not found: {bam_path}")
+        raise typer.Exit(1)
+    if mark_input and not mark_input.exists():
+        logger.error(f"Marker BED file not found: {mark_input}")
+        raise typer.Exit(1)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
     if mark_input is None:
         pkg_dir = Path(__file__).parent
         mark_input = pkg_dir / "data/MethMark/Atlas.U25.l4.hg19.bed"

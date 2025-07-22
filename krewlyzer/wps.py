@@ -103,6 +103,23 @@ def wps(
     """
     Calculate Windowed Protection Score (WPS) features for all .bed.gz files in a folder.
     """
+    # Input checks
+    if not bedgz_path.exists():
+        logger.error(f"Input directory not found: {bedgz_path}")
+        raise typer.Exit(1)
+    if tsv_input and not tsv_input.exists():
+        logger.error(f"Transcript region file not found: {tsv_input}")
+        raise typer.Exit(1)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
+    try:
+        output.touch()
+    except Exception as e:
+        logger.error(f"Output directory {output} is not writable: {e}")
+        raise typer.Exit(1)
     try:
         bedgz_files = list(Path(bedgz_path).glob("*.bed.gz"))
         if not bedgz_files:

@@ -11,7 +11,14 @@ console = Console()
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("krewlyzer-cli")
 
-app = typer.Typer()
+def set_log_level(log_level: str = typer.Option("INFO", "--log-level", help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL")):
+    """Set global logging level."""
+    level = getattr(logging, log_level.upper(), logging.INFO)
+    for handler in logging.root.handlers:
+        handler.setLevel(level)
+    logging.getLogger().setLevel(level)
+
+app = typer.Typer(callback=set_log_level)
 
 from .motif import motif
 from .fsc import fsc
@@ -20,6 +27,7 @@ from .fsd import fsd
 from .wps import wps
 from .ocf import ocf
 from .uxm import uxm
+from .wrapper import run_all
 
 app.command()(motif)
 app.command()(fsc)
@@ -28,6 +36,7 @@ app.command()(fsd)
 app.command()(wps)
 app.command()(ocf)
 app.command()(uxm)
+app.command()(run_all)
 
 @app.command()
 def version() -> None:

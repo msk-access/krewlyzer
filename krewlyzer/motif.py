@@ -37,12 +37,26 @@ def motif(
     map_quality: int = typer.Option(20, '-m', help="Minimum mapping quality"),
     min_length: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
     max_length: int = typer.Option(400, '--maxlen', help="Maximum fragment length"),
-    kmer: int = typer.Option(3, '-k', help="K-mer size for motif analysis"),
-    threads: int = typer.Option(1, '-t', help="Number of processes to use for parallel BAM processing"),
-    chromosomes: Optional[str] = typer.Option(None, '-c', help="Comma-separated list of chromosomes to process"),
-    force: bool = typer.Option(False, '-f', help="Force overwrite existing files"),
-    verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose output")
+    kmer: int = typer.Option(3, '-k', help="K-mer size for motif extraction"),
+    chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated list of chromosomes to process"),
+    verbose: bool = typer.Option(False, '--verbose', help="Enable verbose logging"),
+    threads: int = typer.Option(1, '--threads', help="Number of parallel processes (default: 1)")
 ):
+    """
+    Extract motif-based features from BAM files.
+    """
+    # Input checks
+    if not bam_path.exists():
+        logger.error(f"Input BAM file or directory not found: {bam_path}")
+        raise typer.Exit(1)
+    if not genome_reference.exists() or not genome_reference.is_file():
+        logger.error(f"Reference genome file not found: {genome_reference}")
+        raise typer.Exit(1)
+    try:
+        output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
     """
     Extracts end motif, breakpoint motif, and Motif-Diversity Score (MDS) from one or more BAM files.
     If a directory is provided, all BAM files in the directory will be processed in parallel using multiple processes.

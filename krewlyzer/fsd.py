@@ -92,8 +92,27 @@ def fsd(
     The input folder should be the output directory produced by motif.py, containing the .bed.gz files.
     Output files are written to the output directory, one per .bed.gz file.
     """
-    if not output.exists():
+    # Input checks
+    if not bedgz_path.exists():
+        logger.error(f"Input directory not found: {bedgz_path}")
+        raise typer.Exit(1)
+    if not arms_file.exists():
+        logger.error(f"Arms/region file not found: {arms_file}")
+        raise typer.Exit(1)
+    try:
         output.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"Could not create output directory {output}: {e}")
+        raise typer.Exit(1)
+    if not output.exists():
+        logger.error(f"Output directory not found: {output}")
+        raise typer.Exit(1)
+    if not output.is_dir():
+        logger.error(f"Output path is not a directory: {output}")
+        raise typer.Exit(1)
+    if not output.is_writable():
+        logger.error(f"Output directory is not writable: {output}")
+        raise typer.Exit(1)
     bedgz_files = [f for f in bedgz_path.iterdir() if f.suffixes == ['.bed', '.gz']]
     if not bedgz_files:
         logger.error("No .bed.gz files found in the specified folder.")
