@@ -1,6 +1,6 @@
 [project]
 name = "krewlyzer"
-version = "0.1.0"
+version = "0.1.1"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
 requires-python = ">=3.8"
