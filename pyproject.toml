@@ -10,7 +10,15 @@ dependencies = [
     "pandas>=2.0.0",
     "biopython>=1.81",
     "pybedtools>=0.9.0",
-    "scikit-misc>=0.1.4"
+    "scikit-misc>=0.1.4",
+    "scipy>=1.10.0",
+    "rich>=13.0.0"
+]
+
+[project.optional-dependencies]
+docs = [
+    "mkdocs>=1.5.0",
+    "mkdocs-material>=9.5.0"
 ]
 
 [project.urls]

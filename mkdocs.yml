@@ -1,0 +1,64 @@
+site_name: Krewlyzer
+site_url: https://msk-access.github.io/krewlyzer/
+repo_url: https://github.com/msk-access/krewlyzer
+repo_name: msk-access/krewlyzer
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - toc.follow
+    - content.code.copy
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Usage: usage.md
+  - Features:
+    - Motif Extraction: features/motif.md
+    - Fragment Size Coverage (FSC): features/fsc.md
+    - Fragment Size Ratio (FSR): features/fsr.md
+    - Fragment Size Distribution (FSD): features/fsd.md
+    - Windowed Protection Score (WPS): features/wps.md
+    - Orientation-aware Fragmentation (OCF): features/ocf.md
+    - Fragment-level Methylation (UXM): features/uxm.md
+    - Mutant Fragment Size (mFSD): features/mfsd.md
+  - Pipeline: pipeline.md
+  - Troubleshooting: troubleshooting.md
+  - Citation: citation.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - attr_list
+  - md_in_html
