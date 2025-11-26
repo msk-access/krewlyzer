@@ -34,7 +34,7 @@ jobs:
     - name: Run tests
       run: |
         . .venv/bin/activate
-        uv pip install pytest
+        uv pip install .[test]
         pytest
 
     - name: Build distribution
