@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2025-11-26
+
+### Fixed
+- **Docker Publishing**: Switched to `GITHUB_TOKEN` for GHCR authentication to fix permission issues.
+- **PyPI Publishing**: Added `skip-existing: true` to handle existing versions gracefully.
+- **CI/CD**: Added build checks for Python package and Docker image to PR workflows.
+
 ## [0.1.4] - 2025-11-26
 
 ### Fixed
