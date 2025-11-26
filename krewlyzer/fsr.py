@@ -5,7 +5,7 @@ import logging
 import sys
 
 import pysam
-import pybedtools
+
 import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler

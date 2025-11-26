@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 import pysam
-import pybedtools
+
 import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler

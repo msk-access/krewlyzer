@@ -2,7 +2,7 @@ import typer
 from pathlib import Path
 import logging
 import pysam
-import pybedtools
+
 import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler

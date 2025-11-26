@@ -36,7 +36,7 @@ def _calc_fsc(
         
         # Load bins
         try:
-            # Use pandas for faster loading if possible, but pybedtools is fine for iteration
+            # Use pandas for faster loading if possible, but is fine for iteration
             # bins = pybedtools.BedTool(bin_input)
             # Actually, reading bins into a dataframe might be easier for grouping
             bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
