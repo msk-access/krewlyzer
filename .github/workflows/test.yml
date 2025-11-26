@@ -31,3 +31,11 @@ jobs:
         run: |
           source .venv/bin/activate
           pytest --maxfail=3 --disable-warnings -q
+      - name: Build Python Package (Dry Run)
+        run: |
+          source .venv/bin/activate
+          uv pip install build
+          python -m build
+      - name: Build Docker Image (Dry Run)
+        run: |
+          docker build .
