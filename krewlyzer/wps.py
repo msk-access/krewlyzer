@@ -2,7 +2,7 @@ import typer
 from pathlib import Path
 import logging
 import pysam
-import pybedtools
+
 import numpy as np
 from collections import defaultdict
 import gzip

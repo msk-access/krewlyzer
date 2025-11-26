@@ -6,7 +6,7 @@ import pysam
 import numpy as np
 import pandas as pd
 import math
-import pybedtools
+
 from collections import defaultdict
 import itertools
 from .helpers import (
@@ -291,18 +291,92 @@ def motif_process(
         progress.update(task, completed=total_pairs)
     bedWrite.close()
     logger.info("Filtering and sorting fragments with blacklist (if provided)...")
+    bedWrite.close()
+    logger.info("Filtering and sorting fragments with blacklist (if provided)...")
     try:
-        bedData = pybedtools.BedTool(temp_bed)
+        # Load temp BED into DataFrame
+        # Columns: chrom, start, end, gc
+        # Use low_memory=False or specify dtypes for safety
+        df = pd.read_csv(temp_bed, sep='\t', header=None, names=['chrom', 'start', 'end', 'gc'], dtype={'chrom': str, 'start': int, 'end': int, 'gc': float})
+        
         if blacklistInput:
-            black_reigon = pybedtools.BedTool(blacklistInput)
-            bedData = bedData.subtract(black_reigon, A=True)
-        bedData.sort(output=bedOutput)
+            logger.info(f"Filtering with blacklist: {blacklistInput}")
+            # Load blacklist
+            # Assume BED format: chrom, start, end
+            bl_df = pd.read_csv(blacklistInput, sep='\t', header=None, usecols=[0, 1, 2], names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
+            
+            # Filter
+            # Since blacklist is usually small, we can iterate over blacklist intervals and remove overlapping rows.
+            # Or use a more efficient interval join if blacklist is large.
+            # For typical blacklists (e.g. ENCODE), iteration might be slow if many intervals.
+            # But compared to pybedtools (which writes to disk and runs bedtools), pandas in-memory might be competitive or faster for small blacklists.
+            
+            # Let's use a simple approach:
+            # 1. Iterate by chromosome
+            # 2. For each chromosome, find overlapping intervals.
+            
+            # Optimization: If blacklist is small, we can do it.
+            # If blacklist is large, we might need IntervalTree or similar.
+            # But we want to avoid new dependencies.
+            
+            # Let's try a vectorized approach if possible? No easy way without interval index.
+            # Let's use the iteration method per chromosome, which is reasonably fast for typical blacklists.
+            
+            # Filter out rows that overlap with ANY blacklist interval
+            # overlap: max(start1, start2) < min(end1, end2)
+            
+            keep_mask = np.ones(len(df), dtype=bool)
+            
+            for chrom, bl_group in bl_df.groupby('chrom'):
+                if chrom not in df['chrom'].values:
+                    continue
+                    
+                chrom_mask = (df['chrom'] == chrom)
+                chrom_df_indices = df.index[chrom_mask]
+                
+                # Get starts and ends for this chrom
+                starts = df.loc[chrom_mask, 'start'].values
+                ends = df.loc[chrom_mask, 'end'].values
+                
+                # Check against all blacklist intervals for this chrom
+                # This is O(N_reads * M_blacklist_intervals). Can be slow if M is large.
+                # ENCODE blacklist is ~300 regions? Then it's fast.
+                # If M is large, this is bad.
+                
+                # Alternative: Sort both and sweep?
+                # Or just assume blacklist is small enough (typical case).
+                
+                for _, bl_row in bl_group.iterrows():
+                    bl_start = bl_row['start']
+                    bl_end = bl_row['end']
+                    
+                    # Vectorized overlap check
+                    # overlap = (starts < bl_end) & (ends > bl_start)
+                    overlap = (starts < bl_end) & (ends > bl_start)
+                    
+                    # Mark overlapping reads to drop
+                    # We need to map back to original indices
+                    # overlap is boolean array for the subset
+                    
+                    if np.any(overlap):
+                        # Get indices in original df to drop
+                        drop_indices = chrom_df_indices[overlap]
+                        keep_mask[drop_indices] = False
+                        
+            df = df[keep_mask]
+            
+        # Sort
+        df.sort_values(by=['chrom', 'start', 'end'], inplace=True)
+        
+        # Write to output
+        df.to_csv(bedOutput, sep='\t', header=False, index=False)
+        
         os.remove(temp_bed)
         
         # Compress and Index
         logger.info(f"Compressing and indexing {bedOutput}...")
         pysam.tabix_compress(bedOutput, bedOutput + ".gz", force=True)
-        pysam.tabix_index(bedOutput + ".gz", preset="bed")
+        pysam.tabix_index(bedOutput + ".gz", preset="bed", force=True)
         # Remove uncompressed file to save space and avoid confusion
         if os.path.exists(bedOutput):
             os.remove(bedOutput)

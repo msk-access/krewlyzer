@@ -5,7 +5,7 @@ import logging
 import sys
 
 import pysam
-import pybedtools
+
 import numpy as np
 import pandas as pd
 from skmisc.loess import loess
