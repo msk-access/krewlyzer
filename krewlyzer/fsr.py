@@ -16,99 +16,155 @@ logger = logging.getLogger("fsr")
 
 from .helpers import gc_correct
 
-def _calc_fsr(bedgz_input, bin_input, windows, continue_n, output_file):
+import pandas as pd
+
+def _calc_fsr(
+    bedgz_input: str | Path, 
+    bin_input: str | Path, 
+    windows: int, 
+    continue_n: int, 
+    output_file: str | Path
+):
     """
     Internal: Calculate fragment size ratio (FSR) for a single .bed.gz file.
-    Writes region-based ratios for short, intermediate, and long fragments.
+    Optimized with vectorized operations.
     """
     try:
-        logger.info(f"input file: {bedgz_input}, {bin_input}")
+        logger.info(f"Processing {bedgz_input} with bins from {bin_input}")
+        
+        # Load bins
         try:
-            inputbed = pysam.Tabixfile(filename=bedgz_input, mode="r")
-        except Exception as e:
-            logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
-            raise typer.Exit(1)
-        try:
-            bins = pybedtools.BedTool(bin_input)
+            bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
         except Exception as e:
             logger.error(f"Could not load bins from {bin_input}: {e}")
             raise typer.Exit(1)
-        length = len(bins)
-        shorts_data, intermediates_data, longs_data, totals_data, bingc = [], [], [], [], []
-        chrom = []
-        logger.info(f"output file: {output_file}")
-        for idx in range(length):
-            bin = bins[idx]
-            try:
-                chrom.append(bin.chrom)
-                inputbed.fetch(bin.chrom, bin.start, bin.end)
-            except ValueError:
-                bingc.append(np.nan)
-                shorts_data.append(0)
-                intermediates_data.append(0)
-                longs_data.append(0)
-            except Exception as e:
-                logger.error(f"Error fetching bin {bin}: {e}")
-                raise typer.Exit(1)
-            else:
-                bin_data = []
-                gc = []
-                try:
-                    for read in inputbed.fetch(bin.chrom, bin.start, bin.end):
-                        bin_data.append(int(read.split("\t")[2]) - int(read.split("\t")[1]))
-                        if 65 <= int(read.split("\t")[2]) - int(read.split("\t")[1]) <= 400:
-                            gc.append(float(read.split("\t")[3]))
-                    count = np.bincount(bin_data, minlength=401)
-                except Exception as e:
-                    logger.error(f"Error processing reads in bin {bin}: {e}")
-                    raise typer.Exit(1)
-                if len(gc) == 0:
-                    bingc.append(np.nan)
-                else:
-                    bingc.append(np.mean(gc))
-                shorts = sum(count[65:150])
-                intermediates = sum(count[151:260])
-                longs = sum(count[261:400])
-                totals = sum(count[65:400])
-                if totals == 0:
-                    shorts_data.append(0)
-                    intermediates_data.append(0)
-                    longs_data.append(0)
-                else:
-                    shorts_data.append(shorts / totals)
-                    intermediates_data.append(intermediates / totals)
-                    longs_data.append(longs / totals)
-        start = 0
-        step = 0
+            
         try:
-            with open(output_file, 'w') as fsrfile:
-                fsrfile.write("region\tshort-ratio\titermediate-ratio\tlong-ratio\n")
-                while step < length:
-                    num = chrom.count(chrom[step])
-                    continues_bin = num // continue_n
-                    last_bin = num % continue_n
-                    for _ in range(continues_bin):
-                        bin_start = start * windows
-                        bin_end = (start + continue_n) * windows - 1
-                        combine_shorts = shorts_data[step: step + continue_n]
-                        combine_intermediates = intermediates_data[step: step + continue_n]
-                        combine_longs = longs_data[step: step + continue_n]
-                        tmp_array = np.zeros(3)
-                        tmp_array[0] = np.mean(combine_shorts)
-                        tmp_array[1] = np.mean(combine_intermediates)
-                        tmp_array[2] = np.mean(combine_longs)
-                        region = f"{chrom[step]}:{bin_start}-{bin_end}"
-                        temp_str = f"{region}\t" + "\t".join(map(str, tmp_array)) + "\n"
-                        fsrfile.write(temp_str)
-                        step += continue_n
-                        start += continue_n
-                    if last_bin != 0:
-                        step += last_bin
-                        start = 0
+            tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
         except Exception as e:
-            logger.error(f"Error writing FSR output file: {e}")
+            logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
             raise typer.Exit(1)
+
+        shorts_ratios = []
+        ultra_shorts_ratios = []
+        inter_ratios = []
+        longs_ratios = []
+        
+        # Iterate over bins
+        for _, bin_row in bins_df.iterrows():
+            chrom = bin_row['chrom']
+            start = bin_row['start']
+            end = bin_row['end']
+            
+            try:
+                rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
+            except ValueError:
+                rows = []
+            except Exception as e:
+                logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
+                raise typer.Exit(1)
+            
+            if not rows:
+                shorts_ratios.append(0)
+                ultra_shorts_ratios.append(0)
+                inter_ratios.append(0)
+                longs_ratios.append(0)
+                continue
+                
+            try:
+                # Vectorized parsing
+                _, starts, ends, _ = zip(*rows)
+                starts = np.array(starts, dtype=int)
+                ends = np.array(ends, dtype=int)
+                lengths = ends - starts
+                
+                # Filter 65-400
+                mask = (lengths >= 65) & (lengths <= 400)
+                valid_lengths = lengths[mask]
+                
+                total = len(valid_lengths)
+                
+                if total == 0:
+                    shorts_ratios.append(0)
+                    ultra_shorts_ratios.append(0)
+                    inter_ratios.append(0)
+                    longs_ratios.append(0)
+                else:
+                    shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 150))
+                    ultra_shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 100))
+                    intermediates = np.sum((valid_lengths >= 151) & (valid_lengths <= 260))
+                    longs = np.sum((valid_lengths >= 261) & (valid_lengths <= 400))
+                    
+                    shorts_ratios.append(shorts / total)
+                    ultra_shorts_ratios.append(ultra_shorts / total)
+                    inter_ratios.append(intermediates / total)
+                    longs_ratios.append(longs / total)
+                    
+            except Exception as e:
+                logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
+                raise typer.Exit(1)
+
+        # Aggregation into windows
+        df = pd.DataFrame({
+            'chrom': bins_df['chrom'],
+            'start': bins_df['start'],
+            'end': bins_df['end'],
+            'short_r': shorts_ratios,
+            'ultra_short_r': ultra_shorts_ratios,
+            'inter_r': inter_ratios,
+            'long_r': longs_ratios
+        })
+        
+        results = []
+        
+        for chrom, group in df.groupby('chrom', sort=False):
+            n_bins = len(group)
+            n_windows = n_bins // continue_n
+            
+            if n_windows == 0:
+                continue
+                
+            trunc_len = n_windows * continue_n
+            
+            short_mat = group['short_r'].values[:trunc_len].reshape(n_windows, continue_n)
+            ultra_short_mat = group['ultra_short_r'].values[:trunc_len].reshape(n_windows, continue_n)
+            inter_mat = group['inter_r'].values[:trunc_len].reshape(n_windows, continue_n)
+            long_mat = group['long_r'].values[:trunc_len].reshape(n_windows, continue_n)
+            
+            # Mean of ratios
+            mean_short = short_mat.mean(axis=1)
+            mean_ultra_short = ultra_short_mat.mean(axis=1)
+            mean_inter = inter_mat.mean(axis=1)
+            mean_long = long_mat.mean(axis=1)
+            
+            window_starts = np.arange(n_windows) * continue_n * windows
+            window_ends = (np.arange(n_windows) + 1) * continue_n * windows - 1
+            
+            results.append(pd.DataFrame({
+                'chrom': chrom,
+                'start': window_starts,
+                'end': window_ends,
+                'short_mean': mean_short,
+                'ultra_short_mean': mean_ultra_short,
+                'inter_mean': mean_inter,
+                'long_mean': mean_long
+            }))
+            
+        if not results:
+            logger.warning("No valid windows found.")
+            return
+
+        final_df = pd.concat(results, ignore_index=True)
+        
+        # Write output
+        with open(output_file, 'w') as f:
+            f.write("region\tshort-ratio\tultra-short-ratio\titermediate-ratio\tlong-ratio\n")
+            for _, row in final_df.iterrows():
+                region = f"{row['chrom']}:{int(row['start'])}-{int(row['end'])}"
+                f.write(f"{region}\t{row['short_mean']:.4f}\t{row['ultra_short_mean']:.4f}\t{row['inter_mean']:.4f}\t{row['long_mean']:.4f}\n")
+                
         logger.info(f"FSR calculation complete. Results written to {output_file}")
+
     except Exception as e:
         logger.error(f"Fatal error in _calc_fsr: {e}")
         raise typer.Exit(1)
@@ -123,6 +179,8 @@ def fsr(
 ):
     """
     Calculate fragment size ratio (FSR) features for all .bed.gz files in a folder.
+    The input folder should be the output directory produced by motif.py, containing the .bed.gz files.
+    Output files are written to the output directory, one per .bed.gz file.
     """
     # Input checks
     if not bedgz_path.exists():
@@ -136,10 +194,6 @@ def fsr(
     except Exception as e:
         logger.error(f"Could not create output directory {output}: {e}")
         raise typer.Exit(1)
-    """
-    The input folder should be the output directory produced by motif.py, containing the .bed.gz files.
-    Output files are written to the output directory, one per .bed.gz file.
-    """
     if not output.exists():
         output.mkdir(parents=True, exist_ok=True)
     bedgz_files = [f for f in bedgz_path.iterdir() if f.suffixes == ['.bed', '.gz']]

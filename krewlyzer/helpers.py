@@ -8,12 +8,12 @@ from collections import defaultdict
 from rich.logging import RichHandler
 import logging
 from skmisc.loess import loess
-import numpy as np
+from pathlib import Path
 
 logging.basicConfig(level="INFO", handlers=[RichHandler()], format="%(message)s")
 logger = logging.getLogger("krewlyzer-helpers")
 
-def gc_correct(coverage, bias):
+def gc_correct(coverage: list[int | float], bias: list[float]) -> list[float]:
     """
     Perform GC bias correction on coverage values using LOESS regression.
     Logs errors and raises commonError if fitting fails.
@@ -28,9 +28,20 @@ def gc_correct(coverage, bias):
         else:
             temp_cov.append(coverage[i])
             temp_bias.append(bias[i])
+            
     if not temp_cov or not temp_bias:
-        logger.error("No valid coverage/bias values for GC correction.")
-        raise commonError("No valid coverage/bias values for GC correction.")
+        logger.warning("No valid coverage/bias values for GC correction. Returning original values.")
+        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
+        
+    # Check for sufficient data points and variance for LOESS
+    if len(temp_cov) < 20:
+        logger.warning(f"Too few data points ({len(temp_cov)}) for LOESS GC correction. Returning original values.")
+        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
+        
+    if np.std(temp_bias) == 0:
+        logger.warning("No variance in GC bias values. Skipping LOESS correction.")
+        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
+
     med = np.median(temp_cov)
     correct_cov = []
     try:
@@ -44,7 +55,9 @@ def gc_correct(coverage, bias):
         coverage_corrected = temp_cov - pred + med
     except Exception as e:
         logger.error(f"GC correction failed: {e}")
-        raise commonError(f"GC correction failed: {e}")
+        # Return original values on failure
+        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
+        
     i, j = 0, 0
     while i < covl:
         if valid[i]:
@@ -63,7 +76,7 @@ class commonError(Exception):
         logger.error(f"commonError: {message}")
         self.message = message
 
-def maxCore(nCore=None):
+def maxCore(nCore: int | None = None) -> int | None:
     if nCore and nCore > 16:
         logger.warning("Requested nCore > 16; capping to 16.")
         return 16
@@ -73,13 +86,13 @@ def maxCore(nCore=None):
 # Alias for CLI import consistency
 max_core = maxCore
 
-def rmEndString(x, y):
+def rmEndString(x: str, y: list[str]) -> str:
     for item in y:
         if x.endswith(item):
             x = x.replace(item, "")
     return x
 
-def isSoftClipped(cigar):
+def isSoftClipped(cigar: list[tuple[int, int]]) -> bool:
     """
     cigar information:
     S	BAM_CSOFT_CLIP	4
@@ -91,7 +104,7 @@ def isSoftClipped(cigar):
             return True
     return False
 
-def GCcontent(seq):
+def GCcontent(seq: str) -> float:
     try:
         nA = seq.count("a") + seq.count("A")
         nT = seq.count("t") + seq.count("T")
@@ -103,7 +116,7 @@ def GCcontent(seq):
         logger.error(f"GCcontent calculation failed: {e}")
         return 0
 
-def read_pair_generator(bam, region_string=None):
+def read_pair_generator(bam: pysam.AlignmentFile, region_string: str | None = None):
     """
     Generate read pairs in a BAM file or within a region string.
     Reads are added to read_dict until a pair is found.
@@ -142,46 +155,83 @@ def read_pair_generator(bam, region_string=None):
         logger.error(f"Error during BAM read pair generation: {e}")
         return
 
-def reverse_seq(seq):
-    r_seq = ''
-    for i in seq:
-        if i == 'A':
-            r_seq += 'T'
-        elif i == 'T':
-            r_seq += 'A'
-        elif i == 'C':
-            r_seq += 'G'
-        elif i == 'G':
-            r_seq += 'C'
-        else:
-            r_seq += i
-    return r_seq
+def reverse_complement(seq: str) -> str:
+    """
+    Return the reverse complement of a DNA sequence.
+    """
+    trans_table = str.maketrans("ATCGatcgNn", "TAGCtagcNn")
+    return seq.translate(trans_table)[::-1]
 
-def get_End_motif(Emotif, seq1, seq2):
-    if seq1.count('N') + seq1.count('n') + seq2.count('N') + seq2.count('n') != 0:
+def get_End_motif(Emotif: dict[str, int], end5: str, end3: str) -> dict[str, int]:
+    """
+    Update End Motif frequency dictionary.
+    end5: 5' end of the fragment (from Read 1)
+    end3: 3' end of the fragment (from Read 2, already reverse complemented to be on forward strand relative to fragment)
+    """
+    if "N" in end5 or "n" in end5 or "N" in end3 or "n" in end3:
         return Emotif
-    seq2 = reverse_seq(seq2)
-    if seq1 in Emotif.keys():
-        Emotif[seq1] += 1
-    if seq2 in Emotif.keys():
-        Emotif[seq2] += 1
+    
+    # In cfDNAFE, they used:
+    # seq2 = reverse_seq(seq2) -> which was just complement, not reverse.
+    # And they passed forward_end3 twice.
+    #
+    # Correct logic:
+    # We want the 4-mer at the 5' end and the 4-mer at the 3' end.
+    # The 5' end sequence is just the sequence.
+    # The 3' end sequence (on the + strand) is what we want.
+    #
+    # However, standard motif analysis often looks at the 5' end of the fragment on both strands.
+    # If we treat the fragment as double stranded:
+    # Strand 1: 5' [Seq] 3'
+    # Strand 2: 3' [Seq_RC] 5'
+    #
+    # The 5' end of Strand 1 is `end5`.
+    # The 5' end of Strand 2 corresponds to the 3' end of Strand 1, reverse complemented.
+    #
+    # If `end3` passed here is the sequence of the 3' end of the fragment on the forward strand:
+    # Then the 5' end of the reverse strand is `reverse_complement(end3)`.
+    #
+    # Let's assume the caller passes the raw sequences from the reads.
+    # Read 1 (Forward): 5' -> 3'. 5' end is the start of fragment.
+    # Read 2 (Reverse): 5' -> 3'. 5' end is the other start of fragment (on reverse strand).
+    #
+    # So we should just take the 5' end of Read 1 and the 5' end of Read 2.
+    #
+    # But let's look at how `motif.py` calls this.
+    # It will be updated to pass:
+    # forward_end5 (Read 1 5' end)
+    # reverse_end5 (Read 2 5' end)
+    #
+    # So we just count both of them.
+    
+    if end5 in Emotif:
+        Emotif[end5] += 1
+    if end3 in Emotif:
+        Emotif[end3] += 1
     return Emotif
 
-def calc_MDS(inputEndMotifFile, outputfile):
+def calc_MDS(inputEndMotifFile: str | Path, outputfile: str | Path) -> None:
     inputfile = pd.read_table(inputEndMotifFile, header=None, names=['bases', 'frequency'])
     k_mer = math.log(len(inputfile), 4)
     frequency = inputfile['frequency'].to_numpy()
     MDS = np.sum(-frequency * np.log2(frequency) / np.log2(4 ** k_mer))
     with open(outputfile, 'a') as f:
-        f.write(inputEndMotifFile + '\t' + str(MDS) + '\n')
+        f.write(str(inputEndMotifFile) + '\t' + str(MDS) + '\n')
 
-def get_Breakpoint_motif(Bpmotif, seq1, seq2):
-    # seq1 and seq2 do not include N
-    if seq1.count('N') + seq1.count('n') + seq2.count('N') + seq2.count('n') != 0:
+def get_Breakpoint_motif(Bpmotif: dict[str, int], seq1: str, seq2: str) -> dict[str, int]:
+    """
+    Update Breakpoint Motif frequency dictionary.
+    seq1: Sequence around the 5' end of the fragment.
+    seq2: Sequence around the 3' end of the fragment.
+    """
+    if "N" in seq1 or "n" in seq1 or "N" in seq2 or "n" in seq2:
         return Bpmotif
-    seq2 = reverse_seq(seq2)
-    if seq1 in Bpmotif.keys():
+    
+    # Similar to End Motif, we just count the motifs at both breakpoints.
+    # The caller should ensure seq1 and seq2 are the correct sequences surrounding the breakpoints.
+    
+    if seq1 in Bpmotif:
         Bpmotif[seq1] += 1
-    if seq2 in Bpmotif.keys():
+    if seq2 in Bpmotif:
         Bpmotif[seq2] += 1
     return Bpmotif

@@ -23,7 +23,7 @@ def calc_uxm(
     methy_threshold: float,
     unmethy_threshold: float,
     pe_type: str = "PE"
-):
+) -> None:
     """
     Calculate UXM fragment-level methylation for a single BAM and marker file.
     Output is a .UXM.tsv file with region, U, X, M proportions.
@@ -140,7 +140,7 @@ def uxm(
     unmethy_threshold: float = typer.Option(0.25, "--unmethy-threshold", "-tU", help="Unmethylation threshold for U fragments"),
     pe_type: str = typer.Option("SE", "--type", help="Fragment type: SE or PE (default: SE)"),
     threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
-):
+) -> None:
     """
     Calculate fragment-level methylation (UXM) features for all BAM files in a folder.
     """

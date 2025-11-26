@@ -11,72 +11,103 @@ console = Console()
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("fsd")
 
-def _calc_fsd(bedgz_input, arms_file, output_file):
+import pandas as pd
+
+def _calc_fsd(
+    bedgz_input: str | Path, 
+    arms_file: str | Path, 
+    output_file: str | Path
+):
     """
     Internal: Calculate fragment size distribution (FSD) for a single .bed.gz file.
-    Writes region-based fragment size distributions in 5bp bins from 65-399bp.
+    Optimized with vectorized operations.
     """
     try:
-        logger.info(f"input file: {bedgz_input}, {arms_file}")
+        logger.info(f"Processing {bedgz_input} with regions from {arms_file}")
+        
+        # Load regions
         try:
-            inputbed = pysam.Tabixfile(filename=bedgz_input, mode="r")
+            bins_df = pd.read_csv(arms_file, sep='\t', header=None, usecols=[0, 1, 2], names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
+        except Exception as e:
+            logger.error(f"Could not load regions from {arms_file}: {e}")
+            raise typer.Exit(1)
+            
+        try:
+            tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
         except Exception as e:
             logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
             raise typer.Exit(1)
-        try:
-            bins = pybedtools.BedTool(arms_file)
-        except Exception as e:
-            logger.error(f"Could not load bins from {arms_file}: {e}")
-            raise typer.Exit(1)
-        length = len(bins)
-        interval_data = []
-        region = []
-        logger.info(f"output file: {output_file}")
-        for idx in range(length):
-            bin = bins[idx]
-            region.append(f"{bin.chrom}:{bin.start}-{bin.end}")
+
+        results = []
+        regions = []
+        
+        # Define histogram bins
+        hist_bins = np.arange(65, 401, 5) # 65, 70, ..., 400. 67 bins.
+        
+        for _, bin_row in bins_df.iterrows():
+            chrom = bin_row['chrom']
+            start = bin_row['start']
+            end = bin_row['end']
+            regions.append(f"{chrom}:{start}-{end}")
+            
             try:
-                inputbed.fetch(bin.chrom, bin.start, bin.end)
+                rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
             except ValueError:
-                interval_data.append([0] * 67)
-                continue
+                rows = []
             except Exception as e:
-                logger.error(f"Error fetching bin {bin}: {e}")
+                logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
                 raise typer.Exit(1)
-            else:
-                bin_data = []
-                try:
-                    for read in inputbed.fetch(bin.chrom, bin.start, bin.end):
-                        bin_data.append(int(read.split("\t")[2]) - int(read.split("\t")[1]))
-                    count = np.bincount(bin_data, minlength=401)
-                    step_size = 5
-                    start_bin = 65
-                    end_bin = 400
-                    bin_len = int((end_bin - start_bin) / step_size)
-                    temp_bin = []
-                    for bin_id in range(bin_len):
-                        temp_bin.append(np.sum(count[(start_bin + step_size * bin_id):(start_bin + step_size * (bin_id + 1))]))
-                    interval_data.append(temp_bin)
-                except Exception as e:
-                    logger.error(f"Error processing reads in bin {bin}: {e}")
-                    interval_data.append([0] * 67)
-                    continue
+            
+            if not rows:
+                results.append(np.zeros(67))
+                continue
+                
+            try:
+                # Vectorized parsing
+                _, starts, ends, _ = zip(*rows)
+                starts = np.array(starts, dtype=int)
+                ends = np.array(ends, dtype=int)
+                lengths = ends - starts
+                
+                # Histogram
+                counts, _ = np.histogram(lengths, bins=hist_bins)
+                
+                # Normalize
+                total = np.sum(counts)
+                if total > 0:
+                    results.append(counts / total)
+                else:
+                    results.append(np.zeros(67))
+                    
+            except Exception as e:
+                logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
+                results.append(np.zeros(67))
+                continue
+
+        # Write output
         try:
-            with open(output_file, 'w') as fsdfile:
-                sbin = np.arange(65, 400, 5)
-                head_str = 'region' + '\t' + '\t'.join([f"{s}-{s+4}" for s in sbin]) + '\n'
-                fsdfile.write(head_str)
-                for i in range(length):
-                    arms = interval_data[i]
-                    score = np.zeros(67)
-                    if np.sum(arms) != 0:
-                        score = np.array(arms) / np.sum(arms)
-                    temp_str = region[i] + '\t' + '\t'.join(map(str, score)) + '\n'
-                    fsdfile.write(temp_str)
+            with open(output_file, 'w') as f:
+                # Header
+                # sbin = np.arange(65, 400, 5) -> 65, 70, ... 395
+                # ranges: 65-69, 70-74, ...
+                # Original code: f"{s}-{s+4}"
+                # My hist_bins: 65, 70...
+                # So bin 0 is [65, 70). i.e. 65, 66, 67, 68, 69.
+                # Matches 65-69 (inclusive).
+                
+                header_bins = [f"{s}-{s+4}" for s in hist_bins[:-1]]
+                f.write('region\t' + '\t'.join(header_bins) + '\n')
+                
+                for i, region in enumerate(regions):
+                    scores = results[i]
+                    f.write(f"{region}\t" + "\t".join(map(str, scores)) + "\n")
+                    
         except Exception as e:
             logger.error(f"Error writing FSD output file: {e}")
             raise typer.Exit(1)
+            
         logger.info(f"FSD calculation complete. Results written to {output_file}")
+
     except Exception as e:
         logger.error(f"Fatal error in _calc_fsd: {e}")
         raise typer.Exit(1)

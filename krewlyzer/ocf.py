@@ -16,7 +16,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("ocf")
 
 
-def calc_ocf(bedgz_file: Path, ocr_file: Path, output_dir: Path):
+def calc_ocf(bedgz_file: Path, ocr_file: Path, output_dir: Path) -> None:
     """
     Calculate OCF for a single .bed.gz file and OCR region file.
     Output is per-region .sync.end files and a summary all.ocf.csv.
@@ -93,7 +93,7 @@ def ocf(
     ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin region BED file (default: packaged tissue file)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output folder for results"),
     threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
-):
+) -> None:
     """
     Calculate orientation-aware cfDNA fragmentation (OCF) features for all .bed.gz files in a folder.
     """
