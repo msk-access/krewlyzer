@@ -79,6 +79,7 @@ uv pip install krewlyzer
 | wps       | Windowed protection score                    |
 | ocf       | Orientation-aware fragmentation              |
 | uxm       | Fragment-level methylation (SE/PE)           |
+| mfsd      | Mutant fragment size distribution            |
 | run-all   | Run all features for a BAM                   |
 
 ## Typical Workflow
@@ -94,9 +95,10 @@ krewlyzer fsd motif_out --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.bed 
 krewlyzer wps motif_out --output wps_out
 krewlyzer ocf motif_out --output ocf_out
 krewlyzer uxm /path/to/bam_folder --output uxm_out
+krewlyzer mfsd sample.bam --input variants.vcf --output mfsd_out/sample.mfsd.tsv
 
 # 3. Run all features in one call:
-krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out
+krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out --variant-input variants.vcf
 ```
 
 ---
@@ -134,9 +136,9 @@ krewlyzer fsc motif_out --output fsc_out [options]
   - `--threads`, `-t`: Number of processes
 
 ### Fragment Size Ratio (FSR)
-**Purpose:** Calculates the ratio of short/intermediate/long fragments per bin, using DELFI-inspired cutoffs.
+**Purpose:** Calculates the ratio of ultra-short/short/intermediate/long fragments per bin.
 
-**Biological context:** The DELFI method (Mouliere et al., 2018) showed that cfDNA fragment size ratios are highly informative for cancer detection. Krewlyzer uses short (65-150bp), intermediate (151-220bp), and long (221-400bp) bins, with GC correction.
+**Biological context:** The DELFI method (Mouliere et al., 2018) showed that cfDNA fragment size ratios are highly informative for cancer detection. Krewlyzer uses ultra-short (65-100bp), short (65-150bp), intermediate (151-260bp), and long (261-400bp) bins. The ultra-short bin is a highly specific marker for ctDNA.
 
 **Usage:**
 ```bash
@@ -215,12 +217,28 @@ krewlyzer uxm /path/to/bam_folder --output uxm_out --type PE [options]
   - `--type`: Fragment type: SE or PE (default: SE)
   - `--threads`, `-t`: Number of processes
 
-### Run All Features
-Runs all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm) for a single BAM file in one call.
+### Mutant Fragment Size Distribution (mFSD)
+**Purpose:** Compares the size distribution of mutant vs. wild-type reads at variant sites.
+
+**Biological context:** Mutant ctDNA fragments are typically shorter than wild-type cfDNA. This module quantifies this difference using high-depth targeted sequencing data, providing a sensitive marker for ctDNA presence.
 
 **Usage:**
 ```bash
-krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out [--threads N] [--type SE|PE]
+krewlyzer mfsd sample.bam --input variants.vcf --output output.tsv [options]
+```
+- Input: BAM file and VCF/MAF file containing variants.
+- Output: TSV file with mutant/WT counts, mean sizes, size difference, and KS test statistics.
+- Options:
+  - `--input`, `-i`: VCF or MAF file (required)
+  - `--format`, `-f`: Input format ('auto', 'vcf', 'maf')
+  - `--map-quality`, `-q`: Minimum mapping quality (default: 20)
+
+### Run All Features
+Runs all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm, mfsd) for a single BAM file in one call.
+
+**Usage:**
+```bash
+krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out [--variant-input variants.vcf] [--threads N] [--type SE|PE]
 ```
 
 ---
