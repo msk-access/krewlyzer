@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libxml2-dev \
     libxslt1-dev \
-    libatlas-base-dev \
+
     gfortran \
     libopenblas-dev \
     liblapack-dev \
