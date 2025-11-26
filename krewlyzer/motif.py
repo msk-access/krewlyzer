@@ -1,4 +1,3 @@
-# motif.py: Extracts motif-based features from BAM files
 import typer
 from pathlib import Path
 from typing import Optional
@@ -9,8 +8,9 @@ import pandas as pd
 import math
 import pybedtools
 from collections import defaultdict
+import itertools
 from .helpers import (
-    reverse_seq,
+    reverse_complement,
     get_End_motif,
     get_Breakpoint_motif,
     GCcontent,
@@ -116,16 +116,16 @@ def motif(
 
 
 def motif_process(
-    bamInput,
-    blacklistInput,
-    bedOutput,
-    genome_reference,
-    CHR,
-    mapQuality,
-    k_mer,
-    fragFilter=False,
-    minLen=None,
-    maxLen=None
+    bamInput: str | Path,
+    blacklistInput: str | Path | None,
+    bedOutput: str | Path,
+    genome_reference: str | Path,
+    CHR: list[str] | None,
+    mapQuality: int,
+    k_mer: int,
+    fragFilter: bool = False,
+    minLen: int | None = None,
+    maxLen: int | None = None
 ):
     """
     Main motif feature extraction process with rich logging and consistent CLI output.
@@ -178,38 +178,109 @@ def motif_process(
                 read1End = read1.reference_end
                 read2Start = read2.reference_start
                 read2End = read2.reference_end
+                
+                # Determine fragment coordinates
                 if not read1.is_reverse:
                     rstart = read1Start
                     rend = read2End
-                    forward_end5 = read1.query_sequence[:k_mer].upper()
-                    forward_end3 = read2.query_sequence[-k_mer:].upper()
+                    # 5' end of fragment (Strand 1)
+                    motif_left = read1.query_sequence[:k_mer].upper()
+                    # 5' end of fragment (Strand 2) - which is 5' end of Read 2
+                    motif_right = read2.query_sequence[:k_mer].upper()
                 else:
                     rstart = read2Start
                     rend = read1End
-                    forward_end5 = read2.query_sequence[:k_mer].upper()
-                    forward_end3 = read1.query_sequence[-k_mer:].upper()
+                    # 5' end of fragment (Strand 1) - which is 5' end of Read 2
+                    motif_left = read2.query_sequence[:k_mer].upper()
+                    # 5' end of fragment (Strand 2) - which is 5' end of Read 1
+                    motif_right = read1.query_sequence[:k_mer].upper()
+                
                 if (rstart < 0) or (rend < 0) or (rstart >= rend):
                     continue
                 if fragFilter:
                     readLen = rend - rstart
                     if (minLen and readLen < minLen) or (maxLen and readLen > maxLen):
                         continue
+                
+                # Write BED (0-based start, 0-based exclusive end)
                 gc = GCcontent(genome.fetch(read1.reference_name, rstart, rend))
-                bedWrite.write(f"{read1.reference_name}\t{rstart+1}\t{rend+1}\t{gc}\n")
-                End_motif = get_End_motif(End_motif, forward_end3, forward_end3)
+                bedWrite.write(f"{read1.reference_name}\t{rstart}\t{rend}\t{gc}\n")
+                
+                # Update End Motif
+                End_motif = get_End_motif(End_motif, motif_left, motif_right)
+                
+                # Update Breakpoint Motif
+                # We need genomic context around the 5' ends.
+                # Left breakpoint (rstart): 5' end of fragment.
+                # Right breakpoint (rend): 3' end of fragment (on + strand).
+                
+                # For Breakpoint Motif, we want the sequence AROUND the breakpoint.
+                # Typically k_mer/2 bases before and k_mer/2 bases after.
                 pos = math.ceil(k_mer / 2)
+                
                 try:
-                    if k_mer % 2 == 0:
-                        ref_seq1 = genome.fetch(read1.reference_name, rstart - pos, rstart).upper()
-                        ref_seq2 = genome.fetch(read2.reference_name, rend, rend + pos).upper()
-                        Breakpoint_motif = get_Breakpoint_motif(Breakpoint_motif, ref_seq1 + forward_end5[:pos], forward_end3[-pos:] + ref_seq2)
-                    else:
-                        ref_seq1 = genome.fetch(read1.reference_name, rstart - pos + 1, rstart).upper()
-                        ref_seq2 = genome.fetch(read2.reference_name, rend, rend + pos - 1).upper()
-                        Breakpoint_motif = get_Breakpoint_motif(Breakpoint_motif, ref_seq1 + forward_end5[:pos], forward_end3[-pos:] + ref_seq2)
+                    # Left breakpoint (rstart)
+                    # Genomic sequence before rstart
+                    ref_seq_left = genome.fetch(read1.reference_name, rstart - pos, rstart).upper()
+                    # Fragment sequence starting at rstart (from read)
+                    frag_seq_left = motif_left[:pos] # This is from the read
+                    
+                    # Right breakpoint (rend)
+                    # Fragment sequence ending at rend
+                    # The 3' end of the fragment on + strand corresponds to the 5' end of the reverse read.
+                    # The reverse read sequence (motif_right) is the reverse complement of the + strand.
+                    # So motif_right is 5'->3' on - strand.
+                    # Its complement is 3'->5' on + strand.
+                    # Its reverse complement is 5'->3' on + strand.
+                    
+                    # Wait, let's simplify.
+                    # Breakpoint motif usually captures the genomic context at the nick.
+                    # Left nick: [Genomic Pre][Fragment Start]
+                    # Right nick: [Fragment End][Genomic Post]
+                    
+                    # Left: ref[rstart-pos:rstart] + read[0:pos]
+                    bp_left_seq = ref_seq_left + frag_seq_left
+                    
+                    # Right:
+                    # Genomic Post: ref[rend:rend+pos]
+                    ref_seq_right = genome.fetch(read1.reference_name, rend, rend + pos).upper()
+                    
+                    # Fragment End:
+                    # We have motif_right which is the 5' end of the reverse read.
+                    # This corresponds to the 3' end of the fragment on the forward strand.
+                    # But motif_right is the sequence of the read itself (reverse strand).
+                    # To get the forward strand sequence at the 3' end:
+                    # It is reverse_complement(motif_right).
+                    # And we want the last 'pos' bases of the fragment.
+                    # If motif_right is 5'->3' on - strand.
+                    # The first 'pos' bases of motif_right correspond to the last 'pos' bases of the fragment on the + strand (complement).
+                    
+                    # Actually, let's just use the genome for simplicity and consistency if possible?
+                    # No, we should use the read for the fragment part to capture variants/errors if desired, 
+                    # but usually for motifs we assume reference or read is fine.
+                    # Using read is better for actual fragment end.
+                    
+                    # Let's use the logic:
+                    # Right breakpoint is at 'rend'.
+                    # We want [Fragment End][Genomic Post]
+                    # Fragment End is the sequence ending at rend.
+                    # Genomic Post is sequence starting at rend.
+                    
+                    # The sequence of the fragment at the 3' end (on + strand) is:
+                    # reverse_complement(motif_right).
+                    # We want the last 'pos' bases.
+                    # motif_right[:pos] is the 5' end of the reverse read.
+                    # reverse_complement(motif_right[:pos]) is the 3' end of the forward fragment.
+                    
+                    frag_seq_right = reverse_complement(motif_right[:pos])
+                    
+                    bp_right_seq = frag_seq_right + ref_seq_right
+                    
+                    Breakpoint_motif = get_Breakpoint_motif(Breakpoint_motif, bp_left_seq, bp_right_seq)
+
                 except Exception as e:
                     motif_errors += 1
-                    logger.warning(f"Motif extraction failed for fragment at {read1.reference_name}:{rstart}-{rend}: {e}")
+                    # logger.warning(f"Motif extraction failed for fragment at {read1.reference_name}:{rstart}-{rend}: {e}")
                     continue
                 if idx % 10000 == 0:
                     progress.update(task, advance=10000)
@@ -227,8 +298,17 @@ def motif_process(
             bedData = bedData.subtract(black_reigon, A=True)
         bedData.sort(output=bedOutput)
         os.remove(temp_bed)
+        
+        # Compress and Index
+        logger.info(f"Compressing and indexing {bedOutput}...")
+        pysam.tabix_compress(bedOutput, bedOutput + ".gz", force=True)
+        pysam.tabix_index(bedOutput + ".gz", preset="bed")
+        # Remove uncompressed file to save space and avoid confusion
+        if os.path.exists(bedOutput):
+            os.remove(bedOutput)
+            
     except Exception as e:
-        logger.error(f"Error during BED filtering/sorting: {e}")
+        logger.error(f"Error during BED filtering/sorting/compression: {e}")
         raise typer.Exit(1)
     # Write EndMotif
     edm_file = os.path.join(EDM_output_path, Path(bedOutput).stem + '.EndMotif')
@@ -271,5 +351,6 @@ def motif_process(
     summary_table.add_row("End Motif (EDM)", edm_file)
     summary_table.add_row("Breakpoint Motif (BPM)", bpm_file)
     summary_table.add_row("Motif Diversity Score (MDS)", mds_file)
+    summary_table.add_row("Fragment BED", bedOutput + ".gz")
     console.print(Panel(summary_table, title="[green]Extraction Complete", subtitle=f"Motif errors: {motif_errors}", expand=False))
     logger.info("Motif feature extraction complete.")

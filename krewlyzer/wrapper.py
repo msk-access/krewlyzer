@@ -10,6 +10,8 @@ from .fsd import fsd
 from .wps import wps
 from .ocf import ocf
 from .uxm import uxm
+from .mfsd import mfsd
+from typing import Optional
 
 console = Console()
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
@@ -20,11 +22,12 @@ def run_all(
     bam_file: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
     reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA file for motif extraction"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
+    variant_input: Optional[Path] = typer.Option(None, "--variant-input", "-v", help="Input VCF/MAF file for mFSD analysis"),
     threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes for each step"),
     pe_type: str = typer.Option("SE", "--type", help="Fragment type for UXM: SE or PE (default: SE)")
 ):
     """
-    Run all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm) for a single BAM file.
+    Run all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm, mfsd) for a single BAM file.
     """
     # Input checks
     if not bam_file.exists() or not bam_file.is_file():
@@ -122,4 +125,23 @@ def run_all(
     except Exception as e:
         logger.error(f"UXM calculation failed: {e}")
         raise typer.Exit(1)
+    
+    # 8. mFSD (Optional)
+    if variant_input:
+        if not variant_input.exists():
+            logger.warning(f"Variant input file not found: {variant_input}. Skipping mFSD.")
+        else:
+            mfsd_output = output / "mfsd" / (bam_file.stem + ".mfsd.tsv")
+            try:
+                mfsd(
+                    bam_path=bam_file,
+                    input_file=variant_input,
+                    output=mfsd_output,
+                    format="auto",
+                    map_quality=20
+                )
+            except Exception as e:
+                logger.error(f"mFSD calculation failed: {e}")
+                # Don't raise exit here, just log error as it's optional
+    
     logger.info(f"All feature extraction complete. Results saved to {output}")

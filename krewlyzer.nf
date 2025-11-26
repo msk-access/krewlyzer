@@ -16,10 +16,14 @@ params.samplesheet = ''
 params.ref = ''
 params.krewlyzer = 'krewlyzer' // or path to CLI
 
-// Parse the sample sheet CSV into a channel of [sample_id, bam]
+// Parse the sample sheet CSV into a channel of [sample_id, bam, variant_file]
 Channel.fromPath(params.samplesheet)
     .splitCsv(header:true)
-    .map { row -> tuple(row.sample_id, file(row.bam)) }
+    .map { row -> 
+        def bam = file(row.bam)
+        def variant = row.vcf ? file(row.vcf) : (row.maf ? file(row.maf) : [])
+        tuple(row.sample_id, bam, variant)
+    }
     .set { SAMPLES }
 
 process RUN_ALL {
@@ -30,14 +34,14 @@ process RUN_ALL {
     time '24h'
 
     input:
-    val sample_id
-    path bam_file
+    tuple val(sample_id), path(bam_file), path(variant_file)
 
     script:
+    def variant_arg = variant_file ? "--variant-input ${variant_file}" : ""
     """
     OUTDIR="$sample_id"
     mkdir -p "$OUTDIR"
-    ${params.krewlyzer} run-all ${bam_file} --reference ${params.ref} --output "$OUTDIR" --threads 8
+    ${params.krewlyzer} run-all ${bam_file} --reference ${params.ref} --output "$OUTDIR" --threads 8 ${variant_arg}
     """
     output:
     path "*", emit: out

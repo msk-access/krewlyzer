@@ -16,76 +16,167 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("wps")
 
 
-def _calc_wps(bedgz_input, tsv_input, output_file_pattern, empty=False, protect_input=120, min_size=120, max_size=180):
+import pandas as pd
+
+def _calc_wps(
+    bedgz_input: str | Path, 
+    tsv_input: str | Path, 
+    output_file_pattern: str, 
+    empty: bool = False, 
+    protect_input: int = 120, 
+    min_size: int = 120, 
+    max_size: int = 180
+):
     """
     Calculate Windowed Protection Score (WPS) for a single .bed.gz file and transcript region file.
     Output is gzipped TSV per region.
+    Optimized with vectorized operations.
     """
     try:
         bedgzfile = str(bedgz_input)
         tbx = pysam.TabixFile(bedgzfile)
         protection = protect_input // 2
+        
+        logger.info(f"Processing {bedgz_input} with regions from {tsv_input}")
+        
         with open(tsv_input, 'r') as infile:
-            prefix = "chr"
-            valid_chroms = set(map(str, list(range(1, 23)) + ["X"]))
-            logger.info(f"input file: {bedgz_input}, {tsv_input}")
+            valid_chroms = set(map(str, list(range(1, 23)) + ["X", "Y"]))
+            
             for line in infile:
                 if not line.strip():
                     continue
                 parts = line.split()
                 if len(parts) < 5:
                     continue
-                cid, chrom, start, end, strand = parts[:5]
+                cid, chrom, start_str, end_str, strand = parts[:5]
                 chrom = chrom.replace("chr", "")
                 if chrom not in valid_chroms:
                     continue
-                region_start, region_end = int(float(start)), int(float(end))
+                    
+                region_start = int(float(start_str))
+                region_end = int(float(end_str))
+                
                 if region_start < 1:
                     continue
-                pos_range = defaultdict(lambda: [0, 0])
+                    
+                # Region length (inclusive)
+                length = region_end - region_start + 1
+                
+                # Arrays for the region (0-based index relative to region_start)
+                cov_arr = np.zeros(length, dtype=int)
+                start_arr = np.zeros(length, dtype=int)
+                gcount_arr = np.zeros(length, dtype=int)
+                total_arr = np.zeros(length, dtype=int)
+                
+                # Fetch reads
+                # Pysam fetch is 0-based.
+                # Region 1-based [S, E] -> 0-based [S-1, E)
+                # We need reads extending 'protection' bp around the region
+                fetch_start = max(0, region_start - protection - 1)
+                fetch_end = region_end + protection
+                
+                # Ensure 'chr' prefix for fetching as per original logic
+                fetch_chrom = "chr" + chrom if not chrom.startswith("chr") else chrom
+                
                 try:
-                    from bx.intervals.intersection import Intersecter, Interval
-                    filtered_reads = Intersecter()
-                    for row in tbx.fetch(prefix + chrom, region_start - protection, region_end + protection):
-                        tmp_row = row.split()
-                        rstart = int(tmp_row[1])
-                        rend = int(tmp_row[2])
-                        lseq = rend - rstart
-                        if lseq < min_size or lseq > max_size:
-                            continue
-                        filtered_reads.add_interval(Interval(rstart, rend))
-                        for i in range(rstart, rend):
-                            if region_start <= i <= region_end:
-                                pos_range[i][0] += 1
-                        if region_start <= rstart <= region_end:
-                            pos_range[rstart][1] += 1
-                        if region_start <= rend <= region_end:
-                            pos_range[rend][1] += 1
+                    rows = list(tbx.fetch(fetch_chrom, fetch_start, fetch_end, parser=pysam.asTuple()))
+                except ValueError:
+                    # Try without chr prefix if failed?
+                    try:
+                        rows = list(tbx.fetch(chrom, fetch_start, fetch_end, parser=pysam.asTuple()))
+                    except ValueError:
+                        rows = []
                 except Exception as e:
                     logger.error(f"Error fetching region {chrom}:{region_start}-{region_end}: {e}")
                     continue
+                
+                if not rows:
+                    if not empty:
+                        continue
+                
+                # Process reads
+                for row in rows:
+                    # BED is 0-based start, 0-based exclusive end
+                    rstart = int(row[1])
+                    rend = int(row[2])
+                    lseq = rend - rstart
+                    
+                    if lseq < min_size or lseq > max_size:
+                        continue
+                        
+                    # Convert read to 1-based inclusive for easier logic with 1-based regions
+                    r_start_1 = rstart + 1
+                    r_end_1 = rend
+                    
+                    # 1. Coverage (covCount)
+                    # Read spans [r_start_1, r_end_1]
+                    ov_start = max(region_start, r_start_1)
+                    ov_end = min(region_end, r_end_1)
+                    
+                    if ov_start <= ov_end:
+                        idx_start = ov_start - region_start
+                        idx_end = ov_end - region_start + 1
+                        cov_arr[idx_start:idx_end] += 1
+                        
+                    # 2. Start Count (ends)
+                    if region_start <= r_start_1 <= region_end:
+                        start_arr[r_start_1 - region_start] += 1
+                    if region_start <= r_end_1 <= region_end:
+                        start_arr[r_end_1 - region_start] += 1
+                        
+                    # 3. WPS
+                    # gcount (spanning): window [k-P, k+P] is inside read
+                    # Range: [r_start_1 + P, r_end_1 - P]
+                    g_start = r_start_1 + protection
+                    g_end = r_end_1 - protection
+                    
+                    g_ov_start = max(region_start, g_start)
+                    g_ov_end = min(region_end, g_end)
+                    
+                    if g_ov_start <= g_ov_end:
+                        idx_start = g_ov_start - region_start
+                        idx_end = g_ov_end - region_start + 1
+                        gcount_arr[idx_start:idx_end] += 1
+                        
+                    # total (overlapping): window [k-P, k+P] overlaps read
+                    # Range: [r_start_1 - P, r_end_1 + P]
+                    t_start = r_start_1 - protection
+                    t_end = r_end_1 + protection
+                    
+                    t_ov_start = max(region_start, t_start)
+                    t_ov_end = min(region_end, t_end)
+                    
+                    if t_ov_start <= t_ov_end:
+                        idx_start = t_ov_start - region_start
+                        idx_end = t_ov_end - region_start + 1
+                        total_arr[idx_start:idx_end] += 1
+                
+                # WPS = Spanning - (Total - Spanning) = 2 * Spanning - Total
+                wps_arr = 2 * gcount_arr - total_arr
+                
+                # Check if we should write
+                if np.sum(cov_arr) == 0 and not empty:
+                    continue
+                    
+                # Prepare output
                 filename = output_file_pattern % cid
+                
+                positions = np.arange(region_start, region_end + 1)
+                df = pd.DataFrame({
+                    'chrom': chrom,
+                    'pos': positions,
+                    'cov': cov_arr,
+                    'starts': start_arr,
+                    'wps': wps_arr
+                })
+                
+                if strand == "-":
+                    df = df.iloc[::-1]
+                
                 with gzip.open(filename, 'wt') as outfile:
-                    cov_sites = 0
-                    out_lines = []
-                    for pos in range(region_start, region_end + 1):
-                        rstart, rend = pos - protection, pos + protection
-                        gcount, bcount = 0, 0
-                        for read in filtered_reads.find(rstart, rend):
-                            if (read.start > rstart) or (read.end < rend):
-                                bcount += 1
-                            else:
-                                gcount += 1
-                        cov_count, start_count = pos_range[pos]
-                        cov_sites += cov_count
-                        out_lines.append(f"{chrom}\t{pos}\t{cov_count}\t{start_count}\t{gcount - bcount}\n")
-                    if strand == "-":
-                        out_lines = out_lines[::-1]
-                    for line in out_lines:
-                        outfile.write(line)
-                if cov_sites == 0 and not empty:
-                    import os
-                    os.remove(filename)
+                    for _, row in df.iterrows():
+                        outfile.write(f"{row['chrom']}\t{int(row['pos'])}\t{int(row['cov'])}\t{int(row['starts'])}\t{int(row['wps'])}\n")
+                        
         logger.info(f"WPS calculation complete. Results written to pattern: {output_file_pattern}")
     except Exception as e:
         logger.error(f"Fatal error in _calc_wps: {e}")

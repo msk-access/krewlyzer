@@ -18,16 +18,18 @@ def set_log_level(log_level: str = typer.Option("INFO", "--log-level", help="Log
         handler.setLevel(level)
     logging.getLogger().setLevel(level)
 
-app = typer.Typer(callback=set_log_level)
+app = typer.Typer(help="krewlyzer: A comprehensive toolkit for ctDNA fragmentomics analysis.")
 
-from .motif import motif
-from .fsc import fsc
-from .fsr import fsr
-from .fsd import fsd
-from .wps import wps
-from .ocf import ocf
-from .uxm import uxm
-from .wrapper import run_all
+from krewlyzer.motif import motif
+from krewlyzer.fsc import fsc
+from krewlyzer.fsr import fsr
+from krewlyzer.fsd import fsd
+from krewlyzer.wps import wps
+from krewlyzer.ocf import ocf
+from krewlyzer.uxm import uxm
+from krewlyzer.mfsd import mfsd
+from krewlyzer.wrapper import run_all
+from krewlyzer import __version__
 
 app.command()(motif)
 app.command()(fsc)
@@ -36,12 +38,16 @@ app.command()(fsd)
 app.command()(wps)
 app.command()(ocf)
 app.command()(uxm)
+app.command()(mfsd)
 app.command()(run_all)
 
-@app.command()
-def version() -> None:
-    """Show version information"""
-    logger.info("krewlyzer 0.1.1")
+@app.callback()
+def main(
+    version: bool = typer.Option(False, "--version", "-v", help="Show version and exit"),
+):
+    if version:
+        typer.echo(f"krewlyzer version: {__version__}")
+        raise typer.Exit()
 
 if __name__ == "__main__":
     app()
