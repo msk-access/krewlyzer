@@ -424,7 +424,8 @@ def motif_process(
         raise typer.Exit(1)
     
     # NEW: Write metadata with fragment count
-    metadata_file = str(bedOutput).replace('.bed.gz', '.metadata.json')
+    # Use .bed.gz name since that's what FSD/WPS will look for
+    metadata_file = str(bedOutput) + '.gz.metadata.json'
     logger.info(f"Writing metadata to {metadata_file}")
     try:
         metadata = {
