@@ -141,6 +141,7 @@ def run_all(
     try:
         wps(
             bedgz_path=motif_output,
+            tsv_input=None,  # Use default packaged transcript file
             output=wps_output,
             threads=threads
         )
