@@ -19,15 +19,30 @@ logger = logging.getLogger("krewlyzer-wrapper")
 
 
 def run_all(
-    bam_file: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
-    reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA file for motif extraction"),
+    bam_file: Path = typer.Argument(...,help="Input BAM file (sorted, indexed)"),
+    reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA file"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
-    variant_input: Optional[Path] = typer.Option(None, "--variant-input", "-v", help="Input VCF/MAF file for mFSD analysis"),
-    threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes for each step"),
-    pe_type: str = typer.Option("SE", "--type", help="Fragment type for UXM: SE or PE (default: SE)")
+    
+    # Common filtering options
+    chromosomes: Optional[str] = typer.Option(None, "--chromosomes", help="Comma-separated list of chromosomes (e.g., '1,2,3')"),
+    mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
+    exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-x", help="BED file of genomic regions to exclude"),
+    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
+    maxlen: int = typer.Option(400, "--maxlen", help="Maximum fragment length"),
+    
+    # Optional override for FSD arms file
+    arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms/regions file for FSD (default: project data/ChormosomeArms/hg19.arms.bed)"),
+    
+    # Existing options
+    variant_input: Optional[Path] = typer.Option(None, "--variant-input", "-v", help="Input VCF/MAF file for mFSD"),
+    threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes"),
+    pe_type: str = typer.Option("SE", "--type", help="Fragment type for UXM: SE or PE")
 ):
     """
     Run all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm, mfsd) for a single BAM file.
+    
+    Common filtering options (chromosomes, mapq, exclude-regions, fragment lengths) are exposed.
+    Advanced options can be configured by running tools individually.
     """
     # Input checks
     if not bam_file.exists() or not bam_file.is_file():
@@ -36,6 +51,20 @@ def run_all(
     if not reference.exists() or not reference.is_file():
         logger.error(f"Reference FASTA file not found: {reference}")
         raise typer.Exit(1)
+    
+    # Validate optional filtering files
+    if exclude_regions and not exclude_regions.exists():
+        logger.error(f"Exclude regions file not found: {exclude_regions}")
+        raise typer.Exit(1)
+    if arms_file and not arms_file.exists():
+        logger.error(f"Arms file not found: {arms_file}")
+        raise typer.Exit(1)
+    
+    # Validate fragment length ranges
+    if minlen >= maxlen:
+        logger.error(f"Minimum fragment length ({minlen}) must be less than maximum ({maxlen})")
+        raise typer.Exit(1)
+    
     try:
         output.mkdir(parents=True, exist_ok=True)
     except Exception as e:
@@ -44,15 +73,21 @@ def run_all(
     # 1. Motif extraction
     motif_output = output / "motif"
     try:
+        # Parse chromosomes string to list
+        chr_list = chromosomes.split(",") if chromosomes else None
+        
         motif(
             bam_path=bam_file,
-            reference=reference,
+            genome_reference=reference,      # Fixed: was reference=
             output=motif_output,
-            minlen=65,
-            maxlen=400,
-            k=3,
-            verbose=True,
-            threads=threads,
+            blacklist=exclude_regions,       # Fixed: use exclude_regions parameter
+            map_quality=mapq,                # Added: expose mapq
+            min_length=minlen,               # Fixed: was minlen=
+            max_length=maxlen,               # Fixed: was maxlen=
+            kmer=3,                          # Fixed: was k=
+            chromosomes=chr_list,            # Added: expose chromosomes
+            verbose=False,                   # Changed: less noisy
+            threads=threads
         )
     except Exception as e:
         logger.error(f"Motif extraction failed: {e}")
@@ -82,12 +117,23 @@ def run_all(
     # 4. FSD
     fsd_output = output / "fsd"
     try:
+        # Use packaged default if user doesn't provide arms file
+        # Data is at project root: data/ChormosomeArms/hg19.arms.bed
+        if arms_file is None:
+            project_root = Path(__file__).parent.parent
+            arms_file = project_root / "data" / "ChormosomeArms" / "hg19.arms.bed"
+            if not arms_file.exists():
+                logger.warning(f"Default arms file not found: {arms_file}. Skipping FSD.")
+                raise FileNotFoundError(f"Arms file not found: {arms_file}")
+        
         fsd(
             bedgz_path=motif_output,
             output=fsd_output,
-            arms_file=None,
+            arms_file=arms_file,  # Fixed: was None
             threads=threads
         )
+    except FileNotFoundError:
+        logger.warning("FSD skipped due to missing arms file")
     except Exception as e:
         logger.error(f"FSD calculation failed: {e}")
         raise typer.Exit(1)
