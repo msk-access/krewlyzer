@@ -27,7 +27,7 @@ def _calc_fsd(
     try:
         # NEW: Try to load metadata for CPM normalization
         total_fragments = None
-        metadata_file = str(bedgz_input).replace('.bed.gz', '.metadata.json')
+        metadata_file = str(bedgz_input) + '.metadata.json'
         if Path(metadata_file).exists():
             try:
                 with open(metadata_file, 'r') as f:
@@ -172,9 +172,6 @@ def fsd(
         raise typer.Exit(1)
     if not output.is_dir():
         logger.error(f"Output path is not a directory: {output}")
-        raise typer.Exit(1)
-    if not output.is_writable():
-        logger.error(f"Output directory is not writable: {output}")
         raise typer.Exit(1)
     bedgz_files = [f for f in bedgz_path.iterdir() if f.suffixes == ['.bed', '.gz']]
     if not bedgz_files:

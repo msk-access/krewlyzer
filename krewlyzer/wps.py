@@ -37,7 +37,7 @@ def _calc_wps(
     try:
         # NEW: Try to load metadata for depth normalization
         total_fragments = None
-        metadata_file = str(bedgz_input).replace('.bed.gz', '.metadata.json')
+        metadata_file = str(bedgz_input) + '.metadata.json'
         if Path(metadata_file).exists():
             try:
                 with open(metadata_file, 'r') as f:
