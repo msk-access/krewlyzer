@@ -173,7 +173,6 @@ def motif_process(
     with Progress(console=console, transient=True) as progress:
         task = progress.add_task("Processing fragments", total=total_pairs)
         for idx, pair in enumerate(read_pair_generator(bamfile)):
-            fragment_count += 1  # NEW: Count every fragment
             try:
                 read1, read2 = pair
                 if read1.mapping_quality < mapQuality or read2.mapping_quality < mapQuality or read1.reference_name not in chroms:
@@ -209,6 +208,7 @@ def motif_process(
                 # Write BED (0-based start, 0-based exclusive end)
                 gc = GCcontent(genome.fetch(read1.reference_name, rstart, rend))
                 bedWrite.write(f"{read1.reference_name}\t{rstart}\t{rend}\t{gc}\n")
+                fragment_count += 1  # NEW: Count only fragments that pass all filters and get written
                 
                 # Update End Motif
                 End_motif = get_End_motif(End_motif, motif_left, motif_right)
