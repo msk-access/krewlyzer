@@ -36,3 +36,15 @@ krewlyzer = "krewlyzer.cli:app"
 [build-system]
 requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["krewlyzer"]
+
+[tool.setuptools.package-data]
+krewlyzer = [
+    "data/**/*.bed",
+    "data/**/*.txt",
+    "data/**/*.tsv",
+    "data/**/*.wig",
+    "data/**/*.rds"
+]

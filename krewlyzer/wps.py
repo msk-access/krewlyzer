@@ -249,7 +249,7 @@ def wps(
             raise typer.Exit(1)
         if tsv_input is None:
             # Default to package data transcriptAnno-hg19-1kb.tsv
-            tsv_input = Path(__file__).parent.parent / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
+            tsv_input = Path(__file__).parent / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
             logger.info(f"No tsv_input specified. Using default: {tsv_input}")
         if not tsv_input.exists():
             logger.error(f"Transcript/region file does not exist: {tsv_input}")

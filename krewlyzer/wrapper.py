@@ -117,10 +117,10 @@ def run_all(
     fsd_output = output / "fsd"
     try:
         # Use packaged default if user doesn't provide arms file
-        # Data is at project root: data/ChormosomeArms/hg19.arms.bed
+        # Data is at package level: krewlyzer/data/ChormosomeArms/hg19.arms.bed
         if arms_file is None:
-            project_root = Path(__file__).parent.parent
-            arms_file = project_root / "data" / "ChormosomeArms" / "hg19.arms.bed"
+            pkg_dir = Path(__file__).parent
+            arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
             if not arms_file.exists():
                 logger.warning(f"Default arms file not found: {arms_file}. Skipping FSD.")
                 raise FileNotFoundError(f"Arms file not found: {arms_file}")
