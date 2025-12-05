@@ -296,17 +296,15 @@ def fsc(
     if not output.is_dir():
         logger.error(f"Output path is not a directory: {output}")
         raise typer.Exit(1)
-    if not output.is_writable():
-        logger.error(f"Output directory is not writable: {output}")
-        raise typer.Exit(1)
 
     bedgz_files = [f for f in bedgz_path.iterdir() if f.suffixes == ['.bed', '.gz']]
     if not bedgz_files:
         logger.error("No .bed.gz files found in the specified folder.")
         raise typer.Exit(1)
     if bin_input is None:
-        # Use package-relative default
-        bin_input = Path(__file__).parent / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
+        # Use project-level data (not package data)
+        project_root = Path(__file__).parent.parent
+        bin_input = project_root / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
         logger.info(f"No bin_input specified. Using default: {bin_input}")
     if not bin_input.exists():
         logger.error(f"Bin input file does not exist: {bin_input}")
