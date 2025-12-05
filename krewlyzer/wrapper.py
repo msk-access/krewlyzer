@@ -94,6 +94,7 @@ def run_all(
     try:
         fsc(
             bedgz_path=motif_output,
+            bin_input=None,  # Use default packaged bin file
             output=fsc_output,
             threads=threads
         )
@@ -105,6 +106,7 @@ def run_all(
     try:
         fsr(
             bedgz_path=motif_output,
+            bin_input=None,  # Use default packaged bin file
             output=fsr_output,
             threads=threads
         )
