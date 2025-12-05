@@ -2,6 +2,7 @@ import typer
 from pathlib import Path
 import logging
 import pysam
+import json
 
 import numpy as np
 from collections import defaultdict
@@ -31,8 +32,23 @@ def _calc_wps(
     Calculate Windowed Protection Score (WPS) for a single .bed.gz file and transcript region file.
     Output is gzipped TSV per region.
     Optimized with vectorized operations.
+    Automatically detects and uses metadata file for depth normalization if available.
     """
     try:
+        # NEW: Try to load metadata for depth normalization
+        total_fragments = None
+        metadata_file = str(bedgz_input).replace('.bed.gz', '.metadata.json')
+        if Path(metadata_file).exists():
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                    total_fragments = metadata.get('total_unique_fragments')
+                    logger.info(f"Found metadata: {total_fragments:,} total fragments for WPS normalization")
+            except Exception as e:
+                logger.warning(f"Could not load metadata from {metadata_file}: {e}")
+        else:
+            logger.info("No metadata found - outputting raw WPS scores only")
+        
         bedgzfile = str(bedgz_input)
         tbx = pysam.TabixFile(bedgzfile)
         protection = protect_input // 2
@@ -151,8 +167,13 @@ def _calc_wps(
                         idx_end = t_ov_end - region_start + 1
                         total_arr[idx_start:idx_end] += 1
                 
-                # WPS = Spanning - (Total - Spanning) = 2 * Spanning - Total
+                # WPS = Spanning - (Total - Spanning)
                 wps_arr = 2 * gcount_arr - total_arr
+                
+                # NEW: Add depth-normalized WPS if we have total fragments
+                if total_fragments:
+                    # Normalize by depth (per million fragments)
+                    wps_norm_arr = wps_arr / (total_fragments / 1e6)
                 
                 # Check if we should write
                 if np.sum(cov_arr) == 0 and not empty:
@@ -162,20 +183,30 @@ def _calc_wps(
                 filename = output_file_pattern % cid
                 
                 positions = np.arange(region_start, region_end + 1)
-                df = pd.DataFrame({
+                df_data = {
                     'chrom': chrom,
                     'pos': positions,
                     'cov': cov_arr,
                     'starts': start_arr,
                     'wps': wps_arr
-                })
+                }
+                if total_fragments:
+                    df_data['wps_norm'] = wps_norm_arr
+                
+                df = pd.DataFrame(df_data)
                 
                 if strand == "-":
                     df = df.iloc[::-1]
                 
                 with gzip.open(filename, 'wt') as outfile:
-                    for _, row in df.iterrows():
-                        outfile.write(f"{row['chrom']}\t{int(row['pos'])}\t{int(row['cov'])}\t{int(row['starts'])}\t{int(row['wps'])}\n")
+                    if total_fragments:
+                        # NEW: Write with normalized column
+                        for _, row in df.iterrows():
+                            outfile.write(f"{row['chrom']}\t{int(row['pos'])}\t{int(row['cov'])}\t{int(row['starts'])}\t{int(row['wps'])}\t{row['wps_norm']}\n")
+                    else:
+                        # Original format
+                        for _, row in df.iterrows():
+                            outfile.write(f"{row['chrom']}\t{int(row['pos'])}\t{int(row['cov'])}\t{int(row['starts'])}\t{int(row['wps'])}\n")
                         
         logger.info(f"WPS calculation complete. Results written to pattern: {output_file_pattern}")
     except Exception as e:
