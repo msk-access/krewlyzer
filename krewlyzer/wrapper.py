@@ -73,9 +73,6 @@ def run_all(
     # 1. Motif extraction
     motif_output = output / "motif"
     try:
-        # Parse chromosomes string to list
-        chr_list = chromosomes.split(",") if chromosomes else None
-        
         motif(
             bam_path=bam_file,
             genome_reference=reference,      # Fixed: was reference=
@@ -85,7 +82,7 @@ def run_all(
             min_length=minlen,               # Fixed: was minlen=
             max_length=maxlen,               # Fixed: was maxlen=
             kmer=3,                          # Fixed: was k=
-            chromosomes=chr_list,            # Added: expose chromosomes
+            chromosomes=chromosomes,         # Added: pass as string (motif splits internally)
             verbose=False,                   # Changed: less noisy
             threads=threads
         )
