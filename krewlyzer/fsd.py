@@ -2,6 +2,7 @@ import typer
 from pathlib import Path
 import logging
 import pysam
+import json
 
 import numpy as np
 from rich.console import Console
@@ -21,8 +22,23 @@ def _calc_fsd(
     """
     Internal: Calculate fragment size distribution (FSD) for a single .bed.gz file.
     Optimized with vectorized operations.
+    Automatically detects and uses metadata file for CPM normalization if available.
     """
     try:
+        # NEW: Try to load metadata for CPM normalization
+        total_fragments = None
+        metadata_file = str(bedgz_input).replace('.bed.gz', '.metadata.json')
+        if Path(metadata_file).exists():
+            try:
+                with open(metadata_file, 'r') as f:
+                    metadata = json.load(f)
+                    total_fragments = metadata.get('total_unique_fragments')
+                    logger.info(f"Found metadata: {total_fragments:,} total fragments")
+            except Exception as e:
+                logger.warning(f"Could not load metadata from {metadata_file}: {e}")
+        else:
+            logger.info("No metadata found - outputting region-normalized FSD only")
+        
         logger.info(f"Processing {bedgz_input} with regions from {arms_file}")
         
         # Load regions
@@ -40,6 +56,7 @@ def _calc_fsd(
 
         results = []
         regions = []
+        region_totals = []  # NEW: Track raw counts per region for CPM calculation
         
         # Define histogram bins
         hist_bins = np.arange(65, 401, 5) # 65, 70, ..., 400. 67 bins.
@@ -60,6 +77,7 @@ def _calc_fsd(
             
             if not rows:
                 results.append(np.zeros(67))
+                region_totals.append(0)  # NEW: Store zero for empty regions
                 continue
                 
             try:
@@ -72,8 +90,9 @@ def _calc_fsd(
                 # Histogram
                 counts, _ = np.histogram(lengths, bins=hist_bins)
                 
-                # Normalize
+                # Normalize (region-level)
                 total = np.sum(counts)
+                region_totals.append(total)  # NEW: Store for CPM calculation
                 if total > 0:
                     results.append(counts / total)
                 else:
@@ -82,25 +101,38 @@ def _calc_fsd(
             except Exception as e:
                 logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
                 results.append(np.zeros(67))
+                region_totals.append(0)  # NEW: Store zero for error cases
                 continue
 
         # Write output
         try:
             with open(output_file, 'w') as f:
                 # Header
-                # sbin = np.arange(65, 400, 5) -> 65, 70, ... 395
-                # ranges: 65-69, 70-74, ...
-                # Original code: f"{s}-{s+4}"
-                # My hist_bins: 65, 70...
-                # So bin 0 is [65, 70). i.e. 65, 66, 67, 68, 69.
-                # Matches 65-69 (inclusive).
-                
                 header_bins = [f"{s}-{s+4}" for s in hist_bins[:-1]]
-                f.write('region\t' + '\t'.join(header_bins) + '\n')
                 
+                # NEW: Add CPM columns if we have total fragments
+                if total_fragments:
+                    header_cpm = [f"{s}-{s+4}_cpm" for s in hist_bins[:-1]]
+                    f.write('region\t' + '\t'.join(header_bins) + '\t' + '\t'.join(header_cpm) + '\n')
+                else:
+                    f.write('region\t' + '\t'.join(header_bins) + '\n')
+                
+                # Data rows
                 for i, region in enumerate(regions):
-                    scores = results[i]
-                    f.write(f"{region}\t" + "\t".join(map(str, scores)) + "\n")
+                    scores = results[i]  # Region-normalized [0-1]
+                    row = f"{region}\t" + "\t".join(map(str, scores))
+                    
+                    # NEW: Add CPM columns if we have total fragments
+                    if total_fragments:
+                        # CPM = (region_normalized * region_total / total_fragments) * 1e6
+                        region_total = region_totals[i]
+                        if region_total > 0:
+                            cpm_scores = (scores * region_total / total_fragments) * 1e6
+                        else:
+                            cpm_scores = np.zeros(67)
+                        row += "\t" + "\t".join(map(str, cpm_scores))
+                    
+                    f.write(row + "\n")
                     
         except Exception as e:
             logger.error(f"Error writing FSD output file: {e}")
