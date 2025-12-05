@@ -6,6 +6,8 @@ import pysam
 import numpy as np
 import pandas as pd
 import math
+import json
+from datetime import datetime
 
 from collections import defaultdict
 import itertools
@@ -167,9 +169,11 @@ def motif_process(
     logger.info("Extracting motif features from BAM file...")
     total_pairs = bamfile.mapped // 2 if bamfile.mapped else 1000000
     motif_errors = 0
+    fragment_count = 0  # NEW: Track total unique fragments
     with Progress(console=console, transient=True) as progress:
         task = progress.add_task("Processing fragments", total=total_pairs)
         for idx, pair in enumerate(read_pair_generator(bamfile)):
+            fragment_count += 1  # NEW: Count every fragment
             try:
                 read1, read2 = pair
                 if read1.mapping_quality < mapQuality or read2.mapping_quality < mapQuality or read1.reference_name not in chroms:
@@ -418,6 +422,22 @@ def motif_process(
     except Exception as e:
         logger.error(f"Failed to write MDS output: {e}")
         raise typer.Exit(1)
+    
+    # NEW: Write metadata with fragment count
+    metadata_file = str(bedOutput).replace('.bed.gz', '.metadata.json')
+    logger.info(f"Writing metadata to {metadata_file}")
+    try:
+        metadata = {
+            "sample_id": Path(bedOutput).stem,
+            "total_unique_fragments": fragment_count,
+            "timestamp": datetime.now().isoformat()
+        }
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to write metadata: {e}")
+        raise typer.Exit(1)
+    
     # Print summary
     summary_table = Table(title="Motif Extraction Summary", show_header=True, header_style="bold magenta")
     summary_table.add_column("Output Type", style="bold")
@@ -426,5 +446,6 @@ def motif_process(
     summary_table.add_row("Breakpoint Motif (BPM)", bpm_file)
     summary_table.add_row("Motif Diversity Score (MDS)", mds_file)
     summary_table.add_row("Fragment BED", bedOutput + ".gz")
+    summary_table.add_row("Metadata", metadata_file)
     console.print(Panel(summary_table, title="[green]Extraction Complete", subtitle=f"Motif errors: {motif_errors}", expand=False))
     logger.info("Motif feature extraction complete.")
