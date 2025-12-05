@@ -54,6 +54,20 @@ def motif(
     if not genome_reference.exists() or not genome_reference.is_file():
         logger.error(f"Reference genome file not found: {genome_reference}")
         raise typer.Exit(1)
+    
+    # Use packaged exclude-regions if not provided
+    if blacklist is None:
+        pkg_dir = Path(__file__).parent
+        blacklist = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
+        if blacklist.exists():
+            logger.info(f"Using default exclude-regions: {blacklist}")
+        else:
+            logger.warning(f"Default exclude-regions not found: {blacklist}. Continuing without blacklist.")
+            blacklist = None
+    elif not blacklist.exists():
+        logger.error(f"Exclude-regions file not found: {blacklist}")
+        raise typer.Exit(1)
+    
     try:
         output.mkdir(parents=True, exist_ok=True)
     except Exception as e:

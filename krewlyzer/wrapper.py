@@ -52,8 +52,16 @@ def run_all(
         logger.error(f"Reference FASTA file not found: {reference}")
         raise typer.Exit(1)
     
-    # Validate optional filtering files
-    if exclude_regions and not exclude_regions.exists():
+    # Use packaged exclude-regions if not provided
+    if exclude_regions is None:
+        pkg_dir = Path(__file__).parent
+        exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
+        if exclude_regions.exists():
+            logger.info(f"Using default exclude-regions: {exclude_regions}")
+        else:
+            logger.warning(f"Default exclude-regions not found. Continuing without it.")
+            exclude_regions = None
+    elif not exclude_regions.exists():
         logger.error(f"Exclude regions file not found: {exclude_regions}")
         raise typer.Exit(1)
     if arms_file and not arms_file.exists():
