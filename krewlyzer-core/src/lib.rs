@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 
 pub mod filters;
 pub mod bed;
+pub mod fsc;
 
 /// Read filtering configuration
 #[pyclass]
@@ -50,7 +51,10 @@ impl ReadFilters {
 fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ReadFilters>()?;
     
-    // Placeholder functions - will be implemented in subsequent phases
+    // FSC functions
+    m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
+    
+    // Version
     #[pyfn(m)]
     fn version() -> &'static str {
         env!("CARGO_PKG_VERSION")
