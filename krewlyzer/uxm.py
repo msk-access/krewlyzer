@@ -130,6 +130,24 @@ def calc_uxm(
         logger.error(f"Fatal error in calc_uxm: {e}")
         raise typer.Exit(1)
 
+def _run_uxm_file(bam_file, output_dir, mark_input, map_quality, min_cpg, methy_threshold, unmethy_threshold, pe_type):
+    """Module-level worker function for parallel UXM calculation."""
+    from pathlib import Path
+    sample_prefix = Path(bam_file).stem.replace('.bam', '')
+    output_file = Path(output_dir) / f"{sample_prefix}.UXM.tsv"
+    calc_uxm(
+        Path(bam_file),
+        Path(mark_input),
+        output_file,
+        map_quality,
+        min_cpg,
+        methy_threshold,
+        unmethy_threshold,
+        pe_type
+    )
+    return str(output_file)
+
+
 def uxm(
     bam_path: Path = typer.Argument(..., help="Folder containing .bam files for UXM calculation."),
     mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Marker BED file (default: packaged atlas)", show_default=False),
@@ -162,22 +180,14 @@ def uxm(
     bam_files = [f for f in Path(bam_path).glob("*.bam")]
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    def run_uxm_file(bam_file):
-        sample_prefix = bam_file.stem.replace('.bam', '')
-        output_file = output / f"{sample_prefix}.UXM.tsv"
-        calc_uxm(
-            bam_file,
-            mark_input,
-            output_file,
-            map_quality,
-            min_cpg,
-            methy_threshold,
-            unmethy_threshold,
-            pe_type
-        )
-        return str(output_file)
+    
+    from functools import partial
+    worker = partial(_run_uxm_file, output_dir=str(output), mark_input=str(mark_input),
+                     map_quality=map_quality, min_cpg=min_cpg, methy_threshold=methy_threshold,
+                     unmethy_threshold=unmethy_threshold, pe_type=pe_type)
+    
     with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(run_uxm_file, bam_file): bam_file for bam_file in bam_files}
+        futures = {executor.submit(worker, str(bam_file)): bam_file for bam_file in bam_files}
         for future in as_completed(futures):
             bam_file = futures[future]
             try:
@@ -186,3 +196,4 @@ def uxm(
             except Exception as exc:
                 logger.error(f"UXM calculation failed for {bam_file}: {exc}")
     logger.info(f"UXM features calculated for {len(bam_files)} files.")
+

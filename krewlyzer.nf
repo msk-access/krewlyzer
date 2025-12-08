@@ -6,6 +6,9 @@
  * Usage:
  *   nextflow run krewlyzer.nf --samplesheet samplesheet.csv --ref /path/to/reference.fa
  *
+ * For targeted panels (ACCESS, etc.):
+ *   nextflow run krewlyzer.nf --samplesheet samplesheet.csv --ref ref.fa --bin_input targets.bed
+ *
  * For LSF:         nextflow run krewlyzer.nf -profile lsf ...
  * For SLURM:       nextflow run krewlyzer.nf -profile slurm ...
  * For Docker:      nextflow run krewlyzer.nf -profile docker ...
@@ -14,6 +17,7 @@
 
 params.samplesheet = ''
 params.ref = ''
+params.bin_input = ''  // Custom regions BED for FSC/FSR (e.g., ACCESS targets)
 params.krewlyzer = 'krewlyzer' // or path to CLI
 
 // Parse the sample sheet CSV into a channel of [sample_id, bam, variant_file]
@@ -38,10 +42,11 @@ process RUN_ALL {
 
     script:
     def variant_arg = variant_file ? "--variant-input ${variant_file}" : ""
+    def bin_arg = params.bin_input ? "--bin-input ${params.bin_input}" : ""
     """
     OUTDIR="$sample_id"
     mkdir -p "$OUTDIR"
-    ${params.krewlyzer} run-all ${bam_file} --reference ${params.ref} --output "$OUTDIR" --threads 8 ${variant_arg}
+    ${params.krewlyzer} run-all ${bam_file} --reference ${params.ref} --output "$OUTDIR" --threads 8 ${variant_arg} ${bin_arg}
     """
     output:
     path "*", emit: out
@@ -50,3 +55,4 @@ process RUN_ALL {
 workflow {
     RUN_ALL(SAMPLES)
 }
+

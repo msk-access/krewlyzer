@@ -214,6 +214,25 @@ def _calc_wps(
         raise typer.Exit(1)
 
 
+def _wps_task(bedgz_file, output_dir, tsv_input, empty, protect_input, min_size, max_size):
+    """Module-level worker function for parallel WPS calculation."""
+    import traceback
+    try:
+        output_file_pattern = str(Path(output_dir) / (Path(bedgz_file).stem.replace('.bed', '') + ".%s.WPS.tsv.gz"))
+        _calc_wps(
+            bedgz_input=str(bedgz_file),
+            tsv_input=str(tsv_input),
+            output_file_pattern=output_file_pattern,
+            empty=empty,
+            protect_input=protect_input,
+            min_size=min_size,
+            max_size=max_size
+        )
+        return None
+    except Exception as exc:
+        return traceback.format_exc()
+
+
 def wps(
     bedgz_path: Path = typer.Argument(..., help="Folder containing .bed.gz files (should be the output directory from motif.py)"),
     tsv_input: Path = typer.Option(None, "--tsv-input", "-t", help="Path to transcript/region file (TSV format)"),
@@ -265,26 +284,16 @@ def wps(
         output.mkdir(parents=True, exist_ok=True)
         logger.info(f"Calculating WPS for {len(bedgz_files)} files...")
         from concurrent.futures import ProcessPoolExecutor, as_completed
-        import traceback
-        def wps_task(bedgz_file):
-            try:
-                output_file_pattern = str(output / (bedgz_file.stem.replace('.bed', '') + ".%s.WPS.tsv.gz"))
-                _calc_wps(
-                    bedgz_input=str(bedgz_file),
-                    tsv_input=str(tsv_input),
-                    output_file_pattern=output_file_pattern,
-                    empty=empty,
-                    protect_input=protect_input,
-                    min_size=min_size,
-                    max_size=max_size
-                )
-                return None
-            except Exception as exc:
-                return traceback.format_exc()
+        from functools import partial
+        
         n_procs = max_core(threads) if threads else 1
         logger.info(f"Calculating WPS for {len(bedgz_files)} files using {n_procs} processes...")
+        
+        worker = partial(_wps_task, output_dir=str(output), tsv_input=str(tsv_input),
+                         empty=empty, protect_input=protect_input, min_size=min_size, max_size=max_size)
+        
         with ProcessPoolExecutor(max_workers=n_procs) as executor:
-            futures = {executor.submit(wps_task, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+            futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
             for future in as_completed(futures):
                 exc = future.result()
                 if exc:
@@ -293,3 +302,4 @@ def wps(
     except Exception as e:
         logger.error(f"Fatal error in wps CLI: {e}")
         raise typer.Exit(1)
+

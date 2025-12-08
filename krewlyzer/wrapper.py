@@ -33,6 +33,9 @@ def run_all(
     # Optional override for FSD arms file
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms/regions file for FSD (default: project data/ChormosomeArms/hg19.arms.bed)"),
     
+    # Targeted panel support
+    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom regions BED for FSC/FSR (e.g., ACCESS targets). Required for targeted panels."),
+    
     # Existing options
     variant_input: Optional[Path] = typer.Option(None, "--variant-input", "-v", help="Input VCF/MAF file for mFSD"),
     threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes"),
@@ -67,6 +70,19 @@ def run_all(
     if arms_file and not arms_file.exists():
         logger.error(f"Arms file not found: {arms_file}")
         raise typer.Exit(1)
+    if bin_input and not bin_input.exists():
+        logger.error(f"Bin input file not found: {bin_input}")
+        raise typer.Exit(1)
+    
+    # Determine window settings based on bin_input
+    # For targeted panels (custom bin file), use windows=1, continue_n=1
+    if bin_input:
+        fsc_fsr_windows = 1
+        fsc_fsr_continue_n = 1
+        logger.info(f"Using custom bin file for FSC/FSR: {bin_input}")
+    else:
+        fsc_fsr_windows = 100000
+        fsc_fsr_continue_n = 50
     
     # Validate fragment length ranges
     if minlen >= maxlen:
@@ -102,7 +118,9 @@ def run_all(
     try:
         fsc(
             bedgz_path=motif_output,
-            bin_input=None,  # Use default packaged bin file
+            bin_input=bin_input,  # Custom or default bin file
+            windows=fsc_fsr_windows,
+            continue_n=fsc_fsr_continue_n,
             output=fsc_output,
             threads=threads
         )
@@ -114,7 +132,9 @@ def run_all(
     try:
         fsr(
             bedgz_path=motif_output,
-            bin_input=None,  # Use default packaged bin file
+            bin_input=bin_input,  # Custom or default bin file
+            windows=fsc_fsr_windows,
+            continue_n=fsc_fsr_continue_n,
             output=fsr_output,
             threads=threads
         )

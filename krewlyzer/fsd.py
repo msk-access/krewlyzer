@@ -144,6 +144,13 @@ def _calc_fsd(
         logger.error(f"Fatal error in _calc_fsd: {e}")
         raise typer.Exit(1)
 
+def _run_fsd_file(bedgz_file, output_dir, arms_file):
+    """Module-level worker function for parallel FSD calculation."""
+    output_file = Path(output_dir) / (Path(bedgz_file).stem.replace('.bed', '') + '.FSD.txt')
+    _calc_fsd(str(bedgz_file), str(arms_file), str(output_file))
+    return str(output_file)
+
+
 def fsd(
     bedgz_path: Path = typer.Argument(..., help="Folder containing .bed.gz files (should be the output directory from motif.py)"),
     arms_file: Path = typer.Option(..., "--arms-file", "-a", help="Path to arms/region file (BED format)"),
@@ -182,13 +189,13 @@ def fsd(
         raise typer.Exit(1)
     logger.info(f"Calculating FSD for {len(bedgz_files)} files...")
     from concurrent.futures import ProcessPoolExecutor, as_completed
+    from functools import partial
     logger.info(f"Starting parallel FSD calculation using {threads} processes...")
-    def run_fsd_file(bedgz_file):
-        output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSD.txt')
-        _calc_fsd(str(bedgz_file), str(arms_file), str(output_file))
-        return str(output_file)
+    
+    worker = partial(_run_fsd_file, output_dir=str(output), arms_file=str(arms_file))
+    
     with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(run_fsd_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
         for future in as_completed(futures):
             bedgz_file = futures[future]
             try:
@@ -197,3 +204,4 @@ def fsd(
             except Exception as exc:
                 logger.error(f"FSD calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSD features calculated for {len(bedgz_files)} files.")
+

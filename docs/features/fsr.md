@@ -22,3 +22,10 @@ krewlyzer fsr motif_out --output fsr_out [options]
 - `--windows`, `-w`: Window size (default: 100000)
 - `--continue-n`, `-c`: Super-bin size (default: 50)
 - `--threads`, `-t`: Number of processes
+
+## Targeted Panel Usage
+For targeted sequencing (ACCESS, etc.), use custom regions with `windows=1`:
+```bash
+krewlyzer fsr motif_out -b targets.bed -w 1 -c 1 --output fsr_out
+```
+

@@ -169,6 +169,13 @@ def _calc_fsr(
         logger.error(f"Fatal error in _calc_fsr: {e}")
         raise typer.Exit(1)
 
+def _run_fsr_file(bedgz_file, output_dir, bin_input, windows, continue_n):
+    """Module-level worker function for parallel FSR calculation."""
+    output_file = Path(output_dir) / (Path(bedgz_file).stem.replace('.bed', '') + '.FSR.txt')
+    _calc_fsr(str(bedgz_file), str(bin_input), windows, continue_n, str(output_file))
+    return str(output_file)
+
+
 def fsr(
     bedgz_path: Path = typer.Argument(..., help="Folder containing .bed.gz files (should be the output directory from motif.py)"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file (default: data/ChormosomeBins/hg19_window_100kb.bed)"),
@@ -210,13 +217,14 @@ def fsr(
         raise typer.Exit(1)
     logger.info(f"Calculating FSR for {len(bedgz_files)} files...")
     from concurrent.futures import ProcessPoolExecutor, as_completed
+    from functools import partial
     logger.info(f"Starting parallel FSR calculation using {threads} processes...")
-    def run_fsr_file(bedgz_file):
-        output_file = output / (bedgz_file.stem.replace('.bed', '') + '.FSR.txt')
-        _calc_fsr(str(bedgz_file), str(bin_input), windows, continue_n, str(output_file))
-        return str(output_file)
+    
+    worker = partial(_run_fsr_file, output_dir=str(output), bin_input=str(bin_input),
+                     windows=windows, continue_n=continue_n)
+    
     with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(run_fsr_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
         for future in as_completed(futures):
             bedgz_file = futures[future]
             try:
@@ -225,3 +233,4 @@ def fsr(
             except Exception as exc:
                 logger.error(f"FSR calculation failed for {bedgz_file}: {exc}")
     logger.info(f"FSR features calculated for {len(bedgz_files)} files.")
+

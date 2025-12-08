@@ -25,6 +25,13 @@ def test_run_all_logic(mock_mfsd, mock_uxm, mock_ocf, mock_wps, mock_fsd, mock_f
         bam_file=bam_file,
         reference=reference,
         output=output,
+        chromosomes=None,
+        mapq=20,
+        exclude_regions=None,
+        minlen=65,
+        maxlen=400,
+        arms_file=None,
+        bin_input=None,
         variant_input=variant_input,
         threads=2,
         pe_type="PE"
@@ -51,7 +58,16 @@ def test_run_all_logic(mock_mfsd, mock_uxm, mock_ocf, mock_wps, mock_fsd, mock_f
         bam_file=bam_file,
         reference=reference,
         output=output,
+        chromosomes=None,
+        mapq=20,
+        exclude_regions=None,
+        minlen=65,
+        maxlen=400,
+        arms_file=None,
+        bin_input=None,
         variant_input=None,
-        threads=2
+        threads=2,
+        pe_type="SE"
     )
     mock_mfsd.assert_not_called()
+

@@ -79,13 +79,21 @@ def calc_ocf(bedgz_file: Path, ocr_file: Path, output_dir: Path) -> None:
                         trueends += float(Left)
                         background += float(Right)
                 ocf.append(trueends - background)
-        import pandas as pd
         ocf_df = pd.DataFrame({"tissue": Labels, "OCF": ocf})
         ocf_df.to_csv(outputfile, sep="\t", index=None)
         logger.info(f"OCF calculation complete for {bedgz_file}. Results in {output_dir}.")
     except Exception as e:
         logger.error(f"Fatal error in calc_ocf: {e}")
         raise typer.Exit(1)
+
+
+def _run_ocf_file(bedgz_file, output_dir, ocr_input):
+    """Module-level worker function for parallel OCF calculation."""
+    from pathlib import Path
+    sample_dir = Path(output_dir) / Path(bedgz_file).stem.replace('.bed', '')
+    sample_dir.mkdir(exist_ok=True)
+    calc_ocf(Path(bedgz_file), Path(ocr_input), sample_dir)
+    return str(sample_dir)
 
 
 def ocf(
@@ -116,13 +124,11 @@ def ocf(
     bedgz_files = [f for f in Path(bedgz_path).glob("*.bed.gz")]
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    def run_ocf_file(bedgz_file):
-        sample_dir = output / bedgz_file.stem.replace('.bed', '')
-        sample_dir.mkdir(exist_ok=True)
-        calc_ocf(bedgz_file, ocr_input, sample_dir)
-        return str(sample_dir)
+    
+    worker = partial(_run_ocf_file, output_dir=str(output), ocr_input=str(ocr_input))
+    
     with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(run_ocf_file, bedgz_file): bedgz_file for bedgz_file in bedgz_files}
+        futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
         for future in as_completed(futures):
             bedgz_file = futures[future]
             try:
@@ -131,3 +137,4 @@ def ocf(
             except Exception as exc:
                 logger.error(f"OCF calculation failed for {bedgz_file}: {exc}")
     logger.info(f"OCF features calculated for {len(bedgz_files)} files.")
+

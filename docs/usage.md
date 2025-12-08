@@ -39,3 +39,20 @@ krewlyzer mfsd sample.bam --input variants.vcf --output mfsd_out/sample.mfsd.tsv
 # 3. Run all features in one call:
 krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out --variant-input variants.vcf
 ```
+
+## Targeted Panel Usage (ACCESS, etc.)
+
+For targeted sequencing panels (e.g., MSK-ACCESS), FSC/FSR require a custom regions BED file instead of the default genome-wide 100kb bins:
+
+```bash
+# Using run-all with custom target regions
+krewlyzer run-all sample.bam --reference hg19.fa --output out/ \
+  --bin-input /path/to/MSK-ACCESS-v2_canonicaltargets.bed
+
+# Or run FSC/FSR individually with target regions
+krewlyzer fsc motif_out -b targets.bed -w 1 -c 1 --output fsc_out
+krewlyzer fsr motif_out -b targets.bed -w 1 -c 1 --output fsr_out
+```
+
+> **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins.
+
