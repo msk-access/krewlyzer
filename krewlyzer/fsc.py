@@ -57,7 +57,9 @@ def _calc_fsc(
         if RUST_BACKEND_AVAILABLE:
             logger.info("Using Rust backend for accelerated fragment counting")
             try:
-                shorts_arr, ints_arr, longs_arr, totals_arr, gcs_arr = \
+                # Rust returns 6 arrays: ultra_shorts, shorts, ints, longs, totals, gcs
+                # FSC doesn't use ultra_shorts, so we ignore it
+                _, shorts_arr, ints_arr, longs_arr, totals_arr, gcs_arr = \
                     krewlyzer_core.count_fragments_by_bins(str(bedgz_input), str(bin_input))
                 shorts_data = list(shorts_arr)
                 intermediates_data = list(ints_arr)

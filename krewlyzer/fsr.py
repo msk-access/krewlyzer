@@ -10,9 +10,18 @@ import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler
 
-console = Console()
+console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("fsr")
+
+# Try to import Rust backend for accelerated fragment counting
+try:
+    import krewlyzer_core
+    RUST_BACKEND_AVAILABLE = True
+    logger.debug("Rust backend (krewlyzer_core) available - using accelerated fragment counting")
+except ImportError:
+    RUST_BACKEND_AVAILABLE = False
+    logger.debug("Rust backend not available - using pure Python implementation")
 
 from .helpers import gc_correct
 
@@ -39,70 +48,104 @@ def _calc_fsr(
             logger.error(f"Could not load bins from {bin_input}: {e}")
             raise typer.Exit(1)
             
-        try:
-            tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
-        except Exception as e:
-            logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
-            raise typer.Exit(1)
-
-        shorts_ratios = []
-        ultra_shorts_ratios = []
-        inter_ratios = []
-        longs_ratios = []
-        
-        # Iterate over bins
-        for _, bin_row in bins_df.iterrows():
-            chrom = bin_row['chrom']
-            start = bin_row['start']
-            end = bin_row['end']
-            
+        # Use Rust backend for fragment counting if available (10x+ faster)
+        if RUST_BACKEND_AVAILABLE:
+            logger.info("Using Rust backend for accelerated fragment counting")
             try:
-                rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
-            except ValueError:
-                rows = []
+                # Rust returns: ultra_shorts, shorts, ints, longs, totals, gcs
+                ultra_shorts_arr, shorts_arr, ints_arr, longs_arr, totals_arr, _ = \
+                    krewlyzer_core.count_fragments_by_bins(str(bedgz_input), str(bin_input))
+                
+                # Calculate ratios from counts
+                shorts_ratios = []
+                ultra_shorts_ratios = []
+                inter_ratios = []
+                longs_ratios = []
+                
+                for i in range(len(totals_arr)):
+                    total = totals_arr[i]
+                    if total == 0:
+                        shorts_ratios.append(0)
+                        ultra_shorts_ratios.append(0)
+                        inter_ratios.append(0)
+                        longs_ratios.append(0)
+                    else:
+                        shorts_ratios.append(shorts_arr[i] / total)
+                        ultra_shorts_ratios.append(ultra_shorts_arr[i] / total)
+                        inter_ratios.append(ints_arr[i] / total)
+                        longs_ratios.append(longs_arr[i] / total)
+                
+                logger.info(f"Rust backend: counted {sum(totals_arr):,} fragments across {len(bins_df)} bins")
             except Exception as e:
-                logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
-                raise typer.Exit(1)
-            
-            if not rows:
-                shorts_ratios.append(0)
-                ultra_shorts_ratios.append(0)
-                inter_ratios.append(0)
-                longs_ratios.append(0)
-                continue
-                
+                logger.warning(f"Rust backend failed, falling back to Python: {e}")
+                RUST_BACKEND_AVAILABLE_LOCAL = False
+        else:
+            RUST_BACKEND_AVAILABLE_LOCAL = False
+        
+        # Fall back to Python implementation if Rust not available or failed
+        if not RUST_BACKEND_AVAILABLE or 'RUST_BACKEND_AVAILABLE_LOCAL' in dir() and not RUST_BACKEND_AVAILABLE_LOCAL:
             try:
-                # Vectorized parsing
-                _, starts, ends, _ = zip(*rows)
-                starts = np.array(starts, dtype=int)
-                ends = np.array(ends, dtype=int)
-                lengths = ends - starts
+                tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
+            except Exception as e:
+                logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
+                raise typer.Exit(1)
+
+            shorts_ratios = []
+            ultra_shorts_ratios = []
+            inter_ratios = []
+            longs_ratios = []
+            
+            # Iterate over bins
+            for _, bin_row in bins_df.iterrows():
+                chrom = bin_row['chrom']
+                start = bin_row['start']
+                end = bin_row['end']
                 
-                # Filter 65-400
-                mask = (lengths >= 65) & (lengths <= 400)
-                valid_lengths = lengths[mask]
+                try:
+                    rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
+                except ValueError:
+                    rows = []
+                except Exception as e:
+                    logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
+                    raise typer.Exit(1)
                 
-                total = len(valid_lengths)
-                
-                if total == 0:
+                if not rows:
                     shorts_ratios.append(0)
                     ultra_shorts_ratios.append(0)
                     inter_ratios.append(0)
                     longs_ratios.append(0)
-                else:
-                    shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 150))
-                    ultra_shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 100))
-                    intermediates = np.sum((valid_lengths >= 151) & (valid_lengths <= 260))
-                    longs = np.sum((valid_lengths >= 261) & (valid_lengths <= 400))
+                    continue
                     
-                    shorts_ratios.append(shorts / total)
-                    ultra_shorts_ratios.append(ultra_shorts / total)
-                    inter_ratios.append(intermediates / total)
-                    longs_ratios.append(longs / total)
+                try:
+                    _, starts, ends, _ = zip(*rows)
+                    starts = np.array(starts, dtype=int)
+                    ends = np.array(ends, dtype=int)
+                    lengths = ends - starts
                     
-            except Exception as e:
-                logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
-                raise typer.Exit(1)
+                    mask = (lengths >= 65) & (lengths <= 400)
+                    valid_lengths = lengths[mask]
+                    
+                    total = len(valid_lengths)
+                    
+                    if total == 0:
+                        shorts_ratios.append(0)
+                        ultra_shorts_ratios.append(0)
+                        inter_ratios.append(0)
+                        longs_ratios.append(0)
+                    else:
+                        shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 150))
+                        ultra_shorts = np.sum((valid_lengths >= 65) & (valid_lengths <= 100))
+                        intermediates = np.sum((valid_lengths >= 151) & (valid_lengths <= 260))
+                        longs = np.sum((valid_lengths >= 261) & (valid_lengths <= 400))
+                        
+                        shorts_ratios.append(shorts / total)
+                        ultra_shorts_ratios.append(ultra_shorts / total)
+                        inter_ratios.append(intermediates / total)
+                        longs_ratios.append(longs / total)
+                        
+                except Exception as e:
+                    logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
+                    raise typer.Exit(1)
 
         # Aggregation into windows
         df = pd.DataFrame({

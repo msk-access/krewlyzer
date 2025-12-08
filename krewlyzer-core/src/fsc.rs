@@ -1,6 +1,7 @@
-//! Fragment Size Coverage (FSC) calculation
+//! Fragment Size Coverage (FSC) and Ratio (FSR) calculation
 //!
 //! Counts fragments in genomic bins by size category:
+//! - Ultra-short: 65-100bp (for FSR)
 //! - Short: 65-150bp
 //! - Intermediate: 151-260bp  
 //! - Long: 261-400bp
@@ -15,16 +16,17 @@ use numpy::{PyArray1, IntoPyArray};
 
 use crate::bed::Region;
 
-/// Result of FSC calculation for a single bin
+/// Result of FSC/FSR calculation for a single bin
 #[derive(Debug, Clone, Default)]
 pub struct BinResult {
     pub chrom: String,
     pub start: u64,
     pub end: u64,
-    pub short_count: u32,
-    pub intermediate_count: u32,
-    pub long_count: u32,
-    pub total_count: u32,
+    pub ultra_short_count: u32,  // 65-100bp (for FSR)
+    pub short_count: u32,         // 65-150bp
+    pub intermediate_count: u32,  // 151-260bp
+    pub long_count: u32,          // 261-400bp
+    pub total_count: u32,         // 65-400bp
     pub mean_gc: f64,
 }
 
@@ -132,6 +134,12 @@ pub fn count_fragments_sequential(
                     gc_sum += gc;
                     gc_count += 1;
                     
+                    // Ultra-short: 65-100 (subset of short)
+                    if length <= 100 {
+                        result.ultra_short_count += 1;
+                    }
+                    
+                    // Short: 65-150
                     if length <= 150 {
                         result.short_count += 1;
                     } else if length <= 260 {
@@ -151,7 +159,8 @@ pub fn count_fragments_sequential(
     Ok(results)
 }
 
-/// Python-exposed function to calculate FSC
+/// Python-exposed function to calculate FSC/FSR
+/// Returns: (ultra_shorts, shorts, intermediates, longs, totals, gcs)
 #[pyfunction]
 #[pyo3(signature = (bedgz_path, bin_path))]
 pub fn count_fragments_by_bins(
@@ -159,10 +168,11 @@ pub fn count_fragments_by_bins(
     bedgz_path: &str,
     bin_path: &str,
 ) -> PyResult<(
-    Py<PyArray1<u32>>,  // short counts
-    Py<PyArray1<u32>>,  // intermediate counts
-    Py<PyArray1<u32>>,  // long counts
-    Py<PyArray1<u32>>,  // total counts
+    Py<PyArray1<u32>>,  // ultra-short counts (65-100)
+    Py<PyArray1<u32>>,  // short counts (65-150)
+    Py<PyArray1<u32>>,  // intermediate counts (151-260)
+    Py<PyArray1<u32>>,  // long counts (261-400)
+    Py<PyArray1<u32>>,  // total counts (65-400)
     Py<PyArray1<f64>>,  // mean GC
 )> {
     let bedgz = Path::new(bedgz_path);
@@ -174,6 +184,7 @@ pub fn count_fragments_by_bins(
     let results = count_fragments_sequential(bedgz, &regions)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     
+    let ultra_shorts: Vec<u32> = results.iter().map(|r| r.ultra_short_count).collect();
     let shorts: Vec<u32> = results.iter().map(|r| r.short_count).collect();
     let intermediates: Vec<u32> = results.iter().map(|r| r.intermediate_count).collect();
     let longs: Vec<u32> = results.iter().map(|r| r.long_count).collect();
@@ -181,6 +192,7 @@ pub fn count_fragments_by_bins(
     let gcs: Vec<f64> = results.iter().map(|r| r.mean_gc).collect();
     
     Ok((
+        ultra_shorts.into_pyarray(py).into(),
         shorts.into_pyarray(py).into(),
         intermediates.into_pyarray(py).into(),
         longs.into_pyarray(py).into(),
