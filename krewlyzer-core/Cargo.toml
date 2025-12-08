@@ -1,0 +1,40 @@
+[package]
+name = "krewlyzer-core"
+version = "0.1.0"
+edition = "2021"
+authors = ["MSK-ACCESS Team"]
+description = "High-performance Rust backend for krewlyzer cfDNA analysis"
+license = "MIT"
+
+[lib]
+name = "krewlyzer_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.21", features = ["extension-module"] }
+
+# noodles for BAM/BED/VCF parsing
+noodles = { version = "0.84", features = ["bam", "sam", "bed", "vcf", "tabix", "bgzf", "fasta", "async"] }
+noodles-bam = "0.72"
+noodles-sam = "0.68"
+noodles-bed = "0.16"
+noodles-tabix = "0.45"
+noodles-bgzf = "0.33"
+noodles-fasta = "0.40"
+
+# Parallelism
+rayon = "1.10"
+
+# Utilities
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Numerical
+ndarray = "0.16"
+numpy = "0.21"  # PyO3-numpy integration
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
