@@ -12,9 +12,18 @@ from skmisc.loess import loess
 from rich.console import Console
 from rich.logging import RichHandler
 
-console = Console()
+console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("fsc")
+
+# Try to import Rust backend for accelerated fragment counting
+try:
+    import krewlyzer_core
+    RUST_BACKEND_AVAILABLE = True
+    logger.debug("Rust backend (krewlyzer_core) available - using accelerated fragment counting")
+except ImportError:
+    RUST_BACKEND_AVAILABLE = False
+    logger.debug("Rust backend not available - using pure Python implementation")
 
 
 from .helpers import gc_correct
@@ -44,102 +53,89 @@ def _calc_fsc(
             logger.error(f"Could not load bins from {bin_input}: {e}")
             raise typer.Exit(1)
             
-        try:
-            tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
-        except Exception as e:
-            logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
-            raise typer.Exit(1)
+        # Use Rust backend for fragment counting if available (10x+ faster)
+        if RUST_BACKEND_AVAILABLE:
+            logger.info("Using Rust backend for accelerated fragment counting")
+            try:
+                shorts_arr, ints_arr, longs_arr, totals_arr, gcs_arr = \
+                    krewlyzer_core.count_fragments_by_bins(str(bedgz_input), str(bin_input))
+                shorts_data = list(shorts_arr)
+                intermediates_data = list(ints_arr)
+                longs_data = list(longs_arr)
+                totals_data = list(totals_arr)
+                bingc = [gc if not np.isnan(gc) else np.nan for gc in gcs_arr]
+                logger.info(f"Rust backend: counted {sum(totals_data):,} fragments across {len(bins_df)} bins")
+            except Exception as e:
+                logger.warning(f"Rust backend failed, falling back to Python: {e}")
+                RUST_BACKEND_AVAILABLE_LOCAL = False
+        else:
+            RUST_BACKEND_AVAILABLE_LOCAL = False
+        
+        # Fall back to Python implementation if Rust not available or failed
+        if not RUST_BACKEND_AVAILABLE or 'RUST_BACKEND_AVAILABLE_LOCAL' in dir() and not RUST_BACKEND_AVAILABLE_LOCAL:
+            try:
+                tbx = pysam.TabixFile(filename=bedgz_input, mode="r")
+            except Exception as e:
+                logger.error(f"Could not open {bedgz_input} as Tabix file: {e}")
+                raise typer.Exit(1)
 
-        shorts_data = []
-        intermediates_data = []
-        longs_data = []
-        totals_data = []
-        bingc = []
-        
-        # Iterate over bins
-        # To optimize, we can process by chromosome to avoid random seeking if bins are sorted?
-        # But Tabix is good at random access.
-        
-        for _, bin_row in bins_df.iterrows():
-            chrom = bin_row['chrom']
-            start = bin_row['start']
-            end = bin_row['end']
+            shorts_data = []
+            intermediates_data = []
+            longs_data = []
+            totals_data = []
+            bingc = []
             
-            try:
-                # Fetch reads in bin
-                # parser=pysam.asTuple() is slightly faster than splitting string manually
-                rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
-            except ValueError:
-                # Region not in file (e.g. chromosome not present)
-                rows = []
-            except Exception as e:
-                logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
-                raise typer.Exit(1)
-            
-            if not rows:
-                bingc.append(np.nan)
-                shorts_data.append(0)
-                intermediates_data.append(0)
-                longs_data.append(0)
-                totals_data.append(0)
-                continue
+            # Iterate over bins
+            for _, bin_row in bins_df.iterrows():
+                chrom = bin_row['chrom']
+                start = bin_row['start']
+                end = bin_row['end']
                 
-            # Vectorize parsing
-            # rows is a list of tuples: (chrom, start, end, gc)
-            # We need start (idx 1), end (idx 2), gc (idx 3)
-            # Note: BED is 0-based start, 1-based end? 
-            # motif.py writes: rstart, rend, gc.
-            # pysam.TabixFile returns what's in the file.
-            # motif.py writes: f"{read1.reference_name}\t{rstart}\t{rend}\t{gc}\n"
-            # So col 1 is start, col 2 is end.
-            
-            try:
-                # Extract columns
-                # This is still a Python loop but faster than append in loop
-                # We can use zip to transpose
-                _, starts, ends, gcs = zip(*rows)
-                starts = np.array(starts, dtype=int)
-                ends = np.array(ends, dtype=int)
-                gcs = np.array(gcs, dtype=float)
+                try:
+                    rows = list(tbx.fetch(chrom, start, end, parser=pysam.asTuple()))
+                except ValueError:
+                    rows = []
+                except Exception as e:
+                    logger.error(f"Error fetching {chrom}:{start}-{end}: {e}")
+                    raise typer.Exit(1)
                 
-                lengths = ends - starts
-                
-                # Filter by length (65-400)
-                # We only care about reads with length in range [65, 400] for GC calculation?
-                # Original code: if 65 <= len <= 400: gc.append(...)
-                
-                mask = (lengths >= 65) & (lengths <= 400)
-                valid_gcs = gcs[mask]
-                
-                if len(valid_gcs) == 0:
+                if not rows:
                     bingc.append(np.nan)
-                else:
-                    bingc.append(np.mean(valid_gcs))
-                
-                # Counts
-                # np.bincount requires non-negative integers
-                # We can filter lengths to be within [0, 400] for bincount safety, though mask handles 65-400
-                
-                # We need counts for specific ranges
-                # shorts: 65-150
-                # intermediates: 151-260
-                # longs: 261-400
-                # totals: 65-400
-                
-                # Using histogram might be cleaner or just boolean indexing
-                shorts = np.sum((lengths >= 65) & (lengths <= 150))
-                intermediates = np.sum((lengths >= 151) & (lengths <= 260))
-                longs = np.sum((lengths >= 261) & (lengths <= 400))
-                totals = np.sum(mask) # 65-400
-                
-                shorts_data.append(shorts)
-                intermediates_data.append(intermediates)
-                longs_data.append(longs)
-                totals_data.append(totals)
-                
-            except Exception as e:
-                logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
-                raise typer.Exit(1)
+                    shorts_data.append(0)
+                    intermediates_data.append(0)
+                    longs_data.append(0)
+                    totals_data.append(0)
+                    continue
+                    
+                try:
+                    _, starts, ends, gcs = zip(*rows)
+                    starts = np.array(starts, dtype=int)
+                    ends = np.array(ends, dtype=int)
+                    gcs = np.array(gcs, dtype=float)
+                    
+                    lengths = ends - starts
+                    mask = (lengths >= 65) & (lengths <= 400)
+                    valid_gcs = gcs[mask]
+                    
+                    if len(valid_gcs) == 0:
+                        bingc.append(np.nan)
+                    else:
+                        bingc.append(np.mean(valid_gcs))
+                    
+                    shorts = np.sum((lengths >= 65) & (lengths <= 150))
+                    intermediates = np.sum((lengths >= 151) & (lengths <= 260))
+                    longs = np.sum((lengths >= 261) & (lengths <= 400))
+                    totals = np.sum(mask)
+                    
+                    shorts_data.append(shorts)
+                    intermediates_data.append(intermediates)
+                    longs_data.append(longs)
+                    totals_data.append(totals)
+                    
+                except Exception as e:
+                    logger.error(f"Error processing data in bin {chrom}:{start}-{end}: {e}")
+                    raise typer.Exit(1)
+
 
         # GC Correction
         try:
