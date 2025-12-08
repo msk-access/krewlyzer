@@ -8,6 +8,7 @@ use pyo3::prelude::*;
 pub mod filters;
 pub mod bed;
 pub mod fsc;
+mod wps;
 
 /// Read filtering configuration
 #[pyclass]
@@ -53,6 +54,9 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     
     // FSC functions
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
+    
+    // WPS functions
+    m.add_function(wrap_pyfunction!(wps::calculate_wps, m)?)?;
     
     // Version
     #[pyfn(m)]

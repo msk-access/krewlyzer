@@ -29,6 +29,7 @@ rayon = "1.10"
 # Utilities
 thiserror = "2.0"
 anyhow = "1.0"
+flate2 = "1.0"
 
 
 # Numerical

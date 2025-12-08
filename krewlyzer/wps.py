@@ -12,10 +12,19 @@ from rich.logging import RichHandler
 
 from .helpers import max_core, commonError
 
-console = Console()
+console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("wps")
 
+# Try to import Rust backend
+try:
+    import krewlyzer_core
+    RUST_BACKEND_AVAILABLE = True
+    logger.debug("Rust backend available for WPS")
+except ImportError:
+    RUST_BACKEND_AVAILABLE = False
+    logger.debug("Rust backend not available")
+    
 
 import pandas as pd
 
@@ -283,21 +292,60 @@ def wps(
             max_size = 80
         output.mkdir(parents=True, exist_ok=True)
         logger.info(f"Calculating WPS for {len(bedgz_files)} files...")
-        from concurrent.futures import ProcessPoolExecutor, as_completed
-        from functools import partial
+        if RUST_BACKEND_AVAILABLE:
+            logger.info("Using Rust backend for accelerated WPS calculation")
+            logger.info(f"Processing {len(bedgz_files)} files sequentially (parallelism handled internally by Rust)...")
+            
+            for bedgz_file in bedgz_files:
+                try:
+                    # Get metadata if available
+                    total_fragments = None
+                    try:
+                        metadata_file = str(bedgz_file) + '.metadata.json'
+                        if Path(metadata_file).exists():
+                            with open(metadata_file, 'r') as f:
+                                meta = json.load(f)
+                                total_fragments = meta.get('total_unique_fragments')
+                    except Exception as e:
+                        logger.warning(f"Failed to load metadata: {e}")
+
+                    bed_stem = bedgz_file.name.replace('.bed.gz', '').replace('.bed', '')
+                    
+                    # Call Rust
+                    # calculate_wps(bedgz_path, tsv_path, output_dir, file_stem, empty, protect, min_size, max_size, total_fragments)
+                    count = krewlyzer_core.calculate_wps(
+                        str(bedgz_file), 
+                        str(tsv_input), 
+                        str(output), 
+                        bed_stem,
+                        empty,
+                        protect_input,
+                        min_size,
+                        max_size,
+                        total_fragments
+                    )
+                    logger.info(f"WPS calculated for {bedgz_file.name}: processed {count} regions")
+                except Exception as e:
+                    logger.error(f"Rust WPS calculation failed for {bedgz_file}: {e}")
+                    # Fallback or continue? Continue for now.
+        else:
+            # Original Python parallel execution
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+            from functools import partial
+            
+            n_procs = max_core(threads) if threads else 1
+            logger.info(f"Calculating WPS for {len(bedgz_files)} files using {n_procs} processes...")
+            
+            worker = partial(_wps_task, output_dir=str(output), tsv_input=str(tsv_input),
+                             empty=empty, protect_input=protect_input, min_size=min_size, max_size=max_size)
+            
+            with ProcessPoolExecutor(max_workers=n_procs) as executor:
+                futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
+                for future in as_completed(futures):
+                    exc = future.result()
+                    if exc:
+                        logger.error(f"WPS calculation failed for {futures[future]}:\n{exc}")
         
-        n_procs = max_core(threads) if threads else 1
-        logger.info(f"Calculating WPS for {len(bedgz_files)} files using {n_procs} processes...")
-        
-        worker = partial(_wps_task, output_dir=str(output), tsv_input=str(tsv_input),
-                         empty=empty, protect_input=protect_input, min_size=min_size, max_size=max_size)
-        
-        with ProcessPoolExecutor(max_workers=n_procs) as executor:
-            futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
-            for future in as_completed(futures):
-                exc = future.result()
-                if exc:
-                    logger.error(f"WPS calculation failed for {futures[future]}:\n{exc}")
         logger.info(f"WPS features calculated for {len(bedgz_files)} files.")
     except Exception as e:
         logger.error(f"Fatal error in wps CLI: {e}")
