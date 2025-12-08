@@ -55,14 +55,14 @@ pub fn parse_bin_file(bin_path: &Path) -> Result<Vec<Region>> {
     Ok(regions)
 }
 
-/// Parse a gzip/bgzf BED file directly (for smaller files or sequential access)
+/// Parse a BGZF BED file using noodles-bgzf with libdeflate
 fn parse_bedgz_fragments(bedgz_path: &Path) -> Result<Vec<(String, u64, u64, f64)>> {
-    use flate2::read::MultiGzDecoder;  // MultiGzDecoder for BGZF multi-block files
+    use noodles_bgzf as bgzf;
     
     let file = File::open(bedgz_path)
         .with_context(|| format!("Failed to open BED.gz file: {:?}", bedgz_path))?;
-    let gz = MultiGzDecoder::new(file);  // Use MultiGzDecoder for BGZF
-    let reader = BufReader::new(gz);
+    let bgzf_reader = bgzf::Reader::new(file);
+    let reader = BufReader::new(bgzf_reader);
     
     let mut fragments = Vec::new();
     for line in reader.lines() {
