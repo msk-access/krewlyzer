@@ -32,7 +32,7 @@ def ocf(
     Calculate Orientation-aware cfDNA Fragmentation (OCF) features for a single sample.
     
     Input: .bed.gz file from extract step
-    Output: {sample}.OCF.csv (summary) and {sample}.OCF.sync.tsv (detailed sync data)
+    Output: {sample}.OCF.tsv (summary) and {sample}.OCF.sync.tsv (detailed sync data)
     """
     # Configure Rust thread pool
     if threads > 0:

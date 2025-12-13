@@ -15,9 +15,9 @@ krewlyzer motif /path/to/input.bam -g /path/to/reference.fa -o /path/to/output_d
 ```
 
 ## Output
-- `{Sample}.EndMotif.txt`: Frequency of K-mer sequences at fragment 5' ends.
-- `{Sample}.BreakPointMotif.txt`: Frequency of K-mer sequences flanking the breakpoint (context + fragment start).
-- `{Sample}.MDS.txt`: Motif Diversity Score (Shannon entropy of end motifs).
+- `{Sample}.EndMotif.tsv`: Frequency of K-mer sequences at fragment 5' ends.
+- `{Sample}.BreakPointMotif.tsv`: Frequency of K-mer sequences flanking the breakpoint (context + fragment start).
+- `{Sample}.MDS.tsv`: Motif Diversity Score (Shannon entropy of end motifs).
 
 ## Method
 Motif frequencies are calculated by analyzing the K-mer sequences at the 5'-ends of fragments.

@@ -5,13 +5,13 @@
 | Command   | Description                                  |
 |-----------|----------------------------------------------|
 | `motif`   | Motif-based feature extraction               |
-| `fsc`     | Fragment size coverage                       |
-| `fsr`     | Fragment size ratio                          |
-| `fsd`     | Fragment size distribution                   |
-| `wps`     | Windowed protection score                    |
-| `ocf`     | Orientation-aware fragmentation              |
-| `uxm`     | Fragment-level methylation (SE/PE)           |
-| `mfsd`    | Mutant fragment size distribution            |
+| `fsc`     | Fragment size coverage (`.FSC.tsv`)          |
+| `fsr`     | Fragment size ratio (`.FSR.tsv`)             |
+| `fsd`     | Fragment size distribution (`.FSD.tsv`)      |
+| `wps`     | Windowed protection score (`.WPS.tsv.gz`)    |
+| `ocf`     | Orientation-aware fragmentation (`.OCF.tsv`) |
+| `uxm`     | Fragment-level methylation (`.UXM.tsv`)      |
+| `mfsd`    | Mutant fragment size distribution (`.mFSD.tsv`)|
 | `run-all` | Run all features for a BAM                   |
 
 ## Reference Data
@@ -37,8 +37,9 @@ Alternatively, you can run tools individually. Note that most tools require a fr
 krewlyzer extract sample.bam -g hg19.fa -o output_dir
 
 # 2. Run feature tools using the BED file
-krewlyzer fsc output_dir/sample.bed.gz --output fsc_out.txt
-krewlyzer wps output_dir/sample.bed.gz --output wps_out.gz
+# 2. Run feature tools using the BED file
+krewlyzer fsc output_dir/sample.bed.gz --output output_dir/
+krewlyzer wps output_dir/sample.bed.gz --output output_dir/
 # ... (fsd, ocf, etc.)
 
 # 3. Motif analysis (Independent of BED, uses BAM directly)
@@ -55,9 +56,10 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ \
   --bin-input /path/to/MSK-ACCESS-v2_canonicaltargets.bed
 
 # Or run FSC/FSR individually with target regions
-krewlyzer fsc motif_out -b targets.bed -w 1 -c 1 --output fsc_out
-krewlyzer fsr motif_out -b targets.bed -w 1 -c 1 --output fsr_out
+# Or run FSC/FSR individually with target regions
+krewlyzer fsc motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
+krewlyzer fsr motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 ```
 
-> **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins.
+> **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
 

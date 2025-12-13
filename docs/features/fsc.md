@@ -30,7 +30,7 @@ krewlyzer fsc sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 
 ## Output Format
 
-Output file: `{sample}.FSC.txt`
+Output: `{sample}.FSC.tsv`
 
 | Column | Description |
 |--------|-------------|

@@ -59,15 +59,18 @@ workflow {
         .map { row ->
             def meta = [id: row.sample]
             
+            // Debug logging
+            // log.info "Processing ${row.sample}: BAM=${row.bam}, METH=${row.meth_bam}, BED=${row.bed}, VCF=${row.vcf}"
+
             // Auto-detect Index for WGS BAM
-            def bam = row.bam ? file(row.bam) : []
-            def bai = (row.bam && get_index(row.bam).exists()) ? get_index(row.bam) : []
+            def bam = row.bam ? file(row.bam) : null
+            def bai = (bam && get_index(bam).exists()) ? get_index(bam) : []
             
             // Auto-detect Index for Meth BAM
-            def mbam = row.meth_bam ? file(row.meth_bam) : []
-            def mbai = (row.meth_bam && get_index(row.meth_bam).exists()) ? get_index(row.meth_bam) : []
+            def mbam = row.meth_bam ? file(row.meth_bam) : null
+            def mbai = (mbam && get_index(mbam).exists()) ? get_index(mbam) : []
             
-            def bed = row.bed ? file(row.bed) : []
+            def bed = row.bed ? file(row.bed) : null
             def vcf = row.vcf ? file(row.vcf) : []
 
             [ meta, bam, bai, vcf, mbam, mbai, bed ]
@@ -79,16 +82,21 @@ workflow {
         }
         .set { ch_inputs }
 
+    // Filter Channels (Fix multiMap nulls)
+    def ch_runall = ch_inputs.runall.filter { it }
+    def ch_methyl = ch_inputs.methyl.filter { it }
+    def ch_bedops = ch_inputs.bedops.filter { it }
+
     // 2. Run-All (Optimal path for WGS BAMs)
     KREWLYZER_RUNALL(
-        ch_inputs.runall,
+        ch_runall,
         file(params.ref),
         params.targets ? file(params.targets) : []
     )
 
     // 3. Methylation (UXM path)
     KREWLYZER_UXM(
-        ch_inputs.methyl,
+        ch_methyl,
         file(params.ref)
     )
 
@@ -96,14 +104,14 @@ workflow {
     // Run compatible tools in parallel
     
     // Tools that support optional targets
-    KREWLYZER_FSC(ch_inputs.bedops, params.targets ? file(params.targets) : [])
-    KREWLYZER_FSR(ch_inputs.bedops, params.targets ? file(params.targets) : [])
+    KREWLYZER_FSC(ch_bedops, params.targets ? file(params.targets) : [])
+    KREWLYZER_FSR(ch_bedops, params.targets ? file(params.targets) : [])
     
     // Tools that require Reference
-    KREWLYZER_WPS(ch_inputs.bedops, file(params.ref))
-    KREWLYZER_OCF(ch_inputs.bedops, file(params.ref))
+    KREWLYZER_WPS(ch_bedops, file(params.ref))
+    KREWLYZER_OCF(ch_bedops, file(params.ref))
     
     // Tools that need only BED
-    KREWLYZER_FSD(ch_inputs.bedops)
+    KREWLYZER_FSD(ch_bedops)
 
 }

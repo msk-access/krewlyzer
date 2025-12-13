@@ -1,3 +1,0 @@
-sample_id,bam,reference
-SAMPLE1,/path/to/sample1.bam,/path/to/reference.fa
-SAMPLE2,/path/to/sample2.bam,/path/to/reference.fa

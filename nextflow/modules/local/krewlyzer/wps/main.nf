@@ -23,7 +23,7 @@ process KREWLYZER_WPS {
     // If regions is optional (defaults to packaged), then just reference.
 
     output:
-    tuple val(meta), path("*.WPS.bed.gz"), emit: bed
+    tuple val(meta), path("*.WPS.tsv.gz"), emit: tsv
     path "versions.yml"                  , emit: versions
 
     script:

@@ -8,7 +8,7 @@ process KREWLYZER_FSC {
     path targets   // Optional for custom bins
 
     output:
-    tuple val(meta), path("*.FSC.txt"), emit: txt
+    tuple val(meta), path("*.FSC.tsv"), emit: tsv
     path "versions.yml"               , emit: versions
 
     script:

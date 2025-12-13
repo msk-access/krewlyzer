@@ -10,10 +10,10 @@ OCF (Sun et al., Genome Res 2019) measures the phasing of upstream (U) and downs
 
 ## Usage
 ```bash
-krewlyzer ocf sample.bed.gz --output ocf_out [options]
+krewlyzer ocf sample.bed.gz --output output_dir/ [options]
 ```
 ## Output
-- `{sample}.OCF.csv`: Summary of OCF calculations per tissue type.
+- `{sample}.OCF.tsv`: Summary of OCF calculations per tissue type.
 - `{sample}.OCF.sync.tsv`: Detailed sync scores.
 
 ## Options

@@ -114,9 +114,9 @@ def run_all(
     bed_temp = output / f"{sample}.bed.tmp"
     
     # Motif Outputs
-    edm_output = output / f"{sample}.EndMotif.txt"
-    bpm_output = output / f"{sample}.BreakPointMotif.txt"
-    mds_output = output / f"{sample}.MDS.txt"
+    edm_output = output / f"{sample}.EndMotif.tsv"
+    bpm_output = output / f"{sample}.BreakPointMotif.tsv"
+    mds_output = output / f"{sample}.MDS.tsv"
     
     should_run_extract = not bedgz_file.exists()
     # Always run motif logic as part of pass if not present?
@@ -194,6 +194,7 @@ def run_all(
             
             logger.info(f"Writing End Motif: {edm_output}")
             with open(edm_output, 'w') as f:
+                f.write("Motif\tFrequency\n")
                 for k, v in End_motif.items():
                     f.write(f"{k}\t{v/total_em if total_em else 0}\n")
             
@@ -204,6 +205,7 @@ def run_all(
             
             logger.info(f"Writing Breakpoint Motif: {bpm_output}")
             with open(bpm_output, 'w') as f:
+                f.write("Motif\tFrequency\n")
                 for k, v in Breakpoint_motif.items():
                     f.write(f"{k}\t{v/total_bpm if total_bpm else 0}\n")
             
@@ -212,7 +214,8 @@ def run_all(
             freq = np.array(list(End_motif.values())) / total_em if total_em else np.zeros(len(End_motif))
             mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
             with open(mds_output, 'w') as f:
-                f.write(f"{mds}\n")
+                f.write("Sample\tMDS\n")
+                f.write(f"{sample}\t{mds}\n")
                 
         except Exception as e:
             logger.error(f"Unified Extract+Motif failed: {e}")
@@ -246,7 +249,7 @@ def run_all(
     # Define Outputs
     out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
     out_wps = output / f"{sample}.WPS.tsv.gz"
-    out_fsd = output / f"{sample}.FSD.txt"
+    out_fsd = output / f"{sample}.FSD.tsv"
     out_ocf_dir = output / f"{sample}_ocf_tmp" # OCF writes mult files to dir
     out_ocf_dir.mkdir(parents=True, exist_ok=True)
     
@@ -273,19 +276,19 @@ def run_all(
             df_counts = pd.read_csv(out_fsc_raw, sep='\t')
             
             # FSC Output
-            final_fsc = output / f"{sample}.FSC.txt"
+            final_fsc = output / f"{sample}.FSC.tsv"
             process_fsc_from_counts(df_counts, final_fsc, fsc_windows, fsc_continue_n)
             
             # FSR Output
-            final_fsr = output / f"{sample}.FSR.txt"
+            final_fsr = output / f"{sample}.FSR.tsv"
             process_fsr_from_counts(df_counts, final_fsr, fsc_windows, fsc_continue_n)
     
         # 2. OCF (Move files)
         # Rust writes 'all.ocf.csv' and 'all.sync.tsv' to out_ocf_dir
-        src_ocf = out_ocf_dir / "all.ocf.csv"
+        src_ocf = out_ocf_dir / "all.ocf.tsv"
         src_sync = out_ocf_dir / "all.sync.tsv"
         
-        dst_ocf = output / f"{sample}.OCF.csv"
+        dst_ocf = output / f"{sample}.OCF.tsv"
         dst_sync = output / f"{sample}.OCF.sync.tsv"
         
         if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))

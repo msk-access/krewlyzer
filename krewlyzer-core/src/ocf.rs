@@ -162,7 +162,7 @@ impl OcfConsumer {
     
     pub fn write_output(&self, output_dir: &Path) -> Result<()> {
         // Output 1: all.ocf.csv
-        let summary_path = output_dir.join("all.ocf.csv");
+        let summary_path = output_dir.join("all.ocf.tsv");
         let mut summary_file = File::create(&summary_path)
             .with_context(|| format!("Failed to create summary file: {:?}", summary_path))?;
         writeln!(summary_file, "tissue\tOCF")?;

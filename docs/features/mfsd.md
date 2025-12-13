@@ -10,7 +10,7 @@ Mutant ctDNA fragments are typically shorter than wild-type cfDNA. This module q
 
 ## Usage
 ```bash
-krewlyzer mfsd sample.bam --input variants.vcf --output output.tsv [options]
+krewlyzer mfsd sample.bam --input variants.vcf --output output_dir/ [options]
 ```
 
 ## Options
@@ -20,7 +20,7 @@ krewlyzer mfsd sample.bam --input variants.vcf --output output.tsv [options]
 
 ## Output Format
 
-Output file: `{sample}.mfsd.tsv`
+Output file: `{sample}.mFSD.tsv`
 
 | Column | Description |
 |--------|-------------|

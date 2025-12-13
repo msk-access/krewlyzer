@@ -37,14 +37,5 @@ krewlyzer = "krewlyzer.cli:app"
 requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
-[tool.setuptools]
-packages = ["krewlyzer"]
-
-[tool.setuptools.package-data]
-krewlyzer = [
-    "data/**/*.bed",
-    "data/**/*.txt",
-    "data/**/*.tsv",
-    "data/**/*.wig",
-    "data/**/*.rds"
-]
+[tool.maturin]
+python-source = "."

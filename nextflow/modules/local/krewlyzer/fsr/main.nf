@@ -8,7 +8,7 @@ process KREWLYZER_FSR {
     path targets   // Optional
 
     output:
-    tuple val(meta), path("*.FSR.txt"), emit: txt
+    tuple val(meta), path("*.FSR.tsv"), emit: tsv
     path "versions.yml"               , emit: versions
 
     script:

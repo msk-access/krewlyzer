@@ -8,7 +8,7 @@ process KREWLYZER_UXM {
     path fasta
 
     output:
-    tuple val(meta), path("*.uxm.bed.gz"), emit: bed
+    tuple val(meta), path("*.UXM.tsv"), emit: tsv
     path "versions.yml"                  , emit: versions
 
     script:

@@ -75,7 +75,7 @@ def fsc(
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
-    output_file = output / f"{sample_name}.FSC.txt"
+    output_file = output / f"{sample_name}.FSC.tsv"
     
     try:
         logger.info(f"Processing {bedgz_input.name}")

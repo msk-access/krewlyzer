@@ -30,7 +30,7 @@ krewlyzer fsr sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 
 ## Output Format
 
-Output file: `{sample}.FSR.txt`
+Output: `{sample}.FSR.tsv`
 
 | Column | Description | Biological Relevance |
 |--------|-------------|----------------------|

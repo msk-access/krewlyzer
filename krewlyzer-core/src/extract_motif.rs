@@ -133,6 +133,21 @@ pub fn process_bam_parallel(
     // To share with Rayon, we wrap in Arc
     let exclude_arc = std::sync::Arc::new(exclude_regions);
 
+    // Load available chromosomes from FASTA to avoid fetch crashes
+    let valid_chroms = if let Ok(fa) = faidx::Reader::from_path(&fasta_path) {
+        let n = fa.n_seqs();
+        let mut s = HashSet::new();
+        for i in 0..n {
+             if let Ok(name) = fa.seq_name(i as i32) {
+                 s.insert(name);
+             }
+        }
+        Some(s)
+    } else {
+        None
+    };
+    let valid_chroms_arc = std::sync::Arc::new(valid_chroms);
+
     let config = UnifiedConfig {
         mapq,
         min_len,
@@ -199,6 +214,14 @@ pub fn process_bam_parallel(
         if local_bam.fetch((chunk.tid, chunk.start, chunk.end)).is_err() {
             return result;
         }
+
+        // Check if chromosome is in reference
+        let chrom_valid = if let Some(ref set) = *valid_chroms_arc {
+             set.contains(&chunk.chrom)
+        } else { false };
+        
+        // Only fetch if chrom is valid AND we have a reader
+        let can_fetch_seq = chrom_valid && local_fasta.is_some();
         
         let context_len = (config.kmer as f64 / 2.0).ceil() as usize;
 
@@ -237,11 +260,13 @@ pub fn process_bam_parallel(
                      }
                      
                      // Calculate GC
-                     let gc = if let Some(ref fa) = local_fasta {
-                         match fa.fetch_seq(&chunk.chrom, start as usize, (end - 1) as usize) {
-                             Ok(seq) => calculate_gc(&seq),
-                             Err(_) => 0.0,
-                         }
+                     let gc = if can_fetch_seq {
+                         if let Some(ref fa) = local_fasta {
+                             match fa.fetch_seq(&chunk.chrom, start as usize, (end - 1) as usize) {
+                                 Ok(seq) => calculate_gc(&seq),
+                                 Err(_) => 0.0,
+                             }
+                         } else { 0.0 }
                      } else { 0.0 };
                      
                      result.fragments.push(format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc));
@@ -309,7 +334,8 @@ pub fn process_bam_parallel(
                 
                 // Breakpoint Motif ... (retained)
                 // Needs FASTA fetch
-                if let Some(ref fa) = local_fasta {
+                if can_fetch_seq { // Safe guard
+                    if let Some(ref fa) = local_fasta {
                     // Logic for Breakpoint context needs careful coordinate handling matching `motif.rs`
                     // Simplified for now: strictly context + motif
                     // If FWD: Ref[pos-p..pos] + Frag[0..p]
@@ -339,6 +365,7 @@ pub fn process_bam_parallel(
                     
                      *result.bp_motifs.entry(bp_str).or_default() += 1;
                 }
+                } // End safe guard
             }
         }
         

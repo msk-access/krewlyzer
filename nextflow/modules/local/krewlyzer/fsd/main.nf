@@ -7,7 +7,7 @@ process KREWLYZER_FSD {
     tuple val(meta), path(bed)
 
     output:
-    tuple val(meta), path("*.FSD.txt.gz"), emit: txt
+    tuple val(meta), path("*.FSD.tsv"), emit: tsv
     path "versions.yml"                 , emit: versions
 
     script:

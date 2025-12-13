@@ -8,8 +8,8 @@ process KREWLYZER_MOTIF {
     path fasta
 
     output:
-    tuple val(meta), path("*.EndMotif.txt"), emit: end_motif
-    tuple val(meta), path("*.MDS.txt")     , emit: mds
+    tuple val(meta), path("*.EndMotif.tsv"), emit: end_motif
+    tuple val(meta), path("*.MDS.tsv")     , emit: mds
     path "versions.yml"                    , emit: versions
 
     script:

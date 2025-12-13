@@ -10,7 +10,7 @@ process KREWLYZER_RUNALL {
     path targets   // Optional: bin_input/arms_file
 
     output:
-    tuple val(meta), path("*.{txt,tsv,bed.gz}"), emit: results
+    tuple val(meta), path("*.{txt,tsv,csv,bed.gz,tsv.gz}"), emit: results
     tuple val(meta), path("*.json")             , emit: metadata, optional: true
     path "versions.yml"                         , emit: versions
 

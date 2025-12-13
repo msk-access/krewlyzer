@@ -73,9 +73,9 @@ def motif(
         sample_name = bam_input.stem.replace('.bam', '')
     
     # Output file paths
-    edm_output = output / f"{sample_name}.EndMotif.txt"
-    bpm_output = output / f"{sample_name}.BreakPointMotif.txt"
-    mds_output = output / f"{sample_name}.MDS.txt"
+    edm_output = output / f"{sample_name}.EndMotif.tsv"
+    bpm_output = output / f"{sample_name}.BreakPointMotif.tsv"
+    mds_output = output / f"{sample_name}.MDS.tsv"
     
     try:
         logger.info(f"Extracting motif features from {bam_input.name}")
