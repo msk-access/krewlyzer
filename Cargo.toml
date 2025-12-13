@@ -1,12 +1,12 @@
 [package]
 name = "krewlyzer"
 version = "0.2.0"
-edition = "2021"
+edition = "2025"
 authors = ["MSK-ACCESS Team"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
 repository = "https://github.com/msk-access/krewlyzer"
 homepage = "https://github.com/msk-access/krewlyzer"
-license = "MIT"
+license = "GNU Affero General Public License v3.0"
 
 [lib]
 name = "krewlyzer_core"
