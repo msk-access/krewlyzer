@@ -16,9 +16,11 @@ All notable changes to this project will be documented in this file.
 - **Build System**: Migrated to `maturin` backend for robust Rust extension compilation.
 - **CLI (`run-all`)**: Now defaults to the Unified Engine.
 - **CLI Filters**: Added `--mapq`, `--minlen`, `--maxlen`, `--skip-duplicates`, `--require-proper-pair` flags to `run-all`, `extract`, and `motif`.
-- **Motif Outputs**: Renamed output files to use `.txt` extension consistently (e.g., `{sample}.EndMotif.txt`).
+- **Motif Outputs**: Renamed output files to use `.tsv` extension consistently (e.g., `{sample}.EndMotif.tsv`).
 - **Data Handling**: `motif` now uses the unified engine, eliminating the need for `bedtools` binary entirely.
 - **Documentation**: Updated `README.md`, `usage.md`, and `pipeline.md` to reflect the new workflow.
+    - Corrected `pipeline.md` samplesheet format documentation to match Nextflow schema.
+    - Updated `usage.md` and feature docs to correctly specify output directory arguments.
 
 ### Fixed
 - **Test Suite**: Cleaned up `tests/` directory, removing obsolete scripts and fixing integration tests (`test_science.py`, `test_run_all_unified_wrapper.py`).
