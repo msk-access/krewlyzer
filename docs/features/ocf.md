@@ -10,9 +10,27 @@ OCF (Sun et al., Genome Res 2019) measures the phasing of upstream (U) and downs
 
 ## Usage
 ```bash
-krewlyzer ocf motif_out --output ocf_out [options]
+krewlyzer ocf sample.bed.gz --output ocf_out [options]
 ```
+## Output
+- `{sample}.OCF.csv`: Summary of OCF calculations per tissue type.
+- `{sample}.OCF.sync.tsv`: Detailed sync scores.
 
 ## Options
-- `--ocr-input`, `-r`: Open chromatin region BED (default: `data/OpenChromatinRegion/7specificTissue.all.OC.bed`)
 - `--threads`, `-t`: Number of processes
+
+## Calculation Details
+
+1.  **Alignment**: Fragments are mapped relative to the center of the Open Chromatin Region (OCR).
+2.  **Counting**:
+    - `Left` ends (Start) and `Right` ends (End) are counted in 10bp bins across a ±1000bp window.
+    - Counts are normalized by total sequencing depth.
+3.  **OCF Score**:
+    $$ OCF = \sum_{Peak} P_{signal} - \sum_{Peak} P_{background} $$
+    - **Signal**: Right ends at -60bp and Left ends at +60bp (Phased nucleosome boundaries).
+    - **Background**: Left ends at -60bp and Right ends at +60bp (Unphased).
+
+## Interpretation
+- **High OCF**: Fragment ends align perfectly with nucleosome boundaries flanking the OCR, indicating the region is **open** in the tissue of origin.
+- **Low OCF**: No phasing, indicating the region is **closed**.
+

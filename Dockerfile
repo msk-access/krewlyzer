@@ -18,10 +18,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2-dev \
     libxslt1-dev \
 
-    gfortran \
     libopenblas-dev \
     liblapack-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install uv (fast Python package/dependency manager)
 RUN pip install --no-cache-dir uv
@@ -41,5 +45,5 @@ RUN uv venv .venv && \
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Default command: show CLI help
-ENTRYPOINT ["krewlyzer"]
-CMD ["--help"]
+# Default command: show CLI help
+CMD ["krewlyzer", "--help"]

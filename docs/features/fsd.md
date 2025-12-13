@@ -10,8 +10,10 @@ cfDNA fragmentation patterns at chromosome arms can reflect nucleosome positioni
 
 ## Usage
 ```bash
-krewlyzer fsd motif_out --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.bed --output fsd_out [options]
+krewlyzer fsd sample.bed.gz --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.bed --output fsd_out.txt [options]
 ```
+## Output
+- `{sample}.FSD.txt`: Frequency of fragment lengths per chromosome arm.
 
 ## Options
 - `--arms-file`, `-a`: Chromosome arms BED (required)

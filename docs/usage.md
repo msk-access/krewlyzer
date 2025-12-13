@@ -22,22 +22,27 @@
   - Provided in `krewlyzer/data/` (see options for each feature)
 
 ## Typical Workflow
+The recommended way to run krewlyzer is using the **Unified Pipeline** via `run-all`, which processes the BAM file in a single pass for maximum efficiency.
 
 ```bash
-# 1. Motif extraction (produces .bed.gz files)
-krewlyzer motif sample.bam -g hg19.fa -o motif_out
+# Optimized Unified Pipeline
+krewlyzer run-all sample.bam --reference hg19.fa --output output_dir \
+    --variants variants.maf --bin-input targets.bed --threads 4
+```
 
-# 2. Extract additional features from motif output:
-krewlyzer fsc motif_out --output fsc_out
-krewlyzer fsr motif_out --output fsr_out
-krewlyzer fsd motif_out --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.bed --output fsd_out
-krewlyzer wps motif_out --output wps_out
-krewlyzer ocf motif_out --output ocf_out
-krewlyzer uxm /path/to/bam_folder --output uxm_out
-krewlyzer mfsd sample.bam --input variants.vcf --output mfsd_out/sample.mfsd.tsv
+Alternatively, you can run tools individually. Note that most tools require a fragment BED file (`.bed.gz`) produced by the `extract` command.
 
-# 3. Run all features in one call:
-krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out --variant-input variants.vcf
+```bash
+# 1. Extract fragments (BAM -> BED.gz)
+krewlyzer extract sample.bam -g hg19.fa -o output_dir
+
+# 2. Run feature tools using the BED file
+krewlyzer fsc output_dir/sample.bed.gz --output fsc_out.txt
+krewlyzer wps output_dir/sample.bed.gz --output wps_out.gz
+# ... (fsd, ocf, etc.)
+
+# 3. Motif analysis (Independent of BED, uses BAM directly)
+krewlyzer motif sample.bam -g hg19.fa -o output_dir 
 ```
 
 ## Targeted Panel Usage (ACCESS, etc.)

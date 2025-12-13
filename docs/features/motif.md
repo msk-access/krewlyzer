@@ -10,12 +10,32 @@ Motif analysis of cfDNA fragment ends can reveal tissue-of-origin, nucleosome po
 
 ## Usage
 ```bash
-krewlyzer motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir \
-    --minlen 65 --maxlen 400 -k 3 --verbose
+krewlyzer motif /path/to/input.bam -g /path/to/reference.fa -o /path/to/output_dir \
+    -k 4 --threads 4
 ```
 
 ## Output
-- `EDM/`: End Motif frequencies
-- `BPM/`: Breakpoint Motif frequencies
-- `MDS/`: Motif Diversity Scores
-- `*.bed.gz`: Intermediate file used for other modules (FSC, FSR, FSD, WPS, OCF).
+- `{Sample}.EndMotif.txt`: Frequency of K-mer sequences at fragment 5' ends.
+- `{Sample}.BreakPointMotif.txt`: Frequency of K-mer sequences flanking the breakpoint (context + fragment start).
+- `{Sample}.MDS.txt`: Motif Diversity Score (Shannon entropy of end motifs).
+
+## Method
+Motif frequencies are calculated by analyzing the K-mer sequences at the 5'-ends of fragments.
+- **End Motif**: Raw sequence at the end of the fragment.
+- **Breakpoint Motif**: Sequence context from the reference genome flanking the fragment start point.
+- **MDS**: Normalized Shannon entropy of the End Motif distribution.
+
+## Calculation Details
+
+### Motif Diversity Score (MDS)
+MDS quantifies the randomness of the 4-mer end motifs.
+
+$$ MDS = \frac{ - \sum_{i} p_i \log_2(p_i) }{ \log_2(4^k) } $$
+
+Where:
+- $p_i$ is the frequency of the $i$-th motif.
+- $k$ is the k-mer length (default 4).
+- The denominator normalizes the score to $[0, 1]$.
+- **High MDS**: Random fragmentation (Healthy).
+- **Low MDS**: Stereotypical fragmentation (Cancer/Nuclease-bias).
+

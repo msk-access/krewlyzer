@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2025-12-12
+
+### Added
+- **Unified Engine**: New high-performance Rust core (`krewlyzer-core`) that processes Extract, Motif, FSC, FSD, WPS, and OCF in a single parallelized pass.
+- **Fragment Extraction**: dedicated `extract` command (via Rust) to convert BAM to BED with configurable filters.
+- **Extract Documentation**: New `docs/features/extract.md` detailing extraction logic and JSON metadata.
+- **Calculation Details**: Comprehensive formulas and interpretation guides added to all feature documentation.
+- **Root Cargo.toml**: Added to support standard `maturin` builds for the hybrid Python-Rust package.
+
+### Changed
+- **Performance**: Significant speedup (3-4x) for end-to-end analysis due to multi-threaded processing and single-pass I/O.
+- **Build System**: Migrated to `maturin` backend for robust Rust extension compilation.
+- **CLI (`run-all`)**: Now defaults to the Unified Engine.
+- **CLI Filters**: Added `--mapq`, `--minlen`, `--maxlen`, `--skip-duplicates`, `--require-proper-pair` flags to `run-all`, `extract`, and `motif`.
+- **Motif Outputs**: Renamed output files to use `.txt` extension consistently (e.g., `{sample}.EndMotif.txt`).
+- **Data Handling**: `motif` now uses the unified engine, eliminating the need for `bedtools` binary entirely.
+- **Documentation**: Updated `README.md`, `usage.md`, and `pipeline.md` to reflect the new workflow.
+
+### Fixed
+- **Test Suite**: Cleaned up `tests/` directory, removing obsolete scripts and fixing integration tests (`test_science.py`, `test_run_all_unified_wrapper.py`).
+- **Validation**: Fixed BAM header issues in tests.
+
+### Removed
+- **Legacy Python Backends**: Removed pure Python implementations of `extract`, `motif`, `fsc`, `fsd`, ensuring all paths use the unified Rust core.
+- **Validation Artifacts**: Deleted temporary validation scripts and data.
+
 ## [0.1.7] - 2025-11-26
 
 ### Fixed

@@ -2,7 +2,6 @@
 //!
 //! Handles tabix-indexed BED.gz files for fragment analysis.
 
-use std::path::Path;
 use rayon::prelude::*;
 
 /// Count fragments in a region by size category
@@ -45,6 +44,48 @@ pub struct Region {
 impl Region {
     pub fn new(chrom: String, start: u64, end: u64) -> Self {
         Self { chrom, start, end }
+    }
+}
+
+/// Unified Fragment definition for the engine
+#[derive(Debug, Clone, Copy)]
+pub struct Fragment {
+    pub chrom_id: u32,
+    pub start: u64,
+    pub end: u64,
+    pub length: u64,
+    pub gc: f64,
+}
+
+/// Helper to map string chromosomes to integer IDs
+#[derive(Debug, Default, Clone)]
+pub struct ChromosomeMap {
+    pub name_to_id: std::collections::HashMap<String, u32>,
+    pub id_to_name: Vec<String>,
+}
+
+impl ChromosomeMap {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    
+    pub fn get_id(&mut self, chrom: &str) -> u32 {
+        if let Some(&id) = self.name_to_id.get(chrom) {
+            id
+        } else {
+            let id = self.id_to_name.len() as u32;
+            self.id_to_name.push(chrom.to_string());
+            self.name_to_id.insert(chrom.to_string(), id);
+            id
+        }
+    }
+    
+    pub fn get_name(&self, id: u32) -> Option<&str> {
+        if (id as usize) < self.id_to_name.len() {
+            Some(&self.id_to_name[id as usize])
+        } else {
+            None
+        }
     }
 }
 

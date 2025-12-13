@@ -1,0 +1,4 @@
+sample,bam,meth_bam,vcf,bed
+Sample_001,/path/to/sample1.bam,,/path/to/sample1.vcf.gz,
+Sample_002,,/path/to/sample2_meth.bam,,
+Sample_003,,,,/path/to/sample3.bed.gz

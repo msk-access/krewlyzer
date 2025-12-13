@@ -25,9 +25,19 @@ def test_motif_help():
     output = strip_ansi(result.output)
     assert result.exit_code == 0
     assert "motif" in output
-    assert "--minlen" in output
+    assert "--kmer" in output  # Changed: motif now uses --kmer, --minlen moved to extract
     assert "-g" in output
     assert "-o" in output
+
+def test_extract_help():
+    result = runner.invoke(app, ["extract", "--help"])
+    output = strip_ansi(result.output)
+    assert result.exit_code == 0
+    assert "extract" in output.lower()
+    assert "--minlen" in output
+    assert "--mapq" in output
+    assert "--skip-duplicates" in output
+    assert "require-proper" in output  # Truncated in CLI output
 
 def test_fsc_help():
     result = runner.invoke(app, ["fsc", "--help"])
@@ -65,7 +75,7 @@ def test_ocf_help():
 
 def test_uxm_help():
     """
-    Test that the UXM CLI help includes all major options and documents both SE and PE mode.
+    Test that the UXM CLI help includes all major options.
     """
     result = runner.invoke(app, ["uxm", "--help"])
     output = strip_ansi(result.output)
@@ -73,8 +83,7 @@ def test_uxm_help():
     assert "uxm" in output.lower() or "fragment-level methylation" in output.lower()
     assert "--mark-input" in output
     assert "--output" in output
-    assert "--type" in output
-    assert "SE" in output or "PE" in output  # Should document both modes
+    assert "--sample-name" in output
 
 def test_run_all_help():
     """
@@ -90,7 +99,7 @@ def test_run_all_help():
     assert "--reference" in output
     assert "--output" in output
     assert "--threads" in output
-    assert "--type" in output
+    assert "--bisulfite-bam" in output  # New optional for UXM
 
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):

@@ -40,6 +40,7 @@ nav:
   - Home: index.md
   - Usage: usage.md
   - Features:
+    - Fragment Extraction: features/extract.md
     - Motif Extraction: features/motif.md
     - Fragment Size Coverage (FSC): features/fsc.md
     - Fragment Size Ratio (FSR): features/fsr.md

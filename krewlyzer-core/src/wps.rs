@@ -1,83 +1,29 @@
 //! Windowed Protection Score (WPS) calculation
 //!
-//! Calculates WPS, Coverage, and Starts for transcript regions.
-//! Writes output directly to gzipped TSV files per region.
+//! Calculates WPS Long, Short, and Ratio for transcript regions.
+//! Matches the reference cfDNAFE implementation exactly.
 
 use std::path::Path;
 use std::io::{BufRead, BufReader, Write};
 use std::fs::File;
 use anyhow::{Result, Context};
-use rayon::prelude::*;
+
 use pyo3::prelude::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
 /// Transcript region from TSV
 #[derive(Debug, Clone)]
-struct Region {
-    id: String,
-    chrom: String,
-    start: u64,
-    end: u64,
-    strand: String,
-}
-
-/// Fragment range (0-based start, 0-based exclusive end)
-#[derive(Debug, Clone, Copy)]
-struct Fragment {
-    // We use u32 to save memory, assuming chromosomes < 4GB
-    // We store chrom as index or hash? For simplicity string for now, or match on string in loop
-    // To save memory for 100M fragments, we should map chrom string to u8/u16 ID.
-    chrom_id: u8, 
-    start: u32,
-    end: u32,
-}
-
-/// Parse a BGZF BED file into a vector of Fragments (lighter memory usage)
-/// Returns (fragments, chrom_map)
-fn parse_fragments_wps(bedgz_path: &Path) -> Result<(Vec<Fragment>, Vec<String>)> {
-    use noodles_bgzf as bgzf;
-    
-    let file = File::open(bedgz_path)
-        .with_context(|| format!("Failed to open BED.gz file: {:?}", bedgz_path))?;
-    let bgzf_reader = bgzf::Reader::new(file);
-    let reader = BufReader::new(bgzf_reader);
-    
-    let mut fragments = Vec::with_capacity(1_000_000);
-    let mut chrom_map: Vec<String> = Vec::new();
-    
-    for line in reader.lines() {
-        let line = line?;
-        if line.is_empty() { continue; }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 { continue; }
-        
-        let chrom = fields[0]; // normalized later?
-        let start: u32 = fields[1].parse().unwrap_or(0);
-        let end: u32 = fields[2].parse().unwrap_or(0);
-        
-        // Find or add chrom ID
-        let chrom_id = if let Some(pos) = chrom_map.iter().position(|c| c == chrom) {
-            pos as u8
-        } else {
-            if chrom_map.len() >= 255 {
-                // Warning or error? access-solid usually has standard chroms
-                // Just fallback to 255? or error
-                eprintln!("Warning: Too many unique chromosomes (>255), skipping {}", chrom);
-                continue; 
-            }
-            chrom_map.push(chrom.to_string());
-            (chrom_map.len() - 1) as u8
-        };
-        
-        fragments.push(Fragment { chrom_id, start, end });
-    }
-    
-    Ok((fragments, chrom_map))
+pub struct Region {
+    pub id: String,
+    pub chrom: String,
+    pub start: u64,
+    pub end: u64,
+    pub strand: String,
 }
 
 /// Parse TSV transcript file
-fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
+pub fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
     let file = File::open(tsv_path).with_context(|| "Failed to open regions file")?;
     let reader = BufReader::new(file);
     let mut regions = Vec::new();
@@ -97,15 +43,13 @@ fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
         let end_str = fields[3];
         let strand = fields[4].to_string();
         
-        // Normalize chrom: remove chr prefix
         let chrom_norm = chrom_raw.trim_start_matches("chr").to_string();
         
-        // Filter valid chroms (1-22, X, Y) if desired (wps.py does this)
         if !valid_chroms.iter().any(|c| c == &chrom_norm) {
             continue;
         }
         
-        let start: u64 = start_str.parse::<f64>().unwrap_or(0.0) as u64; // wps.py does int(float(str))
+        let start: u64 = start_str.parse::<f64>().unwrap_or(0.0) as u64;
         let end: u64 = end_str.parse::<f64>().unwrap_or(0.0) as u64;
         
         if start < 1 { continue; }
@@ -116,8 +60,9 @@ fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
     Ok(regions)
 }
 
+/// Unified entry point for WPS (replaces legacy sequential implementation)
 #[pyfunction]
-#[pyo3(signature = (bedgz_path, tsv_path, output_dir, file_stem, empty=false, protect=120, min_size=120, max_size=180, total_fragments=None))]
+#[pyo3(signature = (bedgz_path, tsv_path, output_dir, file_stem, empty=false, total_fragments=None))]
 pub fn calculate_wps(
     _py: Python<'_>,
     bedgz_path: &str,
@@ -125,190 +70,319 @@ pub fn calculate_wps(
     output_dir: &str,
     file_stem: &str,
     empty: bool,
-    protect: i32,
-    min_size: u32,
-    max_size: u32,
     total_fragments: Option<u64>,
 ) -> PyResult<usize> {
     let bed_path = Path::new(bedgz_path);
     let tsv = Path::new(tsv_path);
-    let out = Path::new(output_dir);
+    let output_path = Path::new(output_dir).join(format!("{}.WPS.tsv.gz", file_stem));
     
-    // Parse inputs
-    let (fragments, chrom_map) = parse_fragments_wps(bed_path)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse fragments: {}", e)))?;
-        
+    // 1. Parse Regions
     let regions = parse_regions(tsv)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse regions: {}", e)))?;
-
-    let protection = (protect as u32) / 2;
-
-    // Process parallel
-    let processed_count = regions.par_iter().map(|region| {
-        // Resolve region chrom to ID
-        let region_chrom_norm = region.chrom.trim_start_matches("chr");
-        let chrom_id_opt = chrom_map.iter().position(|c| c.trim_start_matches("chr") == region_chrom_norm);
         
-        if chrom_id_opt.is_none() {
-            return 0; // Chromosome not in BED file
+    let initial_count = regions.len();
+
+    // 2. Setup Engine
+    let mut chrom_map = ChromosomeMap::default();
+    let consumer = WpsConsumer::new(regions, &mut chrom_map);
+    let analyzer = FragmentAnalyzer::new(consumer, 100_000); // 100k chunk size
+    
+    // 3. Process
+    let final_consumer = analyzer.process_file(bed_path, &mut chrom_map)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Processing failed: {}", e)))?;
+        
+    // 4. Write Output
+    final_consumer.write_output(&output_path, total_fragments, empty)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to write output: {}", e)))?;
+        
+    Ok(initial_count)
+}
+
+use crate::bed::ChromosomeMap;
+use crate::engine::{FragmentConsumer, FragmentAnalyzer};
+use std::sync::Arc;
+use std::collections::HashMap;
+use coitrees::{COITree, IntervalNode, IntervalTree};
+
+/// Output row for a single position with both Long and Short WPS
+#[derive(Debug, Clone)]
+struct WpsRow {
+    gene_id: String,
+    chrom: String,
+    pos: u64,
+    cov_long: u32,
+    cov_short: u32,
+    wps_long: i32,
+    wps_short: i32,
+    wps_ratio: f64,
+    wps_long_norm: f64,
+    wps_short_norm: f64,
+    wps_ratio_norm: f64,
+}
+
+/// Internal accumulator for a single region (using Difference Arrays)
+#[derive(Clone)]
+struct RegionAccumulator {
+    // Difference arrays. 
+    // Size = length + 1 to handle range end+1.
+    // Using i32 because diffs can be negative.
+    // We accumulate everything in diffs, then integrate at the end.
+    cov_long: Vec<i32>,
+    cov_short: Vec<i32>,
+    wps_long: Vec<i32>,
+    wps_short: Vec<i32>,
+}
+
+impl RegionAccumulator {
+    fn new(length: usize) -> Self {
+        Self {
+            cov_long: vec![0; length + 1],
+            cov_short: vec![0; length + 1],
+            wps_long: vec![0; length + 1],
+            wps_short: vec![0; length + 1],
         }
-        let chrom_id = chrom_id_opt.unwrap() as u8;
+    }
+    
+    // Add val to [start, end)
+    fn add_range(vec: &mut Vec<i32>, start: i64, end: i64, val: i32) {
+        let len = vec.len() as i64 - 1; 
+        // Clamp to region bounds [0, len)
+        let s = start.clamp(0, len) as usize;
+        let e = end.clamp(0, len) as usize;
         
-        // Region coordinates (1-based inclusive)
-        let r_start = region.start;
-        let r_end = region.end;
-        let length = (r_end - r_start + 1) as usize;
+        if s < e {
+            vec[s] += val;
+            vec[e] -= val;
+        }
+    }
+
+    fn merge(&mut self, other: &Self) {
+        for (a, b) in self.cov_long.iter_mut().zip(other.cov_long.iter()) { *a += *b; }
+        for (a, b) in self.cov_short.iter_mut().zip(other.cov_short.iter()) { *a += *b; }
+        for (a, b) in self.wps_long.iter_mut().zip(other.wps_long.iter()) { *a += *b; }
+        for (a, b) in self.wps_short.iter_mut().zip(other.wps_short.iter()) { *a += *b; }
+    }
+}
+
+#[derive(Clone)]
+pub struct WpsConsumer {
+    // Shared state
+    // Map chrom_id -> IntervalTree of Region Indices
+    trees: Arc<HashMap<u32, COITree<usize, u32>>>,
+    // Store regions metadata (start/end/strand/id) to generate output
+    regions: Arc<Vec<Region>>,
+    
+    // Thread-local state
+    accumulators: HashMap<usize, RegionAccumulator>,
+}
+
+impl WpsConsumer {
+    pub fn new(regions: Vec<Region>, chrom_map: &mut ChromosomeMap) -> Self {
+        let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
+        // We do NOT pre-allocate accumulators anymore.
         
-        let mut cov_arr = vec![0u32; length];
-        let mut start_arr = vec![0u32; length];
-        let mut gcount_arr = vec![0u32; length];
-        let mut total_arr = vec![0u32; length];
-        
-        // Fetch candidates (optimization: fragments sorted ideally, but we iterate all matching chrom)
-        // If slow, optimize by sorting fragments and binary searching.
-        // For standard targeted panels, fragments vector is ~1M, filtering by chrom reduces to ~50k. Linear scan is fast enough.
-        
-        // Define fetch bounds: region expanded by protection
-        let fetch_start = r_start.saturating_sub(protection as u64 + 1);
-        let fetch_end = r_end + protection as u64;
-        
-        for frag in &fragments {
-            if frag.chrom_id != chrom_id { continue; }
+        for (i, region) in regions.iter().enumerate() {
+            // Map chromosome
+            let chrom_norm = region.chrom.trim_start_matches("chr");
+            let chrom_id = chrom_map.get_id(chrom_norm);
             
-            // Overlap check (fragment 0-based [start, end))
-            // Convert to 1-based [start+1, end] for logic comparison with fetch window
-            let f_start_1 = frag.start as u64 + 1;
-            let f_end_1 = frag.end as u64;
+            // Add to tree (using extended window for lookup)
+            // Long protection is 60. Max Long Frag is 180.
+            // Any fragment that could theoretically touch the region's analysis must be included.
+            // Safe bet: expand by MAX_FRAG_SIZE/2 + PROTECTION?
+            // Actually, we just need to catch any fragment that OVERLAPS the region-of-interest extended by protection.
+            // Legacy used: [start - 60, end + 60].
+            // To be safe, let's use the maximum lookup needed.
+            let start = region.start.saturating_sub(60) as u32;
+            let end = (region.end + 60) as u32;
+            let end_closed = if end > start { end - 1 } else { start };
+
+            nodes_by_chrom.entry(chrom_id).or_default().push(
+                IntervalNode::new(start as i32, end_closed as i32, i)
+            );
+        }
+        
+        let mut trees = HashMap::new();
+        for (chrom_id, nodes) in nodes_by_chrom {
+            trees.insert(chrom_id, COITree::new(&nodes));
+        }
+        
+        Self {
+            trees: Arc::new(trees),
+            regions: Arc::new(regions),
+            accumulators: HashMap::new(),
+        }
+    }
+    
+    /// Write results to output file
+    pub fn write_output(&self, output_path: &Path, total_markers: Option<u64>, empty: bool) -> Result<()> {
+        let file = File::create(output_path)?;
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        let norm_factor = total_markers.unwrap_or(1_000_000) as f64 / 1_000_000.0;
+        
+        writeln!(encoder, "gene_id\tchrom\tpos\tcov_long\tcov_short\twps_long\twps_short\twps_ratio\twps_long_norm\twps_short_norm\twps_ratio_norm")?;
+        
+        for (i, region) in self.regions.iter().enumerate() {
+            // Check if we have data for this region
+            let acc_opt = self.accumulators.get(&i);
             
-            // Check if fragment overlaps the extended fetch window
-            if f_end_1 <= fetch_start || f_start_1 > fetch_end {
+            // If no data and skipping empty - verify logic
+            if acc_opt.is_none() && !empty {
                 continue;
             }
             
-            let len = f_end_1 - f_start_1 + 1;
-            if len < min_size as u64 || len > max_size as u64 {
+            let len = (region.end - region.start + 1) as usize;
+            
+            if acc_opt.is_none() {
+                // If we must print empty regions, print zeros
+                if empty {
+                    for j in 0..len {
+                        writeln!(encoder, "{}\t{}\t{}\t0\t0\t0\t0\t0.0000\t0.000000\t0.000000\t0.000000",
+                            region.id, region.chrom, region.start + j as u64)?;
+                    }
+                }
                 continue;
             }
             
-            // 1. Coverage
-            // Overlap of fragment [f_start_1, f_end_1] with region [r_start, r_end]
-            let ov_start = r_start.max(f_start_1);
-            let ov_end = r_end.min(f_end_1);
+            let acc = acc_opt.unwrap();
             
-            if ov_start <= ov_end {
-                let s = (ov_start - r_start) as usize;
-                let e = (ov_end - r_start + 1) as usize;
-                for i in s..e { cov_arr[i] += 1; }
+            // Reconstruct values from difference arrays
+            let mut curr_cov_long = 0;
+            let mut curr_cov_short = 0;
+            let mut curr_wps_long = 0;
+            let mut curr_wps_short = 0;
+            
+            // let len = (region.end - region.start + 1) as usize; // Already calc'd above
+            let mut rows = Vec::with_capacity(len);
+            let mut total_cov = 0;
+            
+            for j in 0..len {
+                curr_cov_long += acc.cov_long[j];
+                curr_cov_short += acc.cov_short[j];
+                curr_wps_long += acc.wps_long[j];
+                curr_wps_short += acc.wps_short[j];
+                
+                total_cov += curr_cov_long + curr_cov_short;
+                
+                let wps_l = curr_wps_long;
+                let wps_s = curr_wps_short;
+                
+                let ratio = if wps_s != 0 {
+                    wps_l as f64 / wps_s.abs() as f64
+                } else if wps_l != 0 {
+                    wps_l as f64
+                } else {
+                    0.0
+                };
+                
+                 rows.push(WpsRow {
+                    gene_id: region.id.clone(),
+                    chrom: region.chrom.clone(),
+                    pos: region.start + j as u64,
+                    cov_long: curr_cov_long as u32,
+                    cov_short: curr_cov_short as u32,
+                    wps_long: wps_l,
+                    wps_short: wps_s,
+                    wps_ratio: ratio,
+                    wps_long_norm: wps_l as f64 / norm_factor,
+                    wps_short_norm: wps_s as f64 / norm_factor,
+                    wps_ratio_norm: ratio / norm_factor,
+                });
             }
             
-            // 2. Starts (ends)
-            if f_start_1 >= r_start && f_start_1 <= r_end {
-                start_arr[(f_start_1 - r_start) as usize] += 1;
-            }
-            if f_end_1 >= r_start && f_end_1 <= r_end {
-                start_arr[(f_end_1 - r_start) as usize] += 1;
+            // Skip empty if requested (double check)
+            if !empty && total_cov == 0 {
+                continue;
             }
             
-            // 3. WPS
-            // gcount (spanning): window [k-P, k+P] inside read
-            // Valid range for k (relative to read): [f_start_1 + P, f_end_1 - P]
-            if (f_end_1 - f_start_1) >= (2 * protection as u64) {
-                 let g_start = f_start_1 + protection as u64;
-                 let g_end = f_end_1 - protection as u64;
-                 
-                 let g_ov_start = r_start.max(g_start);
-                 let g_ov_end = r_end.min(g_end);
-                 
-                 if g_ov_start <= g_ov_end {
-                     let s = (g_ov_start - r_start) as usize;
-                     let e = (g_ov_end - r_start + 1) as usize;
-                     for i in s..e { gcount_arr[i] += 1; }
-                 }
+            if region.strand == "-" {
+                rows.reverse();
             }
-            
-            // total (overlapping): window [k-P, k+P] overlaps read
-            // Valid range for k: [f_start_1 - P, f_end_1 + P]
-            // Note: f_start_1 - P might be < 1.
-            let t_start = f_start_1.saturating_sub(protection as u64);
-            let t_end = f_end_1 + protection as u64;
-            
-            let t_ov_start = r_start.max(t_start);
-            let t_ov_end = r_end.min(t_end);
-            
-            if t_ov_start <= t_ov_end {
-                let s = (t_ov_start - r_start) as usize;
-                let e = (t_ov_end - r_start + 1) as usize;
-                for i in s..e { total_arr[i] += 1; }
-            }
-        }
-        
-        // Compute WPS
-        let mut wps_arr = Vec::with_capacity(length);
-        for i in 0..length {
-            let val = 2 * (gcount_arr[i] as i32) - (total_arr[i] as i32);
-            wps_arr.push(val);
-        }
-        
-        // Write logic
-        // Skip empty?
-        let total_cov: u32 = cov_arr.iter().sum();
-        if total_cov == 0 && !empty {
-            return 0;
-        }
-        
-        // Prepare output data
-        struct Row {
-            pos: u64,
-            cov: u32,
-            starts: u32,
-            wps: i32,
-            wps_norm: f64,
-        }
-        
-        let mut rows = Vec::with_capacity(length);
-        for i in 0..length {
-            let wps_norm = if let Some(total) = total_fragments {
-                wps_arr[i] as f64 / (total as f64 / 1_000_000.0)
-            } else {
-                0.0
-            };
-            
-            rows.push(Row {
-                pos: r_start + i as u64,
-                cov: cov_arr[i],
-                starts: start_arr[i],
-                wps: wps_arr[i],
-                wps_norm,
-            });
-        }
-        
-        // Handle strand: if "-", reverse rows
-        if region.strand == "-" {
-            rows.reverse();
-        }
-        
-        // Write file
-        // Pattern: file_stem.id.WPS.tsv.gz
-        let filename = format!("{}.{}.WPS.tsv.gz", file_stem, region.id);
-        let path = out.join(filename);
-        
-        if let Ok(file_out) = File::create(&path) {
-            let mut gz = GzEncoder::new(file_out, Compression::default());
             
             for row in rows {
-                if let Some(_) = total_fragments {
-                    writeln!(gz, "{}\t{}\t{}\t{}\t{}\t{:.6}", region.chrom, row.pos, row.cov, row.starts, row.wps, row.wps_norm).ok();
-                } else {
-                    writeln!(gz, "{}\t{}\t{}\t{}\t{}", region.chrom, row.pos, row.cov, row.starts, row.wps).ok();
-                }
+                writeln!(encoder, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.4}\t{:.6}\t{:.6}\t{:.6}", 
+                    row.gene_id, row.chrom, row.pos, 
+                    row.cov_long, row.cov_short,
+                    row.wps_long, row.wps_short, row.wps_ratio,
+                    row.wps_long_norm, row.wps_short_norm, row.wps_ratio_norm)?;
             }
-            gz.finish().ok();
-        } else {
-             return 0; // Error creating file
         }
         
-        1 // Processed
-    }).sum();
-    
-    Ok(processed_count)
+        encoder.finish()?;
+        Ok(())
+    }
 }
+
+impl FragmentConsumer for WpsConsumer {
+    fn name(&self) -> &str {
+        "WPS"
+    }
+
+    fn consume(&mut self, fragment: &crate::bed::Fragment) {
+        if let Some(tree) = self.trees.get(&fragment.chrom_id) {
+            let start = fragment.start as u32;
+            let end = fragment.end as u32;
+            let end_closed = if end > start { end - 1 } else { start };
+            
+            // Collect matches first to avoid concurrent borrow of self
+            let mut matches: Vec<usize> = Vec::new();
+            tree.query(start as i32, end_closed as i32, |node| {
+                matches.push(*node.metadata);
+            });
+            
+            // Now update accumulators
+            for region_idx in matches {
+                // Lazy allocation + Get mutable reference
+                let acc = self.accumulators.entry(region_idx).or_insert_with(|| {
+                     let region = &self.regions[region_idx];
+                     let len = (region.end - region.start + 1) as usize;
+                     RegionAccumulator::new(len)
+                });
+
+                let region = &self.regions[region_idx];
+                let r_start = region.start as i64;
+                // Fragment coords relative to region
+                let f_start = (fragment.start + 1) as i64 - r_start;
+                let f_end = fragment.end as i64 - r_start; // exclusive
+                
+                // Parameters
+                let is_long = fragment.length >= 120 && fragment.length <= 180;
+                let is_short = fragment.length >= 35 && fragment.length <= 80;
+                
+                if is_long {
+                     // Coverage: [start, end)
+                     RegionAccumulator::add_range(&mut acc.cov_long, f_start, f_end, 1);
+                     
+                     // WPS Long: P=60
+                     let p = 60;
+                     RegionAccumulator::add_range(&mut acc.wps_long, f_start + p, f_end - p + 1, 1);
+                     RegionAccumulator::add_range(&mut acc.wps_long, f_start - p, f_start + p, -1);
+                     RegionAccumulator::add_range(&mut acc.wps_long, f_end - p + 1, f_end + p + 1, -1);
+
+                } else if is_short {
+                     RegionAccumulator::add_range(&mut acc.cov_short, f_start, f_end, 1);
+                     
+                     let p = 8;
+                     RegionAccumulator::add_range(&mut acc.wps_short, f_start + p, f_end - p + 1, 1);
+                     RegionAccumulator::add_range(&mut acc.wps_short, f_start - p, f_start + p, -1);
+                     RegionAccumulator::add_range(&mut acc.wps_short, f_end - p + 1, f_end + p + 1, -1);
+                }
+            }
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        for (idx, other_acc) in other.accumulators {
+            match self.accumulators.entry(idx) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().merge(&other_acc);
+                },
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(other_acc);
+                }
+            }
+        }
+    }
+}
+
+

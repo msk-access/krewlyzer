@@ -1,140 +1,112 @@
+"""
+Orientation-aware cfDNA Fragmentation (OCF) calculation.
+
+Calculates OCF features for a single sample.
+Uses Rust backend for accelerated computation.
+"""
+
 import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import pysam
-import pandas as pd
-from collections import defaultdict
-from functools import partial
+
 from rich.console import Console
 from rich.logging import RichHandler
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
 
-console = Console()
+console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("ocf")
 
-
-def calc_ocf(bedgz_file: Path, ocr_file: Path, output_dir: Path) -> None:
-    """
-    Calculate OCF for a single .bed.gz file and OCR region file.
-    Output is per-region .sync.end files and a summary all.ocf.csv.
-    """
-    try:
-        tbx = pysam.TabixFile(str(bedgz_file))
-        regions = pd.read_csv(ocr_file, sep="\t", header=None, names=["chr", "start", "end", "description"])
-        leftPOS = defaultdict(partial(defaultdict, int))
-        rightPOS = defaultdict(partial(defaultdict, int))
-        total = defaultdict(lambda: [0, 0])
-        for _, region in regions.iterrows():
-            region_Chr, region_Start, region_End, region_Label = (
-                region["chr"], region["start"], region["end"], region["description"])
-            try:
-                fetched_reads = tbx.fetch(region_Chr, region_Start, region_End)
-            except ValueError:
-                continue
-            for row in fetched_reads:
-                tmp_row = row.split()
-                rstart = int(tmp_row[1])
-                rend = int(tmp_row[2])
-                if rstart >= region_Start:
-                    s = rstart - region_Start
-                    leftPOS[region_Label][s] += 1
-                    total[region_Label][0] += 1
-                if rend <= region_End:
-                    e = rend - region_Start + 1
-                    rightPOS[region_Label][e] += 1
-                    total[region_Label][1] += 1
-        Labels = []
-        ocf = []
-        outputfile = output_dir / 'all.ocf.csv'
-        for label in total.keys():
-            output = output_dir / f'{label}.sync.end'
-            Labels.append(label)
-            le = leftPOS[label]
-            re = rightPOS[label]
-            ts = total[label][0] / 10000 if total[label][0] else 1
-            te = total[label][1] / 10000 if total[label][1] else 1
-            num = 2000
-            with open(output, 'w') as output_write:
-                for k in range(num):
-                    l = le[k]
-                    r = re[k]
-                    output_write.write(
-                        f"{k - 1000}\t{l}\t{l / ts}\t{r}\t{r / te}\n")
-            # OCF calculation
-            with open(output, 'r') as o:
-                peak = 60
-                bin = 10
-                trueends = 0
-                background = 0
-                for line in o.readlines():
-                    loc, left, Left, right, Right = line.split()
-                    loc = int(loc)
-                    if -peak - bin <= loc <= -peak + bin:
-                        trueends += float(Right)
-                        background += float(Left)
-                    elif peak - bin <= loc <= peak + bin:
-                        trueends += float(Left)
-                        background += float(Right)
-                ocf.append(trueends - background)
-        ocf_df = pd.DataFrame({"tissue": Labels, "OCF": ocf})
-        ocf_df.to_csv(outputfile, sep="\t", index=None)
-        logger.info(f"OCF calculation complete for {bedgz_file}. Results in {output_dir}.")
-    except Exception as e:
-        logger.error(f"Fatal error in calc_ocf: {e}")
-        raise typer.Exit(1)
-
-
-def _run_ocf_file(bedgz_file, output_dir, ocr_input):
-    """Module-level worker function for parallel OCF calculation."""
-    from pathlib import Path
-    sample_dir = Path(output_dir) / Path(bedgz_file).stem.replace('.bed', '')
-    sample_dir.mkdir(exist_ok=True)
-    calc_ocf(Path(bedgz_file), Path(ocr_input), sample_dir)
-    return str(sample_dir)
+# Rust backend is required
+import krewlyzer_core
 
 
 def ocf(
-    bedgz_path: Path = typer.Argument(..., help="Folder containing .bed.gz files (should be the output directory from motif.py)"),
-    ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin region BED file (default: packaged tissue file)"),
-    output: Path = typer.Option(..., "--output", "-o", help="Output folder for results"),
-    threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
-) -> None:
+    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files (default: derived from input filename)"),
+    ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin regions file"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+):
     """
-    Calculate orientation-aware cfDNA fragmentation (OCF) features for all .bed.gz files in a folder.
+    Calculate Orientation-aware cfDNA Fragmentation (OCF) features for a single sample.
+    
+    Input: .bed.gz file from extract step
+    Output: {sample}.OCF.csv (summary) and {sample}.OCF.sync.tsv (detailed sync data)
     """
-    # Input checks
-    if not bedgz_path.exists():
-        logger.error(f"Input directory not found: {bedgz_path}")
+    # Configure Rust thread pool
+    if threads > 0:
+        try:
+            krewlyzer_core.configure_threads(threads)
+            logger.info(f"Configured {threads} threads for parallel processing")
+        except Exception as e:
+            logger.warning(f"Could not configure threads: {e}")
+    
+    # Input validation
+    if not bedgz_input.exists():
+        logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
-    if ocr_input and not ocr_input.exists():
-        logger.error(f"OCR region BED file not found: {ocr_input}")
+    
+    if not str(bedgz_input).endswith('.bed.gz'):
+        logger.error(f"Input must be a .bed.gz file: {bedgz_input}")
         raise typer.Exit(1)
-    try:
-        output.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        logger.error(f"Could not create output directory {output}: {e}")
-        raise typer.Exit(1)
-    # Set default OCR file if not provided
+    
+    # Default OCR file
     if ocr_input is None:
         pkg_dir = Path(__file__).parent
-        ocr_input = pkg_dir / "data/OpenChromatinRegion/7specificTissue.all.OC.bed"
-    bedgz_files = [f for f in Path(bedgz_path).glob("*.bed.gz")]
-    output = Path(output)
+        ocr_input = pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
+        logger.info(f"Using default OCR file: {ocr_input}")
+    
+    if not ocr_input.exists():
+        logger.error(f"OCR file not found: {ocr_input}")
+        raise typer.Exit(1)
+    
+    # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
-    worker = partial(_run_ocf_file, output_dir=str(output), ocr_input=str(ocr_input))
+    # Derive sample name (use provided or derive from input filename)
+    if sample_name is None:
+        sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
-    with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(worker, str(bedgz_file)): bedgz_file for bedgz_file in bedgz_files}
-        for future in as_completed(futures):
-            bedgz_file = futures[future]
-            try:
-                result = future.result()
-                logger.info(f"OCF calculated: {result}")
-            except Exception as exc:
-                logger.error(f"OCF calculation failed for {bedgz_file}: {exc}")
-    logger.info(f"OCF features calculated for {len(bedgz_files)} files.")
+    # Use a subdirectory for Rust output to avoid collisions/hardcoded names
+    # Rust writes 'all.ocf.csv' and 'all.sync.tsv'
+    sample_dir = output / sample_name
+    sample_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        logger.info(f"Processing {bedgz_input.name}")
+        
+        # Call Rust backend
+        krewlyzer_core.ocf.calculate_ocf(
+            str(bedgz_input),
+            str(ocr_input),
+            str(sample_dir)
+        )
+        
+        # Rename/Move files to krewlyzer standard: {output}/{sample}.{EXT}
+        import shutil
+        
+        # Rust hardcoded outputs
+        rust_ocf = sample_dir / "all.ocf.csv"
+        rust_sync = sample_dir / "all.sync.tsv"
+        
+        # Standardized outputs
+        final_ocf = output / f"{sample_name}.OCF.csv"
+        final_sync = output / f"{sample_name}.OCF.sync.tsv"
+        
+        if rust_ocf.exists():
+            shutil.move(str(rust_ocf), str(final_ocf))
+        if rust_sync.exists():
+            shutil.move(str(rust_sync), str(final_sync))
+            
+        # Clean up temporary sample dir if empty
+        try:
+            sample_dir.rmdir()
+        except OSError:
+            pass # Directory not empty or other error, leave it
+        
+        logger.info(f"OCF complete: {final_ocf}, {final_sync}")
 
+    except Exception as e:
+        logger.error(f"OCF calculation failed: {e}")
+        raise typer.Exit(1)
