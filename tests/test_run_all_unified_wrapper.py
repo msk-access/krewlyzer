@@ -27,7 +27,9 @@ def create_dummy_data(temp_dir):
     pysam.index(str(bam)) # Create index (requires valid BAM)
     
     ref = temp_path / "genome.fa"
-    ref.touch()
+    with open(ref, "w") as f:
+        f.write(">chr1\n" + "N" * 100000 + "\n")
+    pysam.faidx(str(ref))
     
     # 2. Dummy Output Dir
     out_dir = temp_path / "output"
