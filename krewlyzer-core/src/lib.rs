@@ -69,7 +69,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
 
     // FSD submodule
-    let fsd_mod = PyModule::new_bound(m.py(), "fsd")?;
+    let fsd_mod = PyModule::new(m.py(), "fsd")?;
     fsd_mod.add_function(wrap_pyfunction!(fsd::calculate_fsd, &fsd_mod)?)?;
     m.add_submodule(&fsd_mod)?;
 
@@ -94,7 +94,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_submodule(&uxm_mod)?;
     
     // Unified Engine (Extract+Motif)
-    let extract_motif_mod = PyModule::new_bound(m.py(), "extract_motif")?;
+    let extract_motif_mod = PyModule::new(m.py(), "extract_motif")?;
     extract_motif_mod.add_function(wrap_pyfunction!(extract_motif::process_bam_parallel, &extract_motif_mod)?)?;
     m.add_submodule(&extract_motif_mod)?;
     

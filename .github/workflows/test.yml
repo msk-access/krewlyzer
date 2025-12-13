@@ -37,6 +37,12 @@ jobs:
           source .venv/bin/activate
           uv pip install build
           python -m build
+      - name: Verify Wheel
+        run: |
+          source .venv/bin/activate
+          pip install dist/*.whl
+          python -c "import krewlyzer; print('krewlyzer imported successfully')"
+          krewlyzer --help
       - name: Build Docker Image (Dry Run)
         run: |
           docker build .
