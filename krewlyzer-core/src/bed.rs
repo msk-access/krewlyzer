@@ -2,7 +2,7 @@
 //!
 //! Handles tabix-indexed BED.gz files for fragment analysis.
 
-use rayon::prelude::*;
+
 
 /// Count fragments in a region by size category
 #[derive(Debug, Default, Clone)]
