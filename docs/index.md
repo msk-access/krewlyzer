@@ -30,7 +30,7 @@ Krewlyzer draws inspiration from [cfDNAFE](https://github.com/Cuiwanxin1998/cfDN
 ```bash
 docker pull ghcr.io/msk-access/krewlyzer:latest
 # Example usage:
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest motif /data/sample.bam -g /data/hg19.fa -o /data/motif_out
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest run-all /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
 ```
 
 ### With uv / pip

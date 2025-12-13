@@ -1,199 +1,96 @@
+"""
+Fragment-level Methylation analysis (UXM) calculation.
+
+Calculates UXM features for a single sample.
+Uses Rust backend for accelerated computation.
+"""
+
 import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import pysam
 
-import numpy as np
 from rich.console import Console
 from rich.logging import RichHandler
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import os
 
-console = Console()
+console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
 logger = logging.getLogger("uxm")
 
-def calc_uxm(
-    bam_file: Path,
-    mark_file: Path,
-    output_file: Path,
-    map_quality: int,
-    min_cpg: int,
-    methy_threshold: float,
-    unmethy_threshold: float,
-    pe_type: str = "PE"
-) -> None:
-    """
-    Calculate UXM fragment-level methylation for a single BAM and marker file.
-    Output is a .UXM.tsv file with region, U, X, M proportions.
-    """
-    try:
-        bai = str(bam_file) + ".bai"
-        if not os.path.exists(bai):
-            pysam.sort("-o", str(bam_file), str(bam_file))
-            pysam.index(str(bam_file))
-            logger.warning(f"Index file {bai} did not exist. Sorted and indexed BAM.")
-        input_file = pysam.AlignmentFile(str(bam_file))
-        marks = pybedtools.BedTool(str(mark_file))
-        res = []
-        for mark in marks:
-            region = f"{mark.chrom}:{mark.start}-{mark.end}"
-            try:
-                input_file.fetch(mark.chrom, mark.start, mark.end)
-            except ValueError:
-                res.append(f"{region}\t0\t0\t0")
-                continue
-            Ufragment = 0
-            Xfragment = 0
-            Mfragment = 0
-            if pe_type == "PE":
-                from krewlyzer.helpers import read_pair_generator
-                region_string = f"{mark.chrom}:{mark.start}-{mark.end}"
-                for read1, read2 in read_pair_generator(input_file, region_string):
-                    if read1 is None or read2 is None:
-                        continue
-                    if read1.mapping_quality < map_quality or read2.mapping_quality < map_quality:
-                        continue
-                    try:
-                        m1 = read1.get_tag("XM")
-                        m2 = read2.get_tag("XM")
-                    except KeyError:
-                        continue
-                    read1Start = read1.reference_start
-                    read1End = read1.reference_end
-                    read2Start = read2.reference_start
-                    read2End = read2.reference_end
-                    # cfDNAFE logic for overlap
-                    if not read1.is_reverse:  # read1 is forward, read2 is reverse
-                        if read2Start < read1End:
-                            overlap = read1End - read2Start
-                            num_methylated = m1.count("Z") + m2[overlap:].count("Z")
-                            num_unmethylated = m1.count("z") + m2[overlap:].count("z")
-                        else:
-                            num_methylated = m1.count("Z") + m2.count("Z")
-                            num_unmethylated = m1.count("z") + m2.count("z")
-                    else:  # read1 is reverse, read2 is forward
-                        if read1Start < read2End:
-                            overlap = read2End - read1Start
-                            num_methylated = m2.count("Z") + m1[overlap:].count("Z")
-                            num_unmethylated = m2.count("z") + m1[overlap:].count("z")
-                        else:
-                            num_methylated = m1.count("Z") + m2.count("Z")
-                            num_unmethylated = m1.count("z") + m2.count("z")
-                    if num_methylated + num_unmethylated < min_cpg:
-                        continue
-                    ratio = num_methylated / (num_methylated + num_unmethylated)
-                    if ratio >= methy_threshold:
-                        Mfragment += 1
-                    elif ratio <= unmethy_threshold:
-                        Ufragment += 1
-                    else:
-                        Xfragment += 1
-            elif pe_type == "SE":
-                for read in input_file.fetch(mark.chrom, mark.start, mark.end):
-                    if read.mapping_quality < map_quality:
-                        continue
-                    try:
-                        m = read.get_tag("XM")
-                    except KeyError:
-                        continue
-                    num_methylated = m.count("Z")
-                    num_unmethylated = m.count("z")
-                    if num_methylated + num_unmethylated < min_cpg:
-                        continue
-                    ratio = num_methylated / (num_methylated + num_unmethylated)
-                    if ratio >= methy_threshold:
-                        Mfragment += 1
-                    elif ratio <= unmethy_threshold:
-                        Ufragment += 1
-                    else:
-                        Xfragment += 1
-            else:
-                logger.error("type must be SE or PE")
-                raise typer.Exit(1)
-            total = Mfragment + Ufragment + Xfragment
-            if total == 0:
-                res.append(f"{region}\t0\t0\t0")
-            else:
-                tmp_array = np.zeros(3)
-                tmp_array[0] = Ufragment / total
-                tmp_array[1] = Xfragment / total
-                tmp_array[2] = Mfragment / total
-                res.append(f"{region}\t" + "\t".join(map(str, tmp_array)))
-        with open(output_file, 'w') as f:
-            f.write('region\tU\tX\tM\n')
-            for i in res:
-                f.write(i + '\n')
-        logger.info(f"UXM calculation complete for {bam_file}. Results in {output_file}.")
-    except Exception as e:
-        logger.error(f"Fatal error in calc_uxm: {e}")
-        raise typer.Exit(1)
-
-def _run_uxm_file(bam_file, output_dir, mark_input, map_quality, min_cpg, methy_threshold, unmethy_threshold, pe_type):
-    """Module-level worker function for parallel UXM calculation."""
-    from pathlib import Path
-    sample_prefix = Path(bam_file).stem.replace('.bam', '')
-    output_file = Path(output_dir) / f"{sample_prefix}.UXM.tsv"
-    calc_uxm(
-        Path(bam_file),
-        Path(mark_input),
-        output_file,
-        map_quality,
-        min_cpg,
-        methy_threshold,
-        unmethy_threshold,
-        pe_type
-    )
-    return str(output_file)
+# Rust backend is required
+import krewlyzer_core
 
 
 def uxm(
-    bam_path: Path = typer.Argument(..., help="Folder containing .bam files for UXM calculation."),
-    mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Marker BED file (default: packaged atlas)", show_default=False),
-    output: Path = typer.Option(..., "--output", "-o", help="Output folder for results"),
-    map_quality: int = typer.Option(30, "--map-quality", "-q", help="Minimum mapping quality"),
-    min_cpg: int = typer.Option(4, "--min-cpg", "-c", help="Minimum CpG count per fragment"),
-    methy_threshold: float = typer.Option(0.75, "--methy-threshold", "-tM", help="Methylation threshold for M fragments"),
-    unmethy_threshold: float = typer.Option(0.25, "--unmethy-threshold", "-tU", help="Unmethylation threshold for U fragments"),
-    pe_type: str = typer.Option("SE", "--type", help="Fragment type: SE or PE (default: SE)"),
-    threads: int = typer.Option(1, "--threads", "-t", help="Number of parallel processes (default: 1)")
-) -> None:
+    bam_input: Path = typer.Argument(..., help="Input bisulfite BAM file"),
+    output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
+    mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Path to genomic marker file"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+):
     """
-    Calculate fragment-level methylation (UXM) features for all BAM files in a folder.
+    Calculate Fragment-level Methylation (UXM) features for a single sample.
+    
+    Input: Bisulfite BAM file
+    Output: {sample}.UXM.tsv file with fragment-level methylation scores
     """
-    # Input checks
-    if not bam_path.exists():
-        logger.error(f"Input BAM directory not found: {bam_path}")
+    # Configure Rust thread pool
+    if threads > 0:
+        try:
+            krewlyzer_core.configure_threads(threads)
+            logger.info(f"Configured {threads} threads for parallel processing")
+        except Exception as e:
+            logger.warning(f"Could not configure threads: {e}")
+    
+    # Input validation
+    if not bam_input.exists():
+        logger.error(f"Input BAM not found: {bam_input}")
         raise typer.Exit(1)
-    if mark_input and not mark_input.exists():
-        logger.error(f"Marker BED file not found: {mark_input}")
+    
+    if not str(bam_input).endswith('.bam'):
+        logger.error(f"Input must be a .bam file: {bam_input}")
         raise typer.Exit(1)
-    try:
-        output.mkdir(parents=True, exist_ok=True)
-    except Exception as e:
-        logger.error(f"Could not create output directory {output}: {e}")
-        raise typer.Exit(1)
+    
+    # Default marker file
     if mark_input is None:
         pkg_dir = Path(__file__).parent
-        mark_input = pkg_dir / "data/MethMark/Atlas.U25.l4.hg19.bed"
-    bam_files = [f for f in Path(bam_path).glob("*.bam")]
-    output = Path(output)
+        mark_input = pkg_dir / "data" / "methylation-markers" / "uxm_markers_hg19.bed"
+        if mark_input.exists():
+            logger.info(f"Using default marker file: {mark_input}")
+        else:
+            logger.error("No default marker file found. Please provide --mark-input")
+            raise typer.Exit(1)
+    
+    if not mark_input.exists():
+        logger.error(f"Marker file not found: {mark_input}")
+        raise typer.Exit(1)
+    
+    # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
-    from functools import partial
-    worker = partial(_run_uxm_file, output_dir=str(output), mark_input=str(mark_input),
-                     map_quality=map_quality, min_cpg=min_cpg, methy_threshold=methy_threshold,
-                     unmethy_threshold=unmethy_threshold, pe_type=pe_type)
+    # Derive sample name (use provided or derive from input filename)
+    if sample_name is None:
+        sample_name = bam_input.stem.replace('.bam', '')
     
-    with ProcessPoolExecutor(max_workers=threads) as executor:
-        futures = {executor.submit(worker, str(bam_file)): bam_file for bam_file in bam_files}
-        for future in as_completed(futures):
-            bam_file = futures[future]
-            try:
-                result = future.result()
-                logger.info(f"UXM calculated: {result}")
-            except Exception as exc:
-                logger.error(f"UXM calculation failed for {bam_file}: {exc}")
-    logger.info(f"UXM features calculated for {len(bam_files)} files.")
+    output_file = output / f"{sample_name}.UXM.tsv"
+    
+    try:
+        logger.info(f"Processing {bam_input.name}")
+        
+        # Call Rust backend with all parameters
+        krewlyzer_core.uxm.calculate_uxm(
+            str(bam_input),
+            str(mark_input),
+            str(output_file),
+            20,    # map_quality
+            1,     # min_cpg
+            0.5,   # methy_threshold
+            0.5,   # unmethy_threshold
+            "SE"   # pe_type (single-end default)
+        )
+        
+        logger.info(f"UXM complete: {output_file}")
 
+    except Exception as e:
+        logger.error(f"UXM calculation failed: {e}")
+        raise typer.Exit(1)

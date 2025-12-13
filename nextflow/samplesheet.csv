@@ -1,0 +1,2 @@
+sample,bam,meth_bam,vcf,bed
+test_sample,/path/to/sample.bam,,/path/to/variants.vcf,
