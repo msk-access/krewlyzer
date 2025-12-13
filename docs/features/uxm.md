@@ -17,6 +17,9 @@ krewlyzer uxm /path/to/bam_folder --output uxm_out [options]
 krewlyzer uxm /path/to/bam_folder --output uxm_out --type PE [options]
 ```
 
+## Output
+Output: `{sample}.UXM.tsv`
+
 ## Options
 - `--mark-input`, `-m`: Marker BED file (default: `data/MethMark/Atlas.U25.l4.hg19.bed`)
 - `--map-quality`, `-q`: Minimum mapping quality (default: 30)

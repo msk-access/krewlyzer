@@ -1,0 +1,49 @@
+[package]
+name = "krewlyzer-core"
+version = "0.2.0"
+edition = "2021"
+authors = ["MSK-ACCESS Team"]
+description = "High-performance Rust backend for krewlyzer cfDNA analysis"
+license = "MIT"
+
+[lib]
+name = "krewlyzer_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# PyO3 for Python bindings
+pyo3 = { version = "0.23", features = ["extension-module"] }
+
+# noodles for BED/BGZF/Tabix (FSD, OCF, FSC, WPS)
+noodles = { version = "0.103", features = ["bed", "tabix", "bgzf", "core"] }
+
+# rust-htslib for BAM operations (mFSD, UXM, Motif)
+rust-htslib = "0.51"
+
+# Parallelism
+rayon = "1.10"
+num_cpus = "1.16"
+
+# Additional dependencies
+bstr = "1.10"
+thiserror = "2.0"
+anyhow = "1.0"
+flate2 = "1.0"
+log = "0.4"
+pyo3-log = "0.12"
+indicatif = "0.17"
+
+
+# Numerical
+ndarray = "0.16"
+numpy = "0.23"  # Matching PyO3 0.23
+statrs = "0.17"
+
+# Interval Trees
+coitrees = "0.4"
+
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

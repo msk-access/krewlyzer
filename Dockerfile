@@ -4,6 +4,11 @@ FROM python:3.10-slim
 # Install OS-level dependencies for pybedtools, pysam, skmisc, numpy, etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    git \
+    pkg-config \
+    gfortran \
+    clang \
+    libclang-dev \
     zlib1g-dev \
     libbz2-dev \
     liblzma-dev \
@@ -17,11 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libxml2-dev \
     libxslt1-dev \
-
-    gfortran \
     libopenblas-dev \
     liblapack-dev \
+    curl \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust toolchain
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Install uv (fast Python package/dependency manager)
 RUN pip install --no-cache-dir uv
@@ -39,7 +47,7 @@ RUN uv venv .venv && \
 
 # Set environment variables for uv venv activation
 ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app"
 
 # Default command: show CLI help
-ENTRYPOINT ["krewlyzer"]
-CMD ["--help"]
+CMD ["krewlyzer", "--help"]

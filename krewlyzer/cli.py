@@ -21,6 +21,7 @@ def set_log_level(log_level: str = typer.Option("INFO", "--log-level", help="Log
 app = typer.Typer(help="krewlyzer: A comprehensive toolkit for ctDNA fragmentomics analysis.")
 
 from krewlyzer.motif import motif
+from krewlyzer.extract import extract
 from krewlyzer.fsc import fsc
 from krewlyzer.fsr import fsr
 from krewlyzer.fsd import fsd
@@ -31,6 +32,7 @@ from krewlyzer.mfsd import mfsd
 from krewlyzer.wrapper import run_all
 from krewlyzer import __version__
 
+app.command()(extract)
 app.command()(motif)
 app.command()(fsc)
 app.command()(fsr)
