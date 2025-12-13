@@ -51,6 +51,8 @@ def run_all(
     # Optional overrides
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms file for FSD"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
+    ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
+    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS"),
     
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
@@ -239,11 +241,11 @@ def run_all(
     if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
     # WPS Genes
-    res_wps = pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
+    res_wps = wps_file if wps_file else pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
     if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
 
     # OCF Regions
-    res_ocf = pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
+    res_ocf = ocr_file if ocr_file else pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
     if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
 
     # Define Outputs

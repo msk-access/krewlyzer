@@ -60,8 +60,18 @@ def create_dummy_data(temp_dir):
     arms = temp_path / "arms.bed"
     with open(arms, "w") as f:
         f.write("chr1\t0\t10000\tArm1\n")
-        
+
+    # OCF Regions
+    ocr = temp_path / "ocr.bed"
+    with open(ocr, "w") as f:
+        f.write("chr1\t100\t200\tTissueA\n")
+
     # WPS Genes (TranscriptAnno) - TSV
+    wps = temp_path / "wps.tsv"
+    with open(wps, "w") as f:
+        f.write("Gene1\tchr1\t1000\t2000\t+\n")
+        
+    return bam, ref, out_dir, bins, arms, ocr, wps
     # The wrapper uses default path resolved relative to package.
     # We can't easily inject custom WPS resource via CLI arguments for `run-all` 
     # because `run-all` doesn't expose `tsv_input` for WPS!
@@ -71,17 +81,14 @@ def create_dummy_data(temp_dir):
     # If I run this test, it will look for data in `krewlyzer/data/...`.
     # Those files SHOULD exist in the repo.
     # If they are missing in the environment, the test will fail.
-    # BUT, I can override `bin_input` and `arms_file`.
-    # I CANNOT override WPS and OCF inputs via `run-all` CLI arguments (unless I add them).
-    
     # Validating existence of default resources in the environment might be tricky if not installed.
     # However, since I am running in the repo, `krewlyzer/data` should be accessible relative to `krewlyzer/wrapper.py`.
     
-    return bam, ref, out_dir, bins, arms
+    return bam, ref, out_dir, bins, arms, ocr, wps
 
 def test_run_all_unified():
     with tempfile.TemporaryDirectory() as temp_dir:
-        bam, ref, out_dir, bins, arms = create_dummy_data(temp_dir)
+        bam, ref, out_dir, bins, arms, ocr, wps = create_dummy_data(temp_dir)
         
         print(f"Testing in {temp_dir}")
         
@@ -93,6 +100,8 @@ def test_run_all_unified():
                 output=out_dir,
                 bin_input=bins,
                 arms_file=arms,
+                ocr_file=ocr,
+                wps_file=wps,
                 sample_name="test_sample",
                 mapq=20,
                 minlen=65,
@@ -115,13 +124,14 @@ def test_run_all_unified():
             
         # Verify Outputs
         out_dir = Path(out_dir)
-        fsc_out = out_dir / "test_sample.FSC.txt"
+        # Note: FSC output standardization to .tsv renamed these:
+        fsc_out = out_dir / "test_sample.FSC.tsv"
         assert fsc_out.exists(), "FSC output missing"
         
-        fsr_out = out_dir / "test_sample.FSR.txt"
+        fsr_out = out_dir / "test_sample.FSR.tsv"
         assert fsr_out.exists(), "FSR output missing"
         
-        fsd_out = out_dir / "test_sample.FSD.txt"
+        fsd_out = out_dir / "test_sample.FSD.tsv"
         assert fsd_out.exists(), "FSD output missing"
         
 if __name__ == "__main__":
