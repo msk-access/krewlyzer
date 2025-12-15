@@ -145,7 +145,7 @@ impl FragmentConsumer for FsdConsumer {
                  let end_closed = if fragment.end > fragment.start { (fragment.end - 1) as i32 } else { start };
                  
                  tree.query(start, end_closed, |node| {
-                     let idx = node.metadata;
+                     let idx = *node.metadata;
                      // Safety: idx comes from initialization which matches histograms size
                      if let Some(hist) = self.histograms.get_mut(idx) {
                          hist[bin_idx] += 1;
