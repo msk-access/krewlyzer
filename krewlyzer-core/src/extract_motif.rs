@@ -316,7 +316,7 @@ pub fn process_bam_parallel(
                 if seq.len() < config.kmer { continue; }
                 
                 let mut motif_seq: Vec<u8> = Vec::new();
-                let mut genomic_coords; 
+                let genomic_coords; 
                 
                 if !record.is_reverse() {
                      for i in 0..config.kmer { motif_seq.push(seq[i]); }

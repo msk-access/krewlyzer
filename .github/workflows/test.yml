@@ -18,6 +18,7 @@ jobs:
           python-version: '3.10'
       - name: Install uv
         run: |
+          sudo apt-get update && sudo apt-get install -y gfortran clang libclang-dev
           pip install uv
       - name: Create and activate uv venv
         run: |
@@ -33,10 +34,26 @@ jobs:
           uv pip list
           python -m pytest --maxfail=3 --disable-warnings -q
       - name: Build Python Package (Dry Run)
-        run: |
-          source .venv/bin/activate
-          uv pip install build
-          python -m build
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist --sdist
+          before-script-linux: |
+            SUDO=""
+            if [ "$(id -u)" -ne 0 ] && command -v sudo &> /dev/null; then
+              SUDO="sudo"
+            fi
+            
+            if command -v yum &> /dev/null; then
+              $SUDO yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel
+            elif command -v apt-get &> /dev/null; then
+              $SUDO apt-get update && $SUDO apt-get install -y zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev
+            elif command -v apk &> /dev/null; then
+              $SUDO apk add zlib-dev bzip2-dev xz-dev curl-dev openssl-dev
+            else
+              echo "No known package manager found"
+              exit 1
+            fi
       - name: Verify Wheel
         run: |
           source .venv/bin/activate
