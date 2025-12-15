@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2025-12-15
+
+### Fixed
+- **Distribution Compatibility**: Updated release workflow to build `manylinux_2_28` wheels (compatible with RHEL 8+, Almalinux 8, etc.) instead of host-native wheels.
+- **Source Builds**: Included `clang` and `llvm-devel` dependencies in the build environment to ensure `bindgen` succeeds for `hts-sys`.
+
 ## [0.2.1] - 2025-12-15
 
 ### Fixed

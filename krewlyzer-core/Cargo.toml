@@ -1,6 +1,6 @@
 [package]
 name = "krewlyzer-core"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 authors = ["MSK-ACCESS Team"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
