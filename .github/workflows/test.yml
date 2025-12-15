@@ -41,7 +41,7 @@ jobs:
         run: |
           source .venv/bin/activate
           pip install dist/*.whl
-          python -c "import krewlyzer; print('krewlyzer imported successfully')"
+          python -c "import krewlyzer; print('Imported:', krewlyzer); print('File:', krewlyzer.__file__)"
           krewlyzer --help
       - name: Build Docker Image (Dry Run)
         run: |

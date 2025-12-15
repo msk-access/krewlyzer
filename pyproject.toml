@@ -39,4 +39,4 @@ build-backend = "maturin"
 
 [tool.maturin]
 python-source = "."
-include = ["krewlyzer-core/**/*"]
+include = ["krewlyzer-core/**/*", "krewlyzer/**/*"]
