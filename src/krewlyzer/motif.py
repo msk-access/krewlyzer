@@ -22,7 +22,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("motif")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def motif(
@@ -47,7 +47,7 @@ def motif(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -92,7 +92,7 @@ def motif(
         # We pass output_motif_prefix="enable" to trigger motif counting in Rust
         # We pass output_bed_path=None to skip writing BED (unless debugging)
         
-        fragment_count, em_counts, bpm_counts = krewlyzer_core.extract_motif.process_bam_parallel(
+        fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ
