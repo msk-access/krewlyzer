@@ -2,7 +2,7 @@
 name = "krewlyzer-core"
 version = "0.2.1"
 edition = "2021"
-authors = ["MSK-ACCESS Team"]
+authors = ["Ronak Shah (shahr2@mskcc.org)"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
 repository = "https://github.com/msk-access/krewlyzer"
 homepage = "https://github.com/msk-access/krewlyzer"
