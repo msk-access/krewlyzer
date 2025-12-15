@@ -147,7 +147,7 @@ impl FragmentConsumer for FscConsumer {
             // Query for overlapping bins
             // API takes i32
             tree.query(start as i32, end_closed as i32, |node| {
-                let bin_idx = *node.metadata;
+                let bin_idx = node.metadata;
                 // Overlap check logic:
                 // `tree.query` returns anything that overlaps.
                 // FSC logic is: read must START and END within appropriate bounds? 

@@ -327,7 +327,7 @@ impl FragmentConsumer for WpsConsumer {
             // Collect matches first to avoid concurrent borrow of self
             let mut matches: Vec<usize> = Vec::new();
             tree.query(start as i32, end_closed as i32, |node| {
-                matches.push(*node.metadata);
+                matches.push(node.metadata);
             });
             
             // Now update accumulators
