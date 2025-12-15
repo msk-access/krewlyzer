@@ -229,7 +229,7 @@ impl FragmentConsumer for OcfConsumer {
             let end_closed = if fragment.end > fragment.start { (fragment.end - 1) as i32 } else { start };
             
             tree.query(start, end_closed, |node| {
-                let region_idx = node.metadata;
+                let region_idx = node.metadata.to_owned();
                 let region = &self.region_infos[region_idx];
                 let label_stats = &mut self.stats[region.label_id];
                 
