@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.1] - 2025-12-15
+
+### Fixed
+- **Rust Compilation**: Resolved cross-platform build issues with `coitrees` metadata types (`usize` vs `&usize`) by using explicit `.to_owned()` conversion. 
+- **CI Build**: Added `gfortran`, `clang`, and `libclang-dev` to CI workflows to fix `scikit-misc` and `rust-htslib` compilation failures.
+- **Permission Errors**: CI scripts now robustly handle `sudo` permissions when installing system dependencies.
+
 ## [0.2.0] - 2025-12-12
 
 ### Added
