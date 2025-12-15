@@ -98,3 +98,11 @@ jobs:
         push: true
         tags: ghcr.io/msk-access/krewlyzer:${{ github.ref_name }},ghcr.io/msk-access/krewlyzer:latest
         platforms: linux/amd64,linux/arm64
+        annotations: |
+          org.opencontainers.image.title=krewlyzer
+          org.opencontainers.image.description=A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files
+          org.opencontainers.image.url=https://github.com/msk-access/krewlyzer
+          org.opencontainers.image.source=https://github.com/msk-access/krewlyzer
+          org.opencontainers.image.vendor=MSK-ACCESS
+          org.opencontainers.image.licenses=AGPL-3.0
+          org.opencontainers.image.version=${{ github.ref_name }}

@@ -28,6 +28,15 @@ RUN maturin build --release --out /wheels --manifest-path rust/Cargo.toml
 # ============ RUNTIME STAGE ============
 FROM python:3.10-slim AS runtime
 
+# OCI Labels for GitHub Container Registry
+LABEL org.opencontainers.image.title="krewlyzer"
+LABEL org.opencontainers.image.description="A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files"
+LABEL org.opencontainers.image.url="https://github.com/msk-access/krewlyzer"
+LABEL org.opencontainers.image.source="https://github.com/msk-access/krewlyzer"
+LABEL org.opencontainers.image.vendor="MSK-ACCESS"
+LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.authors="Ronak Shah <shahr2@mskcc.org>"
+
 # Only runtime dependencies (no build tools!)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 libssl3 zlib1g libbz2-1.0 liblzma5 && \
