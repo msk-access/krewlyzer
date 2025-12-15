@@ -33,10 +33,12 @@ jobs:
           uv pip list
           python -m pytest --maxfail=3 --disable-warnings -q
       - name: Build Python Package (Dry Run)
-        run: |
-          source .venv/bin/activate
-          uv pip install build
-          python -m build
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --out dist --sdist
+          before-script-linux: |
+            yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel
       - name: Verify Wheel
         run: |
           source .venv/bin/activate
