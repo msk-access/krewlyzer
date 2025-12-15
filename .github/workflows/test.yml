@@ -38,7 +38,16 @@ jobs:
           command: build
           args: --release --out dist --sdist
           before-script-linux: |
-            yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel
+            if command -v yum &> /dev/null; then
+              yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel
+            elif command -v apt-get &> /dev/null; then
+              apt-get update && apt-get install -y zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev
+            elif command -v apk &> /dev/null; then
+              apk add zlib-dev bzip2-dev xz-dev curl-dev openssl-dev
+            else
+              echo "No known package manager found"
+              exit 1
+            fi
       - name: Verify Wheel
         run: |
           source .venv/bin/activate
