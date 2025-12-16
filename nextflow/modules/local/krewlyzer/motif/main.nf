@@ -1,7 +1,7 @@
 process KREWLYZER_MOTIF {
     tag "$meta.id"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.2.0"
+    container "ghcr.io/msk-access/krewlyzer:0.2.3"
 
     input:
     tuple val(meta), path(bam), path(bai)

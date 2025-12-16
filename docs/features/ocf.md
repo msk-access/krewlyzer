@@ -6,7 +6,7 @@
 Computes orientation-aware cfDNA fragmentation (OCF) values in tissue-specific open chromatin regions.
 
 ## Biological Context
-OCF (Sun et al., Genome Res 2019) measures the phasing of upstream (U) and downstream (D) fragment ends in open chromatin, informing tissue-of-origin of cfDNA.
+OCF ([Sun et al., 2019](../citation.md#ocf)) measures the phasing of upstream (U) and downstream (D) fragment ends in open chromatin, informing tissue-of-origin of cfDNA.
 
 ## Usage
 ```bash
@@ -30,7 +30,31 @@ krewlyzer ocf sample.bed.gz --output output_dir/ [options]
     - **Signal**: Right ends at -60bp and Left ends at +60bp (Phased nucleosome boundaries).
     - **Background**: Left ends at -60bp and Right ends at +60bp (Unphased).
 
-## Interpretation
-- **High OCF**: Fragment ends align perfectly with nucleosome boundaries flanking the OCR, indicating the region is **open** in the tissue of origin.
-- **Low OCF**: No phasing, indicating the region is **closed**.
+## Clinical Interpretation
 
+### Healthy Plasma Baseline
+In healthy individuals, cfDNA primarily originates from:
+
+| Tissue | OCF Value |
+|--------|-----------|
+| **T-cells (hematopoietic)** | Highest |
+| **Liver** | Second highest |
+| Other tissues | Near zero |
+
+### Detecting Tumor-Derived cfDNA
+When comparing a sample to healthy plasma:
+
+| Pattern | Interpretation |
+|---------|----------------|
+| ↑ Tissue-specific OCF | Tumor shedding from that tissue |
+| ↓ T-cell OCF | Dilution of hematopoietic cfDNA by tumor DNA |
+| OCF correlates with tumor fraction | Higher ctDNA → stronger tissue signal |
+
+### Cancer-Specific Patterns
+| Cancer Type | Expected OCF Change |
+|-------------|---------------------|
+| Hepatocellular carcinoma | ↑ Liver OCF |
+| Colorectal cancer | ↑ Intestine OCF, ↓ T-cell OCF |
+| Lung cancer | ↑ Lung OCF, ↓ T-cell OCF |
+
+> **Reference:** See [Citation & Scientific Background](../citation.md#ocf) for detailed paper summary.

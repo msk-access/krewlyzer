@@ -34,10 +34,11 @@ nextflow run krewlyzer.nf --samplesheet samplesheet.csv --ref /path/to/reference
 ### Samplesheet Format (CSV)
 A CSV file with the following columns:
 ```csv
-sample,bam,meth_bam,vcf,bed
-sample1,/path/to/sample1.bam,,/path/to/sample1.vcf,
-sample2,/path/to/sample2.bam,,,
-sample3,,,,/path/to/pre_extracted.bed.gz
+sample,bam,meth_bam,vcf,bed,maf,single_sample_maf
+sample1,/path/to/sample1.bam,,/path/to/sample1.vcf,,,
+sample2,/path/to/sample2.bam,,,,/path/to/sample2.maf,true
+sample3,/path/to/sample3.bam,,,,/path/to/cohort.maf,false
+sample4,,,,/path/to/pre_extracted.bed.gz,,
 ```
 
 ### Pipeline Logic
@@ -47,8 +48,13 @@ The pipeline automatically runs specific modules based on valid input in the sam
 - **`meth_bam`**: Triggers `uxm` (Methylation) analysis. Can be run alongside `bam` or independently.
 - **`bed`**: Triggers fragment-only features (FSC, FSR, WPS, OCF, FSD). Skips extraction/motif steps. Use this for re-running analysis on already extracted fragments.
 - **`vcf`**: Used with `bam` for `mFSD` (Mutant Fragment Size Distribution) analysis.
+- **`maf`**: Multi-sample MAF file for `mFSD` analysis. The pipeline filters by `Tumor_Sample_Barcode` matching the sample ID (regex: `.*sample_id.*`).
+- **`single_sample_maf`**: Set to `true` if the MAF contains only this sample's variants (skips filtering). Set to `false` or leave empty for multi-sample MAFs.
 
-**Note on Column Headers**: The samplesheet MUST use these exact headers: `sample,bam,meth_bam,vcf,bed`. Empty fields for optional columns should be left blank (commas required).
+> [!NOTE]
+> If the filtered MAF has zero variants for a sample, MFSD is skipped with a warning.
+
+**Note on Column Headers**: The samplesheet MUST use these exact headers: `sample,bam,meth_bam,vcf,bed,maf,single_sample_maf`. Empty fields for optional columns should be left blank (commas required).
 
 ### Profiles
 - `-profile lsf`: For LSF clusters.
