@@ -37,7 +37,7 @@ LABEL org.opencontainers.image.vendor="MSK-ACCESS"
 LABEL org.opencontainers.image.licenses="AGPL-3.0"
 LABEL org.opencontainers.image.authors="Ronak Shah <shahr2@mskcc.org>"
 
-# Only runtime dependencies (no build tools!)
+# Runtime dependencies only (amd64 has pre-built wheels)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcurl4 libssl3 zlib1g libbz2-1.0 liblzma5 && \
     rm -rf /var/lib/apt/lists/*

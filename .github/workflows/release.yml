@@ -81,9 +81,6 @@ jobs:
         skip-existing: true
         verbose: true
 
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
@@ -100,7 +97,7 @@ jobs:
         context: .
         push: true
         tags: ghcr.io/msk-access/krewlyzer:${{ github.ref_name }},ghcr.io/msk-access/krewlyzer:latest
-        platforms: linux/amd64,linux/arm64
+        platforms: linux/amd64
         annotations: |
           org.opencontainers.image.title=krewlyzer
           org.opencontainers.image.description=A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files
