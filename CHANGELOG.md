@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.2] - 2025-12-15
+
+### Changed
+- **Project Structure**: Migrated to recommended maturin "src layout" for better Python/Rust separation:
+  - Python code moved from `krewlyzer/` to `src/krewlyzer/`
+  - Rust code moved from `krewlyzer-core/` to `rust/`
+  - Single `rust/Cargo.toml` (removed duplicate root `Cargo.toml`)
+  - Rust module now imports as `krewlyzer._core` (private)
+- **Dockerfile**: Rewritten as multi-stage build for smaller image size (~200MB vs ~1GB)
+- **OCI Labels**: Added container metadata for GitHub Container Registry
+
+### Fixed
+- **Distribution Compatibility**: Updated release workflow to build `manylinux_2_28` wheels (compatible with RHEL 8+, AlmaLinux 8, etc.)
+- **Source Builds**: Included `clang` and `llvm-devel` in build environment for `bindgen`/`hts-sys`
+- **Docker Build**: Added `patchelf` to maturin installation for Linux wheel building
+- **Test Imports**: Updated test files to use new `krewlyzer._core` import path
+
 ## [0.2.1] - 2025-12-15
 
 ### Fixed

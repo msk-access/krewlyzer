@@ -18,7 +18,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("fsd")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def fsd(
@@ -37,7 +37,7 @@ def fsd(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -74,7 +74,7 @@ def fsd(
         logger.info(f"Processing {bedgz_input.name}")
         
         # Call Rust backend
-        krewlyzer_core.fsd.calculate_fsd(
+        _core.fsd.calculate_fsd(
             str(bedgz_input),
             str(arms_file),
             str(output_file)

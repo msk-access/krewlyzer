@@ -44,7 +44,8 @@ jobs:
       uses: PyO3/maturin-action@v1
       with:
         command: build
-        args: --release --out dist --sdist
+        args: --release --out dist --sdist --manifest-path rust/Cargo.toml
+        manylinux: manylinux_2_28
         before-script-linux: |
           SUDO=""
           if [ "$(id -u)" -ne 0 ] && command -v sudo &> /dev/null; then
@@ -52,13 +53,13 @@ jobs:
           fi
           
           if command -v yum &> /dev/null; then
-            $SUDO yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel
+            $SUDO yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel clang llvm-devel
           elif command -v apt-get &> /dev/null; then
-            $SUDO apt-get update && $SUDO apt-get install -y zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev
+            $SUDO apt-get update && $SUDO apt-get install -y zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev clang libclang-dev
           elif command -v apk &> /dev/null; then
-            $SUDO apk add zlib-dev bzip2-dev xz-dev curl-dev openssl-dev
+            $SUDO apk add zlib-dev bzip2-dev xz-dev curl-dev openssl-dev clang clang-dev
           else
-            echo "No known package manager found"
+            echo "Unsupported package manager"
             exit 1
           fi
         
@@ -97,3 +98,11 @@ jobs:
         push: true
         tags: ghcr.io/msk-access/krewlyzer:${{ github.ref_name }},ghcr.io/msk-access/krewlyzer:latest
         platforms: linux/amd64,linux/arm64
+        annotations: |
+          org.opencontainers.image.title=krewlyzer
+          org.opencontainers.image.description=A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files
+          org.opencontainers.image.url=https://github.com/msk-access/krewlyzer
+          org.opencontainers.image.source=https://github.com/msk-access/krewlyzer
+          org.opencontainers.image.vendor=MSK-ACCESS
+          org.opencontainers.image.licenses=AGPL-3.0
+          org.opencontainers.image.version=${{ github.ref_name }}

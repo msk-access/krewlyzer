@@ -1,17 +1,16 @@
 [package]
-name = "krewlyzer-core"
-version = "0.2.1"
+name = "krewlyzer_core"
+version = "0.2.2"
 edition = "2021"
-authors = ["Ronak Shah (shahr2@mskcc.org)"]
+authors = ["Ronak Shah <shahr2@mskcc.org>"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
 repository = "https://github.com/msk-access/krewlyzer"
 homepage = "https://github.com/msk-access/krewlyzer"
-license = "GNU Affero General Public License v3.0"
+license = "AGPL-3.0"
 
 [lib]
 name = "krewlyzer_core"
-crate-type = ["cdylib", "rlib"]
-path = "krewlyzer-core/src/lib.rs"
+crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings

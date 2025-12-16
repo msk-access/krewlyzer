@@ -19,7 +19,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("wps")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def wps(
@@ -46,7 +46,7 @@ def wps(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -95,7 +95,7 @@ def wps(
                 logger.warning(f"Could not load metadata: {e}")
         
         # Call Rust backend (unified calculation)
-        count = krewlyzer_core.calculate_wps(
+        count = _core.calculate_wps(
             str(bedgz_input),
             str(tsv_input),
             str(output),

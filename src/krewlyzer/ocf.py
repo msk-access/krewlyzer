@@ -18,7 +18,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("ocf")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def ocf(
@@ -37,7 +37,7 @@ def ocf(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -77,7 +77,7 @@ def ocf(
         logger.info(f"Processing {bedgz_input.name}")
         
         # Call Rust backend
-        krewlyzer_core.ocf.calculate_ocf(
+        _core.ocf.calculate_ocf(
             str(bedgz_input),
             str(ocr_input),
             str(sample_dir)
