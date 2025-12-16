@@ -21,7 +21,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("extract")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def extract(
@@ -66,7 +66,7 @@ def extract(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -118,7 +118,7 @@ def extract(
         # Returns (fragment_count, em_counts, bpm_counts)
         # We only care about fragment_count and the side-effect (BED file)
         
-        fragment_count, _, _ = krewlyzer_core.extract_motif.process_bam_parallel(
+        fragment_count, _, _ = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             mapq,

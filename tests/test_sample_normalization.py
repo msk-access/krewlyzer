@@ -22,7 +22,6 @@ def test_metadata_json_format():
     assert metadata["total_unique_fragments"] > 0
     
     print("✅ Metadata JSON format: PASS")
-    return True
 
 def test_fsd_cpm_calculation():
     """Test FSD CPM normalization calculation"""
@@ -43,7 +42,6 @@ def test_fsd_cpm_calculation():
     assert cpm[0] < region_normalized[0] * 1e6  # Should be less than naïve normalization
     
     print(f"✅ FSD CPM calculation: PASS (CPM[0] = {cpm[0]:.2f})")
-    return True
 
 def test_wps_depth_normalization():
     """Test WPS depth normalization calculation"""
@@ -63,7 +61,6 @@ def test_wps_depth_normalization():
     assert wps_norm[0] < wps_raw[0]  # Normalized should be smaller
     
     print(f"✅ WPS depth normalization: PASS (WPS_norm[0] = {wps_norm[0]:.2f})")
-    return True
 
 def test_backward_compatibility():
     """Test that modules work without metadata file"""
@@ -77,7 +74,6 @@ def test_backward_compatibility():
     
     assert not metadata_file.exists()
     print("✅ Backward compatibility: PASS (missing metadata handled)")
-    return True
 
 def test_integration():
     """Test realistic data flow"""
@@ -108,7 +104,6 @@ def test_integration():
         assert cpm == 8.0  # (0.02 * 2000 / 5000000) * 1e6 = 8
         
         print(f"✅ Integration test: PASS (full workflow verified)")
-        return True
     
     finally:
         shutil.rmtree(test_dir)
@@ -131,8 +126,8 @@ if __name__ == "__main__":
     
     for test in tests:
         try:
-            if test():
-                passed += 1
+            test()
+            passed += 1
         except Exception as e:
             print(f"❌ {test.__name__}: FAILED - {e}")
             failed += 1

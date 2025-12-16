@@ -15,7 +15,7 @@ from rich.logging import RichHandler
 from .postprocess import process_fsc_from_counts, process_fsr_from_counts
 
 # Rust backend
-import krewlyzer_core
+from krewlyzer import _core
 
 # Initialize logging globally, but level will be set in run_all
 console = Console(stderr=True)
@@ -75,7 +75,7 @@ def run_all(
     # Configure threads
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -142,7 +142,7 @@ def run_all(
         try:
             # Call Unified Engine
             # Returns (total_count, end_motifs, bp_motifs)
-            fragment_count, em_counts, bpm_counts = krewlyzer_core.extract_motif.process_bam_parallel(
+            fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
                 str(bam_input),
                 str(reference),
                 mapq,
@@ -257,7 +257,7 @@ def run_all(
     
     try:
         # RUN RUST PIPELINE
-        krewlyzer_core.run_unified_pipeline(
+        _core.run_unified_pipeline(
             str(bedgz_file),
             # FSC
             str(res_bin), str(out_fsc_raw),

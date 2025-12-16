@@ -56,6 +56,7 @@ impl ReadFilters {
 }
 
 #[pymodule]
+#[pyo3(name = "_core")]
 fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Initialize logging (bridges Rust log -> Python logging)
     let _ = pyo3_log::init();

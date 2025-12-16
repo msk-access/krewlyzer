@@ -12,7 +12,7 @@ import os
 from krewlyzer.helpers import reverse_complement, get_End_motif
 
 # Rust backend is now required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def test_reverse_complement():
@@ -55,7 +55,7 @@ def test_fsc_calculation(tmp_path):
         f.write("chr1\t1000\t2000\n")
     
     # Call Rust backend directly
-    ultra_shorts, shorts, ints, longs, totals, gcs = krewlyzer_core.count_fragments_by_bins(
+    ultra_shorts, shorts, ints, longs, totals, gcs = _core.count_fragments_by_bins(
         bedgz, str(bins_file)
     )
     
@@ -91,7 +91,7 @@ def test_wps_calculation(tmp_path):
         f.write("region1\tchr1\t100\t200\t+\n")
     
     # Call Rust WPS calculation (new unified API)
-    count = krewlyzer_core.wps.calculate_wps(
+    count = _core.wps.calculate_wps(
         bedgz,
         str(tsv_file),
         str(tmp_path),

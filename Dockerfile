@@ -1,53 +1,49 @@
 # syntax=docker/dockerfile:1
-FROM python:3.10-slim
 
-# Install OS-level dependencies for pybedtools, pysam, skmisc, numpy, etc.
+# ============ BUILD STAGE ============
+FROM python:3.10-slim AS builder
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    pkg-config \
-    gfortran \
-    clang \
-    libclang-dev \
-    zlib1g-dev \
-    libbz2-dev \
-    liblzma-dev \
-    libcurl4-openssl-dev \
-    libssl-dev \
-    libncurses5-dev \
-    libncursesw5-dev \
-    libsqlite3-dev \
-    libgdbm-dev \
-    libreadline-dev \
-    libffi-dev \
-    libxml2-dev \
-    libxslt1-dev \
-    libopenblas-dev \
-    liblapack-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential git pkg-config gfortran clang libclang-dev \
+    zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev \
+    curl && rm -rf /var/lib/apt/lists/*
 
-# Install Rust toolchain
+# Install Rust
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install uv (fast Python package/dependency manager)
-RUN pip install --no-cache-dir uv
+# Install maturin with patchelf support
+RUN pip install --no-cache-dir "maturin[patchelf]" uv
 
-# Set workdir
-WORKDIR /app
+WORKDIR /build
 
 # Copy project files
-COPY . /app
+COPY pyproject.toml README.md LICENSE ./
+COPY rust/ rust/
+COPY src/ src/
 
-# Install dependencies and package in a uv venv
-RUN uv venv .venv && \
-    . .venv/bin/activate && \
-    uv pip install .
+# Build the wheel
+RUN maturin build --release --out /wheels --manifest-path rust/Cargo.toml
 
-# Set environment variables for uv venv activation
-ENV PATH="/app/.venv/bin:$PATH"
-ENV PYTHONPATH="/app"
+# ============ RUNTIME STAGE ============
+FROM python:3.10-slim AS runtime
 
-# Default command: show CLI help
-CMD ["krewlyzer", "--help"]
+# OCI Labels for GitHub Container Registry
+LABEL org.opencontainers.image.title="krewlyzer"
+LABEL org.opencontainers.image.description="A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files"
+LABEL org.opencontainers.image.url="https://github.com/msk-access/krewlyzer"
+LABEL org.opencontainers.image.source="https://github.com/msk-access/krewlyzer"
+LABEL org.opencontainers.image.vendor="MSK-ACCESS"
+LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL org.opencontainers.image.authors="Ronak Shah <shahr2@mskcc.org>"
+
+# Only runtime dependencies (no build tools!)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcurl4 libssl3 zlib1g libbz2-1.0 liblzma5 && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /wheels/*.whl /tmp/
+RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
+
+ENTRYPOINT ["krewlyzer"]
+CMD ["--help"]

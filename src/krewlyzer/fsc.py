@@ -21,7 +21,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("fsc")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 from .helpers import gc_correct
 
@@ -44,7 +44,7 @@ def fsc(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -84,7 +84,7 @@ def fsc(
         logger.info("Counting fragments using Rust backend...")
         
         # Call Rust: count_fragments_by_bins
-        ultra_short, short, intermediate, long, total, gc_values = krewlyzer_core.count_fragments_by_bins(
+        ultra_short, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
             str(bedgz_input),
             str(bin_input)
         )

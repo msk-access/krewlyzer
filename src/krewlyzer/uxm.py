@@ -18,7 +18,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("uxm")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def uxm(
@@ -37,7 +37,7 @@ def uxm(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -78,7 +78,7 @@ def uxm(
         logger.info(f"Processing {bam_input.name}")
         
         # Call Rust backend with all parameters
-        krewlyzer_core.uxm.calculate_uxm(
+        _core.uxm.calculate_uxm(
             str(bam_input),
             str(mark_input),
             str(output_file),

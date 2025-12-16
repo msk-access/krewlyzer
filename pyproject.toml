@@ -11,7 +11,6 @@ dependencies = [
     "pysam>=0.22.0",
     "pandas>=2.2.0",
     "numpy>=1.20.0",
-
     "scikit-misc>=0.3.0",
     "rich>=13.9.0"
 ]
@@ -37,5 +36,6 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [tool.maturin]
-python-source = "."
-include = ["krewlyzer-core/**/*", "krewlyzer/**/*"]
+python-source = "src"
+manifest-path = "rust/Cargo.toml"
+module-name = "krewlyzer._core"

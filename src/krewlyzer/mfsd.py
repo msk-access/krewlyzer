@@ -18,7 +18,7 @@ logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], forma
 logger = logging.getLogger("mfsd")
 
 # Rust backend is required
-import krewlyzer_core
+from krewlyzer import _core
 
 
 def mfsd(
@@ -37,7 +37,7 @@ def mfsd(
     # Configure Rust thread pool
     if threads > 0:
         try:
-            krewlyzer_core.configure_threads(threads)
+            _core.configure_threads(threads)
             logger.info(f"Configured {threads} threads for parallel processing")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
@@ -72,7 +72,7 @@ def mfsd(
         logger.info(f"Detected input type: {input_type}")
         
         # Call Rust backend
-        krewlyzer_core.mfsd.calculate_mfsd(
+        _core.mfsd.calculate_mfsd(
             str(bam_input),
             str(input_file),
             str(output_file),

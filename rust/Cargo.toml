@@ -1,23 +1,25 @@
 [package]
-name = "krewlyzer-core"
+name = "krewlyzer_core"
 version = "0.2.2"
 edition = "2021"
-authors = ["MSK-ACCESS Team"]
+authors = ["Ronak Shah <shahr2@mskcc.org>"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
-license = "MIT"
+repository = "https://github.com/msk-access/krewlyzer"
+homepage = "https://github.com/msk-access/krewlyzer"
+license = "AGPL-3.0"
 
 [lib]
 name = "krewlyzer_core"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
 # PyO3 for Python bindings
 pyo3 = { version = "0.23", features = ["extension-module"] }
 
-# noodles for BED/BGZF/Tabix (FSD, OCF, FSC, WPS)
+# noodles for BED/BGZF/Tabix
 noodles = { version = "0.103", features = ["bed", "tabix", "bgzf", "core"] }
 
-# rust-htslib for BAM operations (mFSD, UXM, Motif)
+# rust-htslib for BAM operations
 rust-htslib = "0.51"
 
 # Parallelism
@@ -33,15 +35,13 @@ log = "0.4"
 pyo3-log = "0.12"
 indicatif = "0.17"
 
-
 # Numerical
 ndarray = "0.16"
-numpy = "0.23"  # Matching PyO3 0.23
+numpy = "0.23"
 statrs = "0.17"
 
 # Interval Trees
 coitrees = "0.4"
-
 
 [profile.release]
 lto = true
