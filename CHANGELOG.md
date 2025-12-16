@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.3] - 2025-12-16
+
+### Changed
+- **Nextflow Pipeline**: Added `FILTER_MAF` module for multi-sample MAF filtering:
+  - New `maf` and `single_sample_maf` columns in samplesheet
+  - Filters MAF by `Tumor_Sample_Barcode` matching sample ID (regex: `.*sample_id.*`)
+  - `single_sample_maf=true` bypasses filtering for per-sample MAFs
+  - Skips MFSD when filtered MAF has zero variants (with warning)
+  - Memory-efficient streaming for large MAF files (100s of MBs)
+  - Outputs filtered MAF + mFSD results
+- **Nextflow Modules**: Updated all container versions to `0.2.3`
+
 ## [0.2.2] - 2025-12-15
 
 ### Changed
@@ -10,7 +22,7 @@ All notable changes to this project will be documented in this file.
   - Rust code moved from `krewlyzer-core/` to `rust/`
   - Single `rust/Cargo.toml` (removed duplicate root `Cargo.toml`)
   - Rust module now imports as `krewlyzer._core` (private)
-- **Dockerfile**: Rewritten as multi-stage build for smaller image size (~200MB vs ~1GB)
+- **Dockerfile**: Rewritten as multi-stage build for smaller image size (~200MB vs ~1GB); amd64 only
 - **OCI Labels**: Added container metadata for GitHub Container Registry
 
 ### Fixed
