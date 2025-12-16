@@ -42,13 +42,14 @@ jobs:
 
     - name: Build distribution
       uses: PyO3/maturin-action@v1
-      env:
-        OPENSSL_NO_VENDOR: "1"
       with:
         command: build
         args: --release --out dist --sdist --manifest-path rust/Cargo.toml
         manylinux: manylinux_2_28
         before-script-linux: |
+          # Use system OpenSSL instead of building from source
+          export OPENSSL_NO_VENDOR=1
+          
           SUDO=""
           if [ "$(id -u)" -ne 0 ] && command -v sudo &> /dev/null; then
             SUDO="sudo"
