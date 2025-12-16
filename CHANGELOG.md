@@ -18,6 +18,9 @@ All notable changes to this project will be documented in this file.
 - **Source Builds**: Included `clang` and `llvm-devel` in build environment for `bindgen`/`hts-sys`
 - **Docker Build**: Added `patchelf` to maturin installation for Linux wheel building
 - **Test Imports**: Updated test files to use new `krewlyzer._core` import path
+- **CI OpenSSL**: Use system OpenSSL (`OPENSSL_NO_VENDOR=1`) instead of building from source
+- **CI Python Versions**: Build wheels for Python 3.10, 3.11, 3.12 in release workflow
+- **Documentation**: Updated logo paths for new `src/` layout
 
 ## [0.2.1] - 2025-12-15
 
