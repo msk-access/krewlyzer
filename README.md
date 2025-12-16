@@ -1,7 +1,7 @@
 # Krewlyzer: Comprehensive cfDNA Feature Extraction Toolkit
 
 <p align="center">
-  <img src="krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
+  <img src="src/krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
 </p>
 
 <p align="center">

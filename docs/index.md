@@ -1,7 +1,7 @@
 # Welcome to Krewlyzer
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/msk-access/krewlyzer/main/krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
+  <img src="https://raw.githubusercontent.com/msk-access/krewlyzer/main/src/krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
 </p>
 
 **Krewlyzer** is a robust, user-friendly command-line toolkit for extracting a wide range of biological features from cell-free DNA (cfDNA) sequencing data. It is designed for cancer genomics, liquid biopsy research, and clinical bioinformatics, providing high-performance, reproducible feature extraction from BAM files.
