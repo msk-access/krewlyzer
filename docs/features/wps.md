@@ -113,5 +113,4 @@ Where:
 
 ## References
 
-Snyder, M. W., Kircher, M., Hill, A. J., Daza, R. M., & Shendure, J. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
-
+> See [Citation & Scientific Background](../citation.md#wps) for detailed paper summary.
