@@ -225,20 +225,29 @@ krewlyzer uxm /path/to/bam_folder --output uxm_out --type PE [options]
   - `--threads`, `-t`: Number of processes
 
 ### Mutant Fragment Size Distribution (mFSD)
-**Purpose:** Compares the size distribution of mutant vs. wild-type reads at variant sites.
+**Purpose:** Compares the size distribution of mutant vs. wild-type fragments at variant sites with comprehensive 4-way classification.
 
-**Biological context:** Mutant ctDNA fragments are typically shorter than wild-type cfDNA. This module quantifies this difference using high-depth targeted sequencing data, providing a sensitive marker for ctDNA presence.
+**Biological context:** Mutant ctDNA fragments are typically shorter (~145bp) than wild-type cfDNA (~166bp). This module quantifies this difference for all small variant types, providing sensitive markers for ctDNA detection and MRD monitoring.
+
+**Variant Types Supported:** SNV, MNV, Insertion, Deletion, Complex
+
+**Fragment Classification:** REF (reference), ALT (alternate), NonREF (errors), N (low quality)
 
 **Usage:**
 ```bash
-krewlyzer mfsd sample.bam --input variants.vcf --output output.tsv [options]
+krewlyzer mfsd sample.bam --input-file variants.vcf --output output_dir/ [options]
 ```
 - Input: BAM file and VCF/MAF file containing variants.
-- Output: TSV file with mutant/WT counts, mean sizes, size difference, and KS test statistics.
+- Output: 
+  - `{sample}.mFSD.tsv` - 39-column summary (counts, mean sizes, 6 pairwise KS tests, derived metrics)
+  - `{sample}.mFSD.distributions.tsv` - Per-variant size distributions (with `-d`)
 - Options:
-  - `--input`, `-i`: VCF or MAF file (required)
-  - `--format`, `-f`: Input format ('auto', 'vcf', 'maf')
-  - `--map-quality`, `-q`: Minimum mapping quality (default: 20)
+  - `--input-file`, `-i`: VCF or MAF file (required)
+  - `--mapq`, `-q`: Minimum mapping quality (default: 20)
+  - `--output-distributions`, `-d`: Generate per-variant size distributions
+  - `--verbose`, `-v`: Enable debug logging
+  - `--threads`, `-t`: Number of threads (0=all cores)
+
 
 ### Run All Features
 Runs all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm, mfsd) for a single BAM file in one call.
@@ -255,21 +264,23 @@ krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out [--va
 After `krewlyzer run-all`:
 ```
 output_dir/
-├── sample.bed.gz           # Fragment file (Tabix indexed)
+├── sample.bed.gz               # Fragment file (Tabix indexed)
 ├── sample.bed.gz.tbi
-├── sample.EndMotif.txt     # End motif frequencies
-├── sample.BreakPointMotif.txt
-├── sample.MDS.txt          # Motif Diversity Score
-├── sample.FSC.txt          # Fragment Size Coverage
-├── sample.FSR.txt          # Fragment Size Ratio
-├── sample.FSD.txt          # Fragment Size Distribution
-├── sample.WPS.tsv.gz       # Windowed Protection Score
-├── sample.OCF.csv          # Orientation-aware Fragmentation summary
-├── sample.OCF.sync.tsv     # OCF details
-└── sample.mfsd.tsv         # Mutant Fragment Size Distribution (if variants provided)
+├── sample.EndMotif.tsv         # End motif frequencies
+├── sample.BreakPointMotif.tsv
+├── sample.MDS.tsv              # Motif Diversity Score
+├── sample.FSC.tsv              # Fragment Size Coverage
+├── sample.FSR.tsv              # Fragment Size Ratio
+├── sample.FSD.tsv              # Fragment Size Distribution
+├── sample.WPS.tsv.gz           # Windowed Protection Score
+├── sample.OCF.tsv              # Orientation-aware Fragmentation summary
+├── sample.OCF.sync.tsv         # OCF details
+├── sample.mFSD.tsv             # Mutant Fragment Size Distribution (39 columns)
+└── sample.mFSD.distributions.tsv  # Per-variant size distributions (optional)
 ```
 
 ---
+
 
 ## Troubleshooting
 - **FileNotFoundError:** Ensure all input files/paths exist and are readable. Use absolute paths if possible.
