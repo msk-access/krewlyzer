@@ -24,6 +24,7 @@
 - [Command Summary](#command-summary)
 - [Typical Workflow](#typical-workflow)
 - [Feature Details & Usage](#feature-details--usage)
+  - [Fragment Extraction](#fragment-extraction)
   - [Motif-based Feature Extraction](#motif-based-feature-extraction)
   - [Fragment Size Coverage (FSC)](#fragment-size-coverage-fsc)
   - [Fragment Size Ratio (FSR)](#fragment-size-ratio-fsr)
@@ -31,6 +32,7 @@
   - [Windowed Protection Score (WPS)](#windowed-protection-score-wps)
   - [Orientation-aware Fragmentation (OCF)](#orientation-aware-fragmentation-ocf)
   - [Fragment-level Methylation (UXM)](#fragment-level-methylation-uxm)
+  - [Mutant Fragment Size Distribution (mFSD)](#mutant-fragment-size-distribution-mfsd)
   - [Run All Features](#run-all-features)
 - [Output Structure Examples](#output-structure-examples)
 - [Troubleshooting](#troubleshooting)
@@ -69,12 +71,13 @@ uv pip install krewlyzer
   - Download GRCh37/hg19 from [UCSC](https://hgdownload.soe.ucsc.edu/goldenPath/hg19/bigZips/)
   - BAMs must be sorted, indexed, and aligned to the same build
 - **Bin/Region/Marker Files:**
-  - Provided in `krewlyzer/data/` (see options for each feature)
+  - Provided in `src/krewlyzer/data/` (see options for each feature)
 
 ## Command Summary
 
 | Command   | Description                                  |
 |-----------|----------------------------------------------|
+| extract   | Extract fragments from BAM to BED            |
 | motif     | Motif-based feature extraction               |
 | fsc       | Fragment size coverage                       |
 | fsr       | Fragment size ratio                          |
@@ -82,7 +85,7 @@ uv pip install krewlyzer
 | wps       | Windowed protection score                    |
 | ocf       | Orientation-aware fragmentation              |
 | uxm       | Fragment-level methylation (SE/PE)           |
-| mfsd      | Mutant fragment size distribution            |
+| mfsd      | Mutant fragment size distribution (4-way)    |
 | run-all   | Run all features for a BAM                   |
 
 ## Typical Workflow
@@ -112,6 +115,20 @@ krewlyzer motif sample.bam -g hg19.fa -o output_dir
 
 ## Feature Details & Usage
 
+### Fragment Extraction
+**Purpose:** Extracts cfDNA fragments from BAM to BED format with configurable filters.
+
+**Usage:**
+```bash
+krewlyzer extract sample.bam -g reference.fa -o output_dir/ [options]
+```
+- Output: `{sample}.bed.gz` (tabix indexed)
+- Options:
+  - `--mapq`, `-q`: Minimum mapping quality (default: 20)
+  - `--minlen`: Minimum fragment length (default: 65)
+  - `--maxlen`: Maximum fragment length (default: 400)
+  - `--exclude-regions`, `-x`: BED file of regions to exclude
+
 ### Motif-based Feature Extraction
 **Purpose:** Extracts end motif, breakpoint motif, and Motif Diversity Score (MDS) from sequencing fragments.
 
@@ -120,9 +137,9 @@ krewlyzer motif sample.bam -g hg19.fa -o output_dir
 **Usage:**
 ```bash
 krewlyzer motif path/to/input.bam -g path/to/reference.fa -o path/to/output_dir \
-    --minlen 65 --maxlen 400 -k 3 --verbose
+    --minlen 65 --maxlen 400 -k 4 --verbose
 ```
-- Output: EDM, BPM, and MDS subfolders in output directory.
+- Output: `{sample}.EndMotif.tsv`, `{sample}.BreakPointMotif.tsv`, `{sample}.MDS.tsv`
 - Rich logging and progress bars for user-friendly feedback.
 
 ### Fragment Size Coverage (FSC)
@@ -250,12 +267,20 @@ krewlyzer mfsd sample.bam --input-file variants.vcf --output output_dir/ [option
 
 
 ### Run All Features
-Runs all feature extraction commands (motif, fsc, fsr, fsd, wps, ocf, uxm, mfsd) for a single BAM file in one call.
+Runs all feature extraction commands (extract, motif, fsc, fsr, fsd, wps, ocf) for a single BAM file in one unified pass. Optional: uxm (requires bisulfite BAM), mfsd (requires variants file).
 
 **Usage:**
 ```bash
-krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out [--variant-input variants.vcf] [--threads N] [--type SE|PE]
+krewlyzer run-all sample.bam --reference hg19.fa --output output_dir/ \
+    [--variants variants.maf] [--bisulfite-bam bs.bam] [--threads 4] [--debug]
 ```
+- Options:
+  - `--reference`, `-g`: Reference FASTA (required)
+  - `--variants`, `-v`: VCF/MAF for mFSD (optional)
+  - `--bisulfite-bam`: Bisulfite BAM for UXM (optional)
+  - `--mapq`, `-q`: Minimum mapping quality (default: 20)
+  - `--threads`, `-t`: Number of threads (0=all cores)
+  - `--debug`: Enable debug logging
 
 ---
 
