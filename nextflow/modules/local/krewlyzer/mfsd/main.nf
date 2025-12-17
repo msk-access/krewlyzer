@@ -7,9 +7,10 @@ process KREWLYZER_MFSD {
     tuple val(meta), path(bam), path(bai), path(variants)
 
     output:
-    tuple val(meta), path("*.mFSD.tsv")     , emit: mfsd
-    tuple val(meta), path("*.filtered.maf") , emit: filtered_maf, optional: true
-    path "versions.yml"                     , emit: versions
+    tuple val(meta), path("*.mFSD.tsv")              , emit: mfsd
+    tuple val(meta), path("*.distributions.tsv")     , emit: distributions, optional: true
+    tuple val(meta), path("*.filtered.maf")          , emit: filtered_maf, optional: true
+    path "versions.yml"                              , emit: versions
 
     script:
     def args = task.ext.args ?: ''
