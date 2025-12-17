@@ -8,7 +8,7 @@ process KREWLYZER_MFSD {
 
     output:
     tuple val(meta), path("*.mFSD.tsv")              , emit: mfsd
-    tuple val(meta), path("*.distributions.tsv")     , emit: distributions, optional: true
+    tuple val(meta), path("*.distributions.tsv")     , emit: distributions
     tuple val(meta), path("*.filtered.maf")          , emit: filtered_maf, optional: true
     path "versions.yml"                              , emit: versions
 
@@ -22,6 +22,8 @@ process KREWLYZER_MFSD {
         --input-file $variants \\
         --output ./ \\
         --sample-name $prefix \\
+        --output-distributions \\
+        --verbose \\
         $args
 
     # Copy filtered MAF to output if it exists (keeps the filtered subset with results)
