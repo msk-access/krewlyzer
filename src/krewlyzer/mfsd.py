@@ -3,6 +3,9 @@ Mutant Fragment Size Distribution (mFSD) calculation.
 
 Calculates mFSD features for a single sample.
 Uses Rust backend for accelerated computation.
+
+Supports all small variant types: SNV, MNV, Insertion, Deletion, Complex.
+4-way fragment classification: REF, ALT, NonREF, N.
 """
 
 import typer
@@ -26,14 +29,33 @@ def mfsd(
     input_file: Path = typer.Option(..., "--input-file", "-i", help="VCF or MAF file with variants"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
+    mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
+    output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
     """
     Calculate Mutant Fragment Size Distribution (mFSD) features for a single sample.
     
+    Supports all small variant types: SNV, MNV, Insertion, Deletion, Complex.
+    
+    Fragment classification:
+    - REF: Supports reference allele (healthy cfDNA baseline)
+    - ALT: Supports alternate allele (tumor signal)
+    - NonREF: Non-REF, non-ALT (sequencing errors, subclones)
+    - N: Contains N at variant position (low quality)
+    
     Input: BAM file and VCF/MAF file with variants
-    Output: {sample}.mFSD.tsv file with fragment size distribution around variants
+    Output: 
+    - {sample}.mFSD.tsv: Summary statistics (39 columns)
+    - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
+    # Set log level based on verbose flag
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+
     # Configure Rust thread pool
     if threads > 0:
         try:
@@ -71,16 +93,20 @@ def mfsd(
         input_type = "vcf" if str(input_file).endswith(".vcf") or str(input_file).endswith(".vcf.gz") else "maf"
         logger.info(f"Detected input type: {input_type}")
         
-        # Call Rust backend
+        # Call Rust backend (new signature with output_distributions)
         _core.mfsd.calculate_mfsd(
             str(bam_input),
             str(input_file),
             str(output_file),
             input_type,
-            20  # Default mapQ
+            mapq,
+            output_distributions
         )
         
         logger.info(f"mFSD complete: {output_file}")
+        if output_distributions:
+            dist_file = output_file.with_suffix('.distributions.tsv')
+            logger.info(f"Distributions: {dist_file}")
 
     except Exception as e:
         logger.error(f"mFSD calculation failed: {e}")
