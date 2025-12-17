@@ -31,6 +31,7 @@ def mfsd(
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
     output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
     """
@@ -49,6 +50,12 @@ def mfsd(
     - {sample}.mFSD.tsv: Summary statistics (39 columns)
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
+    # Set log level based on verbose flag
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+
     # Configure Rust thread pool
     if threads > 0:
         try:

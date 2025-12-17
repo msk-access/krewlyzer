@@ -7,7 +7,7 @@ use rust_htslib::bam::record::Cigar;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
-use log::info;
+use log::{info, warn, debug};
 
 // ============================================================================
 // PHASE 1: Data Structures
@@ -516,6 +516,15 @@ pub fn calculate_mfsd(
     let total_vars = variants.len();
     info!("Found {} variants. Processing in parallel...", total_vars);
     
+    // Debug: variant type breakdown
+    let snv_count = variants.iter().filter(|v| v.var_type == VariantType::Snv).count();
+    let mnv_count = variants.iter().filter(|v| v.var_type == VariantType::Mnv).count();
+    let ins_count = variants.iter().filter(|v| v.var_type == VariantType::Insertion).count();
+    let del_count = variants.iter().filter(|v| v.var_type == VariantType::Deletion).count();
+    let complex_count = variants.iter().filter(|v| v.var_type == VariantType::Complex).count();
+    debug!("Variant types: {} SNV, {} MNV, {} INS, {} DEL, {} Complex", 
+        snv_count, mnv_count, ins_count, del_count, complex_count);
+
     // Progress Bar
     let pb = ProgressBar::new(total_vars as u64);
     pb.set_style(ProgressStyle::default_bar()
@@ -546,7 +555,10 @@ pub fn calculate_mfsd(
                     };
                     match bam.header().tid(alt_name.as_bytes()) {
                         Some(t) => t,
-                        None => return (var.clone(), result),
+                        None => {
+                            warn!("Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
+                            return (var.clone(), result);
+                        }
                     }
                 }
             };
@@ -604,6 +616,35 @@ pub fn calculate_mfsd(
         .collect();
         
     pb.finish_with_message("Done!");
+
+    // Calculate summary statistics
+    let mut total_ref = 0usize;
+    let mut total_alt = 0usize;
+    let mut total_nonref = 0usize;
+    let mut total_n = 0usize;
+    let mut variants_with_alt = 0usize;
+    let mut variants_no_coverage = 0usize;
+    
+    for (_, res) in &results {
+        total_ref += res.ref_lengths.len();
+        total_alt += res.alt_lengths.len();
+        total_nonref += res.nonref_lengths.len();
+        total_n += res.n_lengths.len();
+        if !res.alt_lengths.is_empty() {
+            variants_with_alt += 1;
+        }
+        if res.total_count() == 0 {
+            variants_no_coverage += 1;
+        }
+    }
+    
+    info!("Summary: {} REF, {} ALT, {} NonREF, {} N fragments", total_ref, total_alt, total_nonref, total_n);
+    info!("Variants with ALT support: {}/{} ({:.1}%)", 
+        variants_with_alt, results.len(), 
+        if results.len() > 0 { variants_with_alt as f64 / results.len() as f64 * 100.0 } else { 0.0 });
+    if variants_no_coverage > 0 {
+        warn!("{} variants had no fragment coverage", variants_no_coverage);
+    }
 
     // 3. Write Main Output
     info!("Writing output to {:?}...", output_file);
