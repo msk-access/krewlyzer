@@ -111,6 +111,37 @@ Where:
     - **Long WPS**: $P=60$ bp (Total window ~120bp). Targets 120-180bp fragments.
     - **Short WPS**: $P=8$ bp (Total window ~16bp). Targets 35-80bp fragments.
 
+## Depth Normalization
+
+The normalized columns (`wps_long_norm`, `wps_short_norm`, `wps_ratio_norm`) enable comparison of WPS values **across samples** with different sequencing depths.
+
+### Formula
+
+```
+wps_norm = wps_raw / (total_fragments / 1,000,000)
+```
+
+This gives **per-million fragment** values.
+
+### Metadata Requirement
+
+Normalization requires a metadata file from the `extract` command:
+
+```
+{sample}.metadata.json  ← Contains total_fragments
+{sample}.bed.gz         ← Input to wps
+```
+
+> **Warning**: If metadata is missing, normalized columns default to raw values (not comparable across samples). Run `krewlyzer extract` first.
+
+### When to Use Raw vs Normalized
+
+| Use Case | Columns |
+|----------|---------|
+| **Within-sample** pattern analysis | `wps_long`, `wps_short`, `wps_ratio` |
+| **Cross-sample** comparison | `wps_long_norm`, `wps_short_norm` |
+| **Machine learning** across cohort | Normalized columns |
+
 ## References
 
 > See [Citation & Scientific Background](../citation.md#wps) for detailed paper summary.
