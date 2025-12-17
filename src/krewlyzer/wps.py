@@ -93,6 +93,11 @@ def wps(
                         logger.info(f"Loaded metadata: {total_fragments:,} fragments")
             except Exception as e:
                 logger.warning(f"Could not load metadata: {e}")
+        else:
+            logger.warning(f"Metadata file not found: {metadata_file}")
+            logger.warning("WPS normalized columns (wps_*_norm) will NOT be comparable across samples!")
+            logger.warning("Run 'krewlyzer extract' first to generate metadata.json")
+
         
         # Call Rust backend (unified calculation)
         count = _core.calculate_wps(
