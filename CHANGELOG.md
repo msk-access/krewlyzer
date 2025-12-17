@@ -2,9 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-12-16
+
+### Added
+- **mFSD Variant Type Support**: Now handles all small variant types:
+  - SNV (single nucleotide)
+  - MNV (multi-nucleotide)
+  - Insertion
+  - Deletion
+  - Complex (substitution + indel)
+- **4-Way Fragment Classification**: Fragments classified as REF, ALT, NonREF, or N (low quality)
+- **Comprehensive Statistics**: 6 pairwise KS comparisons (ALT-REF, ALT-NonREF, etc.)
+- **Derived Metrics**: VAF_Proxy, Error_Rate, N_Rate, Size_Ratio, Quality_Score
+- **Quality Flags**: ALT_Confidence (HIGH/LOW/NONE), KS_Valid
+- **Distributions Output**: `--output-distributions` flag generates per-variant size distributions
+- **Verbose Logging**: `--verbose` flag for debug-level logging with variant type breakdown
+- **MRD Support**: Proper handling of low fragment counts (1-2) common in MRD settings
+
+### Changed
+- **BREAKING**: mFSD output format changed from 11 columns to 39 columns
+- **Nextflow MFSD**: Distributions and verbose logging enabled by default
+- **Fragment Counting**: Now counts fragments (R1 only) instead of reads to avoid double-counting
+
+### Fixed
+- **CIGAR Handling**: Improved sequence extraction for INDELs and complex variants
+
 ## [0.2.3] - 2025-12-16
 
 ### Changed
+
 - **Nextflow Pipeline**: Added `FILTER_MAF` module for multi-sample MAF filtering:
   - New `maf` and `single_sample_maf` columns in samplesheet
   - Filters MAF by `Tumor_Sample_Barcode` matching sample ID (regex: `.*sample_id.*`)

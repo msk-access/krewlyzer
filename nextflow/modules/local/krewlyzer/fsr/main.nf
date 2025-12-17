@@ -1,7 +1,7 @@
 process KREWLYZER_FSR {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.2.3"
+    container "ghcr.io/msk-access/krewlyzer:0.3.0"
 
     input:
     tuple val(meta), path(bed)

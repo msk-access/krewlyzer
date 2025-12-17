@@ -1,15 +1,16 @@
 process KREWLYZER_MFSD {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.2.3"
+    container "ghcr.io/msk-access/krewlyzer:0.3.0"
 
     input:
     tuple val(meta), path(bam), path(bai), path(variants)
 
     output:
-    tuple val(meta), path("*.mFSD.tsv")     , emit: mfsd
-    tuple val(meta), path("*.filtered.maf") , emit: filtered_maf, optional: true
-    path "versions.yml"                     , emit: versions
+    tuple val(meta), path("*.mFSD.tsv")              , emit: mfsd
+    tuple val(meta), path("*.distributions.tsv")     , emit: distributions
+    tuple val(meta), path("*.filtered.maf")          , emit: filtered_maf, optional: true
+    path "versions.yml"                              , emit: versions
 
     script:
     def args = task.ext.args ?: ''
@@ -21,6 +22,8 @@ process KREWLYZER_MFSD {
         --input-file $variants \\
         --output ./ \\
         --sample-name $prefix \\
+        --output-distributions \\
+        --verbose \\
         $args
 
     # Copy filtered MAF to output if it exists (keeps the filtered subset with results)

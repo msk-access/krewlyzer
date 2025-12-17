@@ -333,7 +333,16 @@ def run_all(
             logger.info("Running mFSD...")
             try:
                 from .mfsd import mfsd
-                mfsd(bam_input, variants, output, sample, 0)
+                mfsd(
+                    bam_input=bam_input,
+                    input_file=variants,
+                    output=output,
+                    sample_name=sample,
+                    mapq=mapq,
+                    output_distributions=False,
+                    verbose=debug,
+                    threads=threads
+                )
             except Exception as e:
                 logger.warning(f"mFSD failed: {e}")
     else:

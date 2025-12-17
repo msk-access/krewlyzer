@@ -112,7 +112,8 @@ def test_run_all_unified():
                 exclude_regions=None,
                 bisulfite_bam=None,
                 variants=None,
-                chromosomes=None
+                chromosomes=None,
+                debug=False
             )
         except SystemExit as e:
             if e.code != 0:
