@@ -17,6 +17,7 @@ pub mod uxm;
 pub mod extract_motif;
 pub mod engine;
 pub mod pipeline;
+pub mod gc_correction;
 
 /// Read filtering configuration
 #[pyclass]
