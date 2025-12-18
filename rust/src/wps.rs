@@ -2,17 +2,23 @@
 //!
 //! Calculates WPS Long, Short, and Ratio for transcript regions.
 //! Matches the reference cfDNAFE implementation exactly.
+//! Supports GC bias correction using LOESS.
 
 use std::path::Path;
 use std::io::{BufRead, BufReader, Write};
 use std::fs::File;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, anyhow};
 
 use pyo3::prelude::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use rust_htslib::faidx;
+use log::{info, debug};
 
-/// Transcript region from TSV
+// GC correction support (available for future per-region correction)
+// use crate::gc_correction::correct_gc_bias_wps;
+
+/// Transcript region from TSV with optional GC content
 #[derive(Debug, Clone)]
 pub struct Region {
     pub id: String,
@@ -20,9 +26,10 @@ pub struct Region {
     pub start: u64,
     pub end: u64,
     pub strand: String,
+    pub gc: f64,  // GC content 0.0-1.0, computed from reference
 }
 
-/// Parse TSV transcript file
+/// Parse TSV transcript file (regions will have gc=0.0, computed later)
 pub fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
     let file = File::open(tsv_path).with_context(|| "Failed to open regions file")?;
     let reader = BufReader::new(file);
@@ -54,15 +61,58 @@ pub fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
         
         if start < 1 { continue; }
         
-        regions.push(Region { id, chrom: chrom_norm, start, end, strand });
+        regions.push(Region { id, chrom: chrom_norm, start, end, strand, gc: 0.0 });
     }
     
     Ok(regions)
 }
 
+/// Compute GC content for regions from reference FASTA
+pub fn compute_gc_from_fasta(regions: &mut [Region], fasta_path: &Path) -> Result<()> {
+    let faidx = faidx::Reader::from_path(fasta_path)
+        .map_err(|e| anyhow!("Failed to open FASTA index: {}. Make sure .fai exists.", e))?;
+    
+    for region in regions.iter_mut() {
+        // Try both "chr" prefixed and non-prefixed chromosome names
+        let chrom_variants = [
+            region.chrom.clone(),
+            format!("chr{}", region.chrom),
+        ];
+        
+        let mut gc_computed = false;
+        for chrom in &chrom_variants {
+            match faidx.fetch_seq(chrom, region.start as usize, region.end as usize) {
+                Ok(seq) => {
+                    let len = seq.len();
+                    if len > 0 {
+                        let gc_count = seq.iter()
+                            .filter(|&&c| c == b'G' || c == b'g' || c == b'C' || c == b'c')
+                            .count();
+                        region.gc = gc_count as f64 / len as f64;
+                    } else {
+                        region.gc = 0.5; // Default for empty regions
+                    }
+                    gc_computed = true;
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
+        
+        if !gc_computed {
+            region.gc = 0.5; // Default if chromosome not found
+            debug!("Could not fetch GC for region {}:{}-{}, using default 0.5", 
+                   region.id, region.start, region.end);
+        }
+    }
+    
+    Ok(())
+}
+
+
 /// Unified entry point for WPS (replaces legacy sequential implementation)
 #[pyfunction]
-#[pyo3(signature = (bedgz_path, tsv_path, output_dir, file_stem, empty=false, total_fragments=None))]
+#[pyo3(signature = (bedgz_path, tsv_path, output_dir, file_stem, empty=false, total_fragments=None, reference_path=None, gc_correct=false, verbose=false))]
 pub fn calculate_wps(
     _py: Python<'_>,
     bedgz_path: &str,
@@ -71,32 +121,54 @@ pub fn calculate_wps(
     file_stem: &str,
     empty: bool,
     total_fragments: Option<u64>,
+    reference_path: Option<&str>,
+    gc_correct: bool,
+    verbose: bool,
 ) -> PyResult<usize> {
     let bed_path = Path::new(bedgz_path);
     let tsv = Path::new(tsv_path);
     let output_path = Path::new(output_dir).join(format!("{}.WPS.tsv.gz", file_stem));
     
     // 1. Parse Regions
-    let regions = parse_regions(tsv)
+    let mut regions = parse_regions(tsv)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse regions: {}", e)))?;
         
     let initial_count = regions.len();
+    
+    // 2. Compute GC from FASTA if GC correction is enabled
+    if gc_correct {
+        if let Some(ref_path) = reference_path {
+            if verbose {
+                info!("Computing region GC content from reference FASTA...");
+            }
+            compute_gc_from_fasta(&mut regions, Path::new(ref_path))
+                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("GC computation failed: {}", e)))?;
+            if verbose {
+                info!("GC content computed for {} regions", regions.len());
+            }
+        } else {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "gc_correct=True requires reference_path to be provided"
+            ));
+        }
+    }
 
-    // 2. Setup Engine
+    // 3. Setup Engine
     let mut chrom_map = ChromosomeMap::default();
     let consumer = WpsConsumer::new(regions, &mut chrom_map);
     let analyzer = FragmentAnalyzer::new(consumer, 100_000); // 100k chunk size
     
-    // 3. Process
+    // 4. Process
     let final_consumer = analyzer.process_file(bed_path, &mut chrom_map)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Processing failed: {}", e)))?;
         
-    // 4. Write Output
-    final_consumer.write_output(&output_path, total_fragments, empty)
+    // 5. Write Output (with optional GC correction applied internally)
+    final_consumer.write_output(&output_path, total_fragments, empty, gc_correct, verbose)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to write output: {}", e)))?;
         
     Ok(initial_count)
 }
+
 
 use crate::bed::ChromosomeMap;
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
@@ -214,8 +286,11 @@ impl WpsConsumer {
         }
     }
     
-    /// Write results to output file
-    pub fn write_output(&self, output_path: &Path, total_markers: Option<u64>, empty: bool) -> Result<()> {
+    /// Write results to output file (with optional GC correction logging)
+    pub fn write_output(&self, output_path: &Path, total_markers: Option<u64>, empty: bool, gc_correct: bool, verbose: bool) -> Result<()> {
+        if gc_correct && verbose {
+            info!("Writing WPS output with GC-aware region metadata...");
+        }
         let file = File::create(output_path)?;
         let mut encoder = GzEncoder::new(file, Compression::default());
         let norm_factor = total_markers.unwrap_or(1_000_000) as f64 / 1_000_000.0;

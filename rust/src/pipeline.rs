@@ -53,7 +53,7 @@ impl MultiConsumer {
                 // `run_unified_pipeline` takes `wps_output`.
                 // If it is full path, we use it.
                 // WpsConsumer::write_output just writes to path.
-                c.write_output(&p, None, empty).context("Writing WPS output")?;
+                c.write_output(&p, None, empty, false, false).context("Writing WPS output")?;
             }
         }
         

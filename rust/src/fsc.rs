@@ -20,6 +20,7 @@ use std::io::Write;
 
 use crate::bed::{Region, Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
+use crate::gc_correction::correct_gc_bias_per_type;
 
 /// Result of FSC/FSR calculation for a single bin
 #[derive(Debug, Clone, Default)]
@@ -275,6 +276,83 @@ pub fn count_fragments_by_bins(
         intermediates.into_pyarray(py).into(),
         longs.into_pyarray(py).into(),
         totals.into_pyarray(py).into(),
+        gcs.into_pyarray(py).into(),
+    ))
+}
+
+/// Python-exposed function to calculate FSC with GC bias correction applied in Rust
+/// Uses LOESS per fragment type (short, intermediate, long)
+/// Returns: (shorts_corrected, intermediates_corrected, longs_corrected, gcs)
+#[pyfunction]
+#[pyo3(signature = (bedgz_path, bin_path, verbose=false))]
+pub fn count_fragments_gc_corrected(
+    py: Python<'_>,
+    bedgz_path: &str,
+    bin_path: &str,
+    verbose: bool,
+) -> PyResult<(
+    Py<PyArray1<f64>>,  // short counts GC-corrected
+    Py<PyArray1<f64>>,  // intermediate counts GC-corrected
+    Py<PyArray1<f64>>,  // long counts GC-corrected
+    Py<PyArray1<f64>>,  // mean GC (for reference)
+)> {
+    use log::info;
+    
+    let bed_path = Path::new(bedgz_path);
+    let bin_path_p = Path::new(bin_path);
+    
+    if verbose {
+        info!("FSC GC correction: loading bins from {:?}", bin_path_p);
+    }
+    
+    // 1. Prepare
+    let regions = parse_bin_file(bin_path_p)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        
+    let mut chrom_map = ChromosomeMap::new();
+    let consumer = FscConsumer::new(&regions, &mut chrom_map);
+    
+    // 2. Run Engine
+    let engine = FragmentAnalyzer::new(consumer, 100_000);
+    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        
+    // 3. Calculate mean GC per bin
+    for bin in &mut final_consumer.counts {
+        bin.mean_gc = if bin.gc_count > 0 {
+            bin.gc_sum / bin.gc_count as f64
+        } else {
+            0.5  // Default to neutral GC for empty bins
+        };
+    }
+    
+    let results = final_consumer.counts;
+    
+    // 4. Extract raw counts and GC values
+    let shorts: Vec<f64> = results.iter().map(|r| r.short_count as f64).collect();
+    let intermediates: Vec<f64> = results.iter().map(|r| r.intermediate_count as f64).collect();
+    let longs: Vec<f64> = results.iter().map(|r| r.long_count as f64).collect();
+    let gcs: Vec<f64> = results.iter().map(|r| r.mean_gc).collect();
+    
+    if verbose {
+        info!("FSC: {} bins, applying per-type GC correction", results.len());
+    }
+    
+    // 5. Apply GC correction per fragment type
+    let (shorts_corrected, intermediates_corrected, longs_corrected) = 
+        correct_gc_bias_per_type(&gcs, &shorts, &intermediates, &longs, verbose)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+                format!("GC correction failed: {}", e)
+            ))?;
+    
+    if verbose {
+        info!("FSC GC correction complete");
+    }
+    
+    Ok((
+        shorts_corrected.into_pyarray(py).into(),
+        intermediates_corrected.into_pyarray(py).into(),
+        longs_corrected.into_pyarray(py).into(),
         gcs.into_pyarray(py).into(),
     ))
 }
