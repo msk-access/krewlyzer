@@ -2,7 +2,7 @@
 Fragment Size Coverage (FSC) calculation.
 
 Calculates FSC features for a single sample.
-Uses Rust backend for accelerated computation.
+Uses Rust backend for accelerated computation with GC correction.
 """
 
 import typer
@@ -12,7 +12,6 @@ import logging
 
 import numpy as np
 import pandas as pd
-from skmisc.loess import loess
 from rich.console import Console
 from rich.logging import RichHandler
 
@@ -23,8 +22,6 @@ logger = logging.getLogger("fsc")
 # Rust backend is required
 from krewlyzer import _core
 
-from .helpers import gc_correct
-
 
 def fsc(
     bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
@@ -33,6 +30,8 @@ def fsc(
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file (default: hg19_window_100kb.bed)"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number (default: 50)"),
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
     """
@@ -40,6 +39,10 @@ def fsc(
     
     Input: .bed.gz file from extract step
     Output: {sample}.FSC.txt file with z-scored fragment size coverage per window
+    
+    GC Correction:
+        By default, per-fragment-type LOESS correction is applied to remove GC bias.
+        Use --no-gc-correct to disable.
     """
     # Configure Rust thread pool
     if threads > 0:
@@ -80,37 +83,46 @@ def fsc(
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Count fragments using Rust backend
-        logger.info("Counting fragments using Rust backend...")
+        # Count fragments using Rust backend with optional GC correction
+        if gc_correct:
+            logger.info("Counting fragments with GC correction (LOESS per fragment type)...")
+            short, intermediate, long, gc_values = _core.count_fragments_gc_corrected(
+                str(bedgz_input),
+                str(bin_input),
+                verbose
+            )
+            # Compute total from corrected values
+            total = np.array(short) + np.array(intermediate) + np.array(long)
+            short = np.array(short)
+            intermediate = np.array(intermediate)
+            long = np.array(long)
+            logger.info(f"GC correction applied to short/intermediate/long counts")
+        else:
+            logger.info("Counting fragments (no GC correction)...")
+            _, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
+                str(bedgz_input),
+                str(bin_input)
+            )
+            short = np.array(short)
+            intermediate = np.array(intermediate)
+            long = np.array(long)
+            total = np.array(total)
         
-        # Call Rust: count_fragments_by_bins
-        ultra_short, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
-            str(bedgz_input),
-            str(bin_input)
-        )
-        
-        logger.info(f"Counted {sum(total):,} fragments across {len(total)} bins")
+        logger.info(f"Processed {len(total)} bins")
         
         # Load bin file for coordinates
         bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], 
                             names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
         
-        # GC Correction
-        gc_list = [gc if gc > 0 else np.nan for gc in gc_values]
-        correct_shorts = gc_correct(list(short), gc_list)
-        correct_intermediates = gc_correct(list(intermediate), gc_list)
-        correct_longs = gc_correct(list(long), gc_list)
-        correct_totals = gc_correct(list(total), gc_list)
-        
-        # Create DataFrame with results
+        # Create DataFrame with results (already GC-corrected if enabled)
         df = pd.DataFrame({
             'chrom': bins_df['chrom'],
             'start': bins_df['start'],
             'end': bins_df['end'],
-            'shorts': correct_shorts,
-            'intermediates': correct_intermediates,
-            'longs': correct_longs,
-            'totals': correct_totals
+            'shorts': short,
+            'intermediates': intermediate,
+            'longs': long,
+            'totals': total
         })
         
         # Aggregation into windows
