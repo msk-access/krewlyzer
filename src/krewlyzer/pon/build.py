@@ -132,8 +132,54 @@ def build_pon(
                     "long": np.array(long),
                 })
                 
-                # TODO: Get FSD data per arm
-                # TODO: Get WPS data per region (if transcript_file provided)
+                # Get FSD data per arm
+                try:
+                    import tempfile
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
+                        # FSD requires: bed_path, arms_path, output_path
+                        pkg_dir = Path(__file__).parent.parent
+                        arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
+                        if arms_file.exists():
+                            _core.fsd.calculate_fsd(
+                                str(sample_path),
+                                str(arms_file),
+                                str(fsd_output)
+                            )
+                            if fsd_output.exists():
+                                fsd_df = pd.read_csv(fsd_output, sep="\t")
+                                all_fsd_data.append(fsd_df)
+                except Exception as fsd_e:
+                    logger.debug(f"FSD failed for {sample_name}: {fsd_e}")
+                
+                # Get WPS data per region (if transcript_file provided)
+                if transcript_file and transcript_file.exists():
+                    try:
+                        import tempfile
+                        with tempfile.TemporaryDirectory() as tmpdir:
+                            _core.wps.calculate_wps(
+                                str(sample_path),
+                                str(transcript_file),
+                                str(tmpdir),
+                                sample_name,
+                                False,  # empty
+                                None,   # total_fragments
+                                str(reference) if reference else None,  # reference_path
+                                False,  # gc_correct
+                                False   # verbose
+                            )
+                            # Read WPS output for baseline
+                            wps_file = Path(tmpdir) / f"{sample_name}.WPS.tsv.gz"
+                            if wps_file.exists():
+                                wps_df = pd.read_csv(wps_file, sep="\t", compression="gzip")
+                                # Aggregate per region
+                                region_stats = wps_df.groupby("gene_id").agg({
+                                    "wps_long": "mean",
+                                    "wps_short": "mean"
+                                }).reset_index()
+                                all_wps_data.append(region_stats)
+                    except Exception as wps_e:
+                        logger.debug(f"WPS failed for {sample_name}: {wps_e}")
                 
             except Exception as e:
                 logger.warning(f"Failed to process {sample_name}: {e}")
@@ -150,11 +196,11 @@ def build_pon(
     logger.info("Computing GC bias curves...")
     gc_bias = _compute_gc_bias_model(all_gc_data)
     
-    # Build FSD baseline (placeholder)
+    # Build FSD baseline
     logger.info("Computing FSD baseline...")
     fsd_baseline = _compute_fsd_baseline(all_fsd_data)
     
-    # Build WPS baseline (placeholder)
+    # Build WPS baseline
     logger.info("Computing WPS baseline...")
     wps_baseline = _compute_wps_baseline(all_wps_data)
     
@@ -267,16 +313,78 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
     )
 
 
-def _compute_fsd_baseline(all_fsd_data: List) -> Optional[FsdBaseline]:
-    """Compute FSD baseline from sample data (placeholder)."""
-    # TODO: Implement FSD baseline computation
-    return None
+def _compute_fsd_baseline(all_fsd_data: List[pd.DataFrame]) -> Optional[FsdBaseline]:
+    """
+    Compute FSD baseline from sample data.
+    
+    FSD output format: DataFrame with 'region' column and size bin columns (e.g., '65-69', '70-74', ...)
+    
+    Aggregates size distribution proportions per chromosome arm across samples.
+    """
+    if not all_fsd_data:
+        return None
+    
+    # Filter to only DataFrames
+    fsd_dfs = [df for df in all_fsd_data if isinstance(df, pd.DataFrame) and not df.empty]
+    if not fsd_dfs:
+        return None
+    
+    # Get size bin columns (all columns except 'region')
+    sample_df = fsd_dfs[0]
+    size_bin_cols = [col for col in sample_df.columns if col != 'region']
+    
+    # Convert column names to size bin integers (e.g., '65-69' -> 65)
+    size_bins = []
+    for col in size_bin_cols:
+        try:
+            size_bins.append(int(col.split('-')[0]))
+        except ValueError:
+            continue
+    
+    if not size_bins:
+        return None
+    
+    # Aggregate per region across samples
+    # First, concat all samples and compute mean/std per region
+    all_data = pd.concat(fsd_dfs, ignore_index=True)
+    
+    # Group by region and compute stats
+    arms = {}
+    for region in all_data['region'].unique():
+        region_data = all_data[all_data['region'] == region]
+        expected = []
+        std = []
+        for col in size_bin_cols:
+            values = region_data[col].values
+            expected.append(float(np.mean(values)))
+            std.append(float(np.std(values)) if len(values) > 1 else 0.0)
+        arms[region] = {"expected": expected, "std": std}
+    
+    return FsdBaseline(size_bins=size_bins, arms=arms)
 
 
-def _compute_wps_baseline(all_wps_data: List) -> Optional[WpsBaseline]:
-    """Compute WPS baseline from sample data (placeholder)."""
-    # TODO: Implement WPS baseline computation
-    return None
+def _compute_wps_baseline(all_wps_data: List[pd.DataFrame]) -> Optional[WpsBaseline]:
+    """
+    Compute WPS baseline from sample data.
+    
+    Aggregates mean WPS per region across samples.
+    """
+    if not all_wps_data:
+        return None
+    
+    # Combine all samples
+    combined = pd.concat(all_wps_data, ignore_index=True)
+    
+    # Aggregate per region
+    baseline = combined.groupby("gene_id").agg({
+        "wps_long": ["mean", "std"],
+        "wps_short": ["mean", "std"]
+    }).reset_index()
+    
+    # Flatten column names
+    baseline.columns = ["region_id", "wps_long_mean", "wps_long_std", "wps_short_mean", "wps_short_std"]
+    
+    return WpsBaseline(regions=baseline)
 
 
 def _save_pon_model(model: PonModel, output: Path) -> None:
@@ -311,12 +419,46 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     
     gc_bias_df = pd.DataFrame(gc_bias_rows) if gc_bias_rows else pd.DataFrame()
     
+    # Build FSD baseline DataFrame
+    fsd_rows = []
+    if model.fsd_baseline:
+        for arm, data in model.fsd_baseline.arms.items():
+            for i, size_bin in enumerate(model.fsd_baseline.size_bins):
+                if i < len(data["expected"]):
+                    fsd_rows.append({
+                        "table": "fsd_baseline",
+                        "arm": arm,
+                        "size_bin": size_bin,
+                        "expected": data["expected"][i],
+                        "std": data["std"][i],
+                    })
+    
+    fsd_df = pd.DataFrame(fsd_rows) if fsd_rows else pd.DataFrame()
+    
+    # Build WPS baseline DataFrame
+    wps_df = pd.DataFrame()
+    if model.wps_baseline and model.wps_baseline.regions is not None:
+        wps_df = model.wps_baseline.regions.copy()
+        wps_df["table"] = "wps_baseline"
+    
     # Combine and save
     all_dfs = [metadata_df]
     if not gc_bias_df.empty:
         all_dfs.append(gc_bias_df)
+    if not fsd_df.empty:
+        all_dfs.append(fsd_df)
+    if not wps_df.empty:
+        all_dfs.append(wps_df)
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
     combined_df.to_parquet(output, index=False)
     
-    logger.info(f"Saved PON model: {output} ({len(combined_df)} rows)")
+    # Log summary
+    n_gc = len(gc_bias_rows)
+    n_fsd = len(fsd_rows)
+    n_wps = len(wps_df) if not wps_df.empty else 0
+    logger.info(f"Saved PON model: {output}")
+    logger.info(f"   GC bias: {n_gc} bins")
+    logger.info(f"   FSD baseline: {n_fsd} arm×size entries")
+    logger.info(f"   WPS baseline: {n_wps} regions")
+
