@@ -69,6 +69,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     
     // FSC functions
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
+    m.add_function(wrap_pyfunction!(fsc::count_fragments_gc_corrected, m)?)?;
 
     // FSD submodule
     let fsd_mod = PyModule::new(m.py(), "fsd")?;
