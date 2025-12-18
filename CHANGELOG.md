@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2025-12-18
+
+### Fixed
+- **CI Build**: Removed `gfortran` and `scikit-misc` - GC correction now fully in Rust
+- **FSC GC Correction**: Added `--gc-correct/--no-gc-correct` and `--verbose` flags to FSC CLI
+- **Python LOESS Removed**: Removed `gc_correct()` from `helpers.py` and `postprocess.py`
+
+### Changed
+- **Dockerfile**: Removed `gfortran` dependency (no longer needed)
+- **GitHub Actions**: Removed `gfortran` from CI workflows
+- **Nextflow Modules**: Updated all container versions to `0.3.2`
+
 ## [0.3.1] - 2025-12-18
 
 ### Added
@@ -23,6 +35,7 @@ All notable changes to this project will be documented in this file.
 
 ### Documentation
 - Updated `docs/features/fsr.md` and `docs/features/wps.md` with GC correction options
+
 
 ## [0.3.0] - 2025-12-16
 
