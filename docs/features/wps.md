@@ -19,9 +19,13 @@ krewlyzer wps sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 
 ## Options
 - `--tsv-input, -t`: Transcript region file (default: `data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`)
+- `--reference, -r`: Reference FASTA for GC correction (required if --gc-correct)
+- `--gc-correct/--no-gc-correct`: Apply GC bias correction using LOESS (default: **True**)
 - `--sample-name, -s`: Sample name for output file
 - `--empty/--no-empty`: Include regions with no coverage (default: off)
+- `--verbose, -v`: Enable verbose logging
 - `--threads, -p`: Number of threads (0 = all cores)
+
 
 ## Output Format
 

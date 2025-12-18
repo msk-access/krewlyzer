@@ -26,7 +26,10 @@ krewlyzer fsr sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 - `--bin-input, -b`: Bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
 - `--windows, -w`: Window size (default: 100000)
 - `--continue-n, -c`: Consecutive window number (default: 50)
+- `--gc-correct/--no-gc-correct`: Apply GC bias correction using LOESS (default: **True**)
+- `--verbose, -v`: Enable verbose logging
 - `--threads, -p`: Number of threads.
+
 
 ## Output Format
 

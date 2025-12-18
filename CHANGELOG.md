@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2025-12-18
+
+### Added
+- **Rust LOESS GC Correction**: New `rust/src/gc_correction.rs` module using the `lowess` crate
+  - Per-fragment-type correction (short, intermediate, long)
+  - Configurable LOESS parameters (fraction, iterations, delta)
+- **FSR GC Correction**: `--gc-correct/--no-gc-correct` flag (default: **True**)
+  - Uses corrected counts from Rust before calculating ratios
+  - `--verbose` flag for detailed logging
+- **WPS GC Correction**: `--gc-correct/--no-gc-correct` flag (default: **True**)
+  - `--reference, -r`: Reference FASTA for computing region GC content
+  - FASTA-based GC computation using rust-htslib::faidx
+  - Graceful fallback if reference not provided
+
+### Changed
+- **FSC Rust Backend**: Added `count_fragments_gc_corrected()` function for integrated GC correction
+- **WPS Rust Backend**: Updated `calculate_wps()` with `reference_path`, `gc_correct`, `verbose` parameters
+- **lowess Dependency**: Updated from 0.3 to 0.4 for improved API
+
+### Documentation
+- Updated `docs/features/fsr.md` and `docs/features/wps.md` with GC correction options
+
 ## [0.3.0] - 2025-12-16
 
 ### Added
