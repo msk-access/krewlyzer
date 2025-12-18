@@ -30,6 +30,7 @@ from krewlyzer.ocf import ocf
 from krewlyzer.uxm import uxm
 from krewlyzer.mfsd import mfsd
 from krewlyzer.wrapper import run_all
+from krewlyzer.pon.build import build_pon
 from krewlyzer import __version__
 
 app.command()(extract)
@@ -42,6 +43,7 @@ app.command()(ocf)
 app.command()(uxm)
 app.command()(mfsd)
 app.command()(run_all)
+app.command(name="build-pon")(build_pon)
 
 @app.callback()
 def main(
