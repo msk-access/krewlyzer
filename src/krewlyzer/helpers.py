@@ -7,69 +7,14 @@ import math
 from collections import defaultdict
 from rich.logging import RichHandler
 import logging
-from skmisc.loess import loess
 from pathlib import Path
 
 logging.basicConfig(level="INFO", handlers=[RichHandler()], format="%(message)s")
 logger = logging.getLogger("krewlyzer-helpers")
 
-def gc_correct(coverage: list[int | float], bias: list[float]) -> list[float]:
-    """
-    Perform GC bias correction on coverage values using LOESS regression.
-    Logs errors and raises commonError if fitting fails.
-    """
-    covl = len(coverage)
-    valid = [True for _ in range(covl)]
-    temp_cov = []
-    temp_bias = []
-    for i in range(covl):
-        if np.isnan(bias[i]):
-            valid[i] = False
-        else:
-            temp_cov.append(coverage[i])
-            temp_bias.append(bias[i])
-            
-    if not temp_cov or not temp_bias:
-        logger.warning("No valid coverage/bias values for GC correction. Returning original values.")
-        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
-        
-    # Check for sufficient data points and variance for LOESS
-    if len(temp_cov) < 20:
-        logger.warning(f"Too few data points ({len(temp_cov)}) for LOESS GC correction. Returning original values.")
-        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
-        
-    if np.std(temp_bias) == 0:
-        logger.warning("No variance in GC bias values. Skipping LOESS correction.")
-        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
+# Note: gc_correct function removed in v0.3.1 - GC correction now handled by Rust LOESS
+# See count_fragments_gc_corrected() in _core module
 
-    med = np.median(temp_cov)
-    correct_cov = []
-    try:
-        i = np.arange(np.min(temp_bias), np.max(temp_bias), 0.001)
-        coverage_trend = loess(temp_bias, temp_cov, span=0.75)
-        coverage_trend.fit()
-        coverage_model = loess(i, coverage_trend.predict(i, stderror=True).values)
-        coverage_model.fit()
-        coverage_pred = coverage_model.predict(temp_bias, stderror=True)
-        pred = np.array(coverage_pred.values)
-        coverage_corrected = temp_cov - pred + med
-    except Exception as e:
-        logger.error(f"GC correction failed: {e}")
-        # Return original values on failure
-        return [0 if np.isnan(b) else c for c, b in zip(coverage, bias)]
-        
-    i, j = 0, 0
-    while i < covl:
-        if valid[i]:
-            if coverage_corrected[j] < 0:
-                correct_cov.append(0)
-            else:
-                correct_cov.append(coverage_corrected[j])
-            j += 1
-        else:
-            correct_cov.append(0)
-        i += 1
-    return correct_cov
 
 class commonError(Exception):
     def __init__(self, message):

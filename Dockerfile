@@ -4,7 +4,7 @@
 FROM python:3.10-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git pkg-config gfortran clang libclang-dev \
+    build-essential git pkg-config clang libclang-dev \
     zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev \
     curl && rm -rf /var/lib/apt/lists/*
 

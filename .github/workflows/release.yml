@@ -24,7 +24,7 @@ jobs:
 
     - name: Install uv
       run: |
-        sudo apt-get update && sudo apt-get install -y gfortran clang libclang-dev
+        sudo apt-get update && sudo apt-get install -y clang libclang-dev
         pip install uv
 
     - name: Build package
