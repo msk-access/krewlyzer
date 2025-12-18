@@ -97,94 +97,144 @@ def build_pon(
         pkg_dir = Path(__file__).parent.parent
         transcript_file = pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
     
+    # Handle BAM vs BED.gz input - convert all to BED.gz paths
+    import tempfile
+    import shutil
+    temp_extract_dir = None
+    bed_paths = []  # Final list of BED.gz paths to process
+    
+    for sample_path in samples:
+        if sample_path.suffix == '.bam':
+            # Extract BAM to temp BED.gz
+            if temp_extract_dir is None:
+                temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_")
+                logger.info(f"Extracting BAM files to temp directory...")
+            
+            try:
+                bed_output_path = str(Path(temp_extract_dir) / f"{sample_path.stem}.bed.gz")
+                _core.extract_motif.process_bam_parallel(
+                    str(sample_path),  # bam_path
+                    str(reference),    # fasta_path
+                    20,                # mapq
+                    65,                # min_len
+                    400,               # max_len
+                    4,                 # kmer
+                    threads,           # threads
+                    bed_output_path,   # output_bed_path
+                    None,              # output_motif_prefix (skip motifs)
+                    None,              # exclude_path
+                    True,              # skip_duplicates
+                    True               # require_proper_pair
+                )
+                bed_path = Path(bed_output_path)
+                if bed_path.exists():
+                    bed_paths.append(bed_path)
+                    logger.debug(f"Extracted: {sample_path.name} -> {bed_path.name}")
+                else:
+                    logger.warning(f"Extraction produced no output for {sample_path.name}")
+            except Exception as e:
+                logger.warning(f"Failed to extract {sample_path.name}: {e}")
+        else:
+            # Already BED.gz
+            bed_paths.append(sample_path)
+    
+    if not bed_paths:
+        logger.error("No valid samples after processing")
+        if temp_extract_dir:
+            shutil.rmtree(temp_extract_dir)
+        raise typer.Exit(1)
+    
+    logger.info(f"Processing {len(bed_paths)} BED.gz files...")
+    
     # Collect data from all samples
     all_gc_data = []  # List of (gc_values, short, intermediate, long) tuples
     all_fsd_data = []  # List of DataFrames
     all_wps_data = []  # List of (region_id, wps_long_mean, wps_short_mean) tuples
     
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"Processing {n_samples} samples...", total=n_samples)
-        
-        for sample_path in samples:
-            if not sample_path.exists():
-                logger.warning(f"Sample not found, skipping: {sample_path}")
-                progress.advance(task)
-                continue
+    try:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            task = progress.add_task(f"Processing {len(bed_paths)} samples...", total=len(bed_paths))
             
-            sample_name = sample_path.name.replace(".bed.gz", "")
-            progress.update(task, description=f"Processing {sample_name}...")
-            
-            try:
-                # Get FSC data (for GC curves)
-                _, short, intermediate, long, _, gc_values = _core.count_fragments_by_bins(
-                    str(sample_path),
-                    str(bin_file)
-                )
+            for bed_path in bed_paths:
+                if not bed_path.exists():
+                    logger.warning(f"Sample not found, skipping: {bed_path}")
+                    progress.advance(task)
+                    continue
                 
-                all_gc_data.append({
-                    "gc": np.array(gc_values),
-                    "short": np.array(short),
-                    "intermediate": np.array(intermediate),
-                    "long": np.array(long),
-                })
+                sample_name = bed_path.name.replace(".bed.gz", "")
+                progress.update(task, description=f"Processing {sample_name}...")
                 
-                # Get FSD data per arm
                 try:
-                    import tempfile
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
-                        # FSD requires: bed_path, arms_path, output_path
-                        pkg_dir = Path(__file__).parent.parent
-                        arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
-                        if arms_file.exists():
-                            _core.fsd.calculate_fsd(
-                                str(sample_path),
-                                str(arms_file),
-                                str(fsd_output)
-                            )
-                            if fsd_output.exists():
-                                fsd_df = pd.read_csv(fsd_output, sep="\t")
-                                all_fsd_data.append(fsd_df)
-                except Exception as fsd_e:
-                    logger.debug(f"FSD failed for {sample_name}: {fsd_e}")
-                
-                # Get WPS data per region (if transcript_file provided)
-                if transcript_file and transcript_file.exists():
+                    # Get FSC data (for GC curves)
+                    _, short, intermediate, long, _, gc_values = _core.count_fragments_by_bins(
+                        str(bed_path),
+                        str(bin_file)
+                    )
+                    all_gc_data.append({
+                        "gc": np.array(gc_values),
+                        "short": np.array(short),
+                        "intermediate": np.array(intermediate),
+                        "long": np.array(long),
+                    })
+                    
+                    # Get FSD data per arm
                     try:
-                        import tempfile
                         with tempfile.TemporaryDirectory() as tmpdir:
-                            _core.wps.calculate_wps(
-                                str(sample_path),
-                                str(transcript_file),
-                                str(tmpdir),
-                                sample_name,
-                                False,  # empty
-                                None,   # total_fragments
-                                str(reference) if reference else None,  # reference_path
-                                False,  # gc_correct
-                                False   # verbose
-                            )
-                            # Read WPS output for baseline
-                            wps_file = Path(tmpdir) / f"{sample_name}.WPS.tsv.gz"
-                            if wps_file.exists():
-                                wps_df = pd.read_csv(wps_file, sep="\t", compression="gzip")
-                                # Aggregate per region
-                                region_stats = wps_df.groupby("gene_id").agg({
-                                    "wps_long": "mean",
-                                    "wps_short": "mean"
-                                }).reset_index()
-                                all_wps_data.append(region_stats)
-                    except Exception as wps_e:
-                        logger.debug(f"WPS failed for {sample_name}: {wps_e}")
+                            fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
+                            pkg_dir = Path(__file__).parent.parent
+                            arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
+                            if arms_file.exists():
+                                _core.fsd.calculate_fsd(
+                                    str(bed_path),
+                                    str(arms_file),
+                                    str(fsd_output)
+                                )
+                                if fsd_output.exists():
+                                    fsd_df = pd.read_csv(fsd_output, sep="\t")
+                                    all_fsd_data.append(fsd_df)
+                    except Exception as fsd_e:
+                        logger.debug(f"FSD failed for {sample_name}: {fsd_e}")
+                    
+                    # Get WPS data per region (if transcript_file provided)
+                    if transcript_file and transcript_file.exists():
+                        try:
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                _core.wps.calculate_wps(
+                                    str(bed_path),
+                                    str(transcript_file),
+                                    str(tmpdir),
+                                    sample_name,
+                                    False,  # empty
+                                    None,   # total_fragments
+                                    str(reference) if reference else None,
+                                    False,  # gc_correct
+                                    False   # verbose
+                                )
+                                wps_file = Path(tmpdir) / f"{sample_name}.WPS.tsv.gz"
+                                if wps_file.exists():
+                                    wps_df = pd.read_csv(wps_file, sep="\t", compression="gzip")
+                                    region_stats = wps_df.groupby("gene_id").agg({
+                                        "wps_long": "mean",
+                                        "wps_short": "mean"
+                                    }).reset_index()
+                                    all_wps_data.append(region_stats)
+                        except Exception as wps_e:
+                            logger.debug(f"WPS failed for {sample_name}: {wps_e}")
+                    
+                except Exception as e:
+                    logger.warning(f"Failed to process {sample_name}: {e}")
                 
-            except Exception as e:
-                logger.warning(f"Failed to process {sample_name}: {e}")
-            
-            progress.advance(task)
+                progress.advance(task)
+    
+    finally:
+        # Clean up temp extraction directory
+        if temp_extract_dir and Path(temp_extract_dir).exists():
+            shutil.rmtree(temp_extract_dir)
+            logger.debug(f"Cleaned up temp directory: {temp_extract_dir}")
     
     logger.info(f"Successfully processed {len(all_gc_data)} samples")
     
