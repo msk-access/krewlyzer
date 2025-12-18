@@ -30,7 +30,9 @@ def fsr(
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file (default: hg19_window_100kb.bed)"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number (default: 50)"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
 ):
     """
     Calculate Fragment Size Ratio (FSR) features for a single sample.
@@ -48,6 +50,10 @@ def fsr(
         - Intermediate: 151-259bp (nucleosome dynamics)
         - Long: 261-399bp (healthy cell contribution)
         - Total: 65-399bp
+    
+    GC Correction:
+        By default, per-fragment-type LOESS correction is applied to remove GC bias
+        before calculating ratios. Use --no-gc-correct to disable.
     """
     # Configure Rust thread pool
     if threads > 0:
@@ -88,30 +94,56 @@ def fsr(
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Count fragments using Rust backend
-        logger.info("Counting fragments using Rust backend...")
+        if gc_correct:
+            # Use GC-corrected counts from Rust backend
+            logger.info("Counting fragments with GC correction (LOESS per fragment type)...")
+            short, intermediate, long, gc_values = _core.count_fragments_gc_corrected(
+                str(bedgz_input),
+                str(bin_input),
+                verbose
+            )
+            # Note: GC-corrected version doesn't return ultra_short or total (derived from corrected)
+            # For ultra_short ratio, we need raw counts - use non-corrected for ultra_short only
+            ultra_short_raw, _, _, _, total_raw, _ = _core.count_fragments_by_bins(
+                str(bedgz_input),
+                str(bin_input)
+            )
+            ultra_short = np.array(ultra_short_raw)
+            # Total from corrected values
+            total = np.array(short) + np.array(intermediate) + np.array(long)
+            short = np.array(short)
+            intermediate = np.array(intermediate)
+            long = np.array(long)
+            logger.info(f"GC correction applied to short/intermediate/long counts")
+        else:
+            # Use raw counts (no GC correction)
+            logger.info("Counting fragments (no GC correction)...")
+            ultra_short, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
+                str(bedgz_input),
+                str(bin_input)
+            )
+            ultra_short = np.array(ultra_short)
+            short = np.array(short)
+            intermediate = np.array(intermediate)
+            long = np.array(long)
+            total = np.array(total)
         
-        ultra_short, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
-            str(bedgz_input),
-            str(bin_input)
-        )
-        
-        logger.info(f"Counted {sum(total):,} fragments across {len(total)} bins")
+        logger.info(f"Processed {len(total)} bins")
         
         # Load bin file for coordinates
         bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], 
                             names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
         
-        # Create DataFrame with raw counts (NO GC correction for FSR - ratios are self-normalizing)
+        # Create DataFrame with counts (GC-corrected if gc_correct=True)
         df = pd.DataFrame({
             'chrom': bins_df['chrom'],
             'start': bins_df['start'],
             'end': bins_df['end'],
-            'ultra_short': np.array(ultra_short),
-            'short': np.array(short),
-            'intermediate': np.array(intermediate),
-            'long': np.array(long),
-            'total': np.array(total)
+            'ultra_short': ultra_short,
+            'short': short,
+            'intermediate': intermediate,
+            'long': long,
+            'total': total
         })
         
         # Aggregation into windows

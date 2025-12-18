@@ -19,9 +19,13 @@ krewlyzer wps sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 
 ## Options
 - `--tsv-input, -t`: Transcript region file (default: `data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`)
+- `--reference, -r`: Reference FASTA for GC correction (required if --gc-correct)
+- `--gc-correct/--no-gc-correct`: Apply GC bias correction using LOESS (default: **True**)
 - `--sample-name, -s`: Sample name for output file
 - `--empty/--no-empty`: Include regions with no coverage (default: off)
+- `--verbose, -v`: Enable verbose logging
 - `--threads, -p`: Number of threads (0 = all cores)
+
 
 ## Output Format
 
@@ -110,6 +114,37 @@ Where:
 - **Protection Window ($P$)**:
     - **Long WPS**: $P=60$ bp (Total window ~120bp). Targets 120-180bp fragments.
     - **Short WPS**: $P=8$ bp (Total window ~16bp). Targets 35-80bp fragments.
+
+## Depth Normalization
+
+The normalized columns (`wps_long_norm`, `wps_short_norm`, `wps_ratio_norm`) enable comparison of WPS values **across samples** with different sequencing depths.
+
+### Formula
+
+```
+wps_norm = wps_raw / (total_fragments / 1,000,000)
+```
+
+This gives **per-million fragment** values.
+
+### Metadata Requirement
+
+Normalization requires a metadata file from the `extract` command:
+
+```
+{sample}.metadata.json  ← Contains total_fragments
+{sample}.bed.gz         ← Input to wps
+```
+
+> **Warning**: If metadata is missing, normalized columns default to raw values (not comparable across samples). Run `krewlyzer extract` first.
+
+### When to Use Raw vs Normalized
+
+| Use Case | Columns |
+|----------|---------|
+| **Within-sample** pattern analysis | `wps_long`, `wps_short`, `wps_ratio` |
+| **Cross-sample** comparison | `wps_long_norm`, `wps_short_norm` |
+| **Machine learning** across cohort | Normalized columns |
 
 ## References
 
