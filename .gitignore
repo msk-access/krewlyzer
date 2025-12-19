@@ -41,3 +41,6 @@ docker-compose.override.yml
 *.fa
 *.fai
 *.bed
+
+# But include packaged data files
+!src/krewlyzer/data/**/*.bed
