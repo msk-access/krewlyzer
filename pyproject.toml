@@ -39,3 +39,6 @@ build-backend = "maturin"
 python-source = "src"
 manifest-path = "rust/Cargo.toml"
 module-name = "krewlyzer._core"
+include = [
+    "src/krewlyzer/data/**/*"
+]
