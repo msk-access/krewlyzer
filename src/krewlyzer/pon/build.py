@@ -35,6 +35,7 @@ def build_pon(
     bin_file: Optional[Path] = typer.Option(None, "--bin-file", "-b", help="Bin file for FSC/FSR (default: hg19_window_100kb.bed)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
     threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
+    require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """
@@ -124,7 +125,7 @@ def build_pon(
                     None,              # output_motif_prefix (skip motifs)
                     None,              # exclude_path
                     True,              # skip_duplicates
-                    False              # require_proper_pair (False for v1 ACCESS compatibility)
+                    require_proper_pair  # from CLI argument
                 )
                 bed_path = Path(bed_output_path)
                 if bed_path.exists():
