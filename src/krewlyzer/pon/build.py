@@ -124,7 +124,7 @@ def build_pon(
                     None,              # output_motif_prefix (skip motifs)
                     None,              # exclude_path
                     True,              # skip_duplicates
-                    True               # require_proper_pair
+                    False              # require_proper_pair (False for v1 ACCESS compatibility)
                 )
                 bed_path = Path(bed_output_path)
                 if bed_path.exists():

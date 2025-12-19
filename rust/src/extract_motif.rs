@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
 use log::{info};
+use noodles::bgzf;
 
 // Config struct moved to avoid duplication
 
@@ -384,13 +385,15 @@ pub fn process_bam_parallel(
     // Write BED if requested
     if let Some(path) = output_bed_path {
         info!("Writing BED to {}...", path);
-        let mut f = File::create(path).map(BufWriter::new)?;
+        let file = File::create(path)?;
+        let mut writer = bgzf::io::Writer::new(file);
         for res in &results {
             for line in &res.fragments {
-                writeln!(f, "{}", line)?;
+                writeln!(writer, "{}", line)?;
             }
             total_count += res.count;
         }
+        writer.finish()?;  // Ensure proper EOF marker
     } else {
         // Just sum counts if not writing output
          for res in &results {
