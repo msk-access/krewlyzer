@@ -203,6 +203,7 @@ def build_pon(
                     if transcript_file and transcript_file.exists():
                         try:
                             with tempfile.TemporaryDirectory() as tmpdir:
+                                logger.debug(f"Calling WPS for {sample_name} with transcript: {transcript_file}")
                                 _core.wps.calculate_wps(
                                     str(bed_path),
                                     str(transcript_file),
@@ -217,13 +218,16 @@ def build_pon(
                                 wps_file = Path(tmpdir) / f"{sample_name}.WPS.tsv.gz"
                                 if wps_file.exists():
                                     wps_df = pd.read_csv(wps_file, sep="\t", compression="gzip")
+                                    logger.debug(f"WPS output has {len(wps_df)} rows")
                                     region_stats = wps_df.groupby("gene_id").agg({
                                         "wps_long": "mean",
                                         "wps_short": "mean"
                                     }).reset_index()
                                     all_wps_data.append(region_stats)
+                                else:
+                                    logger.warning(f"WPS output file not created for {sample_name}")
                         except Exception as wps_e:
-                            logger.debug(f"WPS failed for {sample_name}: {wps_e}")
+                            logger.warning(f"WPS failed for {sample_name}: {wps_e}")
                     
                 except Exception as e:
                     logger.warning(f"Failed to process {sample_name}: {e}")
