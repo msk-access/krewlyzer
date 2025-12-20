@@ -146,32 +146,73 @@ class PonModel:
         if not path.exists():
             raise FileNotFoundError(f"PON model not found: {path}")
         
-        # Read metadata table
-        metadata_df = pd.read_parquet(path, filters=[("table", "==", "metadata")])
-        if metadata_df.empty:
-            # Try reading as single table (legacy format)
-            df = pd.read_parquet(path)
-            return cls._load_from_single_table(df)
+        # Read all tables
+        df_all = pd.read_parquet(path)
         
-        # Read component tables
-        gc_bias_df = pd.read_parquet(path, filters=[("table", "==", "gc_bias")])
-        fsd_df = pd.read_parquet(path, filters=[("table", "==", "fsd_baseline")])
-        wps_df = pd.read_parquet(path, filters=[("table", "==", "wps_baseline")])
+        # Split by table type
+        metadata_df = df_all[df_all["table"] == "metadata"]
+        gc_bias_df = df_all[df_all["table"] == "gc_bias"]
+        fsd_df = df_all[df_all["table"] == "fsd_baseline"]
+        wps_df = df_all[df_all["table"] == "wps_baseline"]
+        
+        if metadata_df.empty:
+            raise ValueError("Invalid PON file: missing metadata table")
         
         # Parse metadata
         meta = metadata_df.iloc[0]
         
+        # Parse GC bias model
+        gc_bias = None
+        if not gc_bias_df.empty:
+            gc_bias = GcBiasModel(
+                gc_bins=gc_bias_df["gc_bin"].tolist(),
+                short_expected=gc_bias_df["short_expected"].tolist(),
+                short_std=gc_bias_df["short_std"].tolist(),
+                intermediate_expected=gc_bias_df["intermediate_expected"].tolist(),
+                intermediate_std=gc_bias_df["intermediate_std"].tolist(),
+                long_expected=gc_bias_df["long_expected"].tolist(),
+                long_std=gc_bias_df["long_std"].tolist(),
+            )
+        
+        # Parse FSD baseline
+        fsd_baseline = None
+        if not fsd_df.empty:
+            arms_dict = {}
+            for arm_name, arm_group in fsd_df.groupby("arm"):
+                arm_group = arm_group.sort_values("size_bin")
+                arms_dict[arm_name] = {
+                    "expected": arm_group["expected"].tolist(),
+                    "std": arm_group["std"].tolist(),
+                }
+            size_bins = sorted(fsd_df["size_bin"].unique().tolist())
+            fsd_baseline = FsdBaseline(size_bins=size_bins, arms=arms_dict)
+        
+        # Parse WPS baseline
+        wps_baseline = None
+        if not wps_df.empty:
+            regions_df = wps_df[["region_id", "wps_long_mean", "wps_long_std", 
+                                "wps_short_mean", "wps_short_std"]].copy()
+            wps_baseline = WpsBaseline(regions=regions_df)
+        
         # Build model
         model = cls(
-            schema_version=meta.get("schema_version", "1.0"),
-            assay=meta.get("assay", ""),
-            build_date=meta.get("build_date", ""),
+            schema_version=str(meta.get("schema_version", "1.0")),
+            assay=str(meta.get("assay", "")),
+            build_date=str(meta.get("build_date", "")),
             n_samples=int(meta.get("n_samples", 0)),
-            reference=meta.get("reference", ""),
+            reference=str(meta.get("reference", "")),
+            gc_bias=gc_bias,
+            fsd_baseline=fsd_baseline,
+            wps_baseline=wps_baseline,
         )
         
-        # TODO: Parse gc_bias, fsd_baseline, wps_baseline from DataFrames
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")
+        if gc_bias:
+            logger.info(f"  GC bias: {len(gc_bias.gc_bins)} bins")
+        if fsd_baseline:
+            logger.info(f"  FSD baseline: {len(fsd_baseline.arms)} arms, {len(fsd_baseline.size_bins)} size bins")
+        if wps_baseline:
+            logger.info(f"  WPS baseline: {len(wps_baseline.regions)} regions")
         
         return model
     

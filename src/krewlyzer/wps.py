@@ -25,11 +25,12 @@ from krewlyzer import _core
 def wps(
     bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     tsv_input: Optional[Path] = typer.Option(None, "--tsv-input", "-t", help="Path to transcript/region TSV file"),
-    reference: Optional[Path] = typer.Option(None, "--reference", "-r", help="Reference FASTA for GC computation (required for GC correction)"),
+    reference: Optional[Path] = typer.Option(None, "--reference", "-r", help="Reference FASTA for GC computation"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     empty: bool = typer.Option(False, "--empty/--no-empty", help="Include regions with no coverage"),
-    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True, requires --reference)"),
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     threads: int = typer.Option(0, "--threads", "-p", help="Number of threads (0=all cores)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
 ):
@@ -44,11 +45,9 @@ def wps(
         - gene_id, chrom, pos
         - cov_long, cov_short (coverage)
         - wps_long, wps_short, wps_ratio (raw WPS)
-        - wps_long_norm, wps_short_norm, wps_ratio_norm (normalized per million)
+        - wps_long_norm, wps_short_norm, wps_ratio_norm (normalized)
     
-    GC Correction:
-        By default, computes region GC content from the reference FASTA.
-        Use --no-gc-correct to disable, or provide --reference to enable.
+    With --pon-model: Adds wps_long_z and wps_short_z columns (z-scores vs PON)
     """
     # Configure Rust thread pool
     if threads > 0:
@@ -134,9 +133,47 @@ def wps(
         )
         
         logger.info(f"WPS complete: processed {count} regions → {output}/{sample_name}.WPS.tsv.gz")
-        logger.info("Output columns: gene_id, chrom, pos, cov_long, cov_short, wps_long, wps_short, wps_ratio, wps_long_norm, wps_short_norm, wps_ratio_norm")
+        
+        # If PON provided, compute z-scores for each region
+        if pon_model:
+            from krewlyzer.pon.model import PonModel
+            import pandas as pd
+            import gzip
+            
+            try:
+                pon = PonModel.load(pon_model)
+                logger.info(f"Loaded PON model: {pon.assay} (n={pon.n_samples})")
+                
+                if pon.wps_baseline:
+                    wps_file = output / f"{sample_name}.WPS.tsv.gz"
+                    logger.info("Computing z-scores against PON baseline...")
+                    
+                    # Read WPS output
+                    df = pd.read_csv(wps_file, sep="\t", compression="gzip")
+                    
+                    # Aggregate per-region means
+                    region_stats = df.groupby("gene_id").agg({
+                        "wps_long": "mean",
+                        "wps_short": "mean"
+                    }).reset_index()
+                    
+                    # Merge with PON baseline
+                    pon_df = pon.wps_baseline.regions
+                    merged = region_stats.merge(pon_df, left_on="gene_id", right_on="region_id", how="left")
+                    
+                    # Compute z-scores
+                    merged["wps_long_z"] = (merged["wps_long"] - merged["wps_long_mean"]) / merged["wps_long_std"].replace(0, 1)
+                    merged["wps_short_z"] = (merged["wps_short"] - merged["wps_short_mean"]) / merged["wps_short_std"].replace(0, 1)
+                    
+                    # Save summary file
+                    summary_file = output / f"{sample_name}.WPS_summary.tsv"
+                    summary_cols = ["gene_id", "wps_long", "wps_short", "wps_long_z", "wps_short_z"]
+                    merged[summary_cols].to_csv(summary_file, sep="\t", index=False)
+                    logger.info(f"Saved z-score summary: {summary_file}")
+                    
+            except Exception as e:
+                logger.warning(f"Could not compute PON z-scores: {e}")
 
     except Exception as e:
         logger.error(f"WPS calculation failed: {e}")
         raise typer.Exit(1)
-
