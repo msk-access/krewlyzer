@@ -26,12 +26,13 @@ from krewlyzer import _core
 def fsr(
     bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
-    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file (default: hg19_window_100kb.bed)"),
-    windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
-    continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number (default: 50)"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
+    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
+    windows: int = typer.Option(100000, "--windows", "-w", help="Window size"),
+    continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
-    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True)"),
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
 ):
     """

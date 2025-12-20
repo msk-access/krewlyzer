@@ -53,6 +53,7 @@ def run_all(
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
     ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
     wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
