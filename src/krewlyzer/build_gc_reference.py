@@ -99,7 +99,7 @@ def build_gc_reference(
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Output paths
-    valid_regions_path = output_dir / f"valid_regions_{genome_name}.bed"
+    valid_regions_path = output_dir / f"valid_regions_{genome_name}.bed.gz"
     ref_gc_path = output_dir / f"ref_genome_GC_{genome_name}.parquet"
     
     try:

@@ -126,54 +126,82 @@ pub struct ValidRegion {
     pub gc_content: f64,
 }
 
-/// Load valid regions from a BED file
+/// Load valid regions from a BED file (plain or BGZF compressed)
 /// 
 /// # Arguments
-/// * `bed_path` - Path to the valid_regions.bed file
+/// * `bed_path` - Path to the valid_regions.bed or .bed.gz file
 /// 
 /// # Returns
 /// * Vector of ValidRegion structs
 pub fn load_valid_regions(bed_path: &Path) -> Result<Vec<ValidRegion>> {
+    use noodles::bgzf;
+    use std::io::BufRead;
+    
     info!("Loading valid regions from {:?}", bed_path);
     
     let file = File::open(bed_path)
         .with_context(|| format!("Failed to open valid regions file: {:?}", bed_path))?;
-    let reader = BufReader::new(file);
+    
+    // Check if file is BGZF compressed based on extension
+    let is_bgzf = bed_path.extension()
+        .map(|ext| ext == "gz")
+        .unwrap_or(false);
     
     let mut regions = Vec::new();
     
-    for line in reader.lines() {
-        let line = line?;
-        if line.starts_with('#') || line.trim().is_empty() {
-            continue;
+    // Create appropriate reader based on compression
+    if is_bgzf {
+        let mut reader = bgzf::io::Reader::new(file);
+        let mut line = String::new();
+        while reader.read_line(&mut line)? > 0 {
+            if let Some(region) = parse_bed_line(&line) {
+                regions.push(region);
+            }
+            line.clear();
         }
-        
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 {
-            continue;
+    } else {
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let line = line?;
+            if let Some(region) = parse_bed_line(&line) {
+                regions.push(region);
+            }
         }
-        
-        let chrom = fields[0].trim_start_matches("chr").to_string();
-        let start: u64 = fields[1].parse().unwrap_or(0);
-        let end: u64 = fields[2].parse().unwrap_or(0);
-        
-        // GC content may be in 4th column if pre-computed
-        let gc_content = if fields.len() >= 4 {
-            fields[3].parse().unwrap_or(0.0)
-        } else {
-            0.0
-        };
-        
-        regions.push(ValidRegion {
-            chrom,
-            start,
-            end,
-            gc_content,
-        });
     }
     
     info!("Loaded {} valid regions", regions.len());
     Ok(regions)
+}
+
+/// Parse a single BED line into a ValidRegion
+fn parse_bed_line(line: &str) -> Option<ValidRegion> {
+    let line = line.trim();
+    if line.starts_with('#') || line.is_empty() {
+        return None;
+    }
+    
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 3 {
+        return None;
+    }
+    
+    let chrom = fields[0].trim_start_matches("chr").to_string();
+    let start: u64 = fields[1].parse().ok()?;
+    let end: u64 = fields[2].parse().ok()?;
+    
+    // GC content may be in 4th column if pre-computed
+    let gc_content = if fields.len() >= 4 {
+        fields[3].parse().unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    
+    Some(ValidRegion {
+        chrom,
+        start,
+        end,
+        gc_content,
+    })
 }
 
 /// Generate valid regions BED file by excluding problematic and gap regions
@@ -275,12 +303,15 @@ pub fn generate_valid_regions(
           regions.len(), 
           chrom_lengths.values().map(|l| l / bin_size).sum::<u64>() as usize - regions.len());
     
-    // Write output BED
+    // Write output BED.gz (BGZF compressed)
+    use noodles::bgzf;
+    use std::io::Write;
+    
     let output_file = File::create(output_path)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
             format!("Failed to create output file: {}", e)
         ))?;
-    let mut writer = BufWriter::new(output_file);
+    let mut writer = bgzf::io::Writer::new(output_file);
     
     // Write header
     writeln!(writer, "# Valid regions for GC correction estimation")
@@ -295,6 +326,12 @@ pub fn generate_valid_regions(
         writeln!(writer, "{}\t{}\t{}", region.chrom, region.start, region.end)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     }
+    
+    // Finish BGZF stream
+    writer.finish()
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+            format!("Failed to finish BGZF stream: {}", e)
+        ))?;
     
     let region_count = regions.len();
     
