@@ -381,14 +381,118 @@ pub fn generate_ref_genome_gc(
     
     info!("Processing {} regions...", regions.len());
     
-    // TODO: Implement actual GC counting from reference
-    // For each region:
-    //   For each position in region:
-    //     For each length bin:
-    //       Extract sequence, compute GC, increment count
+    // Progress tracking
+    let total_regions = regions.len();
+    let mut processed_regions = 0;
     
-    // TODO: Save as Parquet file (consistent with PON format)
-    // Schema: length_bin (u32), gc_percent (u8), expected_count (u64)
+    // For each valid region, scan for GC content at each position for each length
+    for region in &regions {
+        // Convert chromosome name to the format expected by the FASTA
+        // Try both with and without "chr" prefix
+        let chrom_name = region.chrom.clone();
+        let chrom_with_chr = format!("chr{}", region.chrom);
+        
+        // Try to fetch the sequence for this region
+        let seq_result = faidx.fetch_seq(&chrom_name, region.start as usize, region.end as usize - 1);
+        let seq = match seq_result {
+            Ok(s) => s,
+            Err(_) => {
+                // Try with chr prefix
+                match faidx.fetch_seq(&chrom_with_chr, region.start as usize, region.end as usize - 1) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        // Skip this region if we can't fetch it
+                        continue;
+                    }
+                }
+            }
+        };
+        
+        let seq_len = seq.len();
+        
+        // For each length bin, sample positions and count GC
+        for (bin_idx, &(min_len, max_len)) in LENGTH_BINS.iter().enumerate() {
+            // Use the midpoint of each length bin for sampling
+            let frag_len = ((min_len + max_len) / 2) as usize;
+            
+            // Sample every 100bp to speed up (still statistically representative)
+            let step = 100;
+            
+            let mut pos = 0;
+            while pos + frag_len <= seq_len {
+                // Get the subsequence for this theoretical fragment
+                let frag_seq = &seq[pos..pos + frag_len];
+                
+                // Count GC content
+                let gc_count = frag_seq.iter()
+                    .filter(|&&b| b == b'G' || b == b'g' || b == b'C' || b == b'c')
+                    .count();
+                
+                // Skip if too many Ns (uncertain bases)
+                let n_count = frag_seq.iter()
+                    .filter(|&&b| b == b'N' || b == b'n')
+                    .count();
+                
+                if n_count * 10 > frag_len {
+                    // More than 10% Ns, skip this position
+                    pos += step;
+                    continue;
+                }
+                
+                // Calculate GC percent (0-100)
+                let valid_bases = frag_len - n_count;
+                let gc_percent = if valid_bases > 0 {
+                    ((gc_count as f64 / valid_bases as f64) * 100.0).round() as usize
+                } else {
+                    50  // Default to 50% if no valid bases
+                };
+                
+                let gc_idx = gc_percent.min(100);
+                
+                // Increment count
+                counts[bin_idx][gc_idx] += 1;
+                total_fragments += 1;
+                
+                pos += step;
+            }
+        }
+        
+        processed_regions += 1;
+        
+        // Log progress every 1000 regions
+        if processed_regions % 1000 == 0 {
+            info!("Processed {}/{} regions ({:.1}%), {} fragments so far", 
+                  processed_regions, total_regions,
+                  (processed_regions as f64 / total_regions as f64) * 100.0,
+                  total_fragments);
+        }
+    }
+    
+    info!("Completed GC counting: {} total fragments across {} regions", 
+          total_fragments, processed_regions);
+    
+    // Save as CSV file (simple format, can be loaded easily)
+    // Schema: length_bin_min, length_bin_max, gc_percent, expected_count
+    let output_file = std::fs::File::create(output_path)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+            format!("Failed to create output file: {}", e)
+        ))?;
+    let mut writer = std::io::BufWriter::new(output_file);
+    
+    // Write header
+    writeln!(writer, "length_bin_min,length_bin_max,gc_percent,expected_count")
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    
+    // Write data
+    for (bin_idx, &(min_len, max_len)) in LENGTH_BINS.iter().enumerate() {
+        for gc_percent in 0..=100 {
+            let count = counts[bin_idx][gc_percent];
+            if count > 0 {  // Only write non-zero counts to save space
+                writeln!(writer, "{},{},{},{}", min_len, max_len, gc_percent, count)
+                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+            }
+        }
+    }
     
     info!("Generated ref_genome_GC with {} total fragments", total_fragments);
     Ok(total_fragments)
