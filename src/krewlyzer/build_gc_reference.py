@@ -3,7 +3,7 @@ Build GC Reference Assets CLI.
 
 Generates pre-computed GC correction assets:
 1. valid_regions.bed - Curated 100kb bins excluding blacklist/gaps
-2. ref_genome_GC.npy - Expected fragment counts per (length, GC)
+2. ref_genome_GC.parquet - Expected fragment counts per (length, GC)
 
 These assets are generated once per reference genome and shipped with krewlyzer.
 """
@@ -37,7 +37,7 @@ def build_gc_reference(
     
     This command generates two files:
     1. valid_regions_{genome}.bed - Curated bins for GC estimation
-    2. ref_genome_GC_{genome}.npy - Expected fragment counts per (length, GC)
+    2. ref_genome_GC_{genome}.parquet - Expected fragment counts per (length, GC)
     
     Example:
         krewlyzer build-gc-reference hg38.fa -o data/gc/ -b ENCFF356LFX.bed
@@ -60,21 +60,21 @@ def build_gc_reference(
         logger.error("Run 'samtools faidx <reference>' to create the index")
         raise typer.Exit(1)
     
-    # Default blacklist
+    # Default blacklist from existing data
     if blacklist is None:
         pkg_dir = Path(__file__).parent
-        # Try default blacklist locations
-        possible_blacklists = [
-            pkg_dir / "data" / "gc" / "ENCFF356LFX.bed",  # hg38
-            pkg_dir / "data" / "gc" / "blacklist_hg38.bed",
-        ]
-        for bl in possible_blacklists:
-            if bl.exists():
-                blacklist = bl
-                logger.info(f"Using default blacklist: {blacklist}")
-                break
+        # Try existing blacklist locations based on genome name hint
+        ref_name_lower = reference.name.lower()
+        if 'hg38' in ref_name_lower or 'grch38' in ref_name_lower:
+            blacklist = pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed"
+        else:
+            # Default to hg19 for hg19/b37/GRCh37
+            blacklist = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
         
-        if blacklist is None:
+        if blacklist.exists():
+            logger.info(f"Using default blacklist: {blacklist}")
+        else:
+            logger.warning(f"No blacklist file found at {blacklist}")
             logger.warning("No blacklist file provided or found. Regions may include problematic areas.")
             # Create empty blacklist
             blacklist = output_dir / "empty_blacklist.bed"
@@ -100,7 +100,7 @@ def build_gc_reference(
     
     # Output paths
     valid_regions_path = output_dir / f"valid_regions_{genome_name}.bed"
-    ref_gc_path = output_dir / f"ref_genome_GC_{genome_name}.npy"
+    ref_gc_path = output_dir / f"ref_genome_GC_{genome_name}.parquet"
     
     try:
         # Step 1: Generate valid regions

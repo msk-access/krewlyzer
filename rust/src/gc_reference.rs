@@ -2,7 +2,7 @@
 //!
 //! Generates pre-computed GC correction assets:
 //! 1. valid_regions.bed - Curated 100kb bins excluding blacklist/gaps
-//! 2. ref_genome_GC.npy - Expected fragment counts per (length, GC)
+//! 2. ref_genome_GC.parquet - Expected fragment counts per (length, GC)
 //!
 //! These assets are generated once per reference genome and shipped with krewlyzer.
 
@@ -87,19 +87,19 @@ pub struct RefGenomeGc {
 }
 
 impl RefGenomeGc {
-    /// Load reference GC expected values from a .npy file
+    /// Load reference GC expected values from a Parquet file
     /// 
     /// # Arguments
-    /// * `path` - Path to the .npy file
+    /// * `path` - Path to the .parquet file
     /// 
     /// # Returns
     /// * Loaded RefGenomeGc or error
     pub fn load(path: &Path) -> Result<Self> {
-        // TODO: Implement loading from .npy file using ndarray-npy
-        // For now, return placeholder
+        // TODO: Implement loading from Parquet file
+        // Schema: length_bin (u32), gc_percent (u8), expected_count (f64)
         info!("Loading ref_genome_GC from {:?}", path);
         
-        Err(anyhow!("ref_genome_GC.npy loading not yet implemented"))
+        Err(anyhow!("ref_genome_GC.parquet loading not yet implemented"))
     }
     
     /// Get expected count for a given length and GC content
@@ -288,7 +288,7 @@ fn load_blacklist(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>> {
 /// # Arguments
 /// * `reference_path` - Path to reference FASTA
 /// * `valid_regions_path` - Path to valid_regions.bed
-/// * `output_path` - Path to write ref_genome_GC.npy
+/// * `output_path` - Path to write ref_genome_GC.parquet
 /// 
 /// # Returns
 /// * Total fragments counted
@@ -326,7 +326,8 @@ pub fn generate_ref_genome_gc(
     //     For each length bin:
     //       Extract sequence, compute GC, increment count
     
-    // TODO: Save as .npy file using ndarray-npy
+    // TODO: Save as Parquet file (consistent with PON format)
+    // Schema: length_bin (u32), gc_percent (u8), expected_count (u64)
     
     info!("Generated ref_genome_GC with {} total fragments", total_fragments);
     Ok(total_fragments)
