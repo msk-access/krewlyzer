@@ -19,6 +19,7 @@ pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;
 pub mod pon_model;
+pub mod gc_reference;
 
 /// Read filtering configuration
 #[pyclass]
@@ -105,10 +106,11 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Unified Pipeline (FSC/FSD/WPS/OCF)
     m.add_function(wrap_pyfunction!(pipeline::run_unified_pipeline, m)?)?;
     
-
-    
-
-
+    // GC Reference submodule (pre-computed assets)
+    let gc_mod = PyModule::new(m.py(), "gc")?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_ref_genome_gc, &gc_mod)?)?;
+    m.add_submodule(&gc_mod)?;
     
     // Version
     #[pyfn(m)]
