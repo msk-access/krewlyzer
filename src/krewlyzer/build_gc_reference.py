@@ -66,10 +66,10 @@ def build_gc_reference(
         # Try existing exclude regions based on genome name hint
         ref_name_lower = reference.name.lower()
         if 'hg38' in ref_name_lower or 'grch38' in ref_name_lower:
-            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed"
+            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed.gz"
         else:
             # Default to hg19 for hg19/b37/GRCh37
-            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
+            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed.gz"
         
         if exclude_regions.exists():
             logger.info(f"Using default exclude regions: {exclude_regions}")

@@ -39,31 +39,59 @@ pub struct BinResult {
     pub gc_count: u32,
 }
 
-/// Parse a BED file to get regions (bins)
+/// Parse a BED file (plain or BGZF-compressed) to get regions (bins)
 pub fn parse_bin_file(bin_path: &Path) -> Result<Vec<Region>> {
+    use noodles::bgzf;
+    use std::io::BufRead;
+    
     let file = File::open(bin_path)
         .with_context(|| format!("Failed to open bin file: {:?}", bin_path))?;
-    let reader = BufReader::new(file);
+    
+    // Check if file is BGZF compressed based on extension
+    let is_bgzf = bin_path.extension()
+        .map(|ext| ext == "gz")
+        .unwrap_or(false);
     
     let mut regions = Vec::new();
-    for line in reader.lines() {
-        let line = line?;
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+    
+    if is_bgzf {
+        let mut reader = bgzf::io::Reader::new(file);
+        let mut line = String::new();
+        while reader.read_line(&mut line)? > 0 {
+            if let Some(region) = parse_bed_line_to_region(&line) {
+                regions.push(region);
+            }
+            line.clear();
         }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 {
-            continue;
+    } else {
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let line = line?;
+            if let Some(region) = parse_bed_line_to_region(&line) {
+                regions.push(region);
+            }
         }
-        
-        let chrom = fields[0].to_string();
-        let start: u64 = fields[1].parse().with_context(|| "Invalid start position")?;
-        let end: u64 = fields[2].parse().with_context(|| "Invalid end position")?;
-        
-        regions.push(Region::new(chrom, start, end));
     }
     
     Ok(regions)
+}
+
+/// Parse a single BED line to a Region
+fn parse_bed_line_to_region(line: &str) -> Option<Region> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 3 {
+        return None;
+    }
+    
+    let chrom = fields[0].to_string();
+    let start: u64 = fields[1].parse().ok()?;
+    let end: u64 = fields[2].parse().ok()?;
+    
+    Some(Region::new(chrom, start, end))
 }
 
 /// FscConsumer for the Unified Engine

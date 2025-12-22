@@ -1,0 +1,1 @@
+/Users/shahr2/Documents/Github/krewlyzer/tests/test_data/pon/Donor8F34c2206-TP01_ACCESSv2-VAL-20230004R_cl_aln_srt_MD_IR_FX_BR__aln_srt_IR_FX-duplex.bed.gz

@@ -76,7 +76,7 @@ def fsr(
     # Default bin input
     if bin_input is None:
         pkg_dir = Path(__file__).parent
-        bin_input = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
+        bin_input = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
         logger.info(f"Using default bin file: {bin_input}")
     
     if not bin_input.exists():

@@ -73,6 +73,63 @@ struct OcrRegionInfo {
     label_id: usize,
 }
 
+/// Parse a single OCR line
+fn parse_ocr_line(
+    line: &str,
+    chrom_map: &mut ChromosomeMap,
+    label_to_id: &mut HashMap<String, usize>,
+    labels: &mut Vec<String>,
+    nodes_by_chrom: &mut HashMap<u32, Vec<IntervalNode<usize, u32>>>,
+    region_infos: &mut Vec<OcrRegionInfo>,
+) {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return;
+    }
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 4 {
+        return;
+    }
+    
+    let chrom = fields[0];
+    let start: u64 = fields[1].parse().unwrap_or(0);
+    let end: u64 = fields[2].parse().unwrap_or(0);
+    let label = fields[3].to_string();
+    
+    // Map Label
+    let label_id = if let Some(&id) = label_to_id.get(&label) {
+        id
+    } else {
+        let id = labels.len();
+        label_to_id.insert(label.clone(), id);
+        labels.push(label);
+        id
+    };
+    
+    // Map Chrom
+    let chrom_norm = chrom.trim_start_matches("chr");
+    let chrom_id = chrom_map.get_id(chrom_norm);
+    
+    // Store Region Info
+    let info_idx = region_infos.len();
+    region_infos.push(OcrRegionInfo {
+        start,
+        end,
+        label_id,
+    });
+    
+    // Add to Tree nodes
+    // Standard overlap query.
+    // COITree (closed): [start, end-1]
+    let s = start as u32;
+    let e = end as u32;
+    let e_closed = if e > s { e - 1 } else { s };
+    
+    nodes_by_chrom.entry(chrom_id).or_default().push(
+        IntervalNode::new(s as i32, e_closed as i32, info_idx)
+    );
+}
+
 #[derive(Clone)]
 pub struct OcfConsumer {
     // Shared state
@@ -87,11 +144,17 @@ pub struct OcfConsumer {
 
 impl OcfConsumer {
     pub fn new(ocr_path: &Path, chrom_map: &mut ChromosomeMap) -> Result<Self> {
+        use noodles::bgzf;
+        
         // 1. Parse OCR File
         // Format: chrom start end label
         let file = File::open(ocr_path)
             .with_context(|| format!("Failed to open OCR file: {:?}", ocr_path))?;
-        let reader = BufReader::new(file);
+        
+        // Check if file is BGZF compressed based on extension
+        let is_bgzf = ocr_path.extension()
+            .map(|ext| ext == "gz")
+            .unwrap_or(false);
         
         let mut label_to_id: HashMap<String, usize> = HashMap::new();
         let mut labels: Vec<String> = Vec::new();
@@ -99,48 +162,19 @@ impl OcfConsumer {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut region_infos = Vec::new(); // Implicitly indexed by order of insertion
         
-        for line in reader.lines() {
-            let line = line?;
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 4 { continue; }
-            
-            let chrom = fields[0];
-            let start: u64 = fields[1].parse().unwrap_or(0);
-            let end: u64 = fields[2].parse().unwrap_or(0);
-            let label = fields[3].to_string();
-            
-            // Map Label
-            let label_id = if let Some(&id) = label_to_id.get(&label) {
-                id
-            } else {
-                let id = labels.len();
-                label_to_id.insert(label.clone(), id);
-                labels.push(label);
-                id
-            };
-            
-            // Map Chrom
-            let chrom_norm = chrom.trim_start_matches("chr");
-            let chrom_id = chrom_map.get_id(chrom_norm);
-            
-            // Store Region Info
-            let info_idx = region_infos.len();
-            region_infos.push(OcrRegionInfo {
-                start,
-                end,
-                label_id,
-            });
-            
-            // Add to Tree nodes
-            // Standard overlap query.
-            // COITree (closed): [start, end-1]
-            let s = start as u32;
-            let e = end as u32;
-            let e_closed = if e > s { e - 1 } else { s };
-            
-            nodes_by_chrom.entry(chrom_id).or_default().push(
-                IntervalNode::new(s as i32, e_closed as i32, info_idx)
-            );
+        if is_bgzf {
+            let mut reader = bgzf::io::Reader::new(file);
+            let mut line = String::new();
+            while reader.read_line(&mut line)? > 0 {
+                parse_ocr_line(&line, chrom_map, &mut label_to_id, &mut labels, &mut nodes_by_chrom, &mut region_infos);
+                line.clear();
+            }
+        } else {
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line?;
+                parse_ocr_line(&line, chrom_map, &mut label_to_id, &mut labels, &mut nodes_by_chrom, &mut region_infos);
+            }
         }
         
         // Build Trees

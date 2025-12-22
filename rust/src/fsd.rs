@@ -166,20 +166,53 @@ impl FragmentConsumer for FsdConsumer {
     }
 }
 
-/// Parse Arms/Regions file (Chrom Start End)
+/// Parse Arms/Regions file (Chrom Start End) - supports both plain and BGZF-compressed
 pub fn parse_regions_file(path: &Path) -> Result<Vec<Region>> {
+    use noodles::bgzf;
+    use std::io::BufRead;
+    
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    
+    // Check if file is BGZF compressed based on extension
+    let is_bgzf = path.extension()
+        .map(|ext| ext == "gz")
+        .unwrap_or(false);
+    
     let mut regions = Vec::new();
     
-    for line in reader.lines() {
-        let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 { continue; }
-        let chrom = fields[0].to_string();
-        let start: u64 = fields[1].parse().unwrap_or(0);
-        let end: u64 = fields[2].parse().unwrap_or(0);
-        regions.push(Region::new(chrom, start, end));
+    if is_bgzf {
+        let mut reader = bgzf::io::Reader::new(file);
+        let mut line = String::new();
+        while reader.read_line(&mut line)? > 0 {
+            if let Some(region) = parse_region_line(&line) {
+                regions.push(region);
+            }
+            line.clear();
+        }
+    } else {
+        let reader = BufReader::new(file);
+        for line in reader.lines() {
+            let line = line?;
+            if let Some(region) = parse_region_line(&line) {
+                regions.push(region);
+            }
+        }
     }
     Ok(regions)
+}
+
+/// Parse a single region line
+fn parse_region_line(line: &str) -> Option<Region> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 3 {
+        return None;
+    }
+    let chrom = fields[0].to_string();
+    let start: u64 = fields[1].parse().ok()?;
+    let end: u64 = fields[2].parse().ok()?;
+    Some(Region::new(chrom, start, end))
 }

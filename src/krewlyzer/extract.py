@@ -87,7 +87,7 @@ def extract(
     # Default exclude regions
     if exclude_regions is None:
         pkg_dir = Path(__file__).parent
-        default_exclude = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
+        default_exclude = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed.gz"
         if default_exclude.exists():
             exclude_regions = default_exclude
             logger.info(f"Using default exclude regions: {exclude_regions}")

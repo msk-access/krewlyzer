@@ -234,11 +234,11 @@ def run_all(
     pkg_dir = Path(__file__).parent
     
     # FSC/FSR Bins
-    res_bin = bin_input if bin_input else pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
+    res_bin = bin_input if bin_input else pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
     if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
 
     # FSD Arms
-    res_arms = arms_file if arms_file else pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
+    res_arms = arms_file if arms_file else pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed.gz"
     if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
     # WPS Genes
@@ -246,7 +246,7 @@ def run_all(
     if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
 
     # OCF Regions
-    res_ocf = ocr_file if ocr_file else pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
+    res_ocf = ocr_file if ocr_file else pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed.gz"
     if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
 
     # Define Outputs

@@ -58,7 +58,7 @@ def fsd(
     # Default arms file
     if arms_file is None:
         pkg_dir = Path(__file__).parent
-        arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
+        arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed.gz"
         logger.info(f"Using default arms file: {arms_file}")
     
     if not arms_file.exists():

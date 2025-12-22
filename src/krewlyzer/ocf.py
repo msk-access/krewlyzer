@@ -54,7 +54,7 @@ def ocf(
     # Default OCR file
     if ocr_input is None:
         pkg_dir = Path(__file__).parent
-        ocr_input = pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
+        ocr_input = pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed.gz"
         logger.info(f"Using default OCR file: {ocr_input}")
     
     if not ocr_input.exists():

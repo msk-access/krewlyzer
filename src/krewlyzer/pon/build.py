@@ -87,7 +87,7 @@ def build_pon(
     # Default bin file
     if bin_file is None:
         pkg_dir = Path(__file__).parent.parent
-        bin_file = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
+        bin_file = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
     
     if not bin_file.exists():
         logger.error(f"Bin file not found: {bin_file}")
@@ -187,7 +187,7 @@ def build_pon(
                         with tempfile.TemporaryDirectory() as tmpdir:
                             fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
                             pkg_dir = Path(__file__).parent.parent
-                            arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
+                            arms_file = pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed.gz"
                             if arms_file.exists():
                                 _core.fsd.calculate_fsd(
                                     str(bed_path),
