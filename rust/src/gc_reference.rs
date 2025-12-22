@@ -471,28 +471,77 @@ pub fn generate_ref_genome_gc(
     info!("Completed GC counting: {} total fragments across {} regions", 
           total_fragments, processed_regions);
     
-    // Save as CSV file (simple format, can be loaded easily)
-    // Schema: length_bin_min, length_bin_max, gc_percent, expected_count
+    // Save as Parquet file (consistent with PON format)
+    // Schema: length_bin_min (u32), length_bin_max (u32), gc_percent (u8), expected_count (u64)
+    use arrow::array::{UInt32Array, UInt8Array, UInt64Array};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+    
+    // Build arrays from counts
+    let mut length_bin_min_vec: Vec<u32> = Vec::new();
+    let mut length_bin_max_vec: Vec<u32> = Vec::new();
+    let mut gc_percent_vec: Vec<u8> = Vec::new();
+    let mut expected_count_vec: Vec<u64> = Vec::new();
+    
+    for (bin_idx, &(min_len, max_len)) in LENGTH_BINS.iter().enumerate() {
+        for gc_percent in 0..=100u8 {
+            let count = counts[bin_idx][gc_percent as usize];
+            if count > 0 {  // Only write non-zero counts to save space
+                length_bin_min_vec.push(min_len);
+                length_bin_max_vec.push(max_len);
+                gc_percent_vec.push(gc_percent);
+                expected_count_vec.push(count);
+            }
+        }
+    }
+    
+    // Create arrow arrays
+    let length_bin_min_array = UInt32Array::from(length_bin_min_vec);
+    let length_bin_max_array = UInt32Array::from(length_bin_max_vec);
+    let gc_percent_array = UInt8Array::from(gc_percent_vec);
+    let expected_count_array = UInt64Array::from(expected_count_vec);
+    
+    // Create schema
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("length_bin_min", DataType::UInt32, false),
+        Field::new("length_bin_max", DataType::UInt32, false),
+        Field::new("gc_percent", DataType::UInt8, false),
+        Field::new("expected_count", DataType::UInt64, false),
+    ]));
+    
+    // Create record batch
+    let batch = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(length_bin_min_array),
+            Arc::new(length_bin_max_array),
+            Arc::new(gc_percent_array),
+            Arc::new(expected_count_array),
+        ],
+    ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+        format!("Failed to create record batch: {}", e)
+    ))?;
+    
+    // Write to Parquet file
     let output_file = std::fs::File::create(output_path)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
             format!("Failed to create output file: {}", e)
         ))?;
-    let mut writer = std::io::BufWriter::new(output_file);
     
-    // Write header
-    writeln!(writer, "length_bin_min,length_bin_max,gc_percent,expected_count")
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    let mut writer = ArrowWriter::try_new(output_file, schema, None)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+            format!("Failed to create Parquet writer: {}", e)
+        ))?;
     
-    // Write data
-    for (bin_idx, &(min_len, max_len)) in LENGTH_BINS.iter().enumerate() {
-        for gc_percent in 0..=100 {
-            let count = counts[bin_idx][gc_percent];
-            if count > 0 {  // Only write non-zero counts to save space
-                writeln!(writer, "{},{},{},{}", min_len, max_len, gc_percent, count)
-                    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-            }
-        }
-    }
+    writer.write(&batch).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+        format!("Failed to write Parquet batch: {}", e)
+    ))?;
+    
+    writer.close().map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
+        format!("Failed to close Parquet file: {}", e)
+    ))?;
     
     info!("Generated ref_genome_GC with {} total fragments", total_fragments);
     Ok(total_fragments)

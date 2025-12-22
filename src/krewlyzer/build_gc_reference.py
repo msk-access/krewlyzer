@@ -100,7 +100,7 @@ def build_gc_reference(
     
     # Output paths
     valid_regions_path = output_dir / f"valid_regions_{genome_name}.bed"
-    ref_gc_path = output_dir / f"ref_genome_GC_{genome_name}.csv"
+    ref_gc_path = output_dir / f"ref_genome_GC_{genome_name}.parquet"
     
     try:
         # Step 1: Generate valid regions
