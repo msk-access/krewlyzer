@@ -210,7 +210,7 @@ pub fn generate_valid_regions(
             format!("Failed to load exclude regions: {}", e)
         ))?;
     
-    // Valid chromosomes (1-22, X, Y)
+    // Valid chromosomes (1-22, X, Y) - try with and without chr prefix
     let valid_chroms: Vec<String> = (1..=22)
         .map(|i| i.to_string())
         .chain(vec!["X".to_string(), "Y".to_string()])
@@ -218,8 +218,62 @@ pub fn generate_valid_regions(
     
     let mut regions: Vec<ValidRegion> = Vec::new();
     
-    // TODO: Get chromosome lengths from faidx and generate bins
-    // For now, placeholder implementation
+    // Get number of sequences in the reference
+    let n_seqs = faidx.n_seqs();
+    info!("Reference has {} sequences", n_seqs);
+    
+    // Build a map of chromosome name -> length from reference
+    let mut chrom_lengths: HashMap<String, u64> = HashMap::new();
+    for i in 0..n_seqs {
+        if let Some(name) = faidx.seq_name(i as i32).ok() {
+            // Normalize chromosome name (remove "chr" prefix if present)
+            let normalized = name.trim_start_matches("chr").to_string();
+            
+            // Only include valid chromosomes
+            if valid_chroms.contains(&normalized) {
+                // Get sequence length
+                let len = faidx.fetch_seq_len(&name);
+                chrom_lengths.insert(normalized, len);
+            }
+        }
+    }
+    
+    info!("Found {} valid chromosomes in reference", chrom_lengths.len());
+    
+    // Generate bins for each chromosome, excluding problematic regions
+    for chrom in &valid_chroms {
+        if let Some(&chrom_len) = chrom_lengths.get(chrom) {
+            let excluded = exclude_regions.get(chrom).cloned().unwrap_or_default();
+            
+            // Generate bins of bin_size, excluding those that overlap with excluded regions
+            let mut pos: u64 = 0;
+            while pos + bin_size <= chrom_len {
+                let bin_start = pos;
+                let bin_end = pos + bin_size;
+                
+                // Check if this bin overlaps with any excluded region
+                let overlaps_excluded = excluded.iter().any(|(excl_start, excl_end)| {
+                    // Overlap if: bin_start < excl_end AND bin_end > excl_start
+                    bin_start < *excl_end && bin_end > *excl_start
+                });
+                
+                if !overlaps_excluded {
+                    regions.push(ValidRegion {
+                        chrom: chrom.clone(),
+                        start: bin_start,
+                        end: bin_end,
+                        gc_content: 0.0,  // Will be computed later
+                    });
+                }
+                
+                pos += bin_size;
+            }
+        }
+    }
+    
+    info!("Generated {} valid regions (excluded {} problematic bins)", 
+          regions.len(), 
+          chrom_lengths.values().map(|l| l / bin_size).sum::<u64>() as usize - regions.len());
     
     // Write output BED
     let output_file = File::create(output_path)
@@ -233,8 +287,15 @@ pub fn generate_valid_regions(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     writeln!(writer, "# Excludes: problematic regions, assembly gaps, low mappability")
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    writeln!(writer, "#chrom\tstart\tend")
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     
-    // TODO: Implement actual region generation
+    // Write regions
+    for region in &regions {
+        writeln!(writer, "{}\t{}\t{}", region.chrom, region.start, region.end)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    }
+    
     let region_count = regions.len();
     
     info!("Generated {} valid regions", region_count);
