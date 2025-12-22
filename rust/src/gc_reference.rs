@@ -1,7 +1,7 @@
 //! GC Reference Asset Generation
 //!
 //! Generates pre-computed GC correction assets:
-//! 1. valid_regions.bed - Curated 100kb bins excluding blacklist/gaps
+//! 1. valid_regions.bed - Curated 100kb bins excluding problematic regions
 //! 2. ref_genome_GC.parquet - Expected fragment counts per (length, GC)
 //!
 //! These assets are generated once per reference genome and shipped with krewlyzer.
@@ -117,7 +117,7 @@ impl RefGenomeGc {
 }
 
 /// Valid genomic regions for GC correction estimation
-/// Excludes blacklist regions, assembly gaps, and low-mappability areas
+/// Excludes problematic regions, assembly gaps, and low-mappability areas
 #[derive(Debug, Clone)]
 pub struct ValidRegion {
     pub chrom: String,
@@ -176,26 +176,26 @@ pub fn load_valid_regions(bed_path: &Path) -> Result<Vec<ValidRegion>> {
     Ok(regions)
 }
 
-/// Generate valid regions BED file by excluding blacklist and gap regions
+/// Generate valid regions BED file by excluding problematic and gap regions
 /// 
 /// # Arguments
 /// * `reference_path` - Path to reference FASTA
-/// * `blacklist_path` - Path to ENCODE blacklist BED
+/// * `exclude_regions_path` - Path to exclude regions BED (e.g., ENCODE list)
 /// * `output_path` - Path to write valid_regions.bed
 /// * `bin_size` - Size of each bin (default: 100000)
 /// 
 /// # Returns
 /// * Number of valid regions generated
 #[pyfunction]
-#[pyo3(signature = (reference_path, blacklist_path, output_path, bin_size=100000))]
+#[pyo3(signature = (reference_path, exclude_regions_path, output_path, bin_size=100000))]
 pub fn generate_valid_regions(
     reference_path: &str,
-    blacklist_path: &str,
+    exclude_regions_path: &str,
     output_path: &str,
     bin_size: u64,
 ) -> PyResult<usize> {
     info!("Generating valid regions from reference: {}", reference_path);
-    info!("Blacklist: {}", blacklist_path);
+    info!("Exclude regions: {}", exclude_regions_path);
     info!("Bin size: {} bp", bin_size);
     
     // Load reference index to get chromosome lengths
@@ -204,10 +204,10 @@ pub fn generate_valid_regions(
             format!("Failed to open reference FASTA: {}. Make sure .fai exists.", e)
         ))?;
     
-    // Load blacklist regions
-    let blacklist = load_blacklist(Path::new(blacklist_path))
+    // Load exclude regions
+    let exclude_regions = load_exclude_regions(Path::new(exclude_regions_path))
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-            format!("Failed to load blacklist: {}", e)
+            format!("Failed to load exclude regions: {}", e)
         ))?;
     
     // Valid chromosomes (1-22, X, Y)
@@ -231,7 +231,7 @@ pub fn generate_valid_regions(
     // Write header
     writeln!(writer, "# Valid regions for GC correction estimation")
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-    writeln!(writer, "# Excludes: ENCODE blacklist, assembly gaps, low mappability")
+    writeln!(writer, "# Excludes: problematic regions, assembly gaps, low mappability")
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     
     // TODO: Implement actual region generation
@@ -241,13 +241,13 @@ pub fn generate_valid_regions(
     Ok(region_count)
 }
 
-/// Load blacklist regions from BED file
-fn load_blacklist(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>> {
+/// Load exclude regions from BED file
+fn load_exclude_regions(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>> {
     let file = File::open(path)
-        .with_context(|| format!("Failed to open blacklist file: {:?}", path))?;
+        .with_context(|| format!("Failed to open exclude regions file: {:?}", path))?;
     let reader = BufReader::new(file);
     
-    let mut blacklist: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
+    let mut exclude_regions: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
     
     for line in reader.lines() {
         let line = line?;
@@ -264,16 +264,16 @@ fn load_blacklist(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>> {
         let start: u64 = fields[1].parse().unwrap_or(0);
         let end: u64 = fields[2].parse().unwrap_or(0);
         
-        blacklist.entry(chrom).or_insert_with(Vec::new).push((start, end));
+        exclude_regions.entry(chrom).or_insert_with(Vec::new).push((start, end));
     }
     
     // Sort intervals by start position
-    for intervals in blacklist.values_mut() {
+    for intervals in exclude_regions.values_mut() {
         intervals.sort_by_key(|i| i.0);
     }
     
-    info!("Loaded blacklist with {} chromosomes", blacklist.len());
-    Ok(blacklist)
+    info!("Loaded exclude regions with {} chromosomes", exclude_regions.len());
+    Ok(exclude_regions)
 }
 
 /// Generate reference genome GC expected counts

@@ -2,7 +2,7 @@
 Build GC Reference Assets CLI.
 
 Generates pre-computed GC correction assets:
-1. valid_regions.bed - Curated 100kb bins excluding blacklist/gaps
+1. valid_regions.bed - Curated 100kb bins excluding problematic regions
 2. ref_genome_GC.parquet - Expected fragment counts per (length, GC)
 
 These assets are generated once per reference genome and shipped with krewlyzer.
@@ -27,7 +27,7 @@ from krewlyzer import _core
 def build_gc_reference(
     reference: Path = typer.Argument(..., help="Path to reference FASTA file"),
     output_dir: Path = typer.Option(..., "--output", "-o", help="Output directory for GC assets"),
-    blacklist: Optional[Path] = typer.Option(None, "--blacklist", "-b", help="Path to ENCODE blacklist BED file"),
+    exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-e", help="Path to exclude regions BED file"),
     bin_size: int = typer.Option(100000, "--bin-size", help="Size of each bin in bp (default: 100kb)"),
     genome_name: Optional[str] = typer.Option(None, "--genome-name", "-n", help="Genome name (default: derived from reference filename)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
@@ -40,7 +40,7 @@ def build_gc_reference(
     2. ref_genome_GC_{genome}.parquet - Expected fragment counts per (length, GC)
     
     Example:
-        krewlyzer build-gc-reference hg38.fa -o data/gc/ -b ENCFF356LFX.bed
+        krewlyzer build-gc-reference hg38.fa -o data/gc/ -e exclude-regions.bed
     """
     # Set log level based on verbose flag
     if verbose:
@@ -60,29 +60,29 @@ def build_gc_reference(
         logger.error("Run 'samtools faidx <reference>' to create the index")
         raise typer.Exit(1)
     
-    # Default blacklist from existing data
-    if blacklist is None:
+    # Default exclude regions from existing data
+    if exclude_regions is None:
         pkg_dir = Path(__file__).parent
-        # Try existing blacklist locations based on genome name hint
+        # Try existing exclude regions based on genome name hint
         ref_name_lower = reference.name.lower()
         if 'hg38' in ref_name_lower or 'grch38' in ref_name_lower:
-            blacklist = pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed"
+            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed"
         else:
             # Default to hg19 for hg19/b37/GRCh37
-            blacklist = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
+            exclude_regions = pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed"
         
-        if blacklist.exists():
-            logger.info(f"Using default blacklist: {blacklist}")
+        if exclude_regions.exists():
+            logger.info(f"Using default exclude regions: {exclude_regions}")
         else:
-            logger.warning(f"No blacklist file found at {blacklist}")
-            logger.warning("No blacklist file provided or found. Regions may include problematic areas.")
-            # Create empty blacklist
-            blacklist = output_dir / "empty_blacklist.bed"
+            logger.warning(f"No exclude regions file found at {exclude_regions}")
+            logger.warning("No exclude regions file provided or found. Regions may include problematic areas.")
+            # Create empty exclude regions file
+            exclude_regions = output_dir / "empty_exclude_regions.bed"
             output_dir.mkdir(parents=True, exist_ok=True)
-            blacklist.write_text("# Empty blacklist\n")
+            exclude_regions.write_text("# Empty exclude regions\n")
     
-    if not blacklist.exists():
-        logger.error(f"Blacklist file not found: {blacklist}")
+    if not exclude_regions.exists():
+        logger.error(f"Exclude regions file not found: {exclude_regions}")
         raise typer.Exit(1)
     
     # Derive genome name
@@ -106,12 +106,12 @@ def build_gc_reference(
         # Step 1: Generate valid regions
         logger.info(f"[1/2] Generating valid regions...")
         logger.info(f"  Reference: {reference}")
-        logger.info(f"  Blacklist: {blacklist}")
+        logger.info(f"  Exclude regions: {exclude_regions}")
         logger.info(f"  Bin size: {bin_size:,} bp")
         
         region_count = _core.gc.generate_valid_regions(
             str(reference),
-            str(blacklist),
+            str(exclude_regions),
             str(valid_regions_path),
             bin_size,
         )
