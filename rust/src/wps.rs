@@ -15,8 +15,8 @@ use flate2::Compression;
 use rust_htslib::faidx;
 use log::{info, debug};
 
-// GC correction support (available for future per-region correction)
-// use crate::gc_correction::correct_gc_bias_wps;
+// GC correction support 
+use crate::gc_correction::correct_gc_bias;
 
 /// Transcript region from TSV with optional GC content
 #[derive(Debug, Clone)]
@@ -286,14 +286,108 @@ impl WpsConsumer {
         }
     }
     
-    /// Write results to output file (with optional GC correction logging)
+    /// Write results to output file (with optional GC correction)
+    /// 
+    /// When gc_correct=true:
+    /// 1. Compute mean WPS long/short per region  
+    /// 2. Fit LOESS: expected_wps = f(region_gc)
+    /// 3. Divide each position's WPS by region's expected
     pub fn write_output(&self, output_path: &Path, total_markers: Option<u64>, empty: bool, gc_correct: bool, verbose: bool) -> Result<()> {
-        if gc_correct && verbose {
-            info!("Writing WPS output with GC-aware region metadata...");
-        }
         let file = File::create(output_path)?;
         let mut encoder = GzEncoder::new(file, Compression::default());
         let norm_factor = total_markers.unwrap_or(1_000_000) as f64 / 1_000_000.0;
+        
+        // If GC correction requested, compute expected values per region
+        let gc_correction_factors: Option<Vec<(f64, f64)>> = if gc_correct {
+            if verbose {
+                info!("Computing GC-corrected WPS...");
+            }
+            
+            // First pass: collect region-level means
+            let mut gc_values = Vec::new();
+            let mut wps_long_means = Vec::new();
+            let mut wps_short_means = Vec::new();
+            
+            for (i, region) in self.regions.iter().enumerate() {
+                if let Some(acc) = self.accumulators.get(&i) {
+                    let len = (region.end - region.start + 1) as usize;
+                    
+                    // Reconstruct final WPS values and compute mean
+                    let mut curr_wps_long = 0i64;
+                    let mut curr_wps_short = 0i64;
+                    let mut sum_long = 0i64;
+                    let mut sum_short = 0i64;
+                    
+                    for j in 0..len {
+                        curr_wps_long += acc.wps_long[j] as i64;
+                        curr_wps_short += acc.wps_short[j] as i64;
+                        sum_long += curr_wps_long;
+                        sum_short += curr_wps_short;
+                    }
+                    
+                    let mean_long = sum_long as f64 / len as f64;
+                    let mean_short = sum_short as f64 / len as f64;
+                    
+                    // Only include regions with valid data
+                    if region.gc > 0.0 && region.gc < 1.0 && (mean_long.abs() > 0.0 || mean_short.abs() > 0.0) {
+                        gc_values.push(region.gc);
+                        wps_long_means.push(mean_long.abs()); // Use absolute for fitting
+                        wps_short_means.push(mean_short.abs());
+                    }
+                }
+            }
+            
+            if gc_values.len() >= 10 {
+                // Fit LOESS using correct_gc_bias function
+                let long_expected = correct_gc_bias(&gc_values, &wps_long_means, None);
+                let short_expected = correct_gc_bias(&gc_values, &wps_short_means, None);
+                
+                match (long_expected, short_expected) {
+                    (Ok(long_exp), Ok(short_exp)) => {
+                        // Compute correction factors: global_mean / expected
+                        let global_mean_long: f64 = wps_long_means.iter().sum::<f64>() / wps_long_means.len() as f64;
+                        let global_mean_short: f64 = wps_short_means.iter().sum::<f64>() / wps_short_means.len() as f64;
+                        
+                        // Build lookup: for each region, store (long_factor, short_factor)
+                        let mut factors: Vec<(f64, f64)> = vec![(1.0, 1.0); self.regions.len()];
+                        
+                        let mut exp_idx = 0;
+                        for (i, region) in self.regions.iter().enumerate() {
+                            if let Some(_) = self.accumulators.get(&i) {
+                                if region.gc > 0.0 && region.gc < 1.0 {
+                                    if exp_idx < long_exp.len() {
+                                        let lf = if long_exp[exp_idx] > 0.0 { global_mean_long / long_exp[exp_idx] } else { 1.0 };
+                                        let sf = if short_exp[exp_idx] > 0.0 { global_mean_short / short_exp[exp_idx] } else { 1.0 };
+                                        factors[i] = (lf.max(0.1).min(10.0), sf.max(0.1).min(10.0)); // Clamp to prevent extreme corrections
+                                        exp_idx += 1;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        if verbose {
+                            info!("GC correction: {} regions, global mean long={:.2}, short={:.2}", 
+                                  gc_values.len(), global_mean_long, global_mean_short);
+                        }
+                        
+                        Some(factors)
+                    },
+                    _ => {
+                        if verbose {
+                            info!("GC correction LOESS failed, proceeding without correction");
+                        }
+                        None
+                    }
+                }
+            } else {
+                if verbose {
+                    info!("Too few regions ({}) for GC correction, skipping", gc_values.len());
+                }
+                None
+            }
+        } else {
+            None
+        };
         
         writeln!(encoder, "gene_id\tchrom\tpos\tcov_long\tcov_short\twps_long\twps_short\twps_ratio\twps_long_norm\twps_short_norm\twps_ratio_norm")?;
         
@@ -339,13 +433,19 @@ impl WpsConsumer {
                 
                 total_cov += curr_cov_long + curr_cov_short;
                 
-                let wps_l = curr_wps_long;
-                let wps_s = curr_wps_short;
+                // Apply GC correction if available
+                let (gc_factor_long, gc_factor_short) = gc_correction_factors
+                    .as_ref()
+                    .map(|f| f[i])
+                    .unwrap_or((1.0, 1.0));
                 
-                let ratio = if wps_s != 0 {
-                    wps_l as f64 / wps_s.abs() as f64
-                } else if wps_l != 0 {
-                    wps_l as f64
+                let wps_l_corrected = (curr_wps_long as f64 * gc_factor_long) as i64;
+                let wps_s_corrected = (curr_wps_short as f64 * gc_factor_short) as i64;
+                
+                let ratio = if wps_s_corrected != 0 {
+                    wps_l_corrected as f64 / wps_s_corrected.abs() as f64
+                } else if wps_l_corrected != 0 {
+                    wps_l_corrected as f64
                 } else {
                     0.0
                 };
@@ -356,11 +456,11 @@ impl WpsConsumer {
                     pos: region.start + j as u64,
                     cov_long: curr_cov_long as u32,
                     cov_short: curr_cov_short as u32,
-                    wps_long: wps_l,
-                    wps_short: wps_s,
+                    wps_long: wps_l_corrected as i32,
+                    wps_short: wps_s_corrected as i32,
                     wps_ratio: ratio,
-                    wps_long_norm: wps_l as f64 / norm_factor,
-                    wps_short_norm: wps_s as f64 / norm_factor,
+                    wps_long_norm: wps_l_corrected as f64 / norm_factor,
+                    wps_short_norm: wps_s_corrected as f64 / norm_factor,
                     wps_ratio_norm: ratio / norm_factor,
                 });
             }
