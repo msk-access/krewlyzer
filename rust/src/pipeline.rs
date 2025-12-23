@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use anyhow::{Result, Context};
-
+use log::{info, warn};
 use crate::bed::{Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
 use crate::fsc::FscConsumer;
@@ -96,6 +96,10 @@ impl FragmentConsumer for MultiConsumer {
 #[pyfunction]
 #[pyo3(signature = (
     bed_path,
+    // GC Correction (Optional)
+    gc_ref_path=None, valid_regions_path=None, correction_out_path=None,
+    // Pre-computed factors (skip computation if provided)
+    correction_input_path=None,
     // FSC Args
     fsc_bins=None, fsc_output=None,
     // WPS Args
@@ -108,6 +112,12 @@ impl FragmentConsumer for MultiConsumer {
 pub fn run_unified_pipeline(
     _py: Python,
     bed_path: PathBuf,
+    // GC Correction
+    gc_ref_path: Option<PathBuf>,
+    valid_regions_path: Option<PathBuf>,
+    correction_out_path: Option<PathBuf>,
+    // Pre-computed factors (load instead of compute if provided)
+    correction_input_path: Option<PathBuf>,
     // FSC
     fsc_bins: Option<PathBuf>, fsc_output: Option<PathBuf>,
     // WPS
@@ -117,17 +127,78 @@ pub fn run_unified_pipeline(
     // OCF
     ocf_regions: Option<PathBuf>, ocf_output: Option<PathBuf>,
 ) -> PyResult<()> {
+    use crate::gc_correction::{ReferenceData, ValidRegionFilter, GcObservationConsumer, compute_gcfix_factors, CorrectionFactors};
+    use crate::engine;
+    use std::sync::Arc;
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 1: GC Correction Factors (Load or Compute)
+    // ═══════════════════════════════════════════════════════════════════
+    let factors = if let Some(input_path) = correction_input_path {
+        // Load pre-computed factors from CSV
+        info!("Phase 1: Loading pre-computed GC correction factors from {:?}", input_path);
+        match CorrectionFactors::load_csv(&input_path) {
+            Ok(f) => {
+                info!("Loaded {} correction factor entries", f.data.len());
+                Some(f)
+            },
+            Err(e) => {
+                warn!("Failed to load correction factors: {}. Proceeding without GC correction.", e);
+                None
+            }
+        }
+    } else if let (Some(gc_ref), Some(valid_reg), Some(out_factors)) = (gc_ref_path, valid_regions_path, correction_out_path) {
+        // Compute factors from scratch
+        info!("Phase 1: Computing GC correction factors...");
+        
+        // 1. Load Reference Data
+        let ref_data = ReferenceData::load(&gc_ref)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load GC reference: {}", e)))?;
+            
+        // 2. Load Valid Regions (needs mutable ChromosomeMap for loading)
+        let mut valid_chrom_map = crate::bed::ChromosomeMap::new();
+        let valid_regions = Arc::new(ValidRegionFilter::load(&valid_reg, &mut valid_chrom_map)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load valid regions: {}", e)))?);
+    
+        // 3. Observed Counts
+        let obs_consumer = GcObservationConsumer::new(valid_regions);
+        
+        // Run Engine
+        let engine = engine::FragmentAnalyzer::new(obs_consumer, 500_000); // 500k batch
+        let obs_result = engine.process_file(&bed_path, &mut crate::bed::ChromosomeMap::new())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Phase 1 failed: {}", e)))?;
+            
+        // 4. Compute Factors (use .observed field, not .counts)
+        let computed = compute_gcfix_factors(&obs_result.observed, &ref_data, None)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Factor computation failed: {}", e)))?;
+            
+        // 5. Write Factors
+        computed.write_csv(&out_factors)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors: {}", e)))?;
+            
+        Some(computed)
+    } else {
+        info!("GC correction skipped (no factors provided and no reference files)");
+        None
+    };
+
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 2: Feature Extraction (with Correction)
+    // ═══════════════════════════════════════════════════════════════════
     
     // 1. Initialize Chromosome Map (Shared)
     let mut chrom_map = ChromosomeMap::new();
     
-    // 2. Initialize Consumers
+    // 2. Initialize Consumers (with GC correction)
+    let factors_arc = factors.map(Arc::new);
+    
     let mut fsc_consumer = None;
     if let Some(bins) = fsc_bins {
         // Need to load regions. Reuse verify code?
         // fsc::parse_bin_file is public.
         let regions = crate::fsc::parse_bin_file(&bins).map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-        fsc_consumer = Some(FscConsumer::new(&regions, &mut chrom_map));
+        fsc_consumer = Some(FscConsumer::new(&regions, &mut chrom_map, factors_arc.clone()));
     }
     
     let mut wps_consumer = None;
@@ -135,7 +206,7 @@ pub fn run_unified_pipeline(
         // Parse regions using exposed helper
         let regions = crate::wps::parse_regions(&regs)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse WPS regions: {}", e)))?;
-        wps_consumer = Some(WpsConsumer::new(regions, &mut chrom_map));
+        wps_consumer = Some(WpsConsumer::new(regions, &mut chrom_map, factors_arc.clone()));
     }
     
     let mut fsd_consumer = None;
@@ -143,13 +214,13 @@ pub fn run_unified_pipeline(
         // Parse arms
         let regions = crate::fsd::parse_regions_file(&arms)
              .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-        fsd_consumer = Some(FsdConsumer::new(regions, &mut chrom_map));
+        fsd_consumer = Some(FsdConsumer::new(regions, &mut chrom_map, factors_arc.clone()));
     }
     
     let mut ocf_consumer = None;
     if let Some(regs) = ocf_regions {
         // OcfConsumer parses internally from path
-        let consumer = OcfConsumer::new(&regs, &mut chrom_map)
+        let consumer = OcfConsumer::new(&regs, &mut chrom_map, factors_arc.clone())
               .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         ocf_consumer = Some(consumer);
     }

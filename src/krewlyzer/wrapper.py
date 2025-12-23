@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .postprocess import process_fsc_from_counts, process_fsr_from_counts
+from .assets import AssetManager
 
 # Rust backend
 from krewlyzer import _core
@@ -29,6 +30,7 @@ logger = logging.getLogger("krewlyzer")
 def run_all(
     bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
     reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA (indexed)"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
     
     # Configurable filters (exposed from filters.rs)
@@ -95,6 +97,14 @@ def run_all(
         sample = bam_input.stem.replace('.bam', '')
     else:
         sample = sample_name
+        
+    # Initialize Asset Manager
+    try:
+        assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
+    except ValueError as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
     
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -142,8 +152,8 @@ def run_all(
         
         try:
             # Call Unified Engine
-            # Returns (total_count, end_motifs, bp_motifs)
-            fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
+            # Returns (total_count, end_motifs, bp_motifs, gc_observations)
+            fragment_count, em_counts, bpm_counts, gc_observations = _core.extract_motif.process_bam_parallel(
                 str(bam_input),
                 str(reference),
                 mapq,
@@ -153,21 +163,35 @@ def run_all(
                 threads,
                 bed_out_arg,          # Write BED if needed
                 "enable",             # Always calculate motifs
-                str(exclude_regions) if exclude_regions else None,
+                str(exclude_regions) if exclude_regions else str(assets.exclude_regions),
                 skip_duplicates,
                 require_proper_pair
             )
             
             logger.info(f"Processed {fragment_count:,} fragments")
             
-            # --- Post-Process Extract (Compress BED) ---
+            # --- Post-Process Extract (Move BGZF BED, compute GC factors) ---
             if should_run_extract and bed_temp.exists():
-                logger.info("Compressing BED...")
+                import shutil
                 import pysam
-                import os
-                pysam.tabix_compress(str(bed_temp), str(bedgz_file), force=True)
+                
+                # Rust already writes BGZF - just move and index
+                logger.info("Moving and indexing BED.gz...")
+                shutil.move(str(bed_temp), str(bedgz_file))
                 pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
-                os.remove(str(bed_temp))
+                
+                # Compute GC correction factors inline
+                factors_file = output / f"{sample}.correction_factors.csv"
+                try:
+                    gc_ref = assets.resolve("gc_reference")
+                    valid_regions = assets.resolve("valid_regions")
+                    logger.info(f"Computing GC factors from {len(gc_observations)} observation bins...")
+                    n_factors = _core.gc.compute_and_write_gc_factors(
+                        gc_observations, str(gc_ref), str(valid_regions), str(factors_file)
+                    )
+                    logger.info(f"Computed {n_factors} GC correction factors")
+                except Exception as e:
+                    logger.warning(f"GC factor computation failed: {e}")
                 
                 # Write Metadata
                 import json
@@ -176,6 +200,8 @@ def run_all(
                 metadata = {
                     "sample_id": sample,
                     "total_fragments": fragment_count,
+                    "genome": genome,
+                    "gc_correction_computed": factors_file.exists(),
                     "filters": { "mapq": mapq, "min_length": minlen, "max_length": maxlen },
                     "timestamp": datetime.now().isoformat()
                 }
@@ -230,26 +256,39 @@ def run_all(
     # ═══════════════════════════════════════════════════════════════════
     logger.info("🚀 Running Unified Single-Pass Pipeline (FSC, FSR, FSD, WPS, OCF)...")
 
-    # Define Resource Paths (Resolve defaults if None)
-    pkg_dir = Path(__file__).parent
+    # Define Resource Paths (Resolve defaults via AssetManager)
     
     # FSC/FSR Bins
-    res_bin = bin_input if bin_input else pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
+    res_bin = bin_input if bin_input else assets.bins_100kb
     if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
 
     # FSD Arms
-    res_arms = arms_file if arms_file else pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed.gz"
+    res_arms = arms_file if arms_file else assets.arms
     if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
-    # WPS Genes
-    res_wps = wps_file if wps_file else pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
+    # WPS Genes (Transcript Annotation)
+    res_wps = wps_file if wps_file else assets.transcript_anno
     if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
 
     # OCF Regions
-    res_ocf = ocr_file if ocr_file else pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed.gz"
+    res_ocf = ocr_file if ocr_file else assets.ocf_regions
     if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
+    
+    # GC Reference (Mandatory for GCfix correction)
+    res_gc = assets.gc_reference
+    # We check existence in Rust or here? Here is better for CLI feedback.
+    if not res_gc.exists():
+        logger.error(f"GC reference missing: {res_gc}")
+        logger.error("Run 'krewlyzer build-gc-reference' or ensure bundled assets are present.")
+        raise typer.Exit(1)
+        
+    res_valid_regions = assets.valid_regions
+    if not res_valid_regions.exists():
+        logger.error(f"Valid regions file missing: {res_valid_regions}")
+        raise typer.Exit(1)
 
     # Define Outputs
+    out_gc_factors = output / f"{sample}.correction_factors.csv"
     out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
     out_wps = output / f"{sample}.WPS.tsv.gz"
     out_fsd = output / f"{sample}.FSD.tsv"
@@ -260,6 +299,10 @@ def run_all(
         # RUN RUST PIPELINE
         _core.run_unified_pipeline(
             str(bedgz_file),
+            # GC Correction (compute fresh for run-all)
+            str(res_gc), str(res_valid_regions), str(out_gc_factors),
+            # Pre-computed factors (None = compute above)
+            None,
             # FSC
             str(res_bin), str(out_fsc_raw),
             # WPS
@@ -339,6 +382,8 @@ def run_all(
                     input_file=variants,
                     output=output,
                     sample_name=sample,
+                    reference=reference,
+                    correction_factors=out_gc_factors if out_gc_factors.exists() else None,
                     mapq=mapq,
                     output_distributions=False,
                     verbose=debug,

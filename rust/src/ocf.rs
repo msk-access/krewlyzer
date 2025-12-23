@@ -19,8 +19,8 @@ pub fn calculate_ocf(
     output_dir: PathBuf,
 ) -> PyResult<()> {
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = OcfConsumer::new(&ocr_path, &mut chrom_map)
-        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    let consumer = OcfConsumer::new(&ocr_path, &mut chrom_map, None)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;;
         
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
     let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map)
@@ -38,22 +38,23 @@ use std::sync::Arc;
 use std::path::Path;
 use anyhow::{Result, Context};
 use coitrees::{COITree, IntervalNode, IntervalTree};
+use crate::gc_correction::CorrectionFactors;
 
 #[derive(Clone, Default)]
 struct LabelStats {
-    left_pos: Vec<u64>,  // Size 2000
-    right_pos: Vec<u64>, // Size 2000
-    total_starts: u64,
-    total_ends: u64,
+    left_pos: Vec<f64>,  // Size 2000
+    right_pos: Vec<f64>, // Size 2000
+    total_starts: f64,
+    total_ends: f64,
 }
 
 impl LabelStats {
     fn new() -> Self {
         Self {
-            left_pos: vec![0; 2000],
-            right_pos: vec![0; 2000],
-            total_starts: 0,
-            total_ends: 0,
+            left_pos: vec![0.0; 2000],
+            right_pos: vec![0.0; 2000],
+            total_starts: 0.0,
+            total_ends: 0.0,
         }
     }
     
@@ -136,6 +137,7 @@ pub struct OcfConsumer {
     trees: Arc<HashMap<u32, COITree<usize, u32>>>,
     region_infos: Arc<Vec<OcrRegionInfo>>, // Index -> Info
     labels: Arc<Vec<String>>, // LabelID -> Name
+    factors: Option<Arc<CorrectionFactors>>,
     
     // Thread-local state
     // Indexed by LabelID
@@ -143,18 +145,10 @@ pub struct OcfConsumer {
 }
 
 impl OcfConsumer {
-    pub fn new(ocr_path: &Path, chrom_map: &mut ChromosomeMap) -> Result<Self> {
-        use noodles::bgzf;
-        
+    pub fn new(ocr_path: &Path, chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Result<Self> {
         // 1. Parse OCR File
         // Format: chrom start end label
-        let file = File::open(ocr_path)
-            .with_context(|| format!("Failed to open OCR file: {:?}", ocr_path))?;
-        
-        // Check if file is BGZF compressed based on extension
-        let is_bgzf = ocr_path.extension()
-            .map(|ext| ext == "gz")
-            .unwrap_or(false);
+        let reader = crate::bed::get_reader(ocr_path)?;
         
         let mut label_to_id: HashMap<String, usize> = HashMap::new();
         let mut labels: Vec<String> = Vec::new();
@@ -162,19 +156,9 @@ impl OcfConsumer {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut region_infos = Vec::new(); // Implicitly indexed by order of insertion
         
-        if is_bgzf {
-            let mut reader = bgzf::io::Reader::new(file);
-            let mut line = String::new();
-            while reader.read_line(&mut line)? > 0 {
-                parse_ocr_line(&line, chrom_map, &mut label_to_id, &mut labels, &mut nodes_by_chrom, &mut region_infos);
-                line.clear();
-            }
-        } else {
-            let reader = BufReader::new(file);
-            for line in reader.lines() {
-                let line = line?;
-                parse_ocr_line(&line, chrom_map, &mut label_to_id, &mut labels, &mut nodes_by_chrom, &mut region_infos);
-            }
+        for line in reader.lines() {
+            let line = line?;
+            parse_ocr_line(&line, chrom_map, &mut label_to_id, &mut labels, &mut nodes_by_chrom, &mut region_infos);
         }
         
         // Build Trees
@@ -190,6 +174,7 @@ impl OcfConsumer {
             trees: Arc::new(trees),
             region_infos: Arc::new(region_infos),
             labels: Arc::new(labels),
+            factors,
             stats,
         })
     }
@@ -217,8 +202,8 @@ impl OcfConsumer {
             let label = &self.labels[id];
             let s = &self.stats[id];
             
-            let ts = if s.total_starts > 0 { s.total_starts as f64 / 10000.0 } else { 1.0 };
-            let te = if s.total_ends > 0 { s.total_ends as f64 / 10000.0 } else { 1.0 };
+            let ts = if s.total_starts > 0.0 { s.total_starts / 10000.0 } else { 1.0 };
+            let te = if s.total_ends > 0.0 { s.total_ends / 10000.0 } else { 1.0 };
             
             let peak = 60;
             let bin_width = 10;
@@ -226,14 +211,14 @@ impl OcfConsumer {
             let mut background = 0.0;
             
             for k in 0..2000 {
-                let l_count = s.left_pos[k] as f64;
-                let r_count = s.right_pos[k] as f64;
+                let l_count = s.left_pos[k];
+                let r_count = s.right_pos[k];
                 let l_norm = l_count / ts;
                 let r_norm = r_count / te;
                 let loc = k as i64 - 1000;
                 
-                writeln!(sync_file, "{}\t{}\t{}\t{:.6}\t{}\t{:.6}", 
-                    label, loc, l_count as u64, l_norm, r_count as u64, r_norm)?;
+                writeln!(sync_file, "{}\t{}\t{:.2}\t{:.6}\t{:.2}\t{:.6}", 
+                    label, loc, l_count, l_norm, r_count, r_norm)?;
                 
                 if loc >= -peak - bin_width && loc <= -peak + bin_width {
                     trueends += r_norm;
@@ -273,17 +258,20 @@ impl FragmentConsumer for OcfConsumer {
                 let reg_start = region.start; // u64
                 let reg_end = region.end;     // u64
                 
+                let gc_pct = (fragment.gc * 100.0).round() as u8;
+                let weight = if let Some(ref factors) = self.factors {
+                        factors.get_factor(fragment.length, gc_pct)
+                } else { 1.0 };
+                
                 // Starts
                 if r_start >= reg_start {
                     let s = (r_start - reg_start) as usize;
                     if s < 2000 {
-                        label_stats.left_pos[s] += 1;
-                        label_stats.total_starts += 1;
+                        label_stats.left_pos[s] += weight;
+                        label_stats.total_starts += weight;
                     } else {
-                        // "else { total_starts++ }" implies we count even if out of window,
-                        // IF the read overlaps the region.
-                        // (Legacy logic confirmed this branch exists)
-                        label_stats.total_starts += 1;
+                        // "else { total_starts++ }" implies we count even if out of window
+                        label_stats.total_starts += weight;
                     }
                 }
                 
@@ -292,26 +280,14 @@ impl FragmentConsumer for OcfConsumer {
                     // Legacy: e = (r_end - region.start + 1)
                     // r_end is u64.
                     let diff = r_end.wrapping_sub(reg_start).wrapping_add(1);
-                    // Check logic: if r_end < reg_start-1, diff wraps?
-                    // But we are inside `if r_end <= reg_end`.
-                    // Is it possible `r_end < reg_start`?
-                    // Fragment overlaps Region.
-                    // Overlap: `r_start < reg_end` and `r_end > reg_start`.
-                    // So `r_end > reg_start`. Thus `r_end - reg_start` >= 1.
-                    // So `diff` >= 2? (since +1).
-                    // Or if r_end == reg_start + 1? diff = 2.
-                    // Wait, if r_end > reg_start. Minimally r_end = reg_start + 1.
-                    // So diff >= 2.
-                    // Legacy check: `if e >= 0 && e < 2000`. `e` was likely i64.
-                    // Here we used u64 for starts.
-                    // Let's safe cast.
+                    
                     let e = diff as usize;
                     
                     if e < 2000 {
-                         label_stats.right_pos[e] += 1;
-                         label_stats.total_ends += 1;
+                         label_stats.right_pos[e] += weight;
+                         label_stats.total_ends += weight;
                     } else {
-                         label_stats.total_ends += 1;
+                         label_stats.total_ends += weight;
                     }
                 }
             });

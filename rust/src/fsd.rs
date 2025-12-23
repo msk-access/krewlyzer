@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::collections::HashMap;
+use crate::bed;
 
 
 /// Calculate Fragment Size Distribution (FSD)
@@ -23,7 +24,7 @@ pub fn calculate_fsd(
 
     // 2. Setup Engine
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = FsdConsumer::new(regions, &mut chrom_map);
+    let consumer = FsdConsumer::new(regions, &mut chrom_map, None);
     
     // 3. Process
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
@@ -44,29 +45,32 @@ use std::path::Path;
 use anyhow::{Result, Context};
 use coitrees::{COITree, IntervalNode, IntervalTree};
 
+use crate::gc_correction::CorrectionFactors;
+
 #[derive(Clone)]
 pub struct FsdConsumer {
     // Shared state
     trees: Arc<HashMap<u32, COITree<usize, u32>>>,
     regions: Arc<Vec<Region>>, // To retrieve original region info (name/chrom) for output
+    factors: Option<Arc<CorrectionFactors>>, // Add this
     
     // Thread-local state
     // Index matches regions index
     // Histogram: 67 bins (65-400, step 5)
-    histograms: Vec<Vec<u32>>, 
-    totals: Vec<u32>,
+    histograms: Vec<Vec<f64>>, 
+    totals: Vec<f64>,
 }
 
 impl FsdConsumer {
-    pub fn new(regions: Vec<Region>, chrom_map: &mut ChromosomeMap) -> Self {
+    pub fn new(regions: Vec<Region>, chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Self {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut histograms = Vec::with_capacity(regions.len());
         let mut totals = Vec::with_capacity(regions.len());
         
         for (i, region) in regions.iter().enumerate() {
             // Init counters
-            histograms.push(vec![0; 67]);
-            totals.push(0);
+            histograms.push(vec![0.0; 67]);
+            totals.push(0.0);
             
             // Map chromosome
             let chrom_norm = region.chrom.trim_start_matches("chr");
@@ -92,6 +96,7 @@ impl FsdConsumer {
             regions: Arc::new(regions),
             histograms,
             totals,
+            factors,
         }
     }
     
@@ -148,8 +153,13 @@ impl FragmentConsumer for FsdConsumer {
                      let idx = node.metadata.to_owned();
                      // Safety: idx comes from initialization which matches histograms size
                      if let Some(hist) = self.histograms.get_mut(idx) {
-                         hist[bin_idx] += 1;
-                         self.totals[idx] += 1;
+                         let gc_pct = (fragment.gc * 100.0).round() as u8;
+                         let weight = if let Some(ref factors) = self.factors {
+                             factors.get_factor(len, gc_pct)
+                         } else { 1.0 };
+
+                         hist[bin_idx] += weight;
+                         self.totals[idx] += weight;
                      }
                  });
              }
@@ -168,34 +178,13 @@ impl FragmentConsumer for FsdConsumer {
 
 /// Parse Arms/Regions file (Chrom Start End) - supports both plain and BGZF-compressed
 pub fn parse_regions_file(path: &Path) -> Result<Vec<Region>> {
-    use noodles::bgzf;
-    use std::io::BufRead;
-    
-    let file = File::open(path)?;
-    
-    // Check if file is BGZF compressed based on extension
-    let is_bgzf = path.extension()
-        .map(|ext| ext == "gz")
-        .unwrap_or(false);
+    let reader = bed::get_reader(path)?;
     
     let mut regions = Vec::new();
-    
-    if is_bgzf {
-        let mut reader = bgzf::io::Reader::new(file);
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            if let Some(region) = parse_region_line(&line) {
-                regions.push(region);
-            }
-            line.clear();
-        }
-    } else {
-        let reader = BufReader::new(file);
-        for line in reader.lines() {
-            let line = line?;
-            if let Some(region) = parse_region_line(&line) {
-                regions.push(region);
-            }
+    for line in reader.lines() {
+        let line = line?;
+        if let Some(region) = parse_region_line(&line) {
+            regions.push(region);
         }
     }
     Ok(regions)

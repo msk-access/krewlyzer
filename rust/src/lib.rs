@@ -71,7 +71,6 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     
     // FSC functions
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
-    m.add_function(wrap_pyfunction!(fsc::count_fragments_gc_corrected, m)?)?;
 
     // FSD submodule
     let fsd_mod = PyModule::new(m.py(), "fsd")?;
@@ -80,7 +79,6 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // WPS submodule (also exposed as function above? Cleaned up duplication)
     let wps_mod = PyModule::new(m.py(), "wps")?;
-    wps_mod.add_function(wrap_pyfunction!(wps::calculate_wps, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 
     // OCF submodule
@@ -110,6 +108,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     let gc_mod = PyModule::new(m.py(), "gc")?;
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions, &gc_mod)?)?;
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_ref_genome_gc, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_correction::compute_and_write_gc_factors, &gc_mod)?)?;
     m.add_submodule(&gc_mod)?;
     
     // Version

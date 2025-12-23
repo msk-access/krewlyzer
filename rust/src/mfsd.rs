@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use rust_htslib::bam::{self, Read};
 use rust_htslib::bam::record::Cigar;
+use rust_htslib::faidx;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
@@ -55,12 +56,18 @@ struct Variant {
 }
 
 /// Result accumulator for a single variant - 4-way classification
+/// Supports both unweighted counts and GC-weighted counts
 #[derive(Debug, Clone, Default)]
 struct VariantResult {
     ref_lengths: Vec<f64>,
     alt_lengths: Vec<f64>,
     nonref_lengths: Vec<f64>,
     n_lengths: Vec<f64>,
+    // Weighted counts (sum of weights, not raw counts)
+    ref_weighted: f64,
+    alt_weighted: f64,
+    nonref_weighted: f64,
+    n_weighted: f64,
 }
 
 impl VariantResult {
@@ -72,6 +79,59 @@ impl VariantResult {
         self.ref_lengths.len() + self.alt_lengths.len() + 
         self.nonref_lengths.len() + self.n_lengths.len()
     }
+    
+    /// Add a fragment to the result with optional GC correction weight
+    fn add_fragment(&mut self, class: FragmentClass, frag_len: f64, weight: f64) {
+        match class {
+            FragmentClass::Ref => {
+                self.ref_lengths.push(frag_len);
+                self.ref_weighted += weight;
+            },
+            FragmentClass::Alt => {
+                self.alt_lengths.push(frag_len);
+                self.alt_weighted += weight;
+            },
+            FragmentClass::NonRef => {
+                self.nonref_lengths.push(frag_len);
+                self.nonref_weighted += weight;
+            },
+            FragmentClass::N => {
+                self.n_lengths.push(frag_len);
+                self.n_weighted += weight;
+            },
+        }
+    }
+}
+
+/// Compute GC content from a sequence
+fn compute_gc_content(seq: &[u8]) -> f64 {
+    if seq.is_empty() {
+        return 0.5; // Default
+    }
+    let gc_count = seq.iter().filter(|&&b| b == b'G' || b == b'g' || b == b'C' || b == b'c').count();
+    gc_count as f64 / seq.len() as f64
+}
+
+/// Fetch sequence from reference FASTA for a genomic region
+fn fetch_reference_gc(
+    fasta: &faidx::Reader,
+    chrom: &str,
+    start: u64,
+    end: u64,
+) -> Option<f64> {
+    // Try with and without chr prefix
+    let chroms_to_try = if chrom.starts_with("chr") {
+        vec![chrom.to_string(), chrom.trim_start_matches("chr").to_string()]
+    } else {
+        vec![chrom.to_string(), format!("chr{}", chrom)]
+    };
+    
+    for chr_name in chroms_to_try {
+        if let Ok(seq) = fasta.fetch_seq(&chr_name, start as usize, end as usize) {
+            return Some(compute_gc_content(&seq));
+        }
+    }
+    None
 }
 
 // ============================================================================
@@ -464,8 +524,10 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `input_format` - "vcf" or "maf" (or "auto")
 /// * `map_quality` - Minimum mapping quality
 /// * `output_distributions` - If true, write per-variant size distributions
+/// * `reference_path` - Optional path to reference FASTA (for GC computation)
+/// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false, reference_path=None, correction_factors_path=None))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
@@ -473,7 +535,43 @@ pub fn calculate_mfsd(
     input_format: String,
     map_quality: u8,
     output_distributions: bool,
+    reference_path: Option<PathBuf>,
+    correction_factors_path: Option<PathBuf>,
 ) -> PyResult<()> {
+    use crate::gc_correction::CorrectionFactors;
+    use std::sync::Arc;
+    
+    // Load correction factors if provided
+    let factors: Option<Arc<CorrectionFactors>> = if let Some(ref factors_path) = correction_factors_path {
+        match CorrectionFactors::load_csv(factors_path) {
+            Ok(f) => {
+                info!("Loaded GC correction factors from {:?}", factors_path);
+                Some(Arc::new(f))
+            },
+            Err(e) => {
+                warn!("Failed to load correction factors: {}. Proceeding without GC correction.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    
+    // Load reference FASTA if provided (for GC content computation)
+    let fasta: Option<faidx::Reader> = if let Some(ref ref_path) = reference_path {
+        match faidx::Reader::from_path(ref_path) {
+            Ok(f) => {
+                info!("Loaded reference FASTA: {:?}", ref_path);
+                Some(f)
+            },
+            Err(e) => {
+                warn!("Failed to load reference FASTA: {}. GC correction disabled.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
     // 1. Parse Variants
     let mut variants = Vec::new();
     let file = File::open(&input_file)?;
@@ -543,6 +641,13 @@ pub fn calculate_mfsd(
                 Ok(b) => b,
                 Err(_) => return (var.clone(), result),
             };
+            
+            // Thread-local FASTA reader (for GC correction)
+            let thread_fasta: Option<faidx::Reader> = if factors.is_some() {
+                reference_path.as_ref().and_then(|p| faidx::Reader::from_path(p).ok())
+            } else {
+                None
+            };
 
             // Get chromosome tid
             let tid = match bam.header().tid(var.chrom.as_bytes()) {
@@ -592,22 +697,43 @@ pub fn calculate_mfsd(
                     None => continue, // Read doesn't span variant
                 };
                 
-                // Get fragment length
+                // Get fragment length and coordinates
                 let tlen = record.insert_size().abs();
                 let frag_len = if tlen == 0 { record.seq().len() as i64 } else { tlen };
-                let frag_len = frag_len as f64;
+                let frag_len_f64 = frag_len as f64;
                 
-                // Classify
-                if has_n {
-                    result.n_lengths.push(frag_len);
+                // Compute GC correction weight
+                let weight = if let Some(ref factors_arc) = factors {
+                    // Get fragment coordinates for GC lookup
+                    let frag_start = record.pos() as u64;
+                    let frag_end = if record.insert_size() > 0 {
+                        frag_start + record.insert_size() as u64
+                    } else {
+                        frag_start + record.seq().len() as u64
+                    };
+                    
+                    // Get GC from thread-local FASTA reader
+                    let gc_pct = if let Some(ref fasta) = thread_fasta {
+                        fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end)
+                            .map(|gc| (gc * 100.0).round() as u8)
+                            .unwrap_or(50) // Default 50% GC
+                    } else {
+                        50 // Default if no reference
+                    };
+                    
+                    factors_arc.get_factor(frag_len as u64, gc_pct)
                 } else {
-                    match classify_fragment(&extracted, var) {
-                        FragmentClass::Ref => result.ref_lengths.push(frag_len),
-                        FragmentClass::Alt => result.alt_lengths.push(frag_len),
-                        FragmentClass::NonRef => result.nonref_lengths.push(frag_len),
-                        FragmentClass::N => result.n_lengths.push(frag_len),
-                    }
-                }
+                    1.0 // No correction
+                };
+                
+                // Classify and add with weight
+                let class = if has_n {
+                    FragmentClass::N
+                } else {
+                    classify_fragment(&extracted, var)
+                };
+                
+                result.add_fragment(class, frag_len_f64, weight);
             }
             
             pb.inc(1);
@@ -650,12 +776,14 @@ pub fn calculate_mfsd(
     info!("Writing output to {:?}...", output_file);
     let mut out_file = File::create(&output_file)?;
     
-    // Header (37 columns)
+    // Header (42 columns - added 5 GC-weighted columns)
     writeln!(out_file, "{}", [
         // Variant info (5)
         "Chrom", "Pos", "Ref", "Alt", "VarType",
         // Counts (5)
         "REF_Count", "ALT_Count", "NonREF_Count", "N_Count", "Total_Count",
+        // GC-Weighted Counts (5) - NEW
+        "REF_Weighted", "ALT_Weighted", "NonREF_Weighted", "N_Weighted", "VAF_GC_Corrected",
         // Mean sizes (4)
         "REF_MeanSize", "ALT_MeanSize", "NonREF_MeanSize", "N_MeanSize",
         // Primary: ALT vs REF (3)
@@ -732,14 +860,23 @@ pub fn calculate_mfsd(
         let alt_confidence = confidence_level(n_alt);
         let ks_valid = n_alt >= MIN_FOR_KS && n_ref >= MIN_FOR_KS;
         
+        // GC-weighted counts and VAF
+        let w_ref = res.ref_weighted;
+        let w_alt = res.alt_weighted;
+        let w_nonref = res.nonref_weighted;
+        let w_n = res.n_weighted;
+        let vaf_gc_corrected = if w_alt + w_ref > 0.0 { w_alt / (w_alt + w_ref) } else { 0.0 };
+        
         // Format NaN as "NA"
         let fmt = |v: f64| if v.is_nan() { "NA".to_string() } else { format!("{:.4}", v) };
         
-        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             // Variant info (5)
             var.chrom, var.pos + 1, var.ref_allele, var.alt_allele, var.var_type.as_str(),
-            // Counts (5)
+            // Raw Counts (5)
             n_ref, n_alt, n_nonref, n_n, n_total,
+            // GC-Weighted Counts (5) - NEW
+            fmt(w_ref), fmt(w_alt), fmt(w_nonref), fmt(w_n), fmt(vaf_gc_corrected),
             // Mean sizes (4)
             fmt(mean_ref), fmt(mean_alt), fmt(mean_nonref), fmt(mean_n),
             // Primary: ALT vs REF (3)

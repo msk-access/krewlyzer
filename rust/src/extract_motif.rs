@@ -8,7 +8,7 @@ use rust_htslib::faidx;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
-use log::{info};
+use log::{info, debug};
 use noodles::bgzf;
 
 // Config struct moved to avoid duplication
@@ -26,6 +26,9 @@ struct ChunkResult {
     end_motifs: HashMap<String, u64>,
     bp_motifs: HashMap<String, u64>,
     count: u64,
+    // GC observations for correction factor computation
+    // Key: (length_bin, gc_percent), Value: count
+    gc_observations: HashMap<(u8, u8), u64>,
 }
 
 impl ChunkResult {
@@ -35,6 +38,7 @@ impl ChunkResult {
             end_motifs: HashMap::new(),
             bp_motifs: HashMap::new(),
             count: 0,
+            gc_observations: HashMap::new(),
         }
     }
 }
@@ -42,8 +46,8 @@ impl ChunkResult {
 // Blacklist helpers
 fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
     let mut regions = HashSet::new();
-    if let Ok(file) = File::open(path) {
-        let reader = BufReader::new(file);
+    let path_buf = std::path::PathBuf::from(path);
+    if let Ok(reader) = crate::bed::get_reader(&path_buf) {
         for line in reader.lines().flatten() {
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() >= 3 {
@@ -119,7 +123,7 @@ pub fn process_bam_parallel(
     exclude_path: Option<String>,
     skip_duplicates: bool,
     require_proper_pair: bool,
-) -> PyResult<(u64, HashMap<String, u64>, HashMap<String, u64>)> {
+) -> PyResult<(u64, HashMap<String, u64>, HashMap<String, u64>, HashMap<(u8, u8), u64>)> {
     
     // 1. Configure Global Thread Pool if needed
     if threads > 0 {
@@ -272,6 +276,13 @@ pub fn process_bam_parallel(
                      
                      result.fragments.push(format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc));
                      result.count += 1;
+                     
+                     // Accumulate GC observation for correction factor computation
+                     // Length bins: 60-80, 80-100, ..., 380-400 (17 bins)
+                     let length = tlen as u64;
+                     let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
+                     let gc_pct = (gc * 100.0).round() as u8;
+                     *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
                  }
             }
             
@@ -381,6 +392,7 @@ pub fn process_bam_parallel(
     let mut total_count = 0;
     let mut final_end_motifs = HashMap::new();
     let mut final_bp_motifs = HashMap::new();
+    let mut final_gc_observations: HashMap<(u8, u8), u64> = HashMap::new();
     
     // Write BED if requested
     if let Some(path) = output_bed_path {
@@ -392,14 +404,25 @@ pub fn process_bam_parallel(
                 writeln!(writer, "{}", line)?;
             }
             total_count += res.count;
+            // Merge GC observations
+            for ((len_bin, gc_pct), count) in &res.gc_observations {
+                *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+            }
         }
         writer.finish()?;  // Ensure proper EOF marker
     } else {
         // Just sum counts if not writing output
          for res in &results {
             total_count += res.count;
+            // Still merge GC observations
+            for ((len_bin, gc_pct), count) in &res.gc_observations {
+                *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+            }
         }
     }
+    
+    debug!("Total GC observation bins: {}", final_gc_observations.len());
+    info!("Extracted {} fragments", total_count);
     
     // Merge Motifs
     if config.count_motifs {
@@ -413,5 +436,5 @@ pub fn process_bam_parallel(
         }
     }
     
-    Ok((total_count, final_end_motifs, final_bp_motifs))
+    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations))
 }

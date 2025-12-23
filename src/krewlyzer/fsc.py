@@ -31,6 +31,7 @@ def fsc(
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
@@ -40,12 +41,9 @@ def fsc(
     
     Input: .bed.gz file from extract step
     Output: {sample}.FSC.tsv file with z-scored fragment size coverage per window
-    
-    GC Correction:
-        --pon-model: Hybrid correction using PON + within-sample residual (recommended)
-        --gc-correct: Within-sample LOESS correction only (no --pon-model)
-        --no-gc-correct: No correction
     """
+    from .assets import AssetManager
+    
     # Configure Rust thread pool
     if threads > 0:
         try:
@@ -59,16 +57,22 @@ def fsc(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
-    if not str(bedgz_input).endswith('.bed.gz'):
-        logger.error(f"Input must be a .bed.gz file: {bedgz_input}")
+    # Initialize Asset Manager
+    try:
+        assets = AssetManager(genome)
+    except ValueError as e:
+        logger.error(str(e))
         raise typer.Exit(1)
-    
-    # Default bin input
+        
+    # Resolve bin file
     if bin_input is None:
-        pkg_dir = Path(__file__).parent
-        bin_input = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
-        logger.info(f"Using default bin file: {bin_input}")
-    
+        try:
+            bin_input = assets.resolve("bins_100kb")
+            logger.info(f"Using default bin file: {bin_input}")
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            raise typer.Exit(1)
+            
     if not bin_input.exists():
         logger.error(f"Bin file not found: {bin_input}")
         raise typer.Exit(1)
@@ -76,11 +80,12 @@ def fsc(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
-    # Derive sample name (use provided or derive from input filename)
+    # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
     output_file = output / f"{sample_name}.FSC.tsv"
+    fsc_counts_file = output / f"{sample_name}.fsc_counts.tsv"
     
     # Load PON model if provided
     pon = None
@@ -92,31 +97,78 @@ def fsc(
         except Exception as e:
             logger.warning(f"Could not load PON model: {e}")
             logger.warning("Falling back to within-sample correction only")
-    
+
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Step 1: Get raw counts (no correction yet)
-        logger.info("Counting fragments by bins...")
-        _, short_raw, intermediate_raw, long_raw, total_raw, gc_values = _core.count_fragments_by_bins(
-            str(bedgz_input),
-            str(bin_input)
-        )
-        short = np.array(short_raw, dtype=float)
-        intermediate = np.array(intermediate_raw, dtype=float)
-        long = np.array(long_raw, dtype=float)
-        total = np.array(total_raw, dtype=float)
-        gc_arr = np.array(gc_values)
+        # Resolve GC correction assets
+        gc_ref = None
+        valid_regions = None
+        factors_out = None
         
-        # Step 2: Apply PON correction if available (PON-based expected values)
+        if gc_correct:
+            try:
+                gc_ref = assets.resolve("gc_correction")
+                valid_regions = assets.resolve("valid_regions")
+                factors_out = output / f"{sample_name}.correction_factors.csv"
+            except FileNotFoundError as e:
+                logger.warning(f"GC correction assets not found: {e}")
+                logger.warning("Proceeding without GC correction")
+                gc_correct = False
+        
+        # Check for pre-computed correction factors (from extract step)
+        factors_input = None
+        if gc_correct:
+            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
+            if potential_factors.exists():
+                factors_input = potential_factors
+                logger.info(f"Using pre-computed correction factors: {factors_input}")
+                gc_ref = None
+                valid_regions = None
+                factors_out = None
+        
+        # Call Unified Pipeline (FSC only)
+        logger.info("Running fragment counting...")
+        _core.run_unified_pipeline(
+            str(bedgz_input),
+            # GC Correction (compute)
+            str(gc_ref) if gc_ref else None,
+            str(valid_regions) if valid_regions else None,
+            str(factors_out) if factors_out else None,
+            # GC Correction (load pre-computed)
+            str(factors_input) if factors_input else None,
+            # FSC
+            str(bin_input), str(fsc_counts_file),
+            # Others
+            None, None, False, # WPS
+            None, None,        # FSD
+            None, None         # OCF
+        )
+        
+        logger.info(f"Reading counts from {fsc_counts_file}")
+        
+        # Load the FSC counts TSV
+        # Format: chrom, start, end, ultra_short, short, intermediate, long, total, mean_gc
+        # Using pandas
+        df_counts = pd.read_csv(fsc_counts_file, sep='\t')
+        
+        # Extract arrays for downstream logic
+        short = df_counts['short'].values
+        intermediate = df_counts['intermediate'].values
+        long = df_counts['long'].values
+        total = df_counts['total'].values
+        gc_arr = df_counts['mean_gc'].values
+        
+        # Step 2: Apply PON correction if available (overlay on corrected counts)
         if pon and pon.gc_bias:
-            logger.info("Applying PON-based GC correction...")
+            logger.info("Applying PON-based normalization...")
             for i, gc in enumerate(gc_arr):
                 short_exp = pon.gc_bias.get_expected(gc, "short")
                 inter_exp = pon.gc_bias.get_expected(gc, "intermediate")
                 long_exp = pon.gc_bias.get_expected(gc, "long")
                 
                 # Correct: observed / expected
+                # Note: 'observed' here is already GC-corrected by factors if gc_correct=True
                 if short_exp > 0:
                     short[i] /= short_exp
                 if inter_exp > 0:
@@ -124,39 +176,16 @@ def fsc(
                 if long_exp > 0:
                     long[i] /= long_exp
             
+            # Recalculate total after PON
             total = short + intermediate + long
             
-            # Step 3: Apply residual within-sample LOESS correction
-            if gc_correct:
-                logger.info("Applying residual LOESS correction...")
-                # For now, use the Rust LOESS on PON-corrected values
-                # This is a simplified hybrid approach
-        else:
-            # No PON - use standard within-sample LOESS correction
-            if gc_correct:
-                logger.info("Counting fragments with GC correction (LOESS per fragment type)...")
-                short, intermediate, long, gc_values = _core.count_fragments_gc_corrected(
-                    str(bedgz_input),
-                    str(bin_input),
-                    verbose
-                )
-                total = np.array(short) + np.array(intermediate) + np.array(long)
-                short = np.array(short)
-                intermediate = np.array(intermediate)
-                long = np.array(long)
-                logger.info("GC correction applied to short/intermediate/long counts")
-        
         logger.info(f"Processed {len(total)} bins")
         
-        # Load bin file for coordinates
-        bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], 
-                            names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
-        
-        # Create DataFrame with results (already GC-corrected if enabled)
+        # Create DataFrame for aggregation (reusing loaded columns)
         df = pd.DataFrame({
-            'chrom': bins_df['chrom'],
-            'start': bins_df['start'],
-            'end': bins_df['end'],
+            'chrom': df_counts['chrom'],
+            'start': df_counts['start'],
+            'end': df_counts['end'],
             'shorts': short,
             'intermediates': intermediate,
             'longs': long,

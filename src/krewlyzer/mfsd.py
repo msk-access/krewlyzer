@@ -2,7 +2,7 @@
 Mutant Fragment Size Distribution (mFSD) calculation.
 
 Calculates mFSD features for a single sample.
-Uses Rust backend for accelerated computation.
+Uses Rust backend for accelerated computation with optional GC correction.
 
 Supports all small variant types: SNV, MNV, Insertion, Deletion, Complex.
 4-way fragment classification: REF, ALT, NonREF, N.
@@ -29,6 +29,8 @@ def mfsd(
     input_file: Path = typer.Option(..., "--input-file", "-i", help="VCF or MAF file with variants"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
+    reference: Optional[Path] = typer.Option(None, "--reference", "-g", help="Reference genome FASTA (for GC correction)"),
+    correction_factors: Optional[Path] = typer.Option(None, "--correction-factors", "-F", help="Pre-computed correction_factors.csv (from extract/run-all)"),
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
     output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
@@ -44,6 +46,10 @@ def mfsd(
     - ALT: Supports alternate allele (tumor signal)
     - NonREF: Non-REF, non-ALT (sequencing errors, subclones)
     - N: Contains N at variant position (low quality)
+    
+    GC Correction:
+    - If --correction-factors is provided, fragment counts are weighted by GC correction factors
+    - These factors can be computed automatically by run-all or standalone tools
     
     Input: BAM file and VCF/MAF file with variants
     Output: 
@@ -77,6 +83,15 @@ def mfsd(
         logger.error(f"Variant file not found: {input_file}")
         raise typer.Exit(1)
     
+    # Validate optional paths
+    if reference and not reference.exists():
+        logger.error(f"Reference FASTA not found: {reference}")
+        raise typer.Exit(1)
+    
+    if correction_factors and not correction_factors.exists():
+        logger.error(f"Correction factors file not found: {correction_factors}")
+        raise typer.Exit(1)
+    
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
@@ -93,14 +108,22 @@ def mfsd(
         input_type = "vcf" if str(input_file).endswith(".vcf") or str(input_file).endswith(".vcf.gz") else "maf"
         logger.info(f"Detected input type: {input_type}")
         
-        # Call Rust backend (new signature with output_distributions)
+        # Log GC correction status
+        if correction_factors:
+            logger.info(f"GC correction enabled using: {correction_factors}")
+        else:
+            logger.info("GC correction disabled (no --correction-factors provided)")
+        
+        # Call Rust backend with optional reference and correction factors
         _core.mfsd.calculate_mfsd(
             str(bam_input),
             str(input_file),
             str(output_file),
             input_type,
             mapq,
-            output_distributions
+            output_distributions,
+            str(reference) if reference else None,
+            str(correction_factors) if correction_factors else None
         )
         
         logger.info(f"mFSD complete: {output_file}")

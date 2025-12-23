@@ -50,9 +50,7 @@ impl<C: FragmentConsumer> FragmentAnalyzer<C> {
 
     /// Process the BED file in parallel
     pub fn process_file(&self, bed_path: &Path, chrom_map: &mut ChromosomeMap) -> Result<C> {
-        let file = File::open(bed_path)
-            .with_context(|| format!("Failed to open BED file: {:?}", bed_path))?;
-        let mut reader = bgzf::io::Reader::new(file);
+        let mut reader = crate::bed::get_reader(bed_path)?;
         
         let mut final_consumer = self.consumer_template.clone();
         
@@ -153,5 +151,6 @@ fn parse_line(line: &str, chrom_map: &mut ChromosomeMap) -> Option<Fragment> {
         end,
         length,
         gc,
+        weight: 1.0,
     })
 }

@@ -12,7 +12,6 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
 use log::{info, warn, debug};
 
-use crate::gc_correction::correct_gc_bias_per_type;
 
 /// GC bias correction curves for a single fragment type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,15 +204,8 @@ impl PonModel {
             })
             .collect();
         
-        // Step 2: Within-sample residual LOESS
-        // Use the existing gc_correction module
-        let final_corrected = correct_gc_bias_per_type(
-            &pon_corrected,
-            &pon_corrected,
-            &pon_corrected,
-            gc_values,
-            false, // verbose
-        );
+        // Step 2: Within-sample residual LOESS (REMOVED)
+        // Hybrid correction now relies on upstream fragment weighting
         
         // Return the corrected values for this type
         // (correct_gc_bias_per_type returns short, intermediate, long)

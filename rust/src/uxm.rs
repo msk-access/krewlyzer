@@ -40,8 +40,8 @@ pub fn calculate_uxm(
     // SAFETY: Share BAM path strings.
     
     let mut markers = Vec::new();
-    let file = File::open(&marker_path)?;
-    let reader = BufReader::new(file);
+    let reader = crate::bed::get_reader(&marker_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     
     info!("Loading markers from {:?}...", marker_path);
 
