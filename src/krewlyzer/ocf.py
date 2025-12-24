@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("ocf")
 
 # Rust backend is required
@@ -29,6 +29,7 @@ def ocf(
     ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin regions file"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
     """
@@ -38,6 +39,11 @@ def ocf(
     Output: {sample}.OCF.tsv (summary) and {sample}.OCF.sync.tsv (detailed sync data)
     """
     from .assets import AssetManager
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:

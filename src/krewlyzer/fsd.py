@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("fsd")
 
 # Rust backend is required
@@ -30,6 +30,7 @@ def fsd(
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
     """
@@ -41,6 +42,14 @@ def fsd(
     With --pon-model: Additional z-score columns comparing to PON baseline
     """
     from .assets import AssetManager
+    from .core.pon_integration import load_pon_model
+    from .core.fsd_processor import apply_fsd_pon
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.fsd_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:
@@ -80,15 +89,12 @@ def fsd(
         logger.error(f"Arms file not found: {arms_file}")
         raise typer.Exit(1)
     
+    logger.debug(f"Arms file: {arms_file}")
+    
     # Load PON model if provided
     pon = None
     if pon_model:
-        from krewlyzer.pon.model import PonModel
-        try:
-            pon = PonModel.load(pon_model)
-            logger.info(f"Loaded PON model: {pon.assay} (n={pon.n_samples})")
-        except Exception as e:
-            logger.warning(f"Could not load PON model: {e}")
+        pon = load_pon_model(pon_model)
     
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -98,6 +104,7 @@ def fsd(
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
     output_file = output / f"{sample_name}.FSD.tsv"
+    logger.debug(f"Sample: {sample_name}, Output: {output_file}")
     
     try:
         logger.info(f"Processing {bedgz_input.name}")
@@ -149,37 +156,15 @@ def fsd(
             None, None
         )
         
-        # If PON provided, add z-score columns
-        if pon and pon.fsd_baseline:
-            logger.info("Computing z-scores against PON baseline...")
-            df = pd.read_csv(output_file, sep="\t")
-            
-            # Compute z-scores for each arm-size combination
-            z_scores = []
-            for _, row in df.iterrows():
-                arm = row.iloc[0]  # First column is arm name
-                size_bin = int(row.name) if isinstance(row.name, int) else None
-                
-                # For now, compute overall z-score per arm
-                # Future: Per-size-bin z-scores
-                if arm in pon.fsd_baseline.arms and size_bin:
-                    expected = pon.fsd_baseline.get_expected(arm, size_bin)
-                    std = pon.fsd_baseline.get_std(arm, size_bin)
-                    if std > 0:
-                        z = (row.iloc[1] - expected) / std  # Assume 2nd col is count
-                    else:
-                        z = 0.0
-                else:
-                    z = None
-                z_scores.append(z)
-            
-            # Add z-score column and save
-            df["pon_zscore"] = z_scores
-            df.to_csv(output_file, sep="\t", index=False)
-            logger.info(f"Added z-score column from PON baseline")
+        # If PON provided, apply z-scores using shared processor
+        if pon:
+            apply_fsd_pon(output_file, pon)
         
-        logger.info(f"FSD complete: {output_file}")
+        logger.info(f"✅ FSD complete: {output_file}")
 
     except Exception as e:
         logger.error(f"FSD calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

@@ -10,13 +10,12 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("fsc")
 
 # Rust backend is required
@@ -43,6 +42,14 @@ def fsc(
     Output: {sample}.FSC.tsv file with z-scored fragment size coverage per window
     """
     from .assets import AssetManager
+    from .core.fsc_processor import process_fsc
+    from .core.pon_integration import load_pon_model
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.fsc_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:
@@ -57,9 +64,13 @@ def fsc(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
+    logger.debug(f"Input: {bedgz_input}")
+    logger.debug(f"Output directory: {output}")
+    
     # Initialize Asset Manager
     try:
         assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} → {assets.genome_dir}")
     except ValueError as e:
         logger.error(str(e))
         raise typer.Exit(1)
@@ -77,6 +88,8 @@ def fsc(
         logger.error(f"Bin file not found: {bin_input}")
         raise typer.Exit(1)
     
+    logger.debug(f"Bin file: {bin_input}")
+    
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
@@ -87,15 +100,14 @@ def fsc(
     output_file = output / f"{sample_name}.FSC.tsv"
     fsc_counts_file = output / f"{sample_name}.fsc_counts.tsv"
     
+    logger.debug(f"Sample name: {sample_name}")
+    logger.debug(f"Output file: {output_file}")
+    
     # Load PON model if provided
     pon = None
     if pon_model:
-        from krewlyzer.pon.model import PonModel
-        try:
-            pon = PonModel.load(pon_model)
-            logger.info(f"Loaded PON model: {pon.assay} (n={pon.n_samples})")
-        except Exception as e:
-            logger.warning(f"Could not load PON model: {e}")
+        pon = load_pon_model(pon_model)
+        if pon is None:
             logger.warning("Falling back to within-sample correction only")
 
     try:
@@ -111,6 +123,8 @@ def fsc(
                 gc_ref = assets.resolve("gc_correction")
                 valid_regions = assets.resolve("valid_regions")
                 factors_out = output / f"{sample_name}.correction_factors.csv"
+                logger.debug(f"GC ref: {gc_ref}")
+                logger.debug(f"Valid regions: {valid_regions}")
             except FileNotFoundError as e:
                 logger.warning(f"GC correction assets not found: {e}")
                 logger.warning("Proceeding without GC correction")
@@ -128,7 +142,7 @@ def fsc(
                 factors_out = None
         
         # Call Unified Pipeline (FSC only)
-        logger.info("Running fragment counting...")
+        logger.info("Running fragment counting via Rust backend...")
         _core.run_unified_pipeline(
             str(bedgz_input),
             # GC Correction (compute)
@@ -139,114 +153,32 @@ def fsc(
             str(factors_input) if factors_input else None,
             # FSC
             str(bin_input), str(fsc_counts_file),
-            # Others
-            None, None, False, # WPS
-            None, None,        # FSD
-            None, None         # OCF
+            # Others (disabled)
+            None, None, False,  # WPS
+            None, None,         # FSD
+            None, None          # OCF
         )
         
         logger.info(f"Reading counts from {fsc_counts_file}")
         
         # Load the FSC counts TSV
-        # Format: chrom, start, end, ultra_short, short, intermediate, long, total, mean_gc
-        # Using pandas
         df_counts = pd.read_csv(fsc_counts_file, sep='\t')
+        logger.debug(f"Loaded {len(df_counts)} bins, columns: {list(df_counts.columns)}")
         
-        # Extract arrays for downstream logic
-        short = df_counts['short'].values
-        intermediate = df_counts['intermediate'].values
-        long = df_counts['long'].values
-        total = df_counts['total'].values
-        gc_arr = df_counts['mean_gc'].values
+        # Use shared processor for aggregation and z-score calculation
+        process_fsc(
+            counts_df=df_counts,
+            output_path=output_file,
+            windows=windows,
+            continue_n=continue_n,
+            pon=pon
+        )
         
-        # Step 2: Apply PON correction if available (overlay on corrected counts)
-        if pon and pon.gc_bias:
-            logger.info("Applying PON-based normalization...")
-            for i, gc in enumerate(gc_arr):
-                short_exp = pon.gc_bias.get_expected(gc, "short")
-                inter_exp = pon.gc_bias.get_expected(gc, "intermediate")
-                long_exp = pon.gc_bias.get_expected(gc, "long")
-                
-                # Correct: observed / expected
-                # Note: 'observed' here is already GC-corrected by factors if gc_correct=True
-                if short_exp > 0:
-                    short[i] /= short_exp
-                if inter_exp > 0:
-                    intermediate[i] /= inter_exp
-                if long_exp > 0:
-                    long[i] /= long_exp
-            
-            # Recalculate total after PON
-            total = short + intermediate + long
-            
-        logger.info(f"Processed {len(total)} bins")
-        
-        # Create DataFrame for aggregation (reusing loaded columns)
-        df = pd.DataFrame({
-            'chrom': df_counts['chrom'],
-            'start': df_counts['start'],
-            'end': df_counts['end'],
-            'shorts': short,
-            'intermediates': intermediate,
-            'longs': long,
-            'totals': total
-        })
-        
-        # Aggregation into windows
-        results = []
-        for chrom, group in df.groupby('chrom', sort=False):
-            n_bins = len(group)
-            n_windows = n_bins // continue_n
-            
-            if n_windows == 0:
-                continue
-            
-            trunc_len = n_windows * continue_n
-            
-            shorts_mat = group['shorts'].values[:trunc_len].reshape(n_windows, continue_n)
-            inter_mat = group['intermediates'].values[:trunc_len].reshape(n_windows, continue_n)
-            longs_mat = group['longs'].values[:trunc_len].reshape(n_windows, continue_n)
-            totals_mat = group['totals'].values[:trunc_len].reshape(n_windows, continue_n)
-            
-            sum_shorts = shorts_mat.sum(axis=1)
-            sum_inter = inter_mat.sum(axis=1)
-            sum_longs = longs_mat.sum(axis=1)
-            sum_totals = totals_mat.sum(axis=1)
-            
-            window_starts = np.arange(n_windows) * continue_n * windows
-            window_ends = (np.arange(n_windows) + 1) * continue_n * windows - 1
-            
-            results.append(pd.DataFrame({
-                'chrom': chrom,
-                'start': window_starts,
-                'end': window_ends,
-                'short_sum': sum_shorts,
-                'inter_sum': sum_inter,
-                'long_sum': sum_longs,
-                'total_sum': sum_totals
-            }))
-        
-        if not results:
-            logger.warning("No valid windows found.")
-            return
-        
-        final_df = pd.concat(results, ignore_index=True)
-        
-        # Calculate Z-scores globally
-        final_df['short_z'] = (final_df['short_sum'] - final_df['short_sum'].mean()) / final_df['short_sum'].std()
-        final_df['inter_z'] = (final_df['inter_sum'] - final_df['inter_sum'].mean()) / final_df['inter_sum'].std()
-        final_df['long_z'] = (final_df['long_sum'] - final_df['long_sum'].mean()) / final_df['long_sum'].std()
-        final_df['total_z'] = (final_df['total_sum'] - final_df['total_sum'].mean()) / final_df['total_sum'].std()
-        
-        # Write output
-        with open(output_file, 'w') as f:
-            f.write("region\tshort-fragment-zscore\titermediate-fragment-zscore\tlong-fragment-zscore\ttotal-fragment-zscore\n")
-            for _, row in final_df.iterrows():
-                region = f"{row['chrom']}:{int(row['start'])}-{int(row['end'])}"
-                f.write(f"{region}\t{row['short_z']:.4f}\t{row['inter_z']:.4f}\t{row['long_z']:.4f}\t{row['total_z']:.4f}\n")
-        
-        logger.info(f"FSC complete: {output_file}")
+        logger.info(f"✅ FSC complete: {output_file}")
 
     except Exception as e:
         logger.error(f"FSC calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

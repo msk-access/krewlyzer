@@ -19,7 +19,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("extract")
 
 # Rust backend is required
@@ -160,6 +160,7 @@ def extract(
     # Other options
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
+    verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose logging"),
     threads: int = typer.Option(0, '--threads', '-t', help="Number of threads (0=all cores)")
 ):
     """
@@ -185,6 +186,11 @@ def extract(
     - {sample}.correction_factors.csv: GC correction factors (if --gc-correct)
     """
     from .assets import AssetManager
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:

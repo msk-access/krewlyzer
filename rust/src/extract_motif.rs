@@ -109,7 +109,7 @@ pub struct UnifiedConfig {
 /// Unified Parallel Engine
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, skip_duplicates=true, require_proper_pair=true))]
+#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
 pub fn process_bam_parallel(
     bam_path: String,
     fasta_path: String,
@@ -123,6 +123,7 @@ pub fn process_bam_parallel(
     exclude_path: Option<String>,
     skip_duplicates: bool,
     require_proper_pair: bool,
+    silent: bool,
 ) -> PyResult<(u64, HashMap<String, u64>, HashMap<String, u64>, HashMap<(u8, u8), u64>)> {
     
     // 1. Configure Global Thread Pool if needed
@@ -192,13 +193,18 @@ pub fn process_bam_parallel(
     
     info!("Split genome into {} chunks. Processing...", chunks.len());
     
-    // Progress Bar
-    let pb = ProgressBar::new(chunks.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    // Progress Bar (hidden when called from wrapper)
+    let pb = if silent {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(chunks.len() as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    };
 
     // 3. Parallel Processing
     let results: Vec<ChunkResult> = chunks.par_iter().map(|chunk| {

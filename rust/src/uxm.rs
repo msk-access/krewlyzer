@@ -21,6 +21,7 @@ use log::info;
 /// * `unmethy_threshold` - Threshold for 'U'
 /// * `pe_type` - "SE" or "PE"
 #[pyfunction]
+#[pyo3(signature = (bam_path, marker_path, output_file, map_quality, min_cpg, methy_threshold, unmethy_threshold, _pe_type, silent=false))]
 pub fn calculate_uxm(
     bam_path: PathBuf,
     marker_path: PathBuf,
@@ -29,7 +30,8 @@ pub fn calculate_uxm(
     min_cpg: u32,
     methy_threshold: f64,
     unmethy_threshold: f64,
-    _pe_type: String, // Prefixed with _ as currently unused
+    _pe_type: String,
+    silent: bool,
 ) -> PyResult<()> {
     // 1. Load Markers
     struct Marker {
@@ -60,13 +62,18 @@ pub fn calculate_uxm(
     let total_markers = markers.len();
     info!("Found {} markers. Processing in parallel...", total_markers);
     
-    // Progress Bar
-    let pb = ProgressBar::new(total_markers as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    // Progress Bar (hidden when called from wrapper)
+    let pb = if silent {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(total_markers as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    };
 
     // 2. Process Markers (Parallel)
     let results: Vec<String> = markers.par_iter()

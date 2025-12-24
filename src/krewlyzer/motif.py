@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("motif")
 
 # Rust backend is required
@@ -32,6 +32,7 @@ def motif(
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
+    verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose logging"),
     threads: int = typer.Option(0, '--threads', '-t', help="Number of threads (0=all cores)")
 ):
     """
@@ -44,6 +45,12 @@ def motif(
     
     Note: For fragment extraction (BED.gz), use `krewlyzer extract` instead.
     """
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.motif_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+    
     # Configure Rust thread pool
     if threads > 0:
         try:

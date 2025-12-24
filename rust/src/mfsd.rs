@@ -527,7 +527,7 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `reference_path` - Optional path to reference FASTA (for GC computation)
 /// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false, reference_path=None, correction_factors_path=None))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false, reference_path=None, correction_factors_path=None, silent=false))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
@@ -537,6 +537,7 @@ pub fn calculate_mfsd(
     output_distributions: bool,
     reference_path: Option<PathBuf>,
     correction_factors_path: Option<PathBuf>,
+    silent: bool,
 ) -> PyResult<()> {
     use crate::gc_correction::CorrectionFactors;
     use std::sync::Arc;
@@ -623,13 +624,18 @@ pub fn calculate_mfsd(
     debug!("Variant types: {} SNV, {} MNV, {} INS, {} DEL, {} Complex", 
         snv_count, mnv_count, ins_count, del_count, complex_count);
 
-    // Progress Bar
-    let pb = ProgressBar::new(total_vars as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    // Progress Bar (hidden when called from wrapper)
+    let pb = if silent {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(total_vars as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    };
 
     // 2. Process Variants (Parallel)
     let results: Vec<(Variant, VariantResult)> = variants.par_iter()

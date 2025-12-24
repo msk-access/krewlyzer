@@ -107,7 +107,9 @@ impl FragmentConsumer for MultiConsumer {
     // FSD Args
     fsd_arms=None, fsd_output=None,
     // OCF Args
-    ocf_regions=None, ocf_output=None
+    ocf_regions=None, ocf_output=None,
+    // Progress control
+    silent=false
 ))]
 pub fn run_unified_pipeline(
     _py: Python,
@@ -126,6 +128,8 @@ pub fn run_unified_pipeline(
     fsd_arms: Option<PathBuf>, fsd_output: Option<PathBuf>,
     // OCF
     ocf_regions: Option<PathBuf>, ocf_output: Option<PathBuf>,
+    // Progress control
+    silent: bool,
 ) -> PyResult<()> {
     use crate::gc_correction::{ReferenceData, ValidRegionFilter, GcObservationConsumer, compute_gcfix_factors, CorrectionFactors};
     use crate::engine;
@@ -165,7 +169,7 @@ pub fn run_unified_pipeline(
         
         // Run Engine
         let engine = engine::FragmentAnalyzer::new(obs_consumer, 500_000); // 500k batch
-        let obs_result = engine.process_file(&bed_path, &mut crate::bed::ChromosomeMap::new())
+        let obs_result = engine.process_file(&bed_path, &mut crate::bed::ChromosomeMap::new(), silent)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Phase 1 failed: {}", e)))?;
             
         // 4. Compute Factors (use .observed field, not .counts)
@@ -230,7 +234,7 @@ pub fn run_unified_pipeline(
     
     // 4. Run Analysis
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
-    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map)
+    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, silent)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     // 5. Write Outputs

@@ -14,7 +14,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("uxm")
 
 # Rust backend is required
@@ -37,6 +37,11 @@ def uxm(
     Output: {sample}.UXM.tsv file with fragment-level methylation scores
     """
     from .assets import AssetManager
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:

@@ -23,7 +23,7 @@ pub fn calculate_ocf(
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;;
         
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
-    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map)
+    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     final_consumer.write_output(&output_dir)

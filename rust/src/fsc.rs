@@ -266,7 +266,7 @@ pub fn count_fragments_by_bins(
     
     // 2. Run Engine (Using logic similar to Unified Pipeline but for single consumer)
     let engine = FragmentAnalyzer::new(consumer, 100_000); // 100k chunks
-    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map)
+    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     // 3. Convert Results

@@ -28,7 +28,7 @@ pub fn calculate_fsd(
     
     // 3. Process
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
-    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map)
+    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     // 4. Write Output

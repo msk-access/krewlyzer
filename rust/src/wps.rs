@@ -159,7 +159,7 @@ pub fn calculate_wps(
     let analyzer = FragmentAnalyzer::new(consumer, 100_000); // 100k chunk size
     
     // 4. Process
-    let final_consumer = analyzer.process_file(bed_path, &mut chrom_map)
+    let final_consumer = analyzer.process_file(bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Processing failed: {}", e)))?;
         
     // 5. Write Output (with optional GC correction applied internally)

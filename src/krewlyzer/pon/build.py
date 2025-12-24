@@ -20,7 +20,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .model import PonModel, GcBiasModel, FsdBaseline, WpsBaseline
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("build-pon")
 
 # Import core tools for processing samples

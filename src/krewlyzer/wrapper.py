@@ -23,7 +23,7 @@ from krewlyzer import _core
 console = Console(stderr=True)
 logging.basicConfig(
     level="INFO", 
-    handlers=[RichHandler(console=console, show_time=False, show_path=False)], 
+    handlers=[RichHandler(console=console, show_time=True, show_path=False)], 
     format="%(message)s"
 )
 logger = logging.getLogger("krewlyzer")

@@ -15,7 +15,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("wps")
 
 # Rust backend is required
@@ -50,6 +50,14 @@ def wps(
     With --pon-model: Adds wps_long_z and wps_short_z columns (z-scores vs PON)
     """
     from .assets import AssetManager
+    from .core.pon_integration import load_pon_model
+    from .core.wps_processor import apply_wps_pon
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.wps_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
     
     # Configure Rust thread pool
     if threads > 0:
@@ -192,7 +200,13 @@ def wps(
                     
             except Exception as e:
                 logger.warning(f"Could not compute PON z-scores: {e}")
+                if verbose:
+                    import traceback
+                    traceback.print_exc()
 
     except Exception as e:
         logger.error(f"WPS calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

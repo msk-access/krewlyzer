@@ -7,8 +7,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 import logging
 
-console = Console()
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+console = Console(stderr=True)
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("krewlyzer-cli")
 
 def set_log_level(log_level: str = typer.Option("INFO", "--log-level", help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL")):
