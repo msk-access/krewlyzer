@@ -108,28 +108,21 @@ def motif(
         Breakpoint_motif.update(bpm_counts)
         logger.info(f"Processed {fragment_count:,} fragments")
         
-        # Write End Motif
-        logger.info(f"Writing End Motif: {edm_output}")
-        total_em = sum(End_motif.values())
-        with open(edm_output, 'w') as f:
-            for k, v in End_motif.items():
-                f.write(f"{k}\t{v/total_em if total_em else 0}\n")
+        # Write all motif outputs using shared processor
+        from .core.motif_processor import process_motif_outputs
         
-        # Write Breakpoint Motif
-        logger.info(f"Writing Breakpoint Motif: {bpm_output}")
-        total_bpm = sum(Breakpoint_motif.values())
-        with open(bpm_output, 'w') as f:
-            for k, v in Breakpoint_motif.items():
-                f.write(f"{k}\t{v/total_bpm if total_bpm else 0}\n")
+        total_em, total_bpm, mds = process_motif_outputs(
+            em_counts=End_motif,
+            bpm_counts=Breakpoint_motif,
+            edm_output=edm_output,
+            bpm_output=bpm_output,
+            mds_output=mds_output,
+            sample_name=sample_name,
+            kmer=kmer,
+            include_headers=True  # Consistent with run-all
+        )
         
-        # Write MDS
-        logger.info(f"Writing MDS: {mds_output}")
-        freq = np.array(list(End_motif.values())) / total_em if total_em else np.zeros(len(End_motif))
-        mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
-        with open(mds_output, 'w') as f:
-            f.write(f"{mds}\n")
-        
-        logger.info(f"Motif extraction complete")
+        logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
 
     except Exception as e:
         logger.error(f"Motif extraction failed: {e}")

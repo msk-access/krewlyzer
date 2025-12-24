@@ -75,47 +75,6 @@ impl GcCorrectionFactors {
     }
 }
 
-/// Expected fragment counts from reference genome
-/// Used for rate = observed / expected calculation
-#[derive(Debug, Clone)]
-pub struct RefGenomeGc {
-    /// Expected counts: [length_bin][gc_percent] -> expected_count
-    pub expected: Vec<Vec<f64>>,
-    
-    /// Reference genome name (e.g., "hg38")
-    pub genome_name: String,
-}
-
-impl RefGenomeGc {
-    /// Load reference GC expected values from a Parquet file
-    /// 
-    /// # Arguments
-    /// * `path` - Path to the .parquet file
-    /// 
-    /// # Returns
-    /// * Loaded RefGenomeGc or error
-    pub fn load(path: &Path) -> Result<Self> {
-        // TODO: Implement loading from Parquet file
-        // Schema: length_bin (u32), gc_percent (u8), expected_count (f64)
-        info!("Loading ref_genome_GC from {:?}", path);
-        
-        Err(anyhow!("ref_genome_GC.parquet loading not yet implemented"))
-    }
-    
-    /// Get expected count for a given length and GC content
-    pub fn get_expected(&self, length: u32, gc: f64) -> f64 {
-        let bin_idx = match get_length_bin_index(length) {
-            Some(idx) => idx,
-            None => return 1.0,
-        };
-        
-        let gc_percent = (gc * 100.0).round() as usize;
-        let gc_idx = gc_percent.min(100);
-        
-        self.expected[bin_idx][gc_idx]
-    }
-}
-
 /// Valid genomic regions for GC correction estimation
 /// Excludes problematic regions, assembly gaps, and low-mappability areas
 #[derive(Debug, Clone)]

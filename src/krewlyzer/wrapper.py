@@ -12,7 +12,8 @@ import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
-from .postprocess import process_fsc_from_counts, process_fsr_from_counts
+from .core.fsc_processor import process_fsc
+from .core.fsr_processor import process_fsr
 from .assets import AssetManager
 
 # Rust backend
@@ -209,42 +210,20 @@ def run_all(
                     json.dump(metadata, f, indent=2)
 
             # --- Post-Process Motif (Write Files) ---
-            # Helper imports (should be at top, but adding here locally or will add global)
-            import itertools
-            import numpy as np
+            from .core.motif_processor import process_motif_outputs
             
-            bases = ['A', 'C', 'T', 'G']
-            kmer = 4
+            total_em, total_bpm, mds = process_motif_outputs(
+                em_counts=em_counts,
+                bpm_counts=bpm_counts,
+                edm_output=edm_output,
+                bpm_output=bpm_output,
+                mds_output=mds_output,
+                sample_name=sample,
+                kmer=4,
+                include_headers=True
+            )
             
-            # End Motif
-            End_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            End_motif.update(em_counts)
-            total_em = sum(End_motif.values())
-            
-            logger.info(f"Writing End Motif: {edm_output}")
-            with open(edm_output, 'w') as f:
-                f.write("Motif\tFrequency\n")
-                for k, v in End_motif.items():
-                    f.write(f"{k}\t{v/total_em if total_em else 0}\n")
-            
-            # Breakpoint Motif
-            Breakpoint_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            Breakpoint_motif.update(bpm_counts)
-            total_bpm = sum(Breakpoint_motif.values())
-            
-            logger.info(f"Writing Breakpoint Motif: {bpm_output}")
-            with open(bpm_output, 'w') as f:
-                f.write("Motif\tFrequency\n")
-                for k, v in Breakpoint_motif.items():
-                    f.write(f"{k}\t{v/total_bpm if total_bpm else 0}\n")
-            
-            # MDS
-            logger.info(f"Writing MDS: {mds_output}")
-            freq = np.array(list(End_motif.values())) / total_em if total_em else np.zeros(len(End_motif))
-            mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
-            with open(mds_output, 'w') as f:
-                f.write("Sample\tMDS\n")
-                f.write(f"{sample}\t{mds}\n")
+            logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
                 
         except Exception as e:
             logger.error(f"Unified Extract+Motif failed: {e}")
@@ -321,13 +300,19 @@ def run_all(
             logger.info("Post-processing FSC/FSR...")
             df_counts = pd.read_csv(out_fsc_raw, sep='\t')
             
-            # FSC Output
-            final_fsc = output / f"{sample}.FSC.tsv"
-            process_fsc_from_counts(df_counts, final_fsc, fsc_windows, fsc_continue_n)
+            # Load PON if available
+            pon = None
+            if pon_model:
+                from .core.pon_integration import load_pon_model
+                pon = load_pon_model(pon_model)
             
-            # FSR Output
+            # FSC Output (using shared processor)
+            final_fsc = output / f"{sample}.FSC.tsv"
+            process_fsc(df_counts, final_fsc, fsc_windows, fsc_continue_n, pon=pon)
+            
+            # FSR Output (using shared processor)
             final_fsr = output / f"{sample}.FSR.tsv"
-            process_fsr_from_counts(df_counts, final_fsr, fsc_windows, fsc_continue_n)
+            process_fsr(df_counts, final_fsr, fsc_windows, fsc_continue_n, pon=pon)
     
         # 2. OCF (Move files)
         # Rust writes 'all.ocf.csv' and 'all.sync.tsv' to out_ocf_dir
@@ -344,6 +329,25 @@ def run_all(
             out_ocf_dir.rmdir()
         except:
             pass
+        
+        # 3. Apply PON z-scores to FSD and WPS (if PON model provided)
+        if pon_model:
+            from .core.pon_integration import load_pon_model
+            from .core.fsd_processor import apply_fsd_pon
+            from .core.wps_processor import apply_wps_pon
+            
+            pon = load_pon_model(pon_model)
+            
+            if pon is not None:
+                # Apply PON z-scores to FSD
+                if out_fsd.exists():
+                    apply_fsd_pon(out_fsd, pon)
+                
+                # Apply PON z-scores to WPS
+                if out_wps.exists():
+                    apply_wps_pon(out_wps, pon)
+                    
+                logger.info("PON z-scores applied to FSD and WPS")
             
     except Exception as e:
             logger.error(f"Unified Pipeline failed: {e}")

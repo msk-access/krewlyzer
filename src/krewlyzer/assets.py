@@ -37,7 +37,7 @@ class AssetManager:
     @property
     def arms(self) -> Path:
         """Chromosome arms BED"""
-        return self._get_path("ChormosomeArms", f"{self.file_prefix}.arms.bed.gz")
+        return self._get_path("ChromosomeArms", f"{self.file_prefix}.arms.bed.gz")
 
     @property
     def valid_regions(self) -> Path:
@@ -52,7 +52,7 @@ class AssetManager:
     @property
     def bins_100kb(self) -> Path:
         """100kb fixed windows BED"""
-        return self._get_path("ChormosomeBins", f"{self.file_prefix}_window_100kb.bed.gz")
+        return self._get_path("ChromosomeBins", f"{self.file_prefix}_window_100kb.bed.gz")
         
     @property
     def exclude_regions(self) -> Path:
@@ -69,6 +69,12 @@ class AssetManager:
         """Open Chromatin Regions BED (currently hg19 specific filename used for both if missing hg38 specific?)"""
         # TODO: Add hg38 specific OCF file if available
         return self._get_path("OpenChromatinRegion", "7specificTissue.all.OC.bed.gz")
+
+    @property
+    def methylation_markers(self) -> Path:
+        """Methylation markers BED for UXM analysis"""
+        # Note: Currently hg19 only - hg38 markers need to be generated
+        return self.base_path / "methylation-markers" / f"uxm_markers_{self.file_prefix}.bed"
         
     def resolve(self, asset_name: str) -> Path:
         """
@@ -93,6 +99,7 @@ class AssetManager:
             "exclude_regions": self.exclude_regions,
             "transcript_anno": self.transcript_anno,
             "ocf_regions": self.ocf_regions,
+            "methylation_markers": self.methylation_markers,
         }
         
         if asset_name not in asset_map:
