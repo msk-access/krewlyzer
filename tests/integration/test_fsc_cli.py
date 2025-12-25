@@ -42,7 +42,7 @@ def sample_bins(tmp_path):
 @pytest.mark.integration
 def test_fsc_cli_help():
     """Test FSC CLI help output."""
-    result = runner.invoke(app, ["fsc", "--help"])
+    result = runner.invoke(app, ["fsc", "--help"], color=False)
     assert result.exit_code == 0
     assert "--bin-input" in result.output
     assert "--output" in result.output

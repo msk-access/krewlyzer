@@ -64,7 +64,7 @@ def mock_reference(tmp_path):
 @pytest.mark.integration
 def test_motif_cli_help():
     """Test motif CLI help output."""
-    result = runner.invoke(app, ["motif", "--help"])
+    result = runner.invoke(app, ["motif", "--help"], color=False)
     assert result.exit_code == 0
     assert "--kmer" in result.output
     assert "-g" in result.output
