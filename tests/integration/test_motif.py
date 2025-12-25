@@ -61,13 +61,22 @@ def mock_reference(tmp_path):
     return ref
 
 
+import re
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
+
 @pytest.mark.integration
 def test_motif_cli_help():
     """Test motif CLI help output."""
-    result = runner.invoke(app, ["motif", "--help"], color=False)
+    result = runner.invoke(app, ["motif", "--help"])
     assert result.exit_code == 0
-    assert "--kmer" in result.output
-    assert "-g" in result.output
+    output = strip_ansi(result.output)
+    assert "--kmer" in output
+    assert "-g" in output
 
 
 @pytest.mark.integration

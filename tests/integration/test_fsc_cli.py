@@ -39,13 +39,22 @@ def sample_bins(tmp_path):
     return bins
 
 
+import re
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
+
+
 @pytest.mark.integration
 def test_fsc_cli_help():
     """Test FSC CLI help output."""
-    result = runner.invoke(app, ["fsc", "--help"], color=False)
+    result = runner.invoke(app, ["fsc", "--help"])
     assert result.exit_code == 0
-    assert "--bin-input" in result.output
-    assert "--output" in result.output
+    output = strip_ansi(result.output)
+    assert "--bin-input" in output
+    assert "--output" in output
 
 
 @pytest.mark.integration
