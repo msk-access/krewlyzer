@@ -17,7 +17,16 @@ krewlyzer ocf sample.bed.gz --output output_dir/ [options]
 - `{sample}.OCF.sync.tsv`: Detailed sync scores.
 
 ## Options
-- `--threads`, `-t`: Number of processes
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--ocr-input` | `-r` | PATH | | Open chromatin regions file |
+| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 ## Calculation Details
 

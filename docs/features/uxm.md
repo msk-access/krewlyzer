@@ -21,13 +21,15 @@ krewlyzer uxm /path/to/bam_folder --output uxm_out --type PE [options]
 Output: `{sample}.UXM.tsv`
 
 ## Options
-- `--mark-input`, `-m`: Marker BED file (default: `data/MethMark/Atlas.U25.l4.hg19.bed`)
-- `--map-quality`, `-q`: Minimum mapping quality (default: 30)
-- `--min-cpg`, `-c`: Minimum CpG per fragment (default: 4)
-- `--methy-threshold`, `-tM`: Methylation threshold (default: 0.75)
-- `--unmethy-threshold`, `-tU`: Unmethylation threshold (default: 0.25)
-- `--type`: Fragment type: SE or PE (default: SE)
-- `--threads`, `-t`: Number of processes
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--mark-input` | `-m` | PATH | | Path to genomic marker file |
+| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 ## Clinical Interpretation
 

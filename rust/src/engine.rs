@@ -4,11 +4,9 @@
 //! It uses Rayon for Map-Reduce parallelism.
 
 use rayon::prelude::*;
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::path::Path;
-use std::fs::File;
 use std::io::BufRead;
-use noodles::bgzf;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
@@ -49,21 +47,30 @@ impl<C: FragmentConsumer> FragmentAnalyzer<C> {
     }
 
     /// Process the BED file in parallel
-    pub fn process_file(&self, bed_path: &Path, chrom_map: &mut ChromosomeMap) -> Result<C> {
-        let file = File::open(bed_path)
-            .with_context(|| format!("Failed to open BED file: {:?}", bed_path))?;
-        let mut reader = bgzf::io::Reader::new(file);
+    /// 
+    /// # Arguments
+    /// * `bed_path` - Path to the input BED.gz file
+    /// * `chrom_map` - Chromosome ID mapping
+    /// * `silent` - If true, hide progress bar (for use in wrapper/run-all)
+    pub fn process_file(&self, bed_path: &Path, chrom_map: &mut ChromosomeMap, silent: bool) -> Result<C> {
+        let mut reader = crate::bed::get_reader(bed_path)?;
         
         let mut final_consumer = self.consumer_template.clone();
         
         // Progress Bar (Spinner since total count unknown without full scan)
-        let pb = ProgressBar::new_spinner();
-        pb.set_style(ProgressStyle::default_spinner()
-            .template("{spinner:.green} [{elapsed_precise}] {msg}")
-            .unwrap()
-            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"));
-        pb.set_message("Processing fragments...");
-        pb.enable_steady_tick(Duration::from_millis(100));
+        // Use hidden bar when called from wrapper to avoid double progress
+        let pb = if silent {
+            ProgressBar::hidden()
+        } else {
+            let pb = ProgressBar::new_spinner();
+            pb.set_style(ProgressStyle::default_spinner()
+                .template("{spinner:.green} [{elapsed_precise}] {msg}")
+                .unwrap()
+                .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"));
+            pb.set_message("Processing fragments...");
+            pb.enable_steady_tick(Duration::from_millis(100));
+            pb
+        };
 
         // Buffer for current chunk
         let mut fragment_buffer: Vec<Fragment> = Vec::with_capacity(self.chunk_size);
@@ -153,5 +160,6 @@ fn parse_line(line: &str, chrom_map: &mut ChromosomeMap) -> Option<Fragment> {
         end,
         length,
         gc,
+        weight: 1.0,
     })
 }

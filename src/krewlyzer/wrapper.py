@@ -11,8 +11,11 @@ import pandas as pd
 
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-from .postprocess import process_fsc_from_counts, process_fsr_from_counts
+from .core.fsc_processor import process_fsc
+from .core.fsr_processor import process_fsr
+from .assets import AssetManager
 
 # Rust backend
 from krewlyzer import _core
@@ -21,7 +24,7 @@ from krewlyzer import _core
 console = Console(stderr=True)
 logging.basicConfig(
     level="INFO", 
-    handlers=[RichHandler(console=console, show_time=False, show_path=False)], 
+    handlers=[RichHandler(console=console, show_time=True, show_path=False)], 
     format="%(message)s"
 )
 logger = logging.getLogger("krewlyzer")
@@ -29,6 +32,7 @@ logger = logging.getLogger("krewlyzer")
 def run_all(
     bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
     reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA (indexed)"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
     
     # Configurable filters (exposed from filters.rs)
@@ -53,6 +57,7 @@ def run_all(
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
     ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
     wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
@@ -94,6 +99,14 @@ def run_all(
         sample = bam_input.stem.replace('.bam', '')
     else:
         sample = sample_name
+        
+    # Initialize Asset Manager
+    try:
+        assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
+    except ValueError as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
     
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -108,229 +121,263 @@ def run_all(
     logger.info(f"Processing sample: {sample}")
     logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
     
-    # ═══════════════════════════════════════════════════════════════════
-    # 1. EXTRACT + MOTIF (Unified Engine)
-    # ═══════════════════════════════════════════════════════════════════
+    # Determine which optional tools will run
+    has_uxm = bisulfite_bam is not None and bisulfite_bam.exists()
+    has_mfsd = variants is not None and variants.exists()
     
-    bedgz_file = output / f"{sample}.bed.gz"
-    bed_temp = output / f"{sample}.bed.tmp"
-    
-    # Motif Outputs
-    edm_output = output / f"{sample}.EndMotif.tsv"
-    bpm_output = output / f"{sample}.BreakPointMotif.tsv"
-    mds_output = output / f"{sample}.MDS.tsv"
-    
-    should_run_extract = not bedgz_file.exists()
-    # Always run motif logic as part of pass if not present?
-    # Or just re-run everything if any output missing?
-    # Simple logic: If BED or ANY Motif file missing, run the Engine.
-    should_run_engine = (
-        not bedgz_file.exists() or 
-        not edm_output.exists() or 
-        not bpm_output.exists() or 
-        not mds_output.exists()
-    )
-    
-    if not should_run_engine:
-        logger.info("Extract and Motif outputs exist. Skipping step 1 & 2.")
-    else:
-        logger.info("Running Unified Extract + Motif...")
+    # Multi-step progress display
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console,
+        transient=False,  # Keep progress visible after completion
+    ) as progress:
+        # Create all task placeholders
+        task_extract = progress.add_task("[1/5] Extract + Motif", total=100)
+        task_pipeline = progress.add_task("[2/5] Unified Pipeline", total=100, start=False)
+        task_postproc = progress.add_task("[3/5] Post-processing", total=100, start=False)
+        task_uxm = progress.add_task(f"[4/5] UXM", total=100, start=False, visible=has_uxm)
+        task_mfsd = progress.add_task(f"[5/5] mFSD", total=100, start=False, visible=has_mfsd)
         
-        # Decide if we write BED
-        bed_out_arg = str(bed_temp) if should_run_extract else None
+        # ═══════════════════════════════════════════════════════════════════
+        # 1. EXTRACT + MOTIF (Unified Engine)
+        # ═══════════════════════════════════════════════════════════════════
+    
+        bedgz_file = output / f"{sample}.bed.gz"
+        bed_temp = output / f"{sample}.bed.tmp"
         
-        try:
-            # Call Unified Engine
-            # Returns (total_count, end_motifs, bp_motifs)
-            fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
-                str(bam_input),
-                str(reference),
-                mapq,
-                minlen,
-                maxlen,
-                4, # kmer hardcoded to 4 as per tool standard
-                threads,
-                bed_out_arg,          # Write BED if needed
-                "enable",             # Always calculate motifs
-                str(exclude_regions) if exclude_regions else None,
-                skip_duplicates,
-                require_proper_pair
-            )
+        # Motif Outputs
+        edm_output = output / f"{sample}.EndMotif.tsv"
+        bpm_output = output / f"{sample}.BreakPointMotif.tsv"
+        mds_output = output / f"{sample}.MDS.tsv"
+        
+        should_run_extract = not bedgz_file.exists()
+        should_run_engine = (
+            not bedgz_file.exists() or 
+            not edm_output.exists() or 
+            not bpm_output.exists() or 
+            not mds_output.exists()
+        )
+        
+        if not should_run_engine:
+            progress.update(task_extract, description="[1/5] Extract + Motif  ✓ (cached)", completed=100)
+        else:
+            progress.update(task_extract, description="[1/5] Extract + Motif  ...")
             
-            logger.info(f"Processed {fragment_count:,} fragments")
+            # Decide if we write BED
+            bed_out_arg = str(bed_temp) if should_run_extract else None
             
-            # --- Post-Process Extract (Compress BED) ---
-            if should_run_extract and bed_temp.exists():
-                logger.info("Compressing BED...")
-                import pysam
-                import os
-                pysam.tabix_compress(str(bed_temp), str(bedgz_file), force=True)
-                pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
-                os.remove(str(bed_temp))
+            try:
+                # Call Unified Engine (silent=True to hide Rust progress)
+                fragment_count, em_counts, bpm_counts, gc_observations = _core.extract_motif.process_bam_parallel(
+                    str(bam_input),
+                    str(reference),
+                    mapq,
+                    minlen,
+                    maxlen,
+                    4,  # kmer
+                    threads,
+                    bed_out_arg,
+                    "enable",
+                    str(exclude_regions) if exclude_regions else str(assets.exclude_regions),
+                    skip_duplicates,
+                    require_proper_pair,
+                    True  # silent=True
+                )
                 
-                # Write Metadata
-                import json
-                from datetime import datetime
-                meta_file = output / f"{sample}.metadata.json"
-                metadata = {
-                    "sample_id": sample,
-                    "total_fragments": fragment_count,
-                    "filters": { "mapq": mapq, "min_length": minlen, "max_length": maxlen },
-                    "timestamp": datetime.now().isoformat()
-                }
-                with open(meta_file, 'w') as f:
-                    json.dump(metadata, f, indent=2)
+                # --- Post-Process Extract (Move BGZF BED, compute GC factors) ---
+                if should_run_extract and bed_temp.exists():
+                    import pysam
+                    
+                    # Rust already writes BGZF - just move and index
+                    shutil.move(str(bed_temp), str(bedgz_file))
+                    pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
+                    
+                    # Compute GC correction factors inline
+                    factors_file = output / f"{sample}.correction_factors.csv"
+                    try:
+                        gc_ref = assets.resolve("gc_reference")
+                        valid_regions = assets.resolve("valid_regions")
+                        n_factors = _core.gc.compute_and_write_gc_factors(
+                            gc_observations, str(gc_ref), str(valid_regions), str(factors_file)
+                        )
+                    except Exception as e:
+                        logger.debug(f"GC factor computation failed: {e}")
+                    
+                    # Write Metadata
+                    import json
+                    from datetime import datetime
+                    meta_file = output / f"{sample}.metadata.json"
+                    metadata = {
+                        "sample_id": sample,
+                        "total_fragments": fragment_count,
+                        "genome": genome,
+                        "gc_correction_computed": factors_file.exists(),
+                        "filters": { "mapq": mapq, "min_length": minlen, "max_length": maxlen },
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    with open(meta_file, 'w') as f:
+                        json.dump(metadata, f, indent=2)
 
-            # --- Post-Process Motif (Write Files) ---
-            # Helper imports (should be at top, but adding here locally or will add global)
-            import itertools
-            import numpy as np
-            
-            bases = ['A', 'C', 'T', 'G']
-            kmer = 4
-            
-            # End Motif
-            End_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            End_motif.update(em_counts)
-            total_em = sum(End_motif.values())
-            
-            logger.info(f"Writing End Motif: {edm_output}")
-            with open(edm_output, 'w') as f:
-                f.write("Motif\tFrequency\n")
-                for k, v in End_motif.items():
-                    f.write(f"{k}\t{v/total_em if total_em else 0}\n")
-            
-            # Breakpoint Motif
-            Breakpoint_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            Breakpoint_motif.update(bpm_counts)
-            total_bpm = sum(Breakpoint_motif.values())
-            
-            logger.info(f"Writing Breakpoint Motif: {bpm_output}")
-            with open(bpm_output, 'w') as f:
-                f.write("Motif\tFrequency\n")
-                for k, v in Breakpoint_motif.items():
-                    f.write(f"{k}\t{v/total_bpm if total_bpm else 0}\n")
-            
-            # MDS
-            logger.info(f"Writing MDS: {mds_output}")
-            freq = np.array(list(End_motif.values())) / total_em if total_em else np.zeros(len(End_motif))
-            mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
-            with open(mds_output, 'w') as f:
-                f.write("Sample\tMDS\n")
-                f.write(f"{sample}\t{mds}\n")
+                # --- Post-Process Motif (Write Files) ---
+                from .core.motif_processor import process_motif_outputs
                 
-        except Exception as e:
-            logger.error(f"Unified Extract+Motif failed: {e}")
+                total_em, total_bpm, mds = process_motif_outputs(
+                    em_counts=em_counts,
+                    bpm_counts=bpm_counts,
+                    edm_output=edm_output,
+                    bpm_output=bpm_output,
+                    mds_output=mds_output,
+                    sample_name=sample,
+                    kmer=4,
+                    include_headers=True
+                )
+                
+                progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
+                    
+            except Exception as e:
+                progress.update(task_extract, description=f"[1/5] Extract + Motif  ✗ Error", completed=100)
+                logger.error(f"Unified Extract+Motif failed: {e}")
+                raise typer.Exit(1)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # 2. UNIFIED SINGLE-PASS PIPELINE (FSC, FSR, FSD, WPS, OCF)
+        # ═══════════════════════════════════════════════════════════════════
+        progress.start_task(task_pipeline)
+        progress.update(task_pipeline, description="[2/5] Unified Pipeline ...")
+
+        # Define Resource Paths (Resolve defaults via AssetManager)
+        
+        # FSC/FSR Bins
+        res_bin = bin_input if bin_input else assets.bins_100kb
+        if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
+
+        # FSD Arms
+        res_arms = arms_file if arms_file else assets.arms
+        if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
+
+        # WPS Genes (Transcript Annotation)
+        res_wps = wps_file if wps_file else assets.transcript_anno
+        if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
+
+        # OCF Regions
+        res_ocf = ocr_file if ocr_file else assets.ocf_regions
+        if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
+        
+        # GC Reference
+        res_gc = assets.gc_reference
+        if not res_gc.exists():
+            logger.error(f"GC reference missing: {res_gc}")
+            raise typer.Exit(1)
+            
+        res_valid_regions = assets.valid_regions
+        if not res_valid_regions.exists():
+            logger.error(f"Valid regions file missing: {res_valid_regions}")
             raise typer.Exit(1)
 
-
-    # ═══════════════════════════════════════════════════════════════════
-    # 3. UNIFIED SINGLE-PASS PIPELINE (FSC, FSR, FSD, WPS, OCF)
-    # ═══════════════════════════════════════════════════════════════════
-    logger.info("🚀 Running Unified Single-Pass Pipeline (FSC, FSR, FSD, WPS, OCF)...")
-
-    # Define Resource Paths (Resolve defaults if None)
-    pkg_dir = Path(__file__).parent
-    
-    # FSC/FSR Bins
-    res_bin = bin_input if bin_input else pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
-    if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
-
-    # FSD Arms
-    res_arms = arms_file if arms_file else pkg_dir / "data" / "ChormosomeArms" / "hg19.arms.bed"
-    if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
-
-    # WPS Genes
-    res_wps = wps_file if wps_file else pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
-    if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
-
-    # OCF Regions
-    res_ocf = ocr_file if ocr_file else pkg_dir / "data" / "OpenChromatinRegion" / "7specificTissue.all.OC.bed"
-    if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
-
-    # Define Outputs
-    out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
-    out_wps = output / f"{sample}.WPS.tsv.gz"
-    out_fsd = output / f"{sample}.FSD.tsv"
-    out_ocf_dir = output / f"{sample}_ocf_tmp" # OCF writes mult files to dir
-    out_ocf_dir.mkdir(parents=True, exist_ok=True)
-    
-    try:
-        # RUN RUST PIPELINE
-        _core.run_unified_pipeline(
-            str(bedgz_file),
-            # FSC
-            str(res_bin), str(out_fsc_raw),
-            # WPS
-            str(res_wps), str(out_wps), False,
-            # FSD
-            str(res_arms), str(out_fsd),
-            # OCF
-            str(res_ocf), str(out_ocf_dir)
-        )
-        logger.info("✅ Unified Pipeline execution complete.")
-        
-        # Post-Processing
-        
-        # 1. FSC & FSR (From same raw counts)
-        if out_fsc_raw.exists():
-            logger.info("Post-processing FSC/FSR...")
-            df_counts = pd.read_csv(out_fsc_raw, sep='\t')
-            
-            # FSC Output
-            final_fsc = output / f"{sample}.FSC.tsv"
-            process_fsc_from_counts(df_counts, final_fsc, fsc_windows, fsc_continue_n)
-            
-            # FSR Output
-            final_fsr = output / f"{sample}.FSR.tsv"
-            process_fsr_from_counts(df_counts, final_fsr, fsc_windows, fsc_continue_n)
-    
-        # 2. OCF (Move files)
-        # Rust writes 'all.ocf.csv' and 'all.sync.tsv' to out_ocf_dir
-        src_ocf = out_ocf_dir / "all.ocf.tsv"
-        src_sync = out_ocf_dir / "all.sync.tsv"
-        
-        dst_ocf = output / f"{sample}.OCF.tsv"
-        dst_sync = output / f"{sample}.OCF.sync.tsv"
-        
-        if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))
-        if src_sync.exists(): shutil.move(str(src_sync), str(dst_sync))
+        # Define Outputs
+        out_gc_factors = output / f"{sample}.correction_factors.csv"
+        out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
+        out_wps = output / f"{sample}.WPS.tsv.gz"
+        out_fsd = output / f"{sample}.FSD.tsv"
+        out_ocf_dir = output / f"{sample}_ocf_tmp"
+        out_ocf_dir.mkdir(parents=True, exist_ok=True)
         
         try:
-            out_ocf_dir.rmdir()
-        except:
-            pass
+            # RUN RUST PIPELINE (silent=True)
+            _core.run_unified_pipeline(
+                str(bedgz_file),
+                str(res_gc), str(res_valid_regions), str(out_gc_factors),
+                None,
+                str(res_bin), str(out_fsc_raw),
+                str(res_wps), str(out_wps), False,
+                str(res_arms), str(out_fsd),
+                str(res_ocf), str(out_ocf_dir),
+                True  # silent=True
+            )
+            progress.update(task_pipeline, description="[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+OCF)", completed=100)
             
-    except Exception as e:
+            # ═══════════════════════════════════════════════════════════════════
+            # 3. POST-PROCESSING (FSC/FSR, OCF, PON z-scores)
+            # ═══════════════════════════════════════════════════════════════════
+            progress.start_task(task_postproc)
+            progress.update(task_postproc, description="[3/5] Post-processing ...")
+            
+            # FSC & FSR (From same raw counts)
+            if out_fsc_raw.exists():
+                df_counts = pd.read_csv(out_fsc_raw, sep='\t')
+                
+                # Load PON if available
+                pon = None
+                if pon_model:
+                    from .core.pon_integration import load_pon_model
+                    pon = load_pon_model(pon_model)
+                
+                # FSC Output (using shared processor)
+                final_fsc = output / f"{sample}.FSC.tsv"
+                process_fsc(df_counts, final_fsc, fsc_windows, fsc_continue_n, pon=pon)
+                
+                # FSR Output (using shared processor)
+                final_fsr = output / f"{sample}.FSR.tsv"
+                process_fsr(df_counts, final_fsr, fsc_windows, fsc_continue_n, pon=pon)
+        
+            # OCF (Move files)
+            src_ocf = out_ocf_dir / "all.ocf.tsv"
+            src_sync = out_ocf_dir / "all.sync.tsv"
+            dst_ocf = output / f"{sample}.OCF.tsv"
+            dst_sync = output / f"{sample}.OCF.sync.tsv"
+            
+            if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))
+            if src_sync.exists(): shutil.move(str(src_sync), str(dst_sync))
+            
+            try:
+                out_ocf_dir.rmdir()
+            except:
+                pass
+            
+            # Apply PON z-scores to FSD and WPS (if PON model provided)
+            if pon_model:
+                from .core.pon_integration import load_pon_model
+                from .core.fsd_processor import apply_fsd_pon
+                from .core.wps_processor import apply_wps_pon
+                
+                pon = load_pon_model(pon_model)
+                
+                if pon is not None:
+                    if out_fsd.exists():
+                        apply_fsd_pon(out_fsd, pon)
+                    if out_wps.exists():
+                        apply_wps_pon(out_wps, pon)
+            
+            progress.update(task_postproc, description="[3/5] Post-processing ✓", completed=100)
+                
+        except Exception as e:
+            progress.update(task_pipeline, description="[2/5] Unified Pipeline ✗ Error", completed=100)
             logger.error(f"Unified Pipeline failed: {e}")
             raise typer.Exit(1)
 
-
-    # ═══════════════════════════════════════════════════════════════════
-    # 4. OPTIONAL TOOLS (Always run if requested)
-    # ═══════════════════════════════════════════════════════════════════
-    # 4a. UXM
-    if bisulfite_bam:
-        if not bisulfite_bam.exists():
-            logger.warning(f"Bisulfite BAM not found: {bisulfite_bam}. Skipping UXM.")
-        else:
-            logger.info("Running UXM...")
+        # ═══════════════════════════════════════════════════════════════════
+        # 4. OPTIONAL TOOLS (UXM and mFSD)
+        # ═══════════════════════════════════════════════════════════════════
+        
+        # 4a. UXM
+        if has_uxm:
+            progress.start_task(task_uxm)
+            progress.update(task_uxm, description="[4/5] UXM ...")
             try:
-                # UXM submodule functions are imported in __init__.py usually? 
-                # Check import at top. import uxm from .uxm
                 from .uxm import uxm
                 uxm(bisulfite_bam, output, sample, None, 0)
+                progress.update(task_uxm, description="[4/5] UXM ✓", completed=100)
             except Exception as e:
+                progress.update(task_uxm, description="[4/5] UXM ✗ Error", completed=100)
                 logger.warning(f"UXM failed: {e}")
-    else:
-        logger.info("Skipping UXM (no --bisulfite-bam provided)")
-    
-    # 4b. mFSD
-    if variants:
-        if not variants.exists():
-            logger.warning(f"Variants file not found: {variants}. Skipping mFSD.")
-        else:
-            logger.info("Running mFSD...")
+        
+        # 4b. mFSD
+        if has_mfsd:
+            progress.start_task(task_mfsd)
+            progress.update(task_mfsd, description="[5/5] mFSD ...")
             try:
                 from .mfsd import mfsd
                 mfsd(
@@ -338,14 +385,16 @@ def run_all(
                     input_file=variants,
                     output=output,
                     sample_name=sample,
+                    reference=reference,
+                    correction_factors=out_gc_factors if out_gc_factors.exists() else None,
                     mapq=mapq,
                     output_distributions=False,
                     verbose=debug,
                     threads=threads
                 )
+                progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
             except Exception as e:
+                progress.update(task_mfsd, description="[5/5] mFSD ✗ Error", completed=100)
                 logger.warning(f"mFSD failed: {e}")
-    else:
-        logger.info("Skipping mFSD (no --variants provided)")
     
     logger.info(f"✅ All feature extraction complete: {output}")

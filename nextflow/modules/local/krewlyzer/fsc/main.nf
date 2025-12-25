@@ -15,13 +15,18 @@ process KREWLYZER_FSC {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def targets_arg = targets ? "--bin-input ${targets}" : ""
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
 
     """
     krewlyzer fsc \\
         $bed \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
         $targets_arg \\
+        $genome_arg \\
+        $gc_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

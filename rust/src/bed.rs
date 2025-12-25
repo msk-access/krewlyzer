@@ -2,8 +2,27 @@
 //!
 //! Handles tabix-indexed BED.gz files for fragment analysis.
 
+use std::path::Path;
+use std::fs::File;
+use std::io::{BufRead, BufReader};
+use anyhow::{Context, Result};
+use noodles::bgzf;
 
-
+/// Open a file and return a buffered reader, handling BGZF compression transparently
+pub fn get_reader(path: &Path) -> Result<Box<dyn BufRead>> {
+    let file = File::open(path)
+        .with_context(|| format!("Failed to open file: {:?}", path))?;
+    
+    let is_bgzf = path.extension()
+        .map(|ext| ext == "gz")
+        .unwrap_or(false);
+        
+    if is_bgzf {
+        Ok(Box::new(bgzf::io::Reader::new(file)))
+    } else {
+        Ok(Box::new(BufReader::new(file)))
+    }
+}
 /// Count fragments in a region by size category
 #[derive(Debug, Default, Clone)]
 pub struct FragmentCounts {
@@ -55,6 +74,8 @@ pub struct Fragment {
     pub end: u64,
     pub length: u64,
     pub gc: f64,
+    /// GC correction weight (default 1.0)
+    pub weight: f64,
 }
 
 /// Helper to map string chromosomes to integer IDs

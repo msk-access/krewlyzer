@@ -23,12 +23,19 @@ krewlyzer fsc sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 ```
 
 ## Options
-- `--bin-input, -b`: Bin file (default: `data/ChormosomeBins/hg19_window_100kb.bed`)
-- `--windows, -w`: Window size (default: 100000)
-- `--continue-n, -c`: Consecutive window number (default: 50) - aggregates adjacent bins.
-- `--gc-correct/--no-gc-correct`: Apply GC bias correction using LOESS (default: **True**)
-- `--verbose, -v`: Enable verbose logging
-- `--threads, -t`: Number of threads.
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--bin-input` | `-b` | PATH | | Bin file (default: hg19 100kb bins) |
+| `--pon-model` | `-P` | PATH | | PON model for hybrid GC correction |
+| `--windows` | `-w` | INT | 100000 | Window size |
+| `--continue-n` | `-c` | INT | 50 | Consecutive window count |
+| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 
 ## Output Format

@@ -13,12 +13,15 @@ process KREWLYZER_FSD {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
 
     """
     krewlyzer fsd \\
         $bed \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
+        $genome_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -97,6 +97,7 @@ def test_run_all_unified():
             run_all(
                 bam_input=bam,
                 reference=ref,
+                genome="hg19",  # Required genome build
                 output=out_dir,
                 bin_input=bins,
                 arms_file=arms,
@@ -113,7 +114,8 @@ def test_run_all_unified():
                 bisulfite_bam=None,
                 variants=None,
                 chromosomes=None,
-                debug=False
+                debug=False,
+                pon_model=None,
             )
         except SystemExit as e:
             if e.code != 0:

@@ -14,22 +14,39 @@ krewlyzer run-all sample.bam --reference hg19.fa --output all_features_out \
 
 ### Arguments
 - `sample.bam`: Input BAM file (sorted, indexed).
-- `--reference`, `-g`: Reference genome FASTA.
+- `--reference`, `-r`: Reference genome FASTA.
 - `--output`, `-o`: Output directory.
 - `--variants`, `-v`: (Optional) VCF or MAF file for `mfsd` analysis.
 - `--bin-input`, `-b`: (Optional) Custom bins for FSC/FSR (e.g., targeted panel regions).
+- `--genome`, `-G`: Genome build (default: hg19).
 - `--threads`, `-t`: Number of threads (default: 0 = all cores).
 - `--mapq`, `-q`: Minimum mapping quality (default: 20).
 - `--minlen`, `--maxlen`: Fragment length range (default: 65-400).
 
 ## Nextflow Pipeline
 
-Krewlyzer includes a Nextflow pipeline (`krewlyzer.nf`) for processing multiple samples in parallel on HPC clusters or local machines.
+Krewlyzer includes a Nextflow pipeline (`main.nf`) for processing multiple samples in parallel on HPC clusters or local machines.
 
 ### Usage
 ```bash
-nextflow run krewlyzer.nf --samplesheet samplesheet.csv --ref /path/to/reference.fa --outdir results/
+nextflow run main.nf --samplesheet samplesheet.csv --ref /path/to/reference.fa --outdir results/
 ```
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--samplesheet` | *required* | CSV with sample information |
+| `--ref` | *required* | Reference genome FASTA |
+| `--outdir` | `./results` | Output directory |
+| `--targets` | | Custom target BED for FSC/FSR |
+| `--genome` | `hg19` | Genome build (hg19/hg38) |
+| `--gc_correct` | `true` | Enable GC bias correction |
+| `--pon_model` | | Optional PON model path |
+| `--mapq` | `20` | Minimum mapping quality |
+| `--threads` | `8` | Threads per process |
+| `--minlen` | `65` | Min fragment length |
+| `--maxlen` | `400` | Max fragment length |
 
 ### Samplesheet Format (CSV)
 A CSV file with the following columns:

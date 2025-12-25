@@ -10,13 +10,12 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("fsc")
 
 # Rust backend is required
@@ -26,11 +25,13 @@ from krewlyzer import _core
 def fsc(
     bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
-    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file (default: hg19_window_100kb.bed)"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
+    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
-    continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number (default: 50)"),
-    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True)"),
+    continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
 ):
@@ -38,12 +39,18 @@ def fsc(
     Calculate fragment size coverage (FSC) features for a single sample.
     
     Input: .bed.gz file from extract step
-    Output: {sample}.FSC.txt file with z-scored fragment size coverage per window
-    
-    GC Correction:
-        By default, per-fragment-type LOESS correction is applied to remove GC bias.
-        Use --no-gc-correct to disable.
+    Output: {sample}.FSC.tsv file with z-scored fragment size coverage per window
     """
+    from .assets import AssetManager
+    from .core.fsc_processor import process_fsc
+    from .core.pon_integration import load_pon_model
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.fsc_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+    
     # Configure Rust thread pool
     if threads > 0:
         try:
@@ -57,129 +64,121 @@ def fsc(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
-    if not str(bedgz_input).endswith('.bed.gz'):
-        logger.error(f"Input must be a .bed.gz file: {bedgz_input}")
+    logger.debug(f"Input: {bedgz_input}")
+    logger.debug(f"Output directory: {output}")
+    
+    # Initialize Asset Manager
+    try:
+        assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} → {assets.genome_dir}")
+    except ValueError as e:
+        logger.error(str(e))
         raise typer.Exit(1)
-    
-    # Default bin input
+        
+    # Resolve bin file
     if bin_input is None:
-        pkg_dir = Path(__file__).parent
-        bin_input = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed"
-        logger.info(f"Using default bin file: {bin_input}")
-    
+        try:
+            bin_input = assets.resolve("bins_100kb")
+            logger.info(f"Using default bin file: {bin_input}")
+        except FileNotFoundError as e:
+            logger.error(str(e))
+            raise typer.Exit(1)
+            
     if not bin_input.exists():
         logger.error(f"Bin file not found: {bin_input}")
         raise typer.Exit(1)
     
+    logger.debug(f"Bin file: {bin_input}")
+    
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
-    # Derive sample name (use provided or derive from input filename)
+    # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
     output_file = output / f"{sample_name}.FSC.tsv"
+    fsc_counts_file = output / f"{sample_name}.fsc_counts.tsv"
     
+    logger.debug(f"Sample name: {sample_name}")
+    logger.debug(f"Output file: {output_file}")
+    
+    # Load PON model if provided
+    pon = None
+    if pon_model:
+        pon = load_pon_model(pon_model)
+        if pon is None:
+            logger.warning("Falling back to within-sample correction only")
+
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Count fragments using Rust backend with optional GC correction
+        # Resolve GC correction assets
+        gc_ref = None
+        valid_regions = None
+        factors_out = None
+        
         if gc_correct:
-            logger.info("Counting fragments with GC correction (LOESS per fragment type)...")
-            short, intermediate, long, gc_values = _core.count_fragments_gc_corrected(
-                str(bedgz_input),
-                str(bin_input),
-                verbose
-            )
-            # Compute total from corrected values
-            total = np.array(short) + np.array(intermediate) + np.array(long)
-            short = np.array(short)
-            intermediate = np.array(intermediate)
-            long = np.array(long)
-            logger.info(f"GC correction applied to short/intermediate/long counts")
-        else:
-            logger.info("Counting fragments (no GC correction)...")
-            _, short, intermediate, long, total, gc_values = _core.count_fragments_by_bins(
-                str(bedgz_input),
-                str(bin_input)
-            )
-            short = np.array(short)
-            intermediate = np.array(intermediate)
-            long = np.array(long)
-            total = np.array(total)
+            try:
+                gc_ref = assets.resolve("gc_correction")
+                valid_regions = assets.resolve("valid_regions")
+                factors_out = output / f"{sample_name}.correction_factors.csv"
+                logger.debug(f"GC ref: {gc_ref}")
+                logger.debug(f"Valid regions: {valid_regions}")
+            except FileNotFoundError as e:
+                logger.warning(f"GC correction assets not found: {e}")
+                logger.warning("Proceeding without GC correction")
+                gc_correct = False
         
-        logger.info(f"Processed {len(total)} bins")
+        # Check for pre-computed correction factors (from extract step)
+        factors_input = None
+        if gc_correct:
+            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
+            if potential_factors.exists():
+                factors_input = potential_factors
+                logger.info(f"Using pre-computed correction factors: {factors_input}")
+                gc_ref = None
+                valid_regions = None
+                factors_out = None
         
-        # Load bin file for coordinates
-        bins_df = pd.read_csv(bin_input, sep='\t', header=None, usecols=[0, 1, 2], 
-                            names=['chrom', 'start', 'end'], dtype={'chrom': str, 'start': int, 'end': int})
+        # Call Unified Pipeline (FSC only)
+        logger.info("Running fragment counting via Rust backend...")
+        _core.run_unified_pipeline(
+            str(bedgz_input),
+            # GC Correction (compute)
+            str(gc_ref) if gc_ref else None,
+            str(valid_regions) if valid_regions else None,
+            str(factors_out) if factors_out else None,
+            # GC Correction (load pre-computed)
+            str(factors_input) if factors_input else None,
+            # FSC
+            str(bin_input), str(fsc_counts_file),
+            # Others (disabled)
+            None, None, False,  # WPS
+            None, None,         # FSD
+            None, None          # OCF
+        )
         
-        # Create DataFrame with results (already GC-corrected if enabled)
-        df = pd.DataFrame({
-            'chrom': bins_df['chrom'],
-            'start': bins_df['start'],
-            'end': bins_df['end'],
-            'shorts': short,
-            'intermediates': intermediate,
-            'longs': long,
-            'totals': total
-        })
+        logger.info(f"Reading counts from {fsc_counts_file}")
         
-        # Aggregation into windows
-        results = []
-        for chrom, group in df.groupby('chrom', sort=False):
-            n_bins = len(group)
-            n_windows = n_bins // continue_n
-            
-            if n_windows == 0:
-                continue
-            
-            trunc_len = n_windows * continue_n
-            
-            shorts_mat = group['shorts'].values[:trunc_len].reshape(n_windows, continue_n)
-            inter_mat = group['intermediates'].values[:trunc_len].reshape(n_windows, continue_n)
-            longs_mat = group['longs'].values[:trunc_len].reshape(n_windows, continue_n)
-            totals_mat = group['totals'].values[:trunc_len].reshape(n_windows, continue_n)
-            
-            sum_shorts = shorts_mat.sum(axis=1)
-            sum_inter = inter_mat.sum(axis=1)
-            sum_longs = longs_mat.sum(axis=1)
-            sum_totals = totals_mat.sum(axis=1)
-            
-            window_starts = np.arange(n_windows) * continue_n * windows
-            window_ends = (np.arange(n_windows) + 1) * continue_n * windows - 1
-            
-            results.append(pd.DataFrame({
-                'chrom': chrom,
-                'start': window_starts,
-                'end': window_ends,
-                'short_sum': sum_shorts,
-                'inter_sum': sum_inter,
-                'long_sum': sum_longs,
-                'total_sum': sum_totals
-            }))
+        # Load the FSC counts TSV
+        df_counts = pd.read_csv(fsc_counts_file, sep='\t')
+        logger.debug(f"Loaded {len(df_counts)} bins, columns: {list(df_counts.columns)}")
         
-        if not results:
-            logger.warning("No valid windows found.")
-            return
+        # Use shared processor for aggregation and z-score calculation
+        process_fsc(
+            counts_df=df_counts,
+            output_path=output_file,
+            windows=windows,
+            continue_n=continue_n,
+            pon=pon
+        )
         
-        final_df = pd.concat(results, ignore_index=True)
-        
-        # Calculate Z-scores globally
-        final_df['short_z'] = (final_df['short_sum'] - final_df['short_sum'].mean()) / final_df['short_sum'].std()
-        final_df['inter_z'] = (final_df['inter_sum'] - final_df['inter_sum'].mean()) / final_df['inter_sum'].std()
-        final_df['long_z'] = (final_df['long_sum'] - final_df['long_sum'].mean()) / final_df['long_sum'].std()
-        final_df['total_z'] = (final_df['total_sum'] - final_df['total_sum'].mean()) / final_df['total_sum'].std()
-        
-        # Write output
-        with open(output_file, 'w') as f:
-            f.write("region\tshort-fragment-zscore\titermediate-fragment-zscore\tlong-fragment-zscore\ttotal-fragment-zscore\n")
-            for _, row in final_df.iterrows():
-                region = f"{row['chrom']}:{int(row['start'])}-{int(row['end'])}"
-                f.write(f"{region}\t{row['short_z']:.4f}\t{row['inter_z']:.4f}\t{row['long_z']:.4f}\t{row['total_z']:.4f}\n")
-        
-        logger.info(f"FSC complete: {output_file}")
+        logger.info(f"✅ FSC complete: {output_file}")
 
     except Exception as e:
         logger.error(f"FSC calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

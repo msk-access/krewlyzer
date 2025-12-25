@@ -1,8 +1,9 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use std::collections::HashMap;
+use crate::bed;
 
 
 /// Calculate Fragment Size Distribution (FSD)
@@ -23,11 +24,11 @@ pub fn calculate_fsd(
 
     // 2. Setup Engine
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = FsdConsumer::new(regions, &mut chrom_map);
+    let consumer = FsdConsumer::new(regions, &mut chrom_map, None);
     
     // 3. Process
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
-    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map)
+    let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     // 4. Write Output
@@ -44,29 +45,32 @@ use std::path::Path;
 use anyhow::{Result, Context};
 use coitrees::{COITree, IntervalNode, IntervalTree};
 
+use crate::gc_correction::CorrectionFactors;
+
 #[derive(Clone)]
 pub struct FsdConsumer {
     // Shared state
     trees: Arc<HashMap<u32, COITree<usize, u32>>>,
     regions: Arc<Vec<Region>>, // To retrieve original region info (name/chrom) for output
+    factors: Option<Arc<CorrectionFactors>>, // Add this
     
     // Thread-local state
     // Index matches regions index
     // Histogram: 67 bins (65-400, step 5)
-    histograms: Vec<Vec<u32>>, 
-    totals: Vec<u32>,
+    histograms: Vec<Vec<f64>>, 
+    totals: Vec<f64>,
 }
 
 impl FsdConsumer {
-    pub fn new(regions: Vec<Region>, chrom_map: &mut ChromosomeMap) -> Self {
+    pub fn new(regions: Vec<Region>, chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Self {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut histograms = Vec::with_capacity(regions.len());
         let mut totals = Vec::with_capacity(regions.len());
         
         for (i, region) in regions.iter().enumerate() {
             // Init counters
-            histograms.push(vec![0; 67]);
-            totals.push(0);
+            histograms.push(vec![0.0; 67]);
+            totals.push(0.0);
             
             // Map chromosome
             let chrom_norm = region.chrom.trim_start_matches("chr");
@@ -92,6 +96,7 @@ impl FsdConsumer {
             regions: Arc::new(regions),
             histograms,
             totals,
+            factors,
         }
     }
     
@@ -148,8 +153,13 @@ impl FragmentConsumer for FsdConsumer {
                      let idx = node.metadata.to_owned();
                      // Safety: idx comes from initialization which matches histograms size
                      if let Some(hist) = self.histograms.get_mut(idx) {
-                         hist[bin_idx] += 1;
-                         self.totals[idx] += 1;
+                         let gc_pct = (fragment.gc * 100.0).round() as u8;
+                         let weight = if let Some(ref factors) = self.factors {
+                             factors.get_factor(len, gc_pct)
+                         } else { 1.0 };
+
+                         hist[bin_idx] += weight;
+                         self.totals[idx] += weight;
                      }
                  });
              }
@@ -166,20 +176,32 @@ impl FragmentConsumer for FsdConsumer {
     }
 }
 
-/// Parse Arms/Regions file (Chrom Start End)
+/// Parse Arms/Regions file (Chrom Start End) - supports both plain and BGZF-compressed
 pub fn parse_regions_file(path: &Path) -> Result<Vec<Region>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut regions = Vec::new();
+    let reader = bed::get_reader(path)?;
     
+    let mut regions = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 { continue; }
-        let chrom = fields[0].to_string();
-        let start: u64 = fields[1].parse().unwrap_or(0);
-        let end: u64 = fields[2].parse().unwrap_or(0);
-        regions.push(Region::new(chrom, start, end));
+        if let Some(region) = parse_region_line(&line) {
+            regions.push(region);
+        }
     }
     Ok(regions)
+}
+
+/// Parse a single region line
+fn parse_region_line(line: &str) -> Option<Region> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 3 {
+        return None;
+    }
+    let chrom = fields[0].to_string();
+    let start: u64 = fields[1].parse().ok()?;
+    let end: u64 = fields[2].parse().ok()?;
+    Some(Region::new(chrom, start, end))
 }

@@ -87,7 +87,7 @@ def test_extract_exclude_regions(tmp_path):
     runner = CliRunner()
     result = runner.invoke(app, [
         "extract", str(bam_file),
-        "-g", str(genome_file),
+        "--reference", str(genome_file),  # Fixed: was -g
         "-o", str(output_dir),
         "--exclude-regions", str(exclude_file),
         "--chromosomes", "chr1"

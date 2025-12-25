@@ -18,7 +18,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("motif")
 
 # Rust backend is required
@@ -32,6 +32,7 @@ def motif(
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
+    verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose logging"),
     threads: int = typer.Option(0, '--threads', '-t', help="Number of threads (0=all cores)")
 ):
     """
@@ -44,6 +45,12 @@ def motif(
     
     Note: For fragment extraction (BED.gz), use `krewlyzer extract` instead.
     """
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("core.motif_processor").setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+    
     # Configure Rust thread pool
     if threads > 0:
         try:
@@ -89,10 +96,10 @@ def motif(
         chroms = chromosomes.split(',') if chromosomes else None
         
         # Call Unified Rust Engine (Extract + Motif)
-        # We pass output_motif_prefix="enable" to trigger motif counting in Rust
-        # We pass output_bed_path=None to skip writing BED (unless debugging)
+        # Returns: (fragment_count, em_counts, bpm_counts, dinuc_counts)
+        # We only need the first 3 for motif output
         
-        fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
+        fragment_count, em_counts, bpm_counts, _dinuc = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ
@@ -108,28 +115,21 @@ def motif(
         Breakpoint_motif.update(bpm_counts)
         logger.info(f"Processed {fragment_count:,} fragments")
         
-        # Write End Motif
-        logger.info(f"Writing End Motif: {edm_output}")
-        total_em = sum(End_motif.values())
-        with open(edm_output, 'w') as f:
-            for k, v in End_motif.items():
-                f.write(f"{k}\t{v/total_em if total_em else 0}\n")
+        # Write all motif outputs using shared processor
+        from .core.motif_processor import process_motif_outputs
         
-        # Write Breakpoint Motif
-        logger.info(f"Writing Breakpoint Motif: {bpm_output}")
-        total_bpm = sum(Breakpoint_motif.values())
-        with open(bpm_output, 'w') as f:
-            for k, v in Breakpoint_motif.items():
-                f.write(f"{k}\t{v/total_bpm if total_bpm else 0}\n")
+        total_em, total_bpm, mds = process_motif_outputs(
+            em_counts=End_motif,
+            bpm_counts=Breakpoint_motif,
+            edm_output=edm_output,
+            bpm_output=bpm_output,
+            mds_output=mds_output,
+            sample_name=sample_name,
+            kmer=kmer,
+            include_headers=True  # Consistent with run-all
+        )
         
-        # Write MDS
-        logger.info(f"Writing MDS: {mds_output}")
-        freq = np.array(list(End_motif.values())) / total_em if total_em else np.zeros(len(End_motif))
-        mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
-        with open(mds_output, 'w') as f:
-            f.write(f"{mds}\n")
-        
-        logger.info(f"Motif extraction complete")
+        logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
 
     except Exception as e:
         logger.error(f"Motif extraction failed: {e}")

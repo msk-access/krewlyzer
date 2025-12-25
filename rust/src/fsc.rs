@@ -7,9 +7,9 @@
 //! - Long: 260-399bp (matches cfDNAFE: count[260:400])
 
 use std::path::Path;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::fs::File;
-use anyhow::{Result, Context};
+use anyhow::Result;
 
 use pyo3::prelude::*;
 use numpy::{PyArray1, IntoPyArray};
@@ -20,7 +20,7 @@ use std::io::Write;
 
 use crate::bed::{Region, Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
-use crate::gc_correction::correct_gc_bias_per_type;
+use crate::gc_correction::CorrectionFactors;
 
 /// Result of FSC/FSR calculation for a single bin
 #[derive(Debug, Clone, Default)]
@@ -28,42 +28,50 @@ pub struct BinResult {
     pub chrom: String,
     pub start: u64,
     pub end: u64,
-    pub ultra_short_count: u32,
-    pub short_count: u32,
-    pub intermediate_count: u32,
-    pub long_count: u32,
-    pub total_count: u32,
+    // Using f64 for weighted counts
+    pub ultra_short_count: f64,
+    pub short_count: f64,
+    pub intermediate_count: f64,
+    pub long_count: f64,
+    pub total_count: f64,
     pub mean_gc: f64,
     // Internal use for mean calc
     pub gc_sum: f64,
-    pub gc_count: u32,
+    pub gc_count: f64,
 }
 
-/// Parse a BED file to get regions (bins)
+/// Parse a BED file (plain or BGZF-compressed) to get regions (bins)
 pub fn parse_bin_file(bin_path: &Path) -> Result<Vec<Region>> {
-    let file = File::open(bin_path)
-        .with_context(|| format!("Failed to open bin file: {:?}", bin_path))?;
-    let reader = BufReader::new(file);
+    use crate::bed;
+    let reader = bed::get_reader(bin_path)?;
     
     let mut regions = Vec::new();
     for line in reader.lines() {
         let line = line?;
-        if line.is_empty() || line.starts_with('#') {
-            continue;
+        if let Some(region) = parse_bed_line_to_region(&line) {
+            regions.push(region);
         }
-        let fields: Vec<&str> = line.split('\t').collect();
-        if fields.len() < 3 {
-            continue;
-        }
-        
-        let chrom = fields[0].to_string();
-        let start: u64 = fields[1].parse().with_context(|| "Invalid start position")?;
-        let end: u64 = fields[2].parse().with_context(|| "Invalid end position")?;
-        
-        regions.push(Region::new(chrom, start, end));
     }
     
     Ok(regions)
+}
+
+/// Parse a single BED line to a Region
+fn parse_bed_line_to_region(line: &str) -> Option<Region> {
+    let line = line.trim();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let fields: Vec<&str> = line.split('\t').collect();
+    if fields.len() < 3 {
+        return None;
+    }
+    
+    let chrom = fields[0].to_string();
+    let start: u64 = fields[1].parse().ok()?;
+    let end: u64 = fields[2].parse().ok()?;
+    
+    Some(Region::new(chrom, start, end))
 }
 
 /// FscConsumer for the Unified Engine
@@ -71,13 +79,14 @@ pub fn parse_bin_file(bin_path: &Path) -> Result<Vec<Region>> {
 pub struct FscConsumer {
     // Read-only shared state
     trees: Arc<HashMap<u32, COITree<usize, u32>>>, // ChromID -> (IntervalTree<Data=usize, Coords=u32>)
+    factors: Option<Arc<CorrectionFactors>>,
     
     // Thread-local state
     counts: Vec<BinResult>,
 }
 
 impl FscConsumer {
-    pub fn new(regions: &[Region], chrom_map: &mut ChromosomeMap) -> Self {
+    pub fn new(regions: &[Region], chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Self {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut counts = Vec::with_capacity(regions.len());
         
@@ -112,6 +121,7 @@ impl FscConsumer {
         
         Self {
             trees: Arc::new(trees),
+            factors,
             counts,
         }
     }
@@ -123,8 +133,8 @@ impl FscConsumer {
         writeln!(writer, "chrom\tstart\tend\tultra_short\tshort\tintermediate\tlong\ttotal\tmean_gc")?;
         
         for bin in &self.counts {
-            let mean_gc = if bin.gc_count > 0 { bin.gc_sum / bin.gc_count as f64 } else { 0.0 };
-            writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.4}",
+            let mean_gc = if bin.gc_count > 0.0 { bin.gc_sum / bin.gc_count } else { 0.0 };
+            writeln!(writer, "{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}",
                 bin.chrom, bin.start, bin.end,
                 bin.ultra_short_count, bin.short_count, bin.intermediate_count, bin.long_count,
                 bin.total_count, mean_gc
@@ -167,22 +177,29 @@ impl FragmentConsumer for FscConsumer {
                     let res = self.counts.get_unchecked_mut(bin_idx);
                     
                     if fragment.length >= 65 && fragment.length <= 399 {
-                        res.total_count += 1;
-                        res.gc_sum += fragment.gc;
-                        res.gc_count += 1;
+                        let gc_pct = (fragment.gc * 100.0).round() as u8;
+                        let weight = if let Some(ref factors) = self.factors {
+                             factors.get_factor(fragment.length, gc_pct)
+                        } else {
+                             1.0
+                        };
+
+                        res.total_count += weight;
+                        res.gc_sum += fragment.gc as f64 * weight;
+                        res.gc_count += weight;
                         
                         // Ultra-short: 65-100
                         if fragment.length <= 100 {
-                            res.ultra_short_count += 1;
+                            res.ultra_short_count += weight;
                         }
                         
                         // Short: 65-149
                         if fragment.length <= 149 {
-                            res.short_count += 1;
+                            res.short_count += weight;
                         } else if fragment.length >= 151 && fragment.length <= 259 {
-                            res.intermediate_count += 1;
+                            res.intermediate_count += weight;
                         } else if fragment.length >= 261 && fragment.length <= 399 {
-                            res.long_count += 1;
+                            res.long_count += weight;
                         }
                     }
                 }
@@ -245,17 +262,17 @@ pub fn count_fragments_by_bins(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = FscConsumer::new(&regions, &mut chrom_map);
+    let consumer = FscConsumer::new(&regions, &mut chrom_map, None);
     
     // 2. Run Engine (Using logic similar to Unified Pipeline but for single consumer)
     let engine = FragmentAnalyzer::new(consumer, 100_000); // 100k chunks
-    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map)
+    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map, false)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     // 3. Convert Results
     // Calculate mean GC (Logic ported from legacy struct handling)
     for bin in &mut final_consumer.counts {
-        bin.mean_gc = if bin.gc_count > 0 {
+        bin.mean_gc = if bin.gc_count > 0.0 {
             bin.gc_sum / bin.gc_count as f64
         } else {
             f64::NAN
@@ -263,11 +280,11 @@ pub fn count_fragments_by_bins(
     }
     
     let results = final_consumer.counts;
-    let ultra_shorts: Vec<u32> = results.iter().map(|r| r.ultra_short_count).collect();
-    let shorts: Vec<u32> = results.iter().map(|r| r.short_count).collect();
-    let intermediates: Vec<u32> = results.iter().map(|r| r.intermediate_count).collect();
-    let longs: Vec<u32> = results.iter().map(|r| r.long_count).collect();
-    let totals: Vec<u32> = results.iter().map(|r| r.total_count).collect();
+    let ultra_shorts: Vec<u32> = results.iter().map(|r| r.ultra_short_count as u32).collect();
+    let shorts: Vec<u32> = results.iter().map(|r| r.short_count as u32).collect();
+    let intermediates: Vec<u32> = results.iter().map(|r| r.intermediate_count as u32).collect();
+    let longs: Vec<u32> = results.iter().map(|r| r.long_count as u32).collect();
+    let totals: Vec<u32> = results.iter().map(|r| r.total_count as u32).collect();
     let gcs: Vec<f64> = results.iter().map(|r| r.mean_gc).collect();
     
     Ok((
@@ -276,83 +293,6 @@ pub fn count_fragments_by_bins(
         intermediates.into_pyarray(py).into(),
         longs.into_pyarray(py).into(),
         totals.into_pyarray(py).into(),
-        gcs.into_pyarray(py).into(),
-    ))
-}
-
-/// Python-exposed function to calculate FSC with GC bias correction applied in Rust
-/// Uses LOESS per fragment type (short, intermediate, long)
-/// Returns: (shorts_corrected, intermediates_corrected, longs_corrected, gcs)
-#[pyfunction]
-#[pyo3(signature = (bedgz_path, bin_path, verbose=false))]
-pub fn count_fragments_gc_corrected(
-    py: Python<'_>,
-    bedgz_path: &str,
-    bin_path: &str,
-    verbose: bool,
-) -> PyResult<(
-    Py<PyArray1<f64>>,  // short counts GC-corrected
-    Py<PyArray1<f64>>,  // intermediate counts GC-corrected
-    Py<PyArray1<f64>>,  // long counts GC-corrected
-    Py<PyArray1<f64>>,  // mean GC (for reference)
-)> {
-    use log::info;
-    
-    let bed_path = Path::new(bedgz_path);
-    let bin_path_p = Path::new(bin_path);
-    
-    if verbose {
-        info!("FSC GC correction: loading bins from {:?}", bin_path_p);
-    }
-    
-    // 1. Prepare
-    let regions = parse_bin_file(bin_path_p)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        
-    let mut chrom_map = ChromosomeMap::new();
-    let consumer = FscConsumer::new(&regions, &mut chrom_map);
-    
-    // 2. Run Engine
-    let engine = FragmentAnalyzer::new(consumer, 100_000);
-    let mut final_consumer = engine.process_file(bed_path, &mut chrom_map)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        
-    // 3. Calculate mean GC per bin
-    for bin in &mut final_consumer.counts {
-        bin.mean_gc = if bin.gc_count > 0 {
-            bin.gc_sum / bin.gc_count as f64
-        } else {
-            0.5  // Default to neutral GC for empty bins
-        };
-    }
-    
-    let results = final_consumer.counts;
-    
-    // 4. Extract raw counts and GC values
-    let shorts: Vec<f64> = results.iter().map(|r| r.short_count as f64).collect();
-    let intermediates: Vec<f64> = results.iter().map(|r| r.intermediate_count as f64).collect();
-    let longs: Vec<f64> = results.iter().map(|r| r.long_count as f64).collect();
-    let gcs: Vec<f64> = results.iter().map(|r| r.mean_gc).collect();
-    
-    if verbose {
-        info!("FSC: {} bins, applying per-type GC correction", results.len());
-    }
-    
-    // 5. Apply GC correction per fragment type
-    let (shorts_corrected, intermediates_corrected, longs_corrected) = 
-        correct_gc_bias_per_type(&gcs, &shorts, &intermediates, &longs, verbose)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("GC correction failed: {}", e)
-            ))?;
-    
-    if verbose {
-        info!("FSC GC correction complete");
-    }
-    
-    Ok((
-        shorts_corrected.into_pyarray(py).into(),
-        intermediates_corrected.into_pyarray(py).into(),
-        longs_corrected.into_pyarray(py).into(),
         gcs.into_pyarray(py).into(),
     ))
 }

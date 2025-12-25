@@ -18,13 +18,19 @@ krewlyzer wps sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 ```
 
 ## Options
-- `--tsv-input, -t`: Transcript region file (default: `data/TranscriptAnno/transcriptAnno-hg19-1kb.tsv`)
-- `--reference, -r`: Reference FASTA for GC correction (required if --gc-correct)
-- `--gc-correct/--no-gc-correct`: Apply GC bias correction using LOESS (default: **True**)
-- `--sample-name, -s`: Sample name for output file
-- `--empty/--no-empty`: Include regions with no coverage (default: off)
-- `--verbose, -v`: Enable verbose logging
-- `--threads, -p`: Number of threads (0 = all cores)
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--tsv-input` | | PATH | | Transcript annotation TSV |
+| `--pon-model` | `-P` | PATH | | PON model for hybrid correction |
+| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--reference` | `-r` | PATH | | Reference FASTA for GC correction |
+| `--gc-correct` | | FLAG | | Apply GC bias correction |
+| `--empty` | | FLAG | | Include regions with no coverage |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 
 ## Output Format

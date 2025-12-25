@@ -14,6 +14,18 @@ krewlyzer motif /path/to/input.bam -g /path/to/reference.fa -o /path/to/output_d
     -k 4 --threads 4
 ```
 
+## Options
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--genome` | `-g` | PATH | *required* | Reference genome FASTA (indexed) |
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--kmer` | `-k` | INT | 4 | K-mer size for motif extraction |
+| `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+
 ## Output
 - `{Sample}.EndMotif.tsv`: Frequency of K-mer sequences at fragment 5' ends.
 - `{Sample}.BreakPointMotif.tsv`: Frequency of K-mer sequences flanking the breakpoint (context + fragment start).
