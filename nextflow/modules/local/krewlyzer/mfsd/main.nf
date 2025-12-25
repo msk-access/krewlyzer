@@ -22,6 +22,7 @@ process KREWLYZER_MFSD {
         --input-file $variants \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
         --output-distributions \\
         --verbose \\
         $args

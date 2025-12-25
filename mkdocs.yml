@@ -38,8 +38,11 @@ plugins:
 
 nav:
   - Home: index.md
+  - Getting Started: getting-started.md
+  - Installation: installation.md
   - Usage: usage.md
   - Features:
+    - Overview: features/index.md
     - Fragment Extraction: features/extract.md
     - Motif Extraction: features/motif.md
     - Fragment Size Coverage (FSC): features/fsc.md
@@ -49,9 +52,15 @@ nav:
     - Orientation-aware Fragmentation (OCF): features/ocf.md
     - Fragment-level Methylation (UXM): features/uxm.md
     - Mutant Fragment Size (mFSD): features/mfsd.md
+  - Advanced:
+    - Architecture: advanced/architecture.md
+    - PON Models: advanced/pon.md
+    - GC Correction: advanced/gc-correction.md
   - Pipeline: pipeline.md
   - Troubleshooting: troubleshooting.md
   - Citation: citation.md
+  - Changelog: changelog.md
+  - Contributing: contributing.md
 
 markdown_extensions:
   - admonition

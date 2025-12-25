@@ -16,8 +16,17 @@ krewlyzer fsd sample.bed.gz --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.
 - `{sample}.FSD.tsv`: Frequency of fragment lengths per chromosome arm.
 
 ## Options
-- `--arms-file`, `-a`: Chromosome arms BED (required)
-- `--threads`, `-t`: Number of processes
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--arms-file` | `-a` | PATH | | Chromosome arms BED file |
+| `--pon-model` | `-P` | PATH | | PON model for z-score computation |
+| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 ## Clinical Interpretation
 

@@ -19,6 +19,9 @@ process KREWLYZER_RUNALL {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def variant_arg = variants ? "--variants ${variants}" : ""
     def targets_arg = targets ? "--bin-input ${targets}" : ""
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
+    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
     
     // Construct CLI command
     """
@@ -30,6 +33,9 @@ process KREWLYZER_RUNALL {
         --sample-name $prefix \\
         $variant_arg \\
         $targets_arg \\
+        $genome_arg \\
+        $gc_arg \\
+        $pon_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

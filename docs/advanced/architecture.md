@@ -1,0 +1,178 @@
+# Architecture
+
+Krewlyzer uses a hybrid Python/Rust architecture for optimal performance and usability.
+
+## Overview
+
+```mermaid
+flowchart TB
+    subgraph CLI["Python CLI (Typer)"]
+        cli[krewlyzer CLI]
+        wrapper[wrapper.py]
+    end
+    
+    subgraph Python["Python Layer"]
+        extract[extract.py]
+        motif[motif.py]
+        fsc[fsc.py]
+        fsr[fsr.py]
+        wps[wps.py]
+        ocf[ocf.py]
+        mfsd[mfsd.py]
+        uxm[uxm.py]
+    end
+    
+    subgraph Rust["Rust Core (_core)"]
+        lib[lib.rs]
+        extract_motif[extract_motif.rs]
+        pipeline[pipeline.rs]
+        gc[gc_correction.rs]
+        pon[pon_model.rs]
+        engine[engine.rs]
+    end
+    
+    cli --> wrapper
+    wrapper --> Python
+    Python --> Rust
+```
+
+---
+
+## Rust Core (`krewlyzer._core`)
+
+The performance-critical functions are implemented in Rust and exposed to Python via [PyO3](https://pyo3.rs/).
+
+### Module Structure
+
+| Module | Size | Purpose |
+|--------|------|---------|
+| `lib.rs` | 4KB | PyO3 module definition, thread config |
+| `extract_motif.rs` | 17KB | BAM parsing, fragment extraction, motif counting |
+| `pipeline.rs` | 10KB | Unified FSC/FSD/WPS/OCF pipeline |
+| `fsc.rs` | 11KB | Fragment size coverage by bins |
+| `fsd.rs` | 7KB | Size distribution per arm |
+| `wps.rs` | 18KB | Windowed protection score |
+| `ocf.rs` | 10KB | Orientation-aware fragmentation |
+| `mfsd.rs` | 35KB | Mutant fragment size analysis |
+| `gc_correction.rs` | 20KB | LOESS-based GC bias correction |
+| `pon_model.rs` | 7KB | PON model loading and hybrid correction |
+| `gc_reference.rs` | 20KB | Pre-computed GC reference generation |
+
+### Key Functions Exposed
+
+```python
+from krewlyzer import _core
+
+# Thread configuration
+_core.configure_threads(num_threads=8)
+
+# Fragment extraction
+_core.extract_motif.process_bam_parallel(
+    bam_path, reference_path, filters, ...
+)
+
+# Unified pipeline
+_core.run_unified_pipeline(
+    bed_path, bins, arms, transcripts, ocr, ...
+)
+
+# GC correction
+_core.gc.compute_and_write_gc_factors(...)
+```
+
+---
+
+## Python Layer
+
+The Python layer provides:
+
+1. **CLI Interface** (`cli.py`) - Typer-based commands
+2. **Orchestration** (`wrapper.py`) - run-all coordination
+3. **Asset Management** (`assets.py`) - Bundled data files
+4. **Feature Modules** - Per-tool logic (`fsc.py`, `fsr.py`, etc.)
+5. **PON Integration** (`pon/`) - Model loading and building
+
+### Execution Flow
+
+```
+krewlyzer run-all sample.bam -r hg19.fa -o output/
+    │
+    ├──► extract.py ──► _core.extract_motif.process_bam_parallel()
+    │       └──► sample.bed.gz, sample.EndMotif.tsv, sample.MDS.tsv
+    │
+    ├──► fsc.py ──► _core.run_unified_pipeline() or _core.count_fragments_by_bins()
+    │       └──► sample.FSC.tsv
+    │
+    ├──► fsr.py ──► (Python + Rust)
+    │       └──► sample.FSR.tsv
+    │
+    └──► ... (parallel feature extraction)
+```
+
+---
+
+## Performance Characteristics
+
+| Operation | Engine | Parallelism |
+|-----------|--------|-------------|
+| BAM reading | Rust (htslib) | Multi-threaded |
+| Fragment extraction | Rust | Rayon parallel |
+| Motif counting | Rust | Rayon parallel |
+| FSC/FSD/WPS/OCF | Rust pipeline | Single-pass I/O |
+| GC correction | Rust LOESS | Per-fragment-type |
+| mFSD | Rust | Per-variant parallel |
+| UXM | Rust | Per-region parallel |
+
+### Speedup vs Pure Python
+
+- **3-4x faster** for large BAM files (>100M reads)
+- **Single-pass I/O** for unified pipeline (vs 4 separate passes)
+- **Rayon parallelism** scales with CPU cores
+
+---
+
+## Building from Source
+
+### Requirements
+
+- Python 3.10+
+- Rust toolchain (via [rustup](https://rustup.rs/))
+- C compiler (clang recommended)
+- htslib development headers
+
+### Build Steps
+
+```bash
+# Clone and enter
+git clone https://github.com/msk-access/krewlyzer.git
+cd krewlyzer
+
+# Create environment
+uv venv .venv && source .venv/bin/activate
+
+# Build Rust extension
+cd rust && maturin develop --release
+cd ..
+
+# Install Python package
+uv pip install -e ".[dev,test]"
+
+# Verify
+python -c "from krewlyzer import _core; print(_core.version())"
+```
+
+---
+
+## Extending Krewlyzer
+
+### Adding a New Rust Function
+
+1. Add function in `rust/src/mymodule.rs`
+2. Export via PyO3 in `rust/src/lib.rs`
+3. Call from Python: `_core.mymodule.my_function(...)`
+
+### Adding a New Feature Tool
+
+1. Create `src/krewlyzer/myfeature.py`
+2. Add CLI command in `src/krewlyzer/cli.py`
+3. Optionally add to `wrapper.py` for run-all integration

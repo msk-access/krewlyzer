@@ -42,3 +42,22 @@ module-name = "krewlyzer._core"
 include = [
     "src/krewlyzer/data/**/*"
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "unit: Fast unit tests with no I/O",
+    "integration: Tool integration tests",
+    "e2e: End-to-end workflow tests",
+    "slow: Tests that take >10s",
+    "rust: Tests requiring Rust backend",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["krewlyzer"]
+omit = ["*/tests/*"]

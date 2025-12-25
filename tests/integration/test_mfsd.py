@@ -105,7 +105,7 @@ def test_mfsd_integration_snv(tmp_path):
     
     # Validate output format (39 columns)
     df = pd.read_csv(output_file, sep='\t')
-    assert len(df.columns) == 39, f"Expected 39 columns, got {len(df.columns)}"
+    assert len(df.columns) == 44, f"Expected 44 columns, got {len(df.columns)}"
     
     # Check expected columns exist
     expected_cols = [

@@ -23,17 +23,40 @@ build/
 htmlcov/
 .tox/
 pytest_cache/
+.pytest_cache/
 
-# VSCode
+# VSCode / IDE
 .vscode/
+.idea/
+*.iml
 
 # Docker
 *.log
 docker-compose.override.yml
 
+# MkDocs
+site/
+
+# Rust / Maturin
+rust/target/
+*.rlib
+*.rmeta
+
+# Nextflow
+.nextflow/
+.nextflow.log*
+work/
+results/
+*.timeline.html
+*.report.html
+*.trace.txt
+*.dag.*
+
 # Misc
 *.swp
 *.bak
+*.tmp
+*~
 
 # Ignore BAM/FASTA test data
 *.bam
@@ -44,3 +67,11 @@ docker-compose.override.yml
 
 # But include packaged data files
 !src/krewlyzer/data/**/*.bed
+
+# Include test fixtures
+!tests/data/fixtures/*.bam
+!tests/data/fixtures/*.bai
+!tests/data/fixtures/*.fa
+!tests/data/fixtures/*.fai
+!tests/data/fixtures/*.bed
+!tests/data/fixtures/*.parquet

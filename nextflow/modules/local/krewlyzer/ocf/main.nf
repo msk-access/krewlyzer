@@ -8,19 +8,23 @@ process KREWLYZER_OCF {
     path fasta
 
     output:
-    tuple val(meta), path("*.OCF.bed.gz"), emit: bed
-    path "versions.yml"                  , emit: versions
+    tuple val(meta), path("*.OCF.tsv"), emit: tsv
+    path "versions.yml"               , emit: versions
 
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
 
     """
     krewlyzer ocf \\
         $bed \\
-        --reference $fasta \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
+        $genome_arg \\
+        $gc_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

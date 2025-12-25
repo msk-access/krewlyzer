@@ -96,10 +96,10 @@ def motif(
         chroms = chromosomes.split(',') if chromosomes else None
         
         # Call Unified Rust Engine (Extract + Motif)
-        # We pass output_motif_prefix="enable" to trigger motif counting in Rust
-        # We pass output_bed_path=None to skip writing BED (unless debugging)
+        # Returns: (fragment_count, em_counts, bpm_counts, dinuc_counts)
+        # We only need the first 3 for motif output
         
-        fragment_count, em_counts, bpm_counts = _core.extract_motif.process_bam_parallel(
+        fragment_count, em_counts, bpm_counts, _dinuc = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ

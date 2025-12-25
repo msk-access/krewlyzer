@@ -35,15 +35,22 @@ krewlyzer mfsd sample.bam --input-file variants.vcf --output output_dir/ [option
 ```
 
 ## Options
-- `--input-file`, `-i`: VCF or MAF file (required)
-- `--mapq`, `-q`: Minimum mapping quality (default: 20)
-- `--output-distributions`, `-d`: Output per-variant size distributions
-- `--sample-name`, `-s`: Sample name for output file
-- `--threads`, `-t`: Number of threads (0=all cores)
+
+| Option | Short | Type | Default | Description |
+|--------|-------|------|---------|-------------|
+| `--input-file` | `-i` | PATH | *required* | VCF or MAF file with variants |
+| `--output` | `-o` | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--reference` | `-g` | PATH | | Reference FASTA for GC correction |
+| `--correction-factors` | `-F` | PATH | | Pre-computed correction factors CSV |
+| `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
+| `--output-distributions` | `-d` | FLAG | | Output per-variant size distributions |
+| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 ## Output Format
 
-### Main Output: `{sample}.mFSD.tsv` (39 columns)
+### Main Output: `{sample}.mFSD.tsv` (44 columns)
 
 #### Variant Info (5)
 | Column | Description |
