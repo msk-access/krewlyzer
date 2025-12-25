@@ -1,8 +1,8 @@
 use pyo3::prelude::*;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::Write;
 use std::collections::{HashMap, HashSet};
-use std::io::{BufRead, BufReader}; // Needed for blacklist reading
+use std::io::BufRead;
 use rust_htslib::bam::{self, Read};
 use rust_htslib::faidx;
 use rayon::prelude::*;

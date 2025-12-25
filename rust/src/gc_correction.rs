@@ -408,7 +408,7 @@ use pyo3::exceptions::PyRuntimeError;
 pub fn compute_and_write_gc_factors(
     observations: HashMap<(u8, u8), u64>,
     gc_ref_path: &str,
-    valid_regions_path: &str,
+    _valid_regions_path: &str,
     output_path: &str,
 ) -> PyResult<u64> {
     info!("Computing GC correction factors from {} observation bins...", observations.len());
@@ -441,7 +441,7 @@ pub fn compute_and_write_gc_factors(
     Ok(n_factors)
 }
 
-/// Compute variance of a slice
+#[allow(dead_code)]
 fn variance(data: &[f64]) -> f64 {
     let n = data.len() as f64;
     if n < 2.0 {

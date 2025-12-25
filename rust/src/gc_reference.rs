@@ -7,12 +7,12 @@
 //! These assets are generated once per reference genome and shipped with krewlyzer.
 
 use std::path::Path;
-use std::io::{BufRead, BufReader, Write, BufWriter};
+use std::io::{BufRead, BufReader};
 use std::fs::File;
 use std::collections::HashMap;
 
-use anyhow::{Result, anyhow, Context};
-use log::{info, debug, warn};
+use anyhow::{Result, Context};
+use log::info;
 use pyo3::prelude::*;
 use rust_htslib::faidx;
 

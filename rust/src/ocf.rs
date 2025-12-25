@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use std::collections::HashMap;
 
 
@@ -20,7 +20,7 @@ pub fn calculate_ocf(
 ) -> PyResult<()> {
     let mut chrom_map = ChromosomeMap::new();
     let consumer = OcfConsumer::new(&ocr_path, &mut chrom_map, None)
-        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;;
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
     let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, false)

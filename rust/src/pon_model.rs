@@ -7,10 +7,10 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::fs::File;
 
-use arrow::record_batch::RecordBatch;
+
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use serde::{Deserialize, Serialize};
-use log::{info, warn, debug};
+use log::{info, warn};
 
 
 /// GC bias correction curves for a single fragment type.

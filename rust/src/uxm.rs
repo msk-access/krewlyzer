@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use rust_htslib::bam::{self, Read};
 use rust_htslib::bam::record::Aux;
 use rayon::prelude::*;

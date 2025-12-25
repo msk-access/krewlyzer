@@ -559,7 +559,7 @@ pub fn calculate_mfsd(
     };
     
     // Load reference FASTA if provided (for GC content computation)
-    let fasta: Option<faidx::Reader> = if let Some(ref ref_path) = reference_path {
+    let _fasta: Option<faidx::Reader> = if let Some(ref ref_path) = reference_path {
         match faidx::Reader::from_path(ref_path) {
             Ok(f) => {
                 info!("Loaded reference FASTA: {:?}", ref_path);

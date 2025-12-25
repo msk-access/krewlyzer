@@ -7,9 +7,9 @@
 //! - Long: 260-399bp (matches cfDNAFE: count[260:400])
 
 use std::path::Path;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::fs::File;
-use anyhow::{Result, Context};
+use anyhow::Result;
 
 use pyo3::prelude::*;
 use numpy::{PyArray1, IntoPyArray};
@@ -43,7 +43,7 @@ pub struct BinResult {
 /// Parse a BED file (plain or BGZF-compressed) to get regions (bins)
 pub fn parse_bin_file(bin_path: &Path) -> Result<Vec<Region>> {
     use crate::bed;
-    let reader = bed::get_reader(bin_path)?;;
+    let reader = bed::get_reader(bin_path)?;
     
     let mut regions = Vec::new();
     for line in reader.lines() {

@@ -304,7 +304,7 @@ impl WpsConsumer {
         if gc_correct && verbose {
             info!("Legacy WPS GC correction ignored (using upstream fragment weighting).");
         }
-        let gc_correction_factors: Option<Vec<(f64, f64)>> = None;
+        let _gc_correction_factors: Option<Vec<(f64, f64)>> = None;
         
         writeln!(encoder, "gene_id\tchrom\tpos\tcov_long\tcov_short\twps_long\twps_short\twps_ratio\twps_long_norm\twps_short_norm\twps_ratio_norm")?;
         

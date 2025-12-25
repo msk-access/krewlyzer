@@ -4,11 +4,9 @@
 //! It uses Rayon for Map-Reduce parallelism.
 
 use rayon::prelude::*;
-use anyhow::{Result, Context};
+use anyhow::Result;
 use std::path::Path;
-use std::fs::File;
 use std::io::BufRead;
-use noodles::bgzf;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
