@@ -32,6 +32,9 @@ def mfsd(
     reference: Optional[Path] = typer.Option(None, "--reference", "-g", help="Reference genome FASTA (for GC correction)"),
     correction_factors: Optional[Path] = typer.Option(None, "--correction-factors", "-F", help="Pre-computed correction_factors.csv (from extract/run-all)"),
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
+    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length (filters discordant reads)"),
+    maxlen: int = typer.Option(400, "--maxlen", help="Maximum fragment length (filters discordant reads)"),
+    require_proper_pair: bool = typer.Option(False, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs (disable for duplex BAMs)"),
     output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
@@ -121,9 +124,12 @@ def mfsd(
             str(output_file),
             input_type,
             mapq,
+            minlen,
+            maxlen,
             output_distributions,
             str(reference) if reference else None,
-            str(correction_factors) if correction_factors else None
+            str(correction_factors) if correction_factors else None,
+            require_proper_pair,
         )
         
         logger.info(f"mFSD complete: {output_file}")

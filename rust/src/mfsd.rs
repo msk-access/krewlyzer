@@ -68,6 +68,9 @@ struct VariantResult {
     alt_weighted: f64,
     nonref_weighted: f64,
     n_weighted: f64,
+    // Debug: filter counters
+    skipped_proper_pair: usize,
+    skipped_size: usize,
 }
 
 impl VariantResult {
@@ -527,16 +530,19 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `reference_path` - Optional path to reference FASTA (for GC computation)
 /// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false, reference_path=None, correction_factors_path=None, silent=false))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, silent=false))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
     output_file: PathBuf,
     input_format: String,
     map_quality: u8,
+    min_frag_len: i64,
+    max_frag_len: i64,
     output_distributions: bool,
     reference_path: Option<PathBuf>,
     correction_factors_path: Option<PathBuf>,
+    require_proper_pair: bool,
     silent: bool,
 ) -> PyResult<()> {
     use crate::gc_correction::CorrectionFactors;
@@ -623,6 +629,9 @@ pub fn calculate_mfsd(
     let complex_count = variants.iter().filter(|v| v.var_type == VariantType::Complex).count();
     debug!("Variant types: {} SNV, {} MNV, {} INS, {} DEL, {} Complex", 
         snv_count, mnv_count, ins_count, del_count, complex_count);
+    
+    // Log filter settings
+    info!("Fragment filters: length {}-{}bp, proper_pair={}", min_frag_len, max_frag_len, require_proper_pair);
 
     // Progress Bar (hidden when called from wrapper)
     let pb = if silent {
@@ -697,16 +706,33 @@ pub fn calculate_mfsd(
                 // Only process R1 for fragment counting (avoid double-counting)
                 if record.is_paired() && !record.is_first_in_template() { continue; }
                 
+                // Proper pair filter (optional - disabled by default for duplex BAMs)
+                if require_proper_pair && record.is_paired() && !record.is_proper_pair() {
+                    result.skipped_proper_pair += 1;
+                    continue;
+                }
+                
+                // Get fragment length first to apply size filter early
+                let tlen = record.insert_size().abs();
+                let frag_len = if tlen == 0 { record.seq().len() as i64 } else { tlen };
+                
+                // Fragment size filter - skip discordant/chimeric reads with extreme TLEN
+                if frag_len < min_frag_len || frag_len > max_frag_len {
+                    result.skipped_size += 1;
+                    // Debug: log extreme outliers
+                    if frag_len > 10000 {
+                        debug!("Skipped discordant read at {}:{} with TLEN={}", var.chrom, var.pos + 1, frag_len);
+                    }
+                    continue;
+                }
+                
+                let frag_len_f64 = frag_len as f64;
+                
                 // Extract sequence at variant
                 let (extracted, has_n) = match extract_sequence_at_variant(&record, var) {
                     Some((s, n)) => (s, n),
                     None => continue, // Read doesn't span variant
                 };
-                
-                // Get fragment length and coordinates
-                let tlen = record.insert_size().abs();
-                let frag_len = if tlen == 0 { record.seq().len() as i64 } else { tlen };
-                let frag_len_f64 = frag_len as f64;
                 
                 // Compute GC correction weight
                 let weight = if let Some(ref factors_arc) = factors {
@@ -756,12 +782,16 @@ pub fn calculate_mfsd(
     let mut total_n = 0usize;
     let mut variants_with_alt = 0usize;
     let mut variants_no_coverage = 0usize;
+    let mut total_skipped_proper_pair = 0usize;
+    let mut total_skipped_size = 0usize;
     
     for (_, res) in &results {
         total_ref += res.ref_lengths.len();
         total_alt += res.alt_lengths.len();
         total_nonref += res.nonref_lengths.len();
         total_n += res.n_lengths.len();
+        total_skipped_proper_pair += res.skipped_proper_pair;
+        total_skipped_size += res.skipped_size;
         if !res.alt_lengths.is_empty() {
             variants_with_alt += 1;
         }
@@ -774,6 +804,13 @@ pub fn calculate_mfsd(
     info!("Variants with ALT support: {}/{} ({:.1}%)", 
         variants_with_alt, results.len(), 
         if results.len() > 0 { variants_with_alt as f64 / results.len() as f64 * 100.0 } else { 0.0 });
+    
+    // Log filter statistics
+    if total_skipped_proper_pair > 0 || total_skipped_size > 0 {
+        info!("Filtered: {} improper-pair, {} out-of-size-range ({}-{}bp)", 
+            total_skipped_proper_pair, total_skipped_size, min_frag_len, max_frag_len);
+    }
+    
     if variants_no_coverage > 0 {
         warn!("{} variants had no fragment coverage", variants_no_coverage);
     }
