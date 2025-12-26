@@ -82,7 +82,7 @@ def motif(
     
     # Pre-check BAM compatibility with current filters
     if require_proper_pair:
-        from .extract import check_bam_compatibility
+        from .core.bam_utils import check_bam_compatibility
         logger.info("Checking BAM read compatibility with filters...")
         compat = check_bam_compatibility(bam_input, require_proper_pair, True, 20)
         
