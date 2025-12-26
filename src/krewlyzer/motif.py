@@ -32,6 +32,7 @@ def motif(
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
+    require_proper_pair: bool = typer.Option(True, '--require-proper-pair/--no-require-proper-pair', help="Require proper pairs (disable for duplex/consensus BAMs)"),
     verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose logging"),
     threads: int = typer.Option(0, '--threads', '-t', help="Number of threads (0=all cores)")
 ):
@@ -79,6 +80,28 @@ def motif(
     if sample_name is None:
         sample_name = bam_input.stem.replace('.bam', '')
     
+    # Pre-check BAM compatibility with current filters
+    if require_proper_pair:
+        from .extract import check_bam_compatibility
+        logger.info("Checking BAM read compatibility with filters...")
+        compat = check_bam_compatibility(bam_input, require_proper_pair, True, 20)
+        
+        if compat["pass_rate"] < 0.01 and compat["total_sampled"] > 100:
+            # Critical: Almost no reads would pass!
+            console.print("\n[bold red]⚠️  FILTER COMPATIBILITY WARNING[/bold red]\n")
+            console.print(f"Only [bold]{compat['pass_rate']:.2%}[/bold] of sampled reads would pass current filters.\n")
+            
+            for issue in compat["issues"]:
+                console.print(f"  • {issue}")
+            
+            if compat["suggested_flags"]:
+                suggested = " ".join(compat["suggested_flags"])
+                console.print(f"\n[bold yellow]Suggested command:[/bold yellow]")
+                console.print(f"  krewlyzer motif {bam_input.name} -g {genome_reference.name} -o {output} [bold]{suggested}[/bold]\n")
+                
+                logger.error(f"Filter mismatch detected. Re-run with: {suggested}")
+                raise typer.Exit(1)
+    
     # Output file paths
     edm_output = output / f"{sample_name}.EndMotif.tsv"
     bpm_output = output / f"{sample_name}.BreakPointMotif.tsv"
@@ -108,7 +131,11 @@ def motif(
             kmer,
             threads,
             None,  # output_bed_path
-            "enable" # output_motif_prefix (triggers counting)
+            "enable",  # output_motif_prefix (triggers counting)
+            None,  # exclude_path
+            True,  # skip_duplicates
+            require_proper_pair,  # proper pair filter
+            False  # silent
         )
         
         End_motif.update(em_counts)
