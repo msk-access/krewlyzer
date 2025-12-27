@@ -71,6 +71,7 @@ struct VariantResult {
     // Debug: filter counters
     skipped_proper_pair: usize,
     skipped_size: usize,
+    skipped_extreme: usize,  // Discordant reads with TLEN > 10000
 }
 
 impl VariantResult {
@@ -719,9 +720,9 @@ pub fn calculate_mfsd(
                 // Fragment size filter - skip discordant/chimeric reads with extreme TLEN
                 if frag_len < min_frag_len || frag_len > max_frag_len {
                     result.skipped_size += 1;
-                    // Debug: log extreme outliers
+                    // Track extreme outliers (discordant reads) for summary logging
                     if frag_len > 10000 {
-                        debug!("Skipped discordant read at {}:{} with TLEN={}", var.chrom, var.pos + 1, frag_len);
+                        result.skipped_extreme += 1;
                     }
                     continue;
                 }
@@ -784,6 +785,7 @@ pub fn calculate_mfsd(
     let mut variants_no_coverage = 0usize;
     let mut total_skipped_proper_pair = 0usize;
     let mut total_skipped_size = 0usize;
+    let mut total_skipped_extreme = 0usize;
     
     for (_, res) in &results {
         total_ref += res.ref_lengths.len();
@@ -792,6 +794,7 @@ pub fn calculate_mfsd(
         total_n += res.n_lengths.len();
         total_skipped_proper_pair += res.skipped_proper_pair;
         total_skipped_size += res.skipped_size;
+        total_skipped_extreme += res.skipped_extreme;
         if !res.alt_lengths.is_empty() {
             variants_with_alt += 1;
         }
@@ -809,6 +812,11 @@ pub fn calculate_mfsd(
     if total_skipped_proper_pair > 0 || total_skipped_size > 0 {
         info!("Filtered: {} improper-pair, {} out-of-size-range ({}-{}bp)", 
             total_skipped_proper_pair, total_skipped_size, min_frag_len, max_frag_len);
+    }
+    
+    // Log extreme outliers if any (discordant reads with TLEN > 10000bp)
+    if total_skipped_extreme > 0 {
+        debug!("Skipped {} discordant reads with TLEN > 10000bp", total_skipped_extreme);
     }
     
     if variants_no_coverage > 0 {
