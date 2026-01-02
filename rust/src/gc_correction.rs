@@ -30,32 +30,38 @@ impl Default for GcCorrectionConfig {
     }
 }
 
-/// Fragment length bin definition for GC correction (17 bins, 20bp width)
+/// Fragment length bin definition for GC correction (68 bins, 5bp width)
 /// Range: 60bp to 400bp
+/// 
+/// 5bp granularity provides finer-grained GC bias modeling for ML features.
+/// Bin 0 = 60-64bp, Bin 1 = 65-69bp, ..., Bin 67 = 395-399bp
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LengthBin(pub u8);
 
 impl LengthBin {
+    /// Number of bins (68 = 340bp range / 5bp width)
+    pub const NUM_BINS: u8 = 68;
+    
     /// Get LengthBin from fragment length
     /// Returns None if length is outside tracked range (60-400)
     pub fn from_len(len: u64) -> Option<Self> {
         if len < 60 || len >= 400 {
             return None;
         }
-        // (len - 60) / 20 -> 0..16
-        // E.g. 60 -> 0, 79 -> 0, 80 -> 1
-        let bin = ((len - 60) / 20) as u8;
-        if bin < 17 {
+        // (len - 60) / 5 -> 0..67
+        // E.g. 60 -> 0, 64 -> 0, 65 -> 1, 399 -> 67
+        let bin = ((len - 60) / 5) as u8;
+        if bin < Self::NUM_BINS {
             Some(LengthBin(bin))
         } else {
             None
         }
     }
 
-    /// Get min/max length for this bin
+    /// Get min/max length for this bin (exclusive end)
     pub fn range(&self) -> (u64, u64) {
-        let start = 60 + (self.0 as u64 * 20);
-        (start, start + 20)
+        let start = 60 + (self.0 as u64 * 5);
+        (start, start + 5)
     }
 }
 
@@ -107,8 +113,8 @@ impl ReferenceData {
             
             // Map len_min back to LengthBin
             if len_min >= 60 {
-                let bin_idx = ((len_min - 60) / 20) as u8;
-                if bin_idx < 17 {
+                let bin_idx = ((len_min - 60) / 5) as u8;
+                if bin_idx < LengthBin::NUM_BINS {
                     counts.insert((LengthBin(bin_idx), gc), count);
                 }
             }
@@ -197,8 +203,8 @@ impl CorrectionFactors {
             
             // Map len_min back to LengthBin
             if len_min >= 60 {
-                let bin_idx = ((len_min - 60) / 20) as u8;
-                if bin_idx < 17 {
+                let bin_idx = ((len_min - 60) / 5) as u8;
+                if bin_idx < LengthBin::NUM_BINS {
                     data.insert((LengthBin(bin_idx), gc), CorrectionBinStats {
                         observed,
                         expected,
@@ -233,8 +239,8 @@ pub fn compute_gcfix_factors(
     let cfg = config.unwrap_or_default();
     let mut factors = HashMap::new();
     
-    // Iterate over each length bin (0..17)
-    for bin_idx in 0..17 {
+    // Iterate over each length bin (0..68)
+    for bin_idx in 0..LengthBin::NUM_BINS {
         let bin = LengthBin(bin_idx);
         
         // Collect (gc, ratio) pairs for this bin

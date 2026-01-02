@@ -40,6 +40,7 @@ def extract(
     
     # Configurable filters
     exclude_regions: Optional[Path] = typer.Option(None, '-x', '--exclude-regions', help="Exclude regions BED file"),
+    target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: GC model computed on off-target reads only)"),
     mapq: int = typer.Option(20, '--mapq', '-q', help="Minimum mapping quality"),
     minlen: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
     maxlen: int = typer.Option(400, '--maxlen', help="Maximum fragment length"),
@@ -174,6 +175,9 @@ def extract(
         logger.info(f"Extracting fragments from {bam_input.name}")
         logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
         
+        if target_regions:
+            logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
+        
         # Call Unified Rust Engine (Extract Mode)
         # Returns (fragment_count, em_counts, bpm_counts, gc_observations)
         fragment_count, _, _, gc_observations = _core.extract_motif.process_bam_parallel(
@@ -187,6 +191,7 @@ def extract(
             str(bed_temp),         # output_bed_path
             None,                  # output_motif_prefix (None = skip motif counting)
             str(exclude_regions) if exclude_regions else None,
+            str(target_regions) if target_regions else None,  # For off-target GC model
             skip_duplicates,
             require_proper_pair
         )
@@ -232,6 +237,8 @@ def extract(
             "total_fragments": fragment_count,
             "genome": genome,
             "gc_correction_computed": gc_correct,
+            "panel_mode": target_regions is not None,
+            "target_regions": str(target_regions) if target_regions else None,
             "filters": {
                 "mapq": mapq,
                 "min_length": minlen,

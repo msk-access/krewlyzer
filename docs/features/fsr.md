@@ -3,77 +3,74 @@
 **Command**: `krewlyzer fsr`
 
 ## Purpose
-Computes ratios of fragment size classes per genomic window. Unlike FSC, this metric is self-normalizing (ratio) and focuses on the **proportion** of fragment sizes, which is a powerful biomarker for tumor fraction estimation.
+Computes short/long fragment ratios for cancer biomarker analysis. Uses PoN-normalization **before** ratio calculation for accurate cross-sample comparison.
 
 ## Biological Context
-The ratio of short to long fragments is a key indicator of tumor burden in cfDNA ("fragmentomics"). See [DELFI method](../citation.md#fsr) for details.
 
-- **Short Fragments (65-149bp)**: Tumor DNA is typically shorter (~145bp) than healthy DNA (~166bp).
-- **Ultra-short Fragments (65-100bp)**: Associated with transcription factor binding sites and open chromatin.
-- **Long Fragments (261-399bp)**: Often di-nucleosomes, representing stable, healthy chromatin (Leukocytes).
+The ratio of short to long fragments is a key indicator of tumor burden in cfDNA:
 
-**Key Biomarkers:**
-- **Short/Long Ratio**: The primary metric. Higher ratio = higher probability of tumor DNA.
-- **Ultra-short Ratio**: Indicates active gene regulation/transcription factor binding.
-- **Nucleosome Footprints**: The 10bp precision of the ranges (150bp vs 167bp) helps separate mono-nucleosomes.
+- **Short Fragments (65-149bp)**: Tumor DNA is typically shorter (~145bp) than healthy DNA (~166bp)
+- **Long Fragments (221-400bp)**: Di/multi-nucleosomes, representing stable healthy chromatin
+
+**Key Biomarker**: `short_long_ratio` - Higher ratio = higher probability of tumor DNA
 
 ## Usage
 ```bash
 krewlyzer fsr sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 ```
 
-## Options
+## Key Options
 
-| Option | Short | Type | Default | Description |
-|--------|-------|------|---------|-------------|
-| `--output` | `-o` | PATH | *required* | Output directory |
-| `--sample-name` | `-s` | TEXT | | Override sample name |
-| `--bin-input` | `-b` | PATH | | Bin file (default: hg19 100kb bins) |
-| `--pon-model` | `-P` | PATH | | PON model for hybrid GC correction |
-| `--windows` | `-w` | INT | 100000 | Window size |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window count |
-| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
-| `--gc-correct` | | FLAG | True | Apply GC bias correction |
-| `--verbose` | `-v` | FLAG | | Enable verbose logging |
-| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
-
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Output directory (required) |
+| `--sample-name` | `-s` | Override sample name |
+| `--bin-input` | `-b` | Custom bin file |
+| `--pon-model` | `-P` | PON model for count normalization |
+| `--genome` | `-G` | Genome build: hg19/hg38 |
 
 ## Output Format
 
 Output: `{sample}.FSR.tsv`
 
-| Column | Description | Biological Relevance |
-|--------|-------------|----------------------|
-| `region` | Genomic region | |
-| `ultra_short_count` | Count 65-100bp | TF footprints |
-| `short_count` | Count 65-149bp | Tumor enriched |
-| `inter_count` | Count 151-259bp | Mono-nucleosome |
-| `long_count` | Count 261-399bp | Healthy / Di-nucleosome |
-| `total_count` | Count 65-399bp | Total fragments |
-| `short_ratio` | Short / Total | Tumor fraction proxy |
-| `inter_ratio` | Intermediate / Total | |
-| `long_ratio` | Long / Total | Healthy fraction proxy |
-| `short_long_ratio` | Short / Long | **Primary Cancer Biomarker** |
-| `ultra_short_ratio` | Ultra-short / Total | TF activity indicator |
+| Column | Type | Description |
+|--------|------|-------------|
+| `region` | str | Genomic region (chr:start-end) |
+| `short_count` | int | Raw short fragment count (65-149bp) |
+| `long_count` | int | Raw long fragment count (221-400bp) |
+| `total_count` | int | Total fragments (65-400bp) |
+| `short_norm` | float | short / PoN_short_mean |
+| `long_norm` | float | long / PoN_long_mean |
+| `short_long_ratio` | float | **short_norm / long_norm** (primary biomarker) |
+| `short_long_log2` | float | log2(short_long_ratio) for ML |
+| `short_frac` | float | short / total |
+| `long_frac` | float | long / total |
+
+## Normalization Order (Critical)
+
+> [!IMPORTANT]
+> FSR normalizes counts to PoN **BEFORE** computing ratios:
+> 1. **Normalize**: short_norm = short / PoN_short_mean
+> 2. **Normalize**: long_norm = long / PoN_long_mean  
+> 3. **THEN Ratio**: short_long_ratio = short_norm / long_norm
+
+This ensures accurate cross-sample comparison by removing batch effects before ratio calculation.
 
 ## Clinical Interpretation
-
-### Healthy vs Cancer
 
 | Metric | Healthy Plasma | Cancer (ctDNA present) |
 |--------|----------------|------------------------|
 | Modal fragment size | ~166bp | Left-shifted (~145bp) |
 | `short_long_ratio` | Low (baseline) | **Elevated** |
-| Genome-wide ratio variability | Minimal | Increased aberrations |
+| `short_long_log2` | ~0 | **Positive** |
 
-### Interpretation Guide
-- **High `short_long_ratio`**: Indicates higher tumor fraction (ctDNA) or open chromatin.
-- **High `ultra_short_ratio`**: Indicates regions of high transcription factor activity.
-- **High `long_ratio`**: Indicates stable, nucleosomal DNA (usually healthy background).
+## Panel Data Support
 
-### Clinical Utility
-- **Tumor fraction proxy**: Compare `short_long_ratio` to healthy baseline
-- **Treatment monitoring**: Track ratio changes over time
-- **Performance**: DELFI achieves 57-99% sensitivity at 98% specificity
+For targeted panels, use `--target-regions` in `run-all`:
 
-> **Reference:** See [Citation & Scientific Background](../citation.md#fsr) for detailed paper summary.
+```bash
+krewlyzer run-all sample.bam -g ref.fa -o out/ \
+    --target-regions panel_targets.bed
+```
+
+> **Reference:** See [Citation & Scientific Background](../citation.md#fsr) for DELFI paper details.

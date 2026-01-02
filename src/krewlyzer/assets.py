@@ -71,6 +71,16 @@ class AssetManager:
         return self._get_path("OpenChromatinRegion", "7specificTissue.all.OC.bed.gz")
 
     @property
+    def wps_anchors(self) -> Path:
+        """WPS anchors BED.GZ (merged TSS+CTCF) for dual-stream chromatin profiling"""
+        return self._get_path("WpsAnchors", f"{self.file_prefix}.wps_anchors.bed.gz")
+
+    @property
+    def wps_background(self) -> Path:
+        """WPS background BED.GZ (full-length Alu elements) for global stacking"""
+        return self._get_path("WpsBackground", f"{self.file_prefix}.alu_consensus.bed.gz")
+
+    @property
     def methylation_markers(self) -> Path:
         """Methylation markers BED for UXM analysis"""
         # Note: Currently hg19 only - hg38 markers need to be generated
@@ -100,6 +110,8 @@ class AssetManager:
             "transcript_anno": self.transcript_anno,
             "ocf_regions": self.ocf_regions,
             "methylation_markers": self.methylation_markers,
+            "wps_anchors": self.wps_anchors,
+            "wps_background": self.wps_background,
         }
         
         if asset_name not in asset_map:

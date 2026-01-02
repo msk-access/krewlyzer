@@ -1,15 +1,18 @@
 process KREWLYZER_WPS {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.3.2"
+    container "ghcr.io/msk-access/krewlyzer:latest"
 
     input:
     tuple val(meta), path(bed)
     path fasta
+    path wps_anchors
+    path wps_background
 
     output:
-    tuple val(meta), path("*.WPS.tsv.gz"), emit: tsv
-    path "versions.yml"                  , emit: versions
+    tuple val(meta), path("*.WPS.parquet")           , emit: parquet
+    tuple val(meta), path("*.WPS_background.parquet"), emit: background, optional: true
+    path "versions.yml"                              , emit: versions
 
     script:
     def args = task.ext.args ?: ''
@@ -17,6 +20,8 @@ process KREWLYZER_WPS {
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
     def ref_arg = fasta ? "--reference ${fasta}" : ""
+    def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
+    def background_arg = wps_background ? "--background ${wps_background}" : ""
 
     """
     krewlyzer wps \\
@@ -27,6 +32,8 @@ process KREWLYZER_WPS {
         $ref_arg \\
         $genome_arg \\
         $gc_arg \\
+        $anchors_arg \\
+        $background_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -42,6 +42,7 @@ def run_all(
     skip_duplicates: bool = typer.Option(True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads"),
     require_proper_pair: bool = typer.Option(True, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs"),
     exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-x", help="Exclude regions BED file"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: GC model from off-target reads only)"),
     
     # Optional inputs for specific tools
     bisulfite_bam: Optional[Path] = typer.Option(None, "--bisulfite-bam", help="Bisulfite BAM for UXM (optional)"),
@@ -56,7 +57,10 @@ def run_all(
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms file for FSD"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
     ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
-    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS"),
+    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS (legacy)"),
+    wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
+    wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
+    bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     
     # Observability
@@ -121,6 +125,9 @@ def run_all(
     logger.info(f"Processing sample: {sample}")
     logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
     
+    if target_regions and isinstance(target_regions, Path) and target_regions.exists():
+        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
+    
     # Determine which optional tools will run
     has_uxm = bisulfite_bam is not None and bisulfite_bam.exists()
     has_mfsd = variants is not None and variants.exists()
@@ -180,8 +187,9 @@ def run_all(
                     4,  # kmer
                     threads,
                     bed_out_arg,
-                    "enable",
+                    "enable",  # output_motif_prefix
                     str(exclude_regions) if exclude_regions else str(assets.exclude_regions),
+                    str(target_regions) if (target_regions and isinstance(target_regions, Path) and target_regions.exists()) else None,  # Panel mode: off-target GC
                     skip_duplicates,
                     require_proper_pair,
                     True  # silent=True
@@ -258,9 +266,22 @@ def run_all(
         res_arms = arms_file if arms_file else assets.arms
         if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
-        # WPS Genes (Transcript Annotation)
-        res_wps = wps_file if wps_file else assets.transcript_anno
-        if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
+        # WPS Regions (prefer wps_anchors, fallback to wps_file, then asset defaults)
+        if wps_anchors and wps_anchors.exists():
+            res_wps = wps_anchors
+            logger.debug(f"WPS anchors: {wps_anchors}")
+        elif wps_file and wps_file.exists():
+            res_wps = wps_file
+            logger.debug(f"WPS transcript (legacy): {wps_file}")
+        else:
+            # Try wps_anchors asset first, fallback to transcript_anno
+            try:
+                res_wps = assets.wps_anchors
+                logger.debug(f"WPS anchors (default): {res_wps}")
+            except (AttributeError, FileNotFoundError):
+                res_wps = assets.transcript_anno
+                logger.debug(f"WPS transcript (fallback): {res_wps}")
+        if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
 
         # OCF Regions
         res_ocf = ocr_file if ocr_file else assets.ocf_regions
@@ -280,10 +301,22 @@ def run_all(
         # Define Outputs
         out_gc_factors = output / f"{sample}.correction_factors.csv"
         out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
-        out_wps = output / f"{sample}.WPS.tsv.gz"
+        out_wps = output / f"{sample}.WPS.parquet"  # Foreground Parquet
+        out_wps_bg = output / f"{sample}.WPS_background.parquet"  # Alu stacking
         out_fsd = output / f"{sample}.FSD.tsv"
         out_ocf_dir = output / f"{sample}_ocf_tmp"
         out_ocf_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Resolve WPS background (explicit --wps-background takes precedence over auto-load)
+        if wps_background and wps_background.exists():
+            res_wps_bg = wps_background
+            logger.info(f"Using explicit WPS background: {res_wps_bg}")
+        elif assets.wps_background.exists():
+            res_wps_bg = assets.wps_background
+            logger.debug(f"Auto-loaded WPS background ({genome}): {res_wps_bg}")
+        else:
+            res_wps_bg = None
+            logger.warning("WPS background not found - skipping background stacking")
         
         try:
             # RUN RUST PIPELINE (silent=True)
@@ -292,9 +325,13 @@ def run_all(
                 str(res_gc), str(res_valid_regions), str(out_gc_factors),
                 None,
                 str(res_bin), str(out_fsc_raw),
-                str(res_wps), str(out_wps), False,
+                str(res_wps), str(out_wps),  # WPS foreground
+                str(res_wps_bg) if res_wps_bg else None, str(out_wps_bg) if res_wps_bg else None,  # WPS background
+                False,
                 str(res_arms), str(out_fsd),
                 str(res_ocf), str(out_ocf_dir),
+                str(target_regions) if (target_regions and isinstance(target_regions, Path) and target_regions.exists()) else None,
+                bait_padding,  # Bait edge padding (adaptive safety applies)
                 True  # silent=True
             )
             progress.update(task_pipeline, description="[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+OCF)", completed=100)
@@ -337,19 +374,38 @@ def run_all(
             except:
                 pass
             
-            # Apply PON z-scores to FSD and WPS (if PON model provided)
+            # Apply processing to FSD and WPS (PoN if provided)
             if pon_model:
                 from .core.pon_integration import load_pon_model
-                from .core.fsd_processor import apply_fsd_pon
-                from .core.wps_processor import apply_wps_pon
-                
                 pon = load_pon_model(pon_model)
-                
-                if pon is not None:
-                    if out_fsd.exists():
-                        apply_fsd_pon(out_fsd, pon)
-                    if out_wps.exists():
-                        apply_wps_pon(out_wps, pon)
+            else:
+                pon = None
+            
+            # FSD post-processing (log-ratios if PoN)
+            from .core.fsd_processor import process_fsd
+            if out_fsd.exists():
+                process_fsd(out_fsd, out_fsd, pon=pon)
+                logger.debug(f"FSD off-target: {out_fsd}")
+            
+            # Check for on-target FSD (panel mode)
+            out_fsd_ontarget = output / f"{sample}.FSD.ontarget.tsv"
+            if out_fsd_ontarget.exists():
+                process_fsd(out_fsd_ontarget, out_fsd_ontarget, pon=pon)
+                logger.info(f"FSD on-target: {out_fsd_ontarget}")
+            
+            # WPS post-processing (smoothing, PoN subtraction, FFT periodicity)
+            from .core.wps_processor import post_process_wps
+            out_wps_bg = output / f"{sample}.WPS_background.parquet"
+            pon_wps_baseline = pon.wps_baseline if pon else None
+            wps_result = post_process_wps(
+                wps_parquet=out_wps,
+                wps_background_parquet=out_wps_bg if out_wps_bg.exists() else None,
+                pon_baseline_parquet=None,  # TODO: extract WPS baseline path from PoN
+                smooth=True,
+                extract_periodicity=True
+            )
+            if wps_result.get("periodicity_score"):
+                logger.info(f"WPS periodicity score: {wps_result['periodicity_score']:.3f}")
             
             progress.update(task_postproc, description="[3/5] Post-processing ✓", completed=100)
                 

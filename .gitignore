@@ -24,6 +24,7 @@ htmlcov/
 .tox/
 pytest_cache/
 .pytest_cache/
+test_outputs/
 
 # VSCode / IDE
 .vscode/

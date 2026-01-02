@@ -3,155 +3,245 @@
 **Command**: `krewlyzer wps`
 
 ## Purpose
-Computes unified nucleosome and transcription factor protection scores for each region in a transcript/region file.
+Computes ML-ready nucleosome and transcription factor protection profiles from cfDNA fragments around genomic anchors (TSS, CTCF sites) and global chromatin metrics from Alu elements.
+
+---
 
 ## Biological Context
-The WPS (Snyder et al., 2016) quantifies chromatin accessibility by comparing fragments that span a protection window to those ending within it. Krewlyzer calculates **both** Long and Short WPS in a single pass:
 
-- **Long WPS** (120-180bp fragments): Measures **nucleosome positioning**
-- **Short WPS** (35-80bp fragments): Measures **transcription factor binding footprints**
-- **WPS Ratio** (Long/Short): Balance between nucleosome and TF protection
+### What is WPS?
 
-## Usage
-```bash
-krewlyzer wps sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
+When DNA wraps around a nucleosome, the histone core **protects** ~147bp from enzymatic digestion. In cfDNA, fragments that span a nucleosome are "protected" (whole), while fragments that end at nucleosome boundaries are "fragmented" (cut).
+
+**WPS Formula:**
+```
+WPS = Fragments_spanning_window - Fragments_ending_in_window
 ```
 
-## Options
+| WPS Value | Meaning | Biological Interpretation |
+|-----------|---------|---------------------------|
+| **Positive** | Protected | Nucleosome present (stable chromatin) |
+| **Zero** | Balanced | Transition zone |
+| **Negative** | Fragmented | Open chromatin (accessible DNA) |
 
-| Option | Short | Type | Default | Description |
-|--------|-------|------|---------|-------------|
-| `--output` | `-o` | PATH | *required* | Output directory |
-| `--sample-name` | `-s` | TEXT | | Override sample name |
-| `--tsv-input` | | PATH | | Transcript annotation TSV |
-| `--pon-model` | `-P` | PATH | | PON model for hybrid correction |
-| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
-| `--reference` | `-r` | PATH | | Reference FASTA for GC correction |
-| `--gc-correct` | | FLAG | | Apply GC bias correction |
-| `--empty` | | FLAG | | Include regions with no coverage |
-| `--verbose` | `-v` | FLAG | | Enable verbose logging |
-| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+### Dual-Stream Processing
 
+Krewlyzer separates fragments into two biological signals:
 
-## Output Format
+| Stream | Window | Fragment Size | Weight | Biological Signal |
+|--------|--------|---------------|--------|-------------------|
+| **WPS-Nuc** | 120bp | [160-175bp] | 1.0 (primary) | **Nucleosome positioning** |
+| | | [120-159] ∪ [176-180bp] | 0.5 (secondary) | Flanking nucleosomes |
+| **WPS-TF** | 16bp | [35-80bp] | 1.0 | **Transcription factor footprints** |
 
-Output file: `{sample}.WPS.tsv.gz`
+The tiered weights for nucleosome fragments prioritize "perfect" mono-nucleosome sizes (~167bp) over edge cases.
+
+---
+
+## Foreground vs Background
+
+WPS generates **two complementary outputs** that capture different biological scales:
+
+### Foreground (`sample.WPS.parquet`)
+
+**What it is**: High-resolution WPS profiles around specific genomic anchors (TSS, CTCF sites).
+
+**Why it matters**: Gene promoters and CTCF sites have characteristic nucleosome patterns:
+- **Active promoters**: Nucleosome-depleted region (NDR) upstream of TSS
+- **Silent promoters**: Packed nucleosomes across TSS
+- **CTCF sites**: Sharp nucleosome boundaries (insulator function)
+
+**ML use**: These 200-bin vectors are gene-specific signatures. Comparing them across cancer types reveals tissue-of-origin and tumor-specific disruptions.
+
+```
+                          TSS
+                           |
+    ←───── -1kb ─────      ↓      ───── +1kb ─────→
+    [bin 0] ... [bin 99] [100] [bin 101] ... [bin 199]
+```
+
+### Background (`sample.WPS_background.parquet`)
+
+**What it is**: Stacked WPS profiles from ~770,000 Alu elements across the genome.
+
+**Why Alu elements?**
+
+1. **Ubiquitous**: Alu elements are everywhere (~11% of human genome)
+2. **Consistent size**: ~300bp (perfect for 2-nucleosome periodicity)
+3. **No gene bias**: Not restricted to specific genes or pathways
+4. **Robust signal**: Stacking 770K elements averages out noise
+
+**What it measures**: When you stack all Alu WPS profiles, a **periodic wave** emerges at ~190bp (nucleosome repeat length). This periodicity reflects **global chromatin health**:
+
+| Periodicity | Meaning | Cancer Implication |
+|-------------|---------|-------------------|
+| **Strong (~190bp)** | Regular nucleosome spacing | Healthy chromatin |
+| **Weak/disrupted** | Irregular chromatin | Tumor burden, genomic instability |
+
+**Hierarchical Groups**:
+- `Global_All`: All Alu (highest SNR, best for QC)
+- `Family_AluY/S/J`: Subfamily ages (~15M / ~35M / ~65M years)
+- `Chr1_All` ... `ChrY_All`: Per-chromosome (CNV context)
+
+---
+
+## Post-Processing: Smoothing and FFT
+
+### Savitzky-Golay Smoothing
+
+**Purpose**: Reduce high-frequency noise while preserving peak shapes.
+
+**How it works**: Fits a polynomial (order=3) to sliding windows (size=11) and uses the fitted value. Unlike moving average, it preserves peak heights and widths.
 
 | Column | Description |
 |--------|-------------|
-| `gene_id` | Transcript/region identifier |
-| `chrom` | Chromosome |
-| `pos` | Genomic position |
-| `cov_long` | Coverage from long fragments (120-180bp) |
-| `cov_short` | Coverage from short fragments (35-80bp) |
-| `wps_long` | WPS for long fragments (nucleosome) |
-| `wps_short` | WPS for short fragments (TF) |
-| `wps_ratio` | Ratio of wps_long / wps_short |
-| `wps_long_norm` | Normalized WPS long (per million fragments) |
-| `wps_short_norm` | Normalized WPS short (per million fragments) |
-| `wps_ratio_norm` | Normalized WPS ratio |
+| `wps_nuc_smooth` | Smoothed nucleosome profile |
+| `wps_tf_smooth` | Smoothed TF profile |
 
-## Column Interpretation Guide
+**When to use**: Always use smoothed columns for visualization. Raw columns for debugging.
 
-### Coverage Columns (`cov_long`, `cov_short`)
+### FFT Periodicity Extraction
 
-| Value | Interpretation |
-|-------|----------------|
-| **0** | No fragments cover this exact position |
-| **Low (1-5)** | Sparse coverage, low confidence |
-| **Medium (5-20)** | Adequate coverage for reliable WPS |
-| **High (>20)** | Well-covered, high-confidence region |
+**Purpose**: Quantify the ~190bp nucleosome repeat length (NRL) from Alu stacking.
 
-> **Note**: Coverage counts fragments covering the **exact position**, while WPS considers fragments in the **protection window** around the position. Thus it's possible to have WPS ≠ 0 with coverage = 0.
+**How it works**:
+1. **Detrend**: Remove linear trends from stacked profile
+2. **Normalize**: Z-score to make amplitude comparable across samples
+3. **Window**: Apply Hann window to reduce spectral leakage
+4. **FFT**: Find dominant frequency in 150-250bp range
+5. **SNR**: Compare peak amplitude to background
 
-### WPS Long (`wps_long`) - Nucleosome Positioning
+| Column | Description |
+|--------|-------------|
+| `nrl_period_bp` | Detected nucleosome repeat length |
+| `nrl_amplitude` | FFT amplitude at dominant frequency |
+| `nrl_snr` | Signal-to-noise ratio (peak vs background) |
+| `nrl_quality` | 0-1 quality score (SNR/3, capped) |
 
-| Value | Interpretation | Biological Meaning |
-|-------|----------------|-------------------|
-| **> 0** | Protected | Nucleosome present, stable chromatin |
-| **≈ 0** | Neutral | Transitional region |
-| **< 0** | Fragmented | Nucleosome-depleted, accessible chromatin |
+**Expected values**:
+- Healthy samples: NRL ~190bp, quality > 0.7
+- Cancer samples: NRL shifted, quality < 0.5
 
-### WPS Short (`wps_short`) - Transcription Factor Footprints
+---
 
-| Value | Interpretation | Biological Meaning |
-|-------|----------------|-------------------|
-| **> 0** | TF-protected | Transcription factor bound at position |
-| **≈ 0** | No TF signal | No detectable TF footprint |
-| **< 0** | TF-fragmented | Active TF turnover or open region |
+## Usage
 
-### WPS Ratio (`wps_ratio`) - Nucleosome vs TF Balance
+```bash
+# Basic (auto-loads bundled assets)
+krewlyzer wps sample.bed.gz -o output/ --genome hg38
 
-| Value | Interpretation | Biological Meaning |
-|-------|----------------|-------------------|
-| **> 1** | Nucleosome-dominated | Stable, closed chromatin |
-| **≈ 1** | Balanced | Mixed nucleosome/TF regulation |
-| **< 1** | TF-dominated | Actively regulated region |
-| **negative** | Complex signal | Fragmented for both (very accessible) |
+# With explicit background override
+krewlyzer wps sample.bed.gz -o output/ --background custom_alu.bed.gz
 
-### When Coverage = 0 but WPS ≠ 0
-
-This occurs when fragments overlap the **protection window** around a position but don't directly cover that position:
-
-```
-Position:        |------ pos 100 ------|
-WPS Window:      [======40-160========]
-Fragment:    [===10-50===]
-                       ↑
-                 Overlaps window → affects WPS
-                 But doesn't reach pos 100 → cov = 0
+# Panel data (MSK-ACCESS)
+krewlyzer wps sample.bed.gz -o output/ --target-regions msk_access_baits.bed --bait-padding 20
 ```
 
-## Cancer Applications
+## CLI Options
 
-- **Tumor Detection**: Altered nucleosome patterns at promoters indicate aberrant gene regulation
-- **Tissue of Origin**: Cell-type-specific nucleosome footprints reveal tumor origin
-- **TF Activity**: Short WPS can detect cancer-specific TF binding (e.g., ER in breast cancer)
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Output directory (required) |
+| `--sample-name` | `-s` | Override sample name |
+| `--wps-anchors` | | WPS anchors BED (TSS+CTCF), auto-loaded if not specified |
+| `--background` | `-B` | Background Alu BED for hierarchical stacking, auto-loaded if not specified |
+| `--target-regions` | | Panel capture BED (enables bait edge masking) |
+| `--bait-padding` | | Bait edge padding in bp (default: 50, see below) |
+| `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
+| `--pon-model` | `-P` | PON model for z-score computation |
+| `--gc-correct` | | Apply GC bias correction (default: enabled) |
+| `--threads` | `-t` | Number of threads (0=all cores) |
+| `--verbose` | `-v` | Enable verbose logging |
 
-## Calculation Details
+### Bait Padding Trade-Off
 
-For each position $k$ in the region of interest:
+The `--bait-padding` option controls how many bp to trim from bait edges to avoid capture artifacts.
 
-$$ WPS(k) = N_{spanning}(k) - N_{ends}(k) $$
+| Value | Effect | Best For |
+|-------|--------|----------|
+| **50** (default) | Maximum artifact removal | WGS, large targets (>200bp) |
+| **15-20** | Preserves data in small exons | Dense exon panels (MSK-ACCESS) |
+| **0** | No trimming (not recommended) | Debugging only |
 
-Where:
-- $N_{spanning}(k)$ is the count of fragments that completely overlap the window $[k - P, k + P]$.
-- $N_{ends}(k)$ is the count of fragments with an endpoint within the window $[k - P, k + P]$.
-- **Protection Window ($P$)**:
-    - **Long WPS**: $P=60$ bp (Total window ~120bp). Targets 120-180bp fragments.
-    - **Short WPS**: $P=8$ bp (Total window ~16bp). Targets 35-80bp fragments.
-
-## Depth Normalization
-
-The normalized columns (`wps_long_norm`, `wps_short_norm`, `wps_ratio_norm`) enable comparison of WPS values **across samples** with different sequencing depths.
-
-### Formula
-
+**Adaptive Safety**: The tool automatically reduces padding for small targets:
 ```
-wps_norm = wps_raw / (total_fragments / 1,000,000)
+effective_trim = min(user_trim, target_length / 4)
 ```
+This ensures you never mask more than 50% of a small exon (25% per side).
 
-This gives **per-million fragment** values.
+---
 
-### Metadata Requirement
+## Output Files
 
-Normalization requires a metadata file from the `extract` command:
+### Foreground: `sample.WPS.parquet`
 
-```
-{sample}.metadata.json  ← Contains total_fragments
-{sample}.bed.gz         ← Input to wps
-```
+Per-region profiles centered on TSS/CTCF anchors (±1kb, 200 bins × 10bp).
 
-> **Warning**: If metadata is missing, normalized columns default to raw values (not comparable across samples). Run `krewlyzer extract` first.
+| Column | Type | Description |
+|--------|------|-------------|
+| `region_id` | string | Anchor identifier |
+| `chrom` | string | Chromosome |
+| `center` | int64 | Anchor center position |
+| `strand` | string | +/- strand |
+| `region_type` | string | TSS/CTCF |
+| `wps_nuc` | float32[200] | Nucleosome WPS profile |
+| `wps_tf` | float32[200] | TF WPS profile |
+| `wps_nuc_smooth` | float32[200] | Savitzky-Golay smoothed |
+| `wps_tf_smooth` | float32[200] | Savitzky-Golay smoothed |
+| `prot_frac_nuc` | float32[200] | Protection fraction (nuc) |
+| `prot_frac_tf` | float32[200] | Protection fraction (TF) |
+| `capture_mask` | uint8[200] | Panel mask (1=reliable, 0=edge/off-target) |
+| `local_depth` | float32 | Local fragment coverage |
 
-### When to Use Raw vs Normalized
+> **Strand Correction**: All profiles are strand-corrected.
+> - Genes on `+` strand are stored 5' → 3'
+> - Genes on `-` strand are **reversed** so they are also 5' → 3'
+> - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
 
-| Use Case | Columns |
-|----------|---------|
-| **Within-sample** pattern analysis | `wps_long`, `wps_short`, `wps_ratio` |
-| **Cross-sample** comparison | `wps_long_norm`, `wps_short_norm` |
-| **Machine learning** across cohort | Normalized columns |
+### Background: `sample.WPS_background.parquet`
+
+Hierarchical stacking of ~770K Alu elements into 29 groups.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_id` | string | Group name |
+| `stacked_wps_nuc` | float32[30] | Stacked nucleosome profile |
+| `stacked_wps_tf` | float32[30] | Stacked TF profile |
+| `stacked_wps_nuc_smooth` | float32[30] | Smoothed profile |
+| `alu_count` | int64 | Number of Alu elements in group |
+| `nrl_period_bp` | float32 | Nucleosome repeat length |
+| `nrl_snr` | float32 | FFT signal-to-noise ratio |
+| `nrl_quality` | float32 | Periodicity quality score (0-1) |
+
+---
+
+## WGS vs Panel Data (MSK-ACCESS)
+
+| Aspect | WGS | Panel (MSK-ACCESS) |
+|--------|-----|-------------------|
+| **Foreground coverage** | All regions | Sparse off-target |
+| **capture_mask** | All 1s | 1=on-target, 0=off-target |
+| **Background Alu** | Full stacking | **Still works!** (Alu is global) |
+| **Best ML features** | Gene-specific vectors | Global periodicity metrics |
+
+**Key insight**: Background Alu stacking works for panels because Alu elements are genome-wide, not restricted to capture regions.
+
+---
+
+## ML Feature Summary
+
+### From Foreground
+- Gene-specific nucleosome disruption patterns
+- TF binding footprints at promoters
+- Tissue-of-origin signatures
+
+### From Background
+- **Global tumor burden**: Loss of periodicity correlates with tumor fraction
+- **Subfamily ratios**: `Family_AluY / Family_AluJ` → Tissue context
+- **Per-chromosome**: Chromatin disruption → CNV context
+
+---
 
 ## References
 
-> See [Citation & Scientific Background](../citation.md#wps) for detailed paper summary.
+> Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.

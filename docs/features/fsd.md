@@ -3,44 +3,65 @@
 **Command**: `krewlyzer fsd`
 
 ## Purpose
-Computes high-resolution (5bp bins) fragment length distributions per chromosome arm.
+Computes high-resolution (5bp bins) fragment length distributions per chromosome arm. Produces ML-ready features with log-ratio normalization and on/off-target split for panel data.
 
-## Biological Context
-cfDNA fragmentation patterns at chromosome arms can reflect nucleosome positioning, chromatin accessibility, and cancer-specific fragmentation signatures. See [DELFI method](../citation.md#fsr) for details.
+## Key Features
+
+| Feature | Description |
+|---------|-------------|
+| **67 bins** | 5bp resolution from 65-400bp |
+| **GC-weighted** | Corrects for sequencing bias |
+| **On/off-target split** | Separate outputs for panel data |
+| **Log-ratio normalization** | log2(sample / PoN_expected) |
 
 ## Usage
+
 ```bash
-krewlyzer fsd sample.bed.gz --arms-file krewlyzer/data/ChormosomeArms/hg19_arms.bed --output output_dir/ [options]
+# WGS
+krewlyzer fsd sample.bed.gz -o output_dir/ --genome hg19
+
+# Panel (with target split via run-all)
+krewlyzer run-all sample.bam -g ref.fa -o out/ \
+    --target-regions panel_targets.bed
 ```
-## Output
-- `{sample}.FSD.tsv`: Frequency of fragment lengths per chromosome arm.
 
 ## Options
 
-| Option | Short | Type | Default | Description |
-|--------|-------|------|---------|-------------|
-| `--output` | `-o` | PATH | *required* | Output directory |
-| `--sample-name` | `-s` | TEXT | | Override sample name |
-| `--arms-file` | `-a` | PATH | | Chromosome arms BED file |
-| `--pon-model` | `-P` | PATH | | PON model for z-score computation |
-| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
-| `--gc-correct` | | FLAG | True | Apply GC bias correction |
-| `--verbose` | `-v` | FLAG | | Enable verbose logging |
-| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Output directory (required) |
+| `--arms-file` | `-a` | Chromosome arms BED file |
+| `--pon-model` | `-P` | PON model for log-ratio computation |
+| `--genome` | `-G` | Genome build: hg19/hg38 |
+| `--gc-correct` | | Apply GC bias correction (default: True) |
 
-## Clinical Interpretation
+## Output Files
 
-### Healthy vs Cancer
+### `{sample}.FSD.tsv` (off-target / default)
 
-| Metric | Healthy Plasma | Cancer (ctDNA present) |
-|--------|----------------|------------------------|
+| Column | Type | Description |
+|--------|------|-------------|
+| `region` | str | Chromosome arm (chr:start-end) |
+| `65-69`, `70-74`, ... | float | Raw GC-weighted counts (67 bins) |
+| `total` | float | Sum of all bins |
+| `65-69_logR`, ... | float | log2(sample / PoN_expected) *(with PoN)* |
+| `pon_stability` | float | 1 / (variance + k) *(with PoN)* |
+
+### `{sample}.FSD.ontarget.tsv` (panel mode only)
+
+Same schema, for fragments overlapping target regions (capture-biased).
+
+## Biological Context
+
+| Signal | Healthy | Cancer |
+|--------|---------|--------|
 | Modal peak | ~166bp | Left-shifted (~145bp) |
 | 10bp periodicity | Clear nucleosome signal | May be altered |
-| Arm-level variation | Minimal | Increased (correlates with CNAs) |
+| Arm variation | Minimal | Increased (correlates with CNAs) |
 
-### What to Look For
-- **Left-shift in distribution**: Tumor DNA is typically shorter
-- **Arm-specific changes**: May correlate with copy number alterations
-- **Loss of nucleosome periodicity**: Indicates altered chromatin structure
+## Normalization Order
 
-> **Reference:** See [Citation & Scientific Background](../citation.md#fsr) for detailed paper summary.
+1. **GC-weighting** (Rust): Raw counts × correction factor
+2. **Log-ratio** (Python): log2(sample / PoN_expected) when PoN provided
+
+> **Note**: For panel data (MSK-ACCESS), use `--target-regions` in `run-all` to separate capture-biased on-target reads from unbiased off-target reads.

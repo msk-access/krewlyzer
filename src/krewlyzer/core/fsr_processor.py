@@ -1,7 +1,8 @@
 """
 FSR (Fragment Size Ratio) processor.
 
-Shared processing logic for aggregating fragment counts and computing ratios.
+Computes short/long fragment ratios for cancer biomarker analysis.
+Uses PoN normalization BEFORE ratio calculation for accurate comparison.
 Used by both standalone fsr.py and run-all wrapper.py.
 """
 
@@ -12,6 +13,9 @@ import numpy as np
 import logging
 
 logger = logging.getLogger("core.fsr_processor")
+
+# Using FSC channels for consistent terminology
+CHANNELS = ['ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long']
 
 
 def process_fsr(
@@ -24,18 +28,21 @@ def process_fsr(
     """
     Process fragment counts into FSR ratios.
     
-    Takes raw bin-level counts (from run_unified_pipeline) and:
-    1. Aggregates into windows
-    2. Computes fragment ratios for each window
-    3. Optionally applies PON normalization before ratio calculation
-    4. Writes output TSV
+    Takes raw bin-level counts and computes short/long ratios with proper
+    normalization order:
+    1. Aggregate into windows
+    2. Normalize counts to PoN FIRST (if provided)
+    3. THEN compute ratios from normalized values
+    
+    This order is critical for accurate cross-sample comparison.
     
     Args:
-        counts_df: DataFrame with columns [chrom, start, end, ultra_short, short, intermediate, long, total, mean_gc]
+        counts_df: DataFrame with columns [chrom, start, end, ultra_short, 
+                   core_short, mono_nucl, di_nucl, long, total, mean_gc]
         output_path: Path to write FSR.tsv output
         windows: Window size in bp (default 100000)
         continue_n: Number of bins to aggregate (default 50)
-        pon: Optional PON model for GC normalization
+        pon: Optional PON model for count normalization
         
     Returns:
         Path to the output file
@@ -43,21 +50,12 @@ def process_fsr(
     logger.info(f"Processing FSR: {len(counts_df)} bins → {output_path}")
     
     # Validate required columns
-    required_cols = ['chrom', 'ultra_short', 'short', 'intermediate', 'long', 'total']
+    required_cols = ['chrom'] + CHANNELS + ['total']
     missing = [c for c in required_cols if c not in counts_df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
     
-    # Apply PON GC correction if available
-    if pon is not None and 'mean_gc' in counts_df.columns:
-        from .pon_integration import compute_gc_bias_correction
-        counts_df = compute_gc_bias_correction(
-            counts_df.copy(), pon,
-            gc_column='mean_gc',
-            size_columns=('short', 'intermediate', 'long')
-        )
-    
-    # Aggregate bins into windows and compute ratios
+    # Aggregate bins into windows
     results = []
     for chrom, group in counts_df.groupby('chrom', sort=False):
         n_bins = len(group)
@@ -67,68 +65,83 @@ def process_fsr(
             continue
         
         trunc_len = n_windows * continue_n
-        
-        # Reshape and sum
-        ultra_mat = group['ultra_short'].values[:trunc_len].reshape(n_windows, continue_n)
-        short_mat = group['short'].values[:trunc_len].reshape(n_windows, continue_n)
-        inter_mat = group['intermediate'].values[:trunc_len].reshape(n_windows, continue_n)
-        long_mat = group['long'].values[:trunc_len].reshape(n_windows, continue_n)
-        total_mat = group['total'].values[:trunc_len].reshape(n_windows, continue_n)
-        
-        ultra_sums = ultra_mat.sum(axis=1)
-        short_sums = short_mat.sum(axis=1)
-        inter_sums = inter_mat.sum(axis=1)
-        long_sums = long_mat.sum(axis=1)
-        total_sums = total_mat.sum(axis=1)
-        
         window_starts = np.arange(n_windows) * continue_n * windows
         window_ends = (np.arange(n_windows) + 1) * continue_n * windows - 1
+        
+        # Aggregate all channels
+        channel_sums = {}
+        for ch in CHANNELS:
+            mat = group[ch].values[:trunc_len].reshape(n_windows, continue_n)
+            channel_sums[ch] = mat.sum(axis=1).astype(float)
+        
+        # For FSR, "short" = ultra_short + core_short (65-149bp)
+        # and "long" = di_nucl + long (221-400bp)
+        short_counts = channel_sums['ultra_short'] + channel_sums['core_short']
+        long_counts = channel_sums['di_nucl'] + channel_sums['long']
+        
+        total_mat = group['total'].values[:trunc_len].reshape(n_windows, continue_n)
+        total_counts = total_mat.sum(axis=1).astype(float)
         
         for i in range(n_windows):
             region = f"{chrom}:{window_starts[i]}-{window_ends[i]}"
             
-            u = float(ultra_sums[i])
-            s = float(short_sums[i])
-            m = float(inter_sums[i])
-            l = float(long_sums[i])
-            t = float(total_sums[i])
+            s = short_counts[i]
+            l = long_counts[i]
+            t = total_counts[i]
             
-            # Calculate ratios (avoid division by zero)
-            if t > 0:
-                s_r = s / t
-                m_r = m / t
-                l_r = l / t
-                u_r = u / t
+            # CORRECT ORDER: Normalize to PoN FIRST
+            if pon is not None:
+                short_mean = pon.get_mean('short') if hasattr(pon, 'get_mean') else None
+                long_mean = pon.get_mean('long') if hasattr(pon, 'get_mean') else None
+                
+                if short_mean and short_mean > 0:
+                    s_norm = s / short_mean
+                else:
+                    s_norm = s
+                
+                if long_mean and long_mean > 0:
+                    l_norm = l / long_mean
+                else:
+                    l_norm = l
             else:
-                s_r = m_r = l_r = u_r = 0.0
+                s_norm = s
+                l_norm = l
             
-            # Short/Long ratio (primary cancer biomarker)
-            if l > 0:
-                sl_r = s / l
+            # THEN compute ratio from normalized values
+            if l_norm > 0:
+                short_long_ratio = s_norm / l_norm
             else:
-                sl_r = s if s > 0 else 0.0
+                short_long_ratio = s_norm if s_norm > 0 else 0.0
+            
+            # Log2 ratio for ML
+            if short_long_ratio > 0:
+                short_long_log2 = np.log2(short_long_ratio)
+            else:
+                short_long_log2 = 0.0
+            
+            # Fractions of total
+            short_frac = s / t if t > 0 else 0.0
+            long_frac = l / t if t > 0 else 0.0
             
             results.append({
                 'region': region,
-                'ultra_short_count': int(u),
                 'short_count': int(s),
-                'inter_count': int(m),
                 'long_count': int(l),
                 'total_count': int(t),
-                'short_ratio': s_r,
-                'inter_ratio': m_r,
-                'long_ratio': l_r,
-                'short_long_ratio': sl_r,
-                'ultra_short_ratio': u_r
+                'short_norm': s_norm,
+                'long_norm': l_norm,
+                'short_long_ratio': short_long_ratio,
+                'short_long_log2': short_long_log2,
+                'short_frac': short_frac,
+                'long_frac': long_frac,
             })
     
     if not results:
         logger.warning("No valid windows found for FSR")
-        # Write empty file with header
         pd.DataFrame(columns=[
-            'region', 'ultra_short_count', 'short_count', 'inter_count',
-            'long_count', 'total_count', 'short_ratio', 'inter_ratio',
-            'long_ratio', 'short_long_ratio', 'ultra_short_ratio'
+            'region', 'short_count', 'long_count', 'total_count',
+            'short_norm', 'long_norm', 'short_long_ratio', 'short_long_log2',
+            'short_frac', 'long_frac'
         ]).to_csv(output_path, sep='\t', index=False)
         return output_path
     

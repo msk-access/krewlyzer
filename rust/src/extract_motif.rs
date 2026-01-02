@@ -109,7 +109,7 @@ pub struct UnifiedConfig {
 /// Unified Parallel Engine
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
+#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, target_regions_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
 pub fn process_bam_parallel(
     bam_path: String,
     fasta_path: String,
@@ -121,6 +121,7 @@ pub fn process_bam_parallel(
     output_bed_path: Option<String>,
     output_motif_prefix: Option<String>,
     exclude_path: Option<String>,
+    target_regions_path: Option<String>,
     skip_duplicates: bool,
     require_proper_pair: bool,
     silent: bool,
@@ -138,6 +139,18 @@ pub fn process_bam_parallel(
     };
     // To share with Rayon, we wrap in Arc
     let exclude_arc = std::sync::Arc::new(exclude_regions);
+
+    // Load target regions for off-target GC model (panel data like MSK-ACCESS)
+    let target_regions = match target_regions_path {
+        Some(ref p) => {
+            let regions = load_exclude_regions(p);  // Reuse same loader
+            info!("Panel mode: GC model will use off-target reads only ({} target regions)", regions.len());
+            regions
+        },
+        None => HashSet::new(),
+    };
+    let target_arc = std::sync::Arc::new(target_regions);
+    let is_panel_mode = !target_arc.is_empty();
 
     // Load available chromosomes from FASTA to avoid fetch crashes
     let valid_chroms = if let Ok(fa) = faidx::Reader::from_path(&fasta_path) {
@@ -285,10 +298,14 @@ pub fn process_bam_parallel(
                      
                      // Accumulate GC observation for correction factor computation
                      // Length bins: 60-80, 80-100, ..., 380-400 (17 bins)
-                     let length = tlen as u64;
-                     let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
-                     let gc_pct = (gc * 100.0).round() as u8;
-                     *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                     // Panel mode: Only use OFF-TARGET fragments for GC model
+                     let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
+                     if !is_on_target {
+                         let length = tlen as u64;
+                         let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
+                         let gc_pct = (gc * 100.0).round() as u8;
+                         *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                     }
                  }
             }
             

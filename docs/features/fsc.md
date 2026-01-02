@@ -3,69 +3,71 @@
 **Command**: `krewlyzer fsc`
 
 ## Purpose
-Computes z-scored coverage of cfDNA fragments in different size ranges per genomic bin, with GC correction. This helps identify copy number variations (CNVs) and coverage anomalies specific to certain fragment sizes.
+Computes GC-corrected coverage of cfDNA fragments in 5 biologically-meaningful size channels per genomic bin. Designed for ML feature extraction in cancer detection.
 
-## Biological Context
-cfDNA fragment size profiles are informative for cancer detection and tissue-of-origin. FSC measures the normalized coverage depth of:
+## 5-Channel Fragment Size Categories
 
-- **Short (65-149bp)**: Enriched for tumor-derived cfDNA (ctDNA) in cancer patients.
-- **Intermediate (151-259bp)**: Represents mono-nucleosomal fragments.
-- **Long (261-399bp)**: Represents di-nucleosomal fragments, often from healthy cells.
-- **Total (65-399bp)**: Overall coverage.
+| Channel | Size Range | Biological Meaning |
+|---------|------------|-------------------|
+| **ultra_short** | 65-100bp | Di-nucleosomal debris, early apoptosis |
+| **core_short** | 101-149bp | Sub-nucleosomal, specific chromatin states |
+| **mono_nucl** | 150-220bp | Mono-nucleosomal (classic cfDNA peak) |
+| **di_nucl** | 221-260bp | Di-nucleosomal, transitional |
+| **long** | 261-400bp | Multi-nucleosomal, necrosis-associated |
 
-Differences in coverage patterns between size classes can reveal:
-- **Copy Number Alterations (CNAs)**: Detected via Total and size-specific coverage.
-- **Chromatin Structure**: Open chromatin (more short fragments) vs. closed chromatin (more long fragments).
+> **Note**: These 5 channels are **non-overlapping** to avoid double-counting in ML models.
 
 ## Usage
 ```bash
 krewlyzer fsc sample.bed.gz -o output_dir/ --sample-name SAMPLE [options]
 ```
 
-## Options
+## Key Options
 
-| Option | Short | Type | Default | Description |
-|--------|-------|------|---------|-------------|
-| `--output` | `-o` | PATH | *required* | Output directory |
-| `--sample-name` | `-s` | TEXT | | Override sample name |
-| `--bin-input` | `-b` | PATH | | Bin file (default: hg19 100kb bins) |
-| `--pon-model` | `-P` | PATH | | PON model for hybrid GC correction |
-| `--windows` | `-w` | INT | 100000 | Window size |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window count |
-| `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
-| `--gc-correct` | | FLAG | True | Apply GC bias correction |
-| `--verbose` | `-v` | FLAG | | Enable verbose logging |
-| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
-
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--output` | `-o` | Output directory (required) |
+| `--sample-name` | `-s` | Override sample name |
+| `--bin-input` | `-b` | Custom bin file (default: 100kb bins) |
+| `--pon-model` | `-P` | PON model for log2 ratio normalization |
+| `--genome` | `-G` | Genome build: hg19/hg38 |
+| `--gc-correct` | | Apply GC bias correction (default: True) |
 
 ## Output Format
 
 Output: `{sample}.FSC.tsv`
 
-| Column | Description |
-|--------|-------------|
-| `region` | Genomic region (chr:start-end) |
-| `short-fragment-zscore` | Z-score of short fragment coverage |
-| `itermediate-fragment-zscore` | Z-score of intermediate fragment coverage |
-| `long-fragment-zscore` | Z-score of long fragment coverage |
-| `total-fragment-zscore` | Z-score of total fragment coverage |
+### Base Columns (always present)
 
-## Interpretation Guide
+| Column | Type | Description |
+|--------|------|-------------|
+| `chrom` | str | Chromosome |
+| `start` | int | Window start (0-based) |
+| `end` | int | Window end |
+| `ultra_short` | float | GC-weighted count (65-100bp) |
+| `core_short` | float | GC-weighted count (101-149bp) |
+| `mono_nucl` | float | GC-weighted count (150-220bp) |
+| `di_nucl` | float | GC-weighted count (221-260bp) |
+| `long` | float | GC-weighted count (261-400bp) |
+| `total` | float | GC-weighted total (65-400bp) |
 
-| Metric | High Z-Score (>2) | Low Z-Score (<-2) |
-|--------|-------------------|-------------------|
-| **Total** | Copy number gain / Accesssible region | Copy number loss / Closed chromatin |
-| **Short** | **Tumor-enriched** / Open chromatin | Depleted ctDNA / Closed chromatin |
-| **Long** | Healthy/Leukocyte DNA enriched | Fragmentation / Open chromatin |
+### PoN Columns (when `--pon-model` provided)
 
-**Note**: Counts are GC-corrected before Z-score calculation to remove sequencing bias.
+| Column | Type | Description |
+|--------|------|-------------|
+| `*_log2` | float | log2(channel / PoN_mean) |
+| `*_reliability` | float | 1 / (PoN_variance + k) |
 
-## Calculation Details
+## Normalization Order
 
-1.  **Binning**: Fragments are counted in 100kb genomic bins (or custom regions).
-2.  **GC Correction**: Raw counts are adjusted for GC content bias using Loess regression (GC vs Count).
-3.  **Aggregation**: Adjusted counts are summed over `N=50` consecutive bins (5Mb effective window) to smooth noise.
-4.  **Z-Score Normalization**:
-    $$ Z = \frac{X - \mu}{\sigma} $$
-    Where $X$ is the summed count for the window, and $\mu, \sigma$ are the genome-wide mean and standard deviation.
+1. **GC-weighting** (Rust): Raw counts × correction factor per (length, GC) bin
+2. **PoN log-ratio** (Python): log2(sample / PoN mean) when PoN model provided
 
+## Panel Data Support
+
+For targeted panels (e.g., MSK-ACCESS), use `--target-regions` in `run-all` to compute GC correction from off-target reads only:
+
+```bash
+krewlyzer run-all sample.bam -g ref.fa -o out/ \
+    --target-regions panel_targets.bed
+```

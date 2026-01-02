@@ -420,26 +420,63 @@ def _compute_fsd_baseline(all_fsd_data: List[pd.DataFrame]) -> Optional[FsdBasel
 
 def _compute_wps_baseline(all_wps_data: List[pd.DataFrame]) -> Optional[WpsBaseline]:
     """
-    Compute WPS baseline from sample data.
+    Compute WPS baseline from Parquet vector format.
     
-    Aggregates mean WPS per region across samples.
+    For each region, computes mean and std vectors across all samples.
+    This enables PoN subtraction with per-position z-scores.
+    
+    Expected columns: region_id, wps_nuc[200], wps_tf[200], etc.
     """
+    import numpy as np
+    
     if not all_wps_data:
         return None
     
-    # Combine all samples
-    combined = pd.concat(all_wps_data, ignore_index=True)
+    template = all_wps_data[0].copy()
+    region_id_col = "region_id" if "region_id" in template.columns else "group_id"
     
-    # Aggregate per region
-    baseline = combined.groupby("gene_id").agg({
-        "wps_long": ["mean", "std"],
-        "wps_short": ["mean", "std"]
-    }).reset_index()
+    # Columns to aggregate
+    vector_cols = [c for c in ["wps_nuc", "wps_tf", "prot_frac_nuc", "prot_frac_tf"] 
+                   if c in template.columns]
     
-    # Flatten column names
-    baseline.columns = ["region_id", "wps_long_mean", "wps_long_std", "wps_short_mean", "wps_short_std"]
+    if not vector_cols:
+        logger.warning("No WPS vector columns found (expected wps_nuc, wps_tf)")
+        return None
     
-    return WpsBaseline(regions=baseline)
+    result_data = []
+    
+    for idx, row in template.iterrows():
+        region_id = row[region_id_col]
+        result_row = {region_id_col: region_id}
+        
+        # Copy non-vector metadata
+        for col in ["chrom", "center", "strand", "region_type"]:
+            if col in template.columns:
+                result_row[col] = row[col]
+        
+        for col in vector_cols:
+            # Collect vectors from all samples for this region
+            vectors = []
+            for df in all_wps_data:
+                if idx < len(df) and col in df.columns:
+                    vec = df.iloc[idx][col]
+                    if vec is not None and len(vec) > 0:
+                        vectors.append(np.array(vec, dtype=np.float32))
+            
+            if vectors:
+                stacked = np.stack(vectors, axis=0)  # (n_samples, n_bins)
+                mean_vec = np.mean(stacked, axis=0)
+                std_vec = np.std(stacked, axis=0)
+                
+                result_row[f"{col}_mean"] = mean_vec.tolist()
+                result_row[f"{col}_std"] = std_vec.tolist()
+        
+        result_data.append(result_row)
+    
+    result_df = pd.DataFrame(result_data)
+    logger.info(f"WPS baseline: {len(result_df)} regions, {len(all_wps_data)} samples")
+    
+    return WpsBaseline(regions=result_df)
 
 
 def _save_pon_model(model: PonModel, output: Path) -> None:
