@@ -124,8 +124,10 @@ def build_pon(
                     bed_output_path,   # output_bed_path
                     None,              # output_motif_prefix (skip motifs)
                     None,              # exclude_path
+                    None,              # target_regions_path
                     True,              # skip_duplicates
-                    require_proper_pair  # from CLI argument
+                    require_proper_pair,  # from CLI argument
+                    True               # silent
                 )
                 bed_path = Path(bed_output_path)
                 if bed_path.exists():

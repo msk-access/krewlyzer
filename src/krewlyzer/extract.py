@@ -179,8 +179,8 @@ def extract(
             logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
         
         # Call Unified Rust Engine (Extract Mode)
-        # Returns (fragment_count, em_counts, bpm_counts, gc_observations)
-        fragment_count, _, _, gc_observations = _core.extract_motif.process_bam_parallel(
+        # Returns (fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on)
+        fragment_count, _, _, gc_observations, _, _ = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             mapq,

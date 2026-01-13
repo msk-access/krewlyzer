@@ -119,10 +119,9 @@ def motif(
         chroms = chromosomes.split(',') if chromosomes else None
         
         # Call Unified Rust Engine (Extract + Motif)
-        # Returns: (fragment_count, em_counts, bpm_counts, dinuc_counts)
-        # We only need the first 3 for motif output
+        # Returns: (fragment_count, em_counts, bpm_counts, gc_obs, em_counts_on, bpm_counts_on)
         
-        fragment_count, em_counts, bpm_counts, _dinuc = _core.extract_motif.process_bam_parallel(
+        fragment_count, em_counts, bpm_counts, _dinuc, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ
@@ -133,6 +132,7 @@ def motif(
             None,  # output_bed_path
             "enable",  # output_motif_prefix (triggers counting)
             None,  # exclude_path
+            None,  # target_regions_path (motif standalone doesn't split on/off yet)
             True,  # skip_duplicates
             require_proper_pair,  # proper pair filter
             False  # silent

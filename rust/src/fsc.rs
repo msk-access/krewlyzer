@@ -81,24 +81,48 @@ fn parse_bed_line_to_region(line: &str) -> Option<Region> {
 }
 
 /// FscConsumer for the Unified Engine
+/// 
+/// When target_regions are provided (panel data like MSK-ACCESS),
+/// counts are split into off-target (primary) and on-target (secondary) outputs.
+/// Off-target data is used for biomarker calculation (unbiased by PCR).
+/// On-target data is only useful for CNV calling.
 #[derive(Clone)]
 pub struct FscConsumer {
     // Read-only shared state
     trees: Arc<HashMap<u32, COITree<usize, u32>>>, // ChromID -> (IntervalTree<Data=usize, Coords=u32>)
     factors: Option<Arc<CorrectionFactors>>,
     
+    // Target regions for on/off-target split (panel data)
+    target_tree: Option<Arc<HashMap<u32, COITree<(), u32>>>>,
+    
     // Thread-local state
+    // Off-target counts (default output - unbiased)
     counts: Vec<BinResult>,
+    // On-target counts (only populated if target_tree is Some)
+    on_target_counts: Vec<BinResult>,
 }
 
 impl FscConsumer {
-    pub fn new(regions: &[Region], chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Self {
+    pub fn new(
+        regions: &[Region], 
+        chrom_map: &mut ChromosomeMap, 
+        factors: Option<Arc<CorrectionFactors>>,
+        target_regions: Option<Arc<HashMap<u32, COITree<(), u32>>>>
+    ) -> Self {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
         let mut counts = Vec::with_capacity(regions.len());
+        let mut on_target_counts = Vec::with_capacity(regions.len());
         
         for (i, region) in regions.iter().enumerate() {
-            // Init count for this region
+            // Init count for this region (off-target)
             counts.push(BinResult {
+                chrom: region.chrom.clone(),
+                start: region.start,
+                end: region.end,
+                ..Default::default()
+            });
+            // Init count for on-target
+            on_target_counts.push(BinResult {
                 chrom: region.chrom.clone(),
                 start: region.start,
                 end: region.end,
@@ -128,17 +152,39 @@ impl FscConsumer {
         Self {
             trees: Arc::new(trees),
             factors,
+            target_tree: target_regions,
             counts,
+            on_target_counts,
         }
     }
     
-    pub fn write_output(&self, path: &Path) -> Result<()> {
+    /// Check if fragment overlaps any target region
+    fn is_on_target(&self, fragment: &Fragment) -> bool {
+        if let Some(ref target_tree) = self.target_tree {
+            if let Some(tree) = target_tree.get(&fragment.chrom_id) {
+                let start = fragment.start as i32;
+                let end_closed = if fragment.end > fragment.start { 
+                    (fragment.end - 1) as i32 
+                } else { 
+                    start 
+                };
+                
+                let mut found = false;
+                tree.query(start, end_closed, |_| { found = true; });
+                return found;
+            }
+        }
+        false
+    }
+    
+    /// Write counts to file
+    fn write_counts(&self, counts: &[BinResult], path: &Path) -> Result<()> {
         let file = File::create(path)?;
         let mut writer = std::io::BufWriter::new(file);
         
         writeln!(writer, "chrom\tstart\tend\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\ttotal\tmean_gc")?;
         
-        for bin in &self.counts {
+        for bin in counts {
             let mean_gc = if bin.gc_count > 0.0 { bin.gc_sum / bin.gc_count } else { 0.0 };
             writeln!(writer, "{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}",
                 bin.chrom, bin.start, bin.end,
@@ -146,6 +192,32 @@ impl FscConsumer {
                 bin.di_nucl_count, bin.long_count, bin.total_count, mean_gc
             )?;
         }
+        Ok(())
+    }
+    
+    pub fn write_output(&self, path: &Path) -> Result<()> {
+        use log::info;
+        
+        // Log summary
+        let total_off: f64 = self.counts.iter().map(|b| b.total_count).sum();
+        let total_on: f64 = self.on_target_counts.iter().map(|b| b.total_count).sum();
+        
+        info!("FSC: {} bins, {:.0} off-target frags, {:.0} on-target frags", 
+            self.counts.len(), total_off, total_on);
+        
+        // Write off-target (main output - unbiased for biomarkers)
+        self.write_counts(&self.counts, path)?;
+        
+        // Write on-target if targets were provided and there's data
+        if self.target_tree.is_some() && total_on > 0.0 {
+            let stem = path.file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output");
+            let on_path = path.with_file_name(format!("{}.ontarget.tsv", stem));
+            self.write_counts(&self.on_target_counts, &on_path)?;
+            info!("FSC on-target: {:?}", on_path);
+        }
+        
         Ok(())
     }
 }
@@ -156,60 +228,50 @@ impl FragmentConsumer for FscConsumer {
     }
 
     fn consume(&mut self, fragment: &Fragment) {
+        // Check if this fragment is on-target (for routing to correct count vector)
+        let on_target = self.is_on_target(fragment);
+        
         if let Some(tree) = self.trees.get(&fragment.chrom_id) {
             let start = fragment.start as u32;
             let end = fragment.end as u32;
             let end_closed = if end > start { end - 1 } else { start };
             
             // Query for overlapping bins
-            // API takes i32
             tree.query(start as i32, end_closed as i32, |node| {
                 let bin_idx = node.metadata.to_owned();
-                // Overlap check logic:
-                // `tree.query` returns anything that overlaps.
-                // FSC logic is: read must START and END within appropriate bounds? 
-                // Or rather: Does the fragment 'fall into' this bin?
-                // Usually Bins partition the genome (non-overlapping). 
-                // A read is assigned to a bin based on its midpoint? Or overlap?
-                // OLD Logic check:
-                // `if *frag_end <= region.start || *frag_start >= region.end { continue; }` => Any overlap.
-                // It just checks overlap. And increments count.
-                // So if a read overlaps two bins, it counts in BOTH?
-                // Yes, `results` loop checks each region independently.
                 
-                // Get mutable ref to bin result
-                // SAFETY: bin_idx comes from initialization, guaranteed valid.
-                unsafe {
-                    let res = self.counts.get_unchecked_mut(bin_idx);
-                    
-                    // Accept fragments in 65-400bp range
-                    if fragment.length >= 65 && fragment.length <= 400 {
-                        let gc_pct = (fragment.gc * 100.0).round() as u8;
-                        let weight = if let Some(ref factors) = self.factors {
-                             factors.get_factor(fragment.length, gc_pct)
-                        } else {
-                             1.0
-                        };
+                // Accept fragments in 65-400bp range
+                if fragment.length >= 65 && fragment.length <= 400 {
+                    let gc_pct = (fragment.gc * 100.0).round() as u8;
+                    let weight = if let Some(ref factors) = self.factors {
+                         factors.get_factor(fragment.length, gc_pct)
+                    } else {
+                         1.0
+                    };
 
+                    // Route to correct vector (on-target or off-target)
+                    // SAFETY: bin_idx comes from initialization, guaranteed valid.
+                    unsafe {
+                        let res = if on_target {
+                            self.on_target_counts.get_unchecked_mut(bin_idx)
+                        } else {
+                            self.counts.get_unchecked_mut(bin_idx)
+                        };
+                        
                         res.total_count += weight;
                         res.gc_sum += fragment.gc as f64 * weight;
                         res.gc_count += weight;
                         
                         // 5 non-overlapping channels for ML features
                         if fragment.length <= 100 {
-                            // Ultra-short: 65-100bp (di-nucleosomal debris)
                             res.ultra_short_count += weight;
                         } else if fragment.length <= 149 {
-                            // Core-short: 101-149bp (sub-nucleosomal)
                             res.core_short_count += weight;
                         } else if fragment.length <= 220 {
-                            // Mono-nucleosomal: 150-220bp (classic cfDNA peak)
                             res.mono_nucl_count += weight;
                         } else if fragment.length <= 260 {
-                            // Di-nucleosomal: 221-260bp
                             res.di_nucl_count += weight;
                         } else {
-                            // Long: 261-400bp (multi-nucleosomal)
                             res.long_count += weight;
                         }
                     }
@@ -219,8 +281,22 @@ impl FragmentConsumer for FscConsumer {
     }
 
     fn merge(&mut self, other: Self) {
+        // Merge off-target counts
         for (i, other_bin) in other.counts.into_iter().enumerate() {
             let my_bin = &mut self.counts[i];
+            my_bin.ultra_short_count += other_bin.ultra_short_count;
+            my_bin.core_short_count += other_bin.core_short_count;
+            my_bin.mono_nucl_count += other_bin.mono_nucl_count;
+            my_bin.di_nucl_count += other_bin.di_nucl_count;
+            my_bin.long_count += other_bin.long_count;
+            my_bin.total_count += other_bin.total_count;
+            my_bin.gc_sum += other_bin.gc_sum;
+            my_bin.gc_count += other_bin.gc_count;
+        }
+        
+        // Merge on-target counts
+        for (i, other_bin) in other.on_target_counts.into_iter().enumerate() {
+            let my_bin = &mut self.on_target_counts[i];
             my_bin.ultra_short_count += other_bin.ultra_short_count;
             my_bin.core_short_count += other_bin.core_short_count;
             my_bin.mono_nucl_count += other_bin.mono_nucl_count;
@@ -275,7 +351,7 @@ pub fn count_fragments_by_bins(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = FscConsumer::new(&regions, &mut chrom_map, None);
+    let consumer = FscConsumer::new(&regions, &mut chrom_map, None, None);  // No target_regions for legacy API
     
     // 2. Run Engine (Using logic similar to Unified Pipeline but for single consumer)
     let engine = FragmentAnalyzer::new(consumer, 100_000); // 100k chunks

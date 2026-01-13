@@ -220,7 +220,18 @@ pub fn run_unified_pipeline(
         // Need to load regions. Reuse verify code?
         // fsc::parse_bin_file is public.
         let regions = crate::fsc::parse_bin_file(&bins).map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-        fsc_consumer = Some(FscConsumer::new(&regions, &mut chrom_map, factors_arc.clone()));
+        
+        // Load target regions if provided (for on/off-target split)
+        let target_tree = if let Some(ref target_path) = target_regions_path {
+            let tree = crate::fsd::load_target_regions(target_path, &mut chrom_map)
+                .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+            info!("FSC: Panel mode enabled, on/off-target split active");
+            Some(Arc::new(tree))
+        } else {
+            None
+        };
+        
+        fsc_consumer = Some(FscConsumer::new(&regions, &mut chrom_map, factors_arc.clone(), target_tree));
     }
     
     let mut wps_consumer = None;

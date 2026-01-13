@@ -139,9 +139,15 @@ pub struct OcfConsumer {
     labels: Arc<Vec<String>>, // LabelID -> Name
     factors: Option<Arc<CorrectionFactors>>,
     
+    // Target regions for on/off-target split (panel data)
+    target_tree: Option<Arc<HashMap<u32, COITree<(), u32>>>>,
+    
     // Thread-local state
     // Indexed by LabelID
+    // Off-target stats (primary - unbiased)
     stats: Vec<LabelStats>,
+    // On-target stats (for comparison - PCR biased)
+    stats_on: Vec<LabelStats>,
 }
 
 impl OcfConsumer {

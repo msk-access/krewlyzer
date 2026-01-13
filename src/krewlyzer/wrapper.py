@@ -115,17 +115,25 @@ def run_all(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
+    # Panel mode detection (affects FSC/FSR aggregation)
+    is_panel_mode = target_regions and isinstance(target_regions, Path) and target_regions.exists()
+    
     # Window settings for FSC/FSR
-    if bin_input:
+    # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
+    # - WGS default: aggregate 50 bins → 5Mb windows for arm-level CNV
+    if bin_input or is_panel_mode:
         fsc_windows, fsc_continue_n = 1, 1
-        logger.info(f"Using custom bin file: {bin_input}")
+        if bin_input:
+            logger.info(f"Using custom bin file: {bin_input}")
+        if is_panel_mode:
+            logger.info(f"Panel mode: FSC/FSR aggregation disabled (preserving gene-level resolution)")
     else:
         fsc_windows, fsc_continue_n = 100000, 50
     
     logger.info(f"Processing sample: {sample}")
     logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
     
-    if target_regions and isinstance(target_regions, Path) and target_regions.exists():
+    if is_panel_mode:
         logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
     
     # Determine which optional tools will run
@@ -178,7 +186,8 @@ def run_all(
             
             try:
                 # Call Unified Engine (silent=True to hide Rust progress)
-                fragment_count, em_counts, bpm_counts, gc_observations = _core.extract_motif.process_bam_parallel(
+                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on)
+                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
                     str(bam_input),
                     str(reference),
                     mapq,
@@ -232,6 +241,7 @@ def run_all(
                 # --- Post-Process Motif (Write Files) ---
                 from .core.motif_processor import process_motif_outputs
                 
+                # Off-target motifs (primary - unbiased for biomarkers)
                 total_em, total_bpm, mds = process_motif_outputs(
                     em_counts=em_counts,
                     bpm_counts=bpm_counts,
@@ -242,6 +252,25 @@ def run_all(
                     kmer=4,
                     include_headers=True
                 )
+                
+                # On-target motifs (for panel data comparison - PCR biased)
+                is_panel_mode = target_regions and isinstance(target_regions, Path) and target_regions.exists()
+                if is_panel_mode and sum(em_counts_on.values()) > 0:
+                    edm_on = output / f"{sample}.EndMotif.ontarget.tsv"
+                    bpm_on = output / f"{sample}.BreakPointMotif.ontarget.tsv"
+                    mds_on = output / f"{sample}.MDS.ontarget.tsv"
+                    
+                    total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
+                        em_counts=em_counts_on,
+                        bpm_counts=bpm_counts_on,
+                        edm_output=edm_on,
+                        bpm_output=bpm_on,
+                        mds_output=mds_on,
+                        sample_name=sample,
+                        kmer=4,
+                        include_headers=True
+                    )
+                    logger.info(f"Motif on-target: {total_em_on:,} EM, {total_bpm_on:,} BPM")
                 
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
                     
@@ -352,13 +381,27 @@ def run_all(
                     from .core.pon_integration import load_pon_model
                     pon = load_pon_model(pon_model)
                 
-                # FSC Output (using shared processor)
+                # FSC Output (off-target - primary for biomarkers)
                 final_fsc = output / f"{sample}.FSC.tsv"
                 process_fsc(df_counts, final_fsc, fsc_windows, fsc_continue_n, pon=pon)
                 
-                # FSR Output (using shared processor)
+                # FSR Output (off-target - primary for biomarkers)
                 final_fsr = output / f"{sample}.FSR.tsv"
                 process_fsr(df_counts, final_fsr, fsc_windows, fsc_continue_n, pon=pon)
+                
+                # Process on-target files if they exist (panel mode)
+                out_fsc_raw_ontarget = output / f"{sample}_raw.FSC.ontarget.tsv"
+                if out_fsc_raw_ontarget.exists():
+                    logger.info("Processing on-target FSC/FSR (for CNV only)")
+                    df_counts_on = pd.read_csv(out_fsc_raw_ontarget, sep='\t')
+                    
+                    # FSC on-target (for CNV analysis only)
+                    final_fsc_on = output / f"{sample}.FSC.ontarget.tsv"
+                    process_fsc(df_counts_on, final_fsc_on, fsc_windows, fsc_continue_n, pon=pon)
+                    
+                    # FSR on-target (for comparison only - PCR biased)
+                    final_fsr_on = output / f"{sample}.FSR.ontarget.tsv"
+                    process_fsr(df_counts_on, final_fsr_on, fsc_windows, fsc_continue_n, pon=pon)
         
             # OCF (Move files)
             src_ocf = out_ocf_dir / "all.ocf.tsv"
