@@ -54,14 +54,58 @@ workflow {
         exit 0
     }
 
+    // =====================================================
+    // ASSAY RESOLUTION FUNCTIONS (XS1, XS2, WGS)
+    // =====================================================
+    
+    // Assay code to PON filename mapping
+    def assayToPon = [
+        'XS1': 'msk-access-v1.pon.parquet',
+        'XS2': 'msk-access-v2.pon.parquet',
+        'WGS': 'wgs.pon.parquet'
+    ]
+    
+    // Assay code to targets filename mapping
+    def assayToTargets = [
+        'XS1': 'XS1_targets.bed',
+        'XS2': 'XS2_targets.bed'
+        // WGS has no targets
+    ]
+
+    // Resolve PON model: explicit > assay-based > global param
+    def resolvePon = { row ->
+        if (row.pon) return file(row.pon)
+        if (row.assay && params.asset_dir && assayToPon[row.assay]) {
+            def assay_pon = file("${params.asset_dir}/pon/${assayToPon[row.assay]}")
+            if (assay_pon.exists()) return assay_pon
+            log.warn "PON not found for assay ${row.assay}: ${assay_pon}"
+        }
+        if (params.pon_model) return file(params.pon_model)
+        return []
+    }
+
+    // Resolve targets: explicit > assay-based > global param
+    def resolveTargets = { row ->
+        if (row.targets) return file(row.targets)
+        if (row.assay && params.asset_dir && assayToTargets[row.assay]) {
+            def assay_targets = file("${params.asset_dir}/targets/${assayToTargets[row.assay]}")
+            if (assay_targets.exists()) return assay_targets
+            log.warn "Targets not found for assay ${row.assay}: ${assay_targets}"
+        }
+        if (params.targets) return file(params.targets)
+        return []
+    }
+
     // 1. Parse Sample Sheet
     Channel.fromPath(params.samplesheet)
         .splitCsv(header:true)
         .map { row ->
-            def meta = [id: row.sample]
+            def meta = [id: row.sample, assay: row.assay ?: 'UNKNOWN']
             
             // Debug logging
-            // log.info "Processing ${row.sample}: BAM=${row.bam}, METH=${row.meth_bam}, BED=${row.bed}, VCF=${row.vcf}, MAF=${row.maf}"
+            if (params.verbose) {
+                log.info "Processing ${row.sample}: ASSAY=${row.assay ?: 'N/A'}, BAM=${row.bam}, BED=${row.bed}"
+            }
 
             // Auto-detect Index for WGS BAM
             def bam = row.bam ? file(row.bam) : null
@@ -76,13 +120,17 @@ workflow {
             def maf = row.maf ? file(row.maf) : null
             // single_sample_maf: if true, skip filtering and use MAF directly
             def single_sample = row.single_sample_maf?.toLowerCase() in ['true', 'yes', '1']
+            
+            // Resolve PON and targets based on assay
+            def pon = resolvePon(row)
+            def targets = resolveTargets(row)
 
-            [ meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample ]
+            [ meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample, pon, targets ]
         }
-        .multiMap { meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample ->
-            runall: bam  ? [ meta, bam, bai, vcf ] : null
+        .multiMap { meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample, pon, targets ->
+            runall: bam  ? [ meta, bam, bai, vcf, pon, targets ] : null
             methyl: mbam ? [ meta, mbam, mbai ]    : null
-            bedops: bed  ? [ meta, bed ]           : null
+            bedops: bed  ? [ meta, bed, pon, targets ]           : null
             // Multi-sample MAF: needs filtering
             maf_multi:  (bam && maf && !single_sample) ? [ meta, bam, bai, maf ] : null
             // Single-sample MAF: skip filtering, pass directly
@@ -100,8 +148,7 @@ workflow {
     // 2. Run-All (Optimal path for WGS BAMs)
     KREWLYZER_RUNALL(
         ch_runall,
-        file(params.ref),
-        params.targets ? file(params.targets) : []
+        file(params.ref)
     )
 
     // 3. Methylation (UXM path)
@@ -111,18 +158,27 @@ workflow {
     )
 
     // 4. Bed Operations (Lightweight path for pre-extracted BEDs)
-    // Run compatible tools in parallel
+    // Extract bed-only channel (meta, bed) for simpler tools
+    ch_bed_only = ch_bedops.map { meta, bed, pon, targets -> [ meta, bed ] }
     
-    // Tools that support optional targets
-    KREWLYZER_FSC(ch_bedops, params.targets ? file(params.targets) : [])
-    KREWLYZER_FSR(ch_bedops, params.targets ? file(params.targets) : [])
+    // FSC/FSR get optional targets from channel
+    ch_bed_targets = ch_bedops.map { meta, bed, pon, targets -> [ meta, bed, targets ?: [] ] }
+    KREWLYZER_FSC(ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, ch_bed_targets.map { it[2] })
+    KREWLYZER_FSR(ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, ch_bed_targets.map { it[2] })
     
-    // Tools that require Reference
-    KREWLYZER_WPS(ch_bedops, file(params.ref))
-    KREWLYZER_OCF(ch_bedops, file(params.ref))
+    // WPS with optional anchors
+    KREWLYZER_WPS(
+        ch_bed_only,
+        file(params.ref),
+        params.wps_anchors ? file(params.wps_anchors) : [],
+        params.wps_background ? file(params.wps_background) : []
+    )
     
-    // Tools that need only BED
-    KREWLYZER_FSD(ch_bedops)
+    // OCF
+    KREWLYZER_OCF(ch_bed_only, file(params.ref))
+    
+    // FSD - only needs bed
+    KREWLYZER_FSD(ch_bed_only)
 
     // 5. MFSD (Mutant Fragment Size Distribution)
     

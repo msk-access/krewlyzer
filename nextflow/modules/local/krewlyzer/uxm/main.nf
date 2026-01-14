@@ -15,14 +15,16 @@ process KREWLYZER_UXM {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
     
     """
     krewlyzer uxm \\
-        $bam \\
+        -i $bam \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
         $genome_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -15,11 +15,12 @@ process KREWLYZER_MOTIF {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def verbose_arg = params.verbose ? "--verbose" : ""
 
     """
     krewlyzer motif \\
-        $bam \\
-        --reference $fasta \\
+        -i $bam \\
+        -r $fasta \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\

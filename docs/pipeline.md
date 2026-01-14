@@ -152,6 +152,7 @@ For batch processing, use the Nextflow pipeline:
 nextflow run main.nf \
     --samplesheet samples.csv \
     --ref /path/to/hg19.fa \
+    --asset_dir /path/to/krewlyzer/data/ \
     --outdir results/
 ```
 
@@ -162,33 +163,72 @@ nextflow run main.nf \
 | `--samplesheet` | *required* | CSV with sample information |
 | `--ref` | *required* | Reference genome FASTA |
 | `--outdir` | `./results` | Output directory |
-| `--targets` | | Target BED for panel mode |
+| `--asset_dir` | | Base directory for PON/targets (enables assay resolution) |
+| `--targets` | | Global target BED (fallback) |
 | `--genome` | `hg19` | Genome build |
-| `--pon_model` | | PON model path |
+| `--pon_model` | | Global PON model (fallback) |
+| `--bait_padding` | `50` | Bait edge padding for WPS |
+| `--verbose` | `false` | Enable verbose logging |
 | `--threads` | `8` | Threads per process |
 
 ### Samplesheet Format
 
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf
-sample1,/path/to/sample1.bam,,/path/to/sample1.vcf,,,
-sample2,/path/to/sample2.bam,,,,/path/to/sample2.maf,true
-sample3,,,,/path/to/pre_extracted.bed.gz,,
+sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sample` | TEXT | Sample identifier |
+| `bam` | PATH | WGS/Panel BAM file |
+| `meth_bam` | PATH | Bisulfite BAM for UXM |
+| `vcf` | PATH | VCF for mFSD |
+| `bed` | PATH | Pre-extracted .bed.gz |
+| `maf` | PATH | MAF for mFSD |
+| `single_sample_maf` | BOOL | Skip MAF filtering if `true` |
+| `assay` | TEXT | Assay code: `XS1`, `XS2`, `WGS` |
+| `pon` | PATH | Sample-specific PON (overrides assay) |
+| `targets` | PATH | Sample-specific targets (overrides assay) |
+
+### Assay Resolution (XS1/XS2)
+
+When `assay` is set and `--asset_dir` is provided, the pipeline auto-resolves:
+
+| Assay | PON File | Targets File |
+|-------|----------|--------------|
+| `XS1` | `{asset_dir}/pon/msk-access-v1.pon.parquet` | `{asset_dir}/targets/XS1_targets.bed` |
+| `XS2` | `{asset_dir}/pon/msk-access-v2.pon.parquet` | `{asset_dir}/targets/XS2_targets.bed` |
+| `WGS` | `{asset_dir}/pon/wgs.pon.parquet` | None |
+
+### Example Samplesheet
+
+```csv
+sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+# MSK-ACCESS V1 samples (auto-resolve PON/targets)
+ACCESS_001,/data/sample1.bam,,,,,false,XS1,,
+
+# MSK-ACCESS V2 with MAF
+ACCESS_002,/data/sample2.bam,,,,/data/cohort.maf,false,XS2,,
+
+# WGS (no targets)
+WGS_001,/data/wgs.bam,,/data/wgs.vcf,,,,WGS,,
+
+# Custom PON/targets override
+CUSTOM,/data/custom.bam,,,,,,,/data/custom.pon.parquet,/data/custom.bed
 ```
 
 ### Pipeline Logic
 
-| Column | Triggers |
-|--------|----------|
-| `bam` | Full run-all workflow |
-| `meth_bam` | UXM methylation analysis |
-| `bed` | Fragment-only features (no extract) |
-| `vcf`/`maf` | mFSD variant analysis |
+| Input | Triggered Workflow |
+|-------|-------------------|
+| `bam` only | Full run-all (extract → features) |
+| `bam` + `vcf`/`maf` | run-all + mFSD |
+| `meth_bam` only | UXM methylation |
+| `bed` only | FSC, FSR, FSD, WPS, OCF (no extract) |
 
 ### Profiles
-- `-profile lsf` – LSF clusters
-- `-profile slurm` – SLURM clusters
 - `-profile docker` – Docker container
+- `-profile slurm` – SLURM clusters (cmobic_cpu)
 
 ---
 

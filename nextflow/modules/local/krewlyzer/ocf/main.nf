@@ -16,15 +16,21 @@ process KREWLYZER_OCF {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
+    def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
+    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
 
     """
     krewlyzer ocf \\
-        $bed \\
+        -i $bed \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
         $genome_arg \\
         $gc_arg \\
+        $targets_arg \\
+        $pon_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

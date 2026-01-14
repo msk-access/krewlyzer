@@ -97,7 +97,7 @@ krewlyzer ocf -i sample.bed.gz -o output/
 ### For MRD Monitoring
 ```bash
 # Compare mutant vs wild-type fragment sizes
-krewlyzer mfsd sample.bam -i variants.vcf -o output/
+krewlyzer mfsd -i sample.bam -V variants.vcf -o output/
 ```
 
 ### For Methylation Deconvolution

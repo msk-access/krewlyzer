@@ -1,7 +1,7 @@
 process KREWLYZER_WPS {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:latest"
+    container "ghcr.io/msk-access/krewlyzer:0.3.2"
 
     input:
     tuple val(meta), path(bed)
@@ -19,13 +19,17 @@ process KREWLYZER_WPS {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
-    def ref_arg = fasta ? "--reference ${fasta}" : ""
+    def ref_arg = fasta ? "-r ${fasta}" : ""
     def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
     def background_arg = wps_background ? "--background ${wps_background}" : ""
+    def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
+    def bait_arg = params.bait_padding ? "--bait-padding ${params.bait_padding}" : ""
+    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
 
     """
     krewlyzer wps \\
-        $bed \\
+        -i $bed \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
@@ -34,6 +38,10 @@ process KREWLYZER_WPS {
         $gc_arg \\
         $anchors_arg \\
         $background_arg \\
+        $targets_arg \\
+        $bait_arg \\
+        $pon_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml
