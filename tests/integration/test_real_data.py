@@ -18,7 +18,7 @@ def test_extract_real_bam(tmp_path, real_bam, real_reference):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "extract", str(real_bam),
+        "extract", "-i", str(real_bam),
         "--reference", str(real_reference),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -39,7 +39,7 @@ def test_fsc_real_data(tmp_path, real_bam, real_reference, real_bins):
     # First run extract to get BED.gz
     output_dir = tmp_path / "output"
     runner.invoke(app, [
-        "extract", str(real_bam),
+        "extract", "-i", str(real_bam),
         "--reference", str(real_reference),
         "-o", str(output_dir),
         "-s", "test_sample",
@@ -52,7 +52,7 @@ def test_fsc_real_data(tmp_path, real_bam, real_reference, real_bins):
     
     # Run FSC
     result = runner.invoke(app, [
-        "fsc", str(bedgz),
+        "fsc", "-i", str(bedgz),
         "-b", str(real_bins),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -70,7 +70,7 @@ def test_fsd_real_data(tmp_path, real_bam, real_reference, real_arms):
     # First run extract
     output_dir = tmp_path / "output"
     runner.invoke(app, [
-        "extract", str(real_bam),
+        "extract", "-i", str(real_bam),
         "--reference", str(real_reference),
         "-o", str(output_dir),
         "-s", "test_sample",
@@ -82,7 +82,7 @@ def test_fsd_real_data(tmp_path, real_bam, real_reference, real_arms):
         pytest.skip("Extract step failed")
     
     result = runner.invoke(app, [
-        "fsd", str(bedgz),
+        "fsd", "-i", str(bedgz),
         "-a", str(real_arms),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -111,7 +111,7 @@ def test_fsr_real_data(tmp_path, real_bam, real_reference, real_bins):
     # First run extract
     output_dir = tmp_path / "output"
     runner.invoke(app, [
-        "extract", str(real_bam),
+        "extract", "-i", str(real_bam),
         "--reference", str(real_reference),
         "-o", str(output_dir),
         "-s", "test_sample",
@@ -123,7 +123,7 @@ def test_fsr_real_data(tmp_path, real_bam, real_reference, real_bins):
         pytest.skip("Extract step failed")
     
     result = runner.invoke(app, [
-        "fsr", str(bedgz),
+        "fsr", "-i", str(bedgz),
         "-b", str(real_bins),
         "-o", str(output_dir),
         "-s", "test_sample",

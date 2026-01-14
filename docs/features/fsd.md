@@ -3,65 +3,218 @@
 **Command**: `krewlyzer fsd`
 
 ## Purpose
+
 Computes high-resolution (5bp bins) fragment length distributions per chromosome arm. Produces ML-ready features with log-ratio normalization and on/off-target split for panel data.
 
-## Key Features
+---
 
-| Feature | Description |
-|---------|-------------|
-| **67 bins** | 5bp resolution from 65-400bp |
-| **GC-weighted** | Corrects for sequencing bias |
-| **On/off-target split** | Separate outputs for panel data |
-| **Log-ratio normalization** | log2(sample / PoN_expected) |
+## Processing Flowchart
+
+```mermaid
+flowchart LR
+    BED["sample.bed.gz"] --> PIPELINE["Rust Pipeline"]
+    ARMS["Chromosome Arms"] --> PIPELINE
+    GC["GC Correction"] --> PIPELINE
+    PIPELINE --> FSD["FSD.tsv"]
+    
+    subgraph "With --pon-model"
+        FSD --> PON["PON Normalization"]
+        PON --> LOGR["FSD.tsv + _logR columns"]
+    end
+    
+    subgraph "With --target-regions"
+        PIPELINE --> FSD_ON["FSD.ontarget.tsv"]
+    end
+```
+
+## Biological Context
+
+### Why Fragment Sizes Matter
+
+cfDNA fragment sizes reflect nucleosome positioning and chromatin state in source cells:
+
+| Fragment Size | Source | Biological Significance |
+|---------------|--------|------------------------|
+| **~145bp** | Core nucleosome | Minimal DNA protection |
+| **~166bp** | Mono-nucleosome + linker | "Classic" cfDNA peak |
+| **~334bp** | Di-nucleosome | Stable chromatin regions |
+| **10bp periodicity** | DNA helical pitch | Rotational phasing |
+
+### Cancer Signature
+
+| Signal | Healthy Plasma | Cancer (ctDNA) |
+|--------|----------------|----------------|
+| Modal peak | ~166bp | Left-shifted (~145bp) |
+| 10bp periodicity | Clear | Often disrupted |
+| Arm-level variation | Minimal | Increased (correlates with CNAs) |
+
+> **Why arm-level?** Chromosome arms have distinct chromatin environments. Tumor-derived cfDNA shows arm-specific fragmentation shifts that correlate with copy number alterations.
+
+---
 
 ## Usage
 
 ```bash
-# WGS
-krewlyzer fsd sample.bed.gz -o output_dir/ --genome hg19
+# Basic usage
+krewlyzer fsd -i sample.bed.gz -o output_dir/ --genome hg19
 
-# Panel (with target split via run-all)
-krewlyzer run-all sample.bam -g ref.fa -o out/ \
+# With PON for log-ratio normalization
+krewlyzer fsd -i sample.bed.gz -o output_dir/ -P msk-access.pon.parquet
+
+# Panel data (MSK-ACCESS) with on/off-target split
+krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
     --target-regions panel_targets.bed
 ```
 
+---
+
 ## Options
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--output` | `-o` | Output directory (required) |
-| `--arms-file` | `-a` | Chromosome arms BED file |
-| `--pon-model` | `-P` | PON model for log-ratio computation |
-| `--genome` | `-G` | Genome build: hg19/hg38 |
-| `--gc-correct` | | Apply GC bias correction (default: True) |
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--input` | `-i` | *required* | Input .bed.gz file (from extract) |
+| `--output` | `-o` | *required* | Output directory |
+| `--sample-name` | `-s` | Auto | Override sample name |
+| `--arms-file` | `-a` | Bundled | Chromosome arms BED file |
+| `--pon-model` | `-P` | None | PON model for log-ratio computation |
+| `--target-regions` | `-T` | None | Target BED (enables on/off split) |
+| `--genome` | `-G` | hg19 | Genome build (hg19/hg38) |
+| `--gc-correct` | | True | Apply GC bias correction |
+| `--threads` | `-t` | 0 | Threads (0=all cores) |
+| `--verbose` | `-v` | False | Enable debug logging |
+
+---
 
 ## Output Files
 
-### `{sample}.FSD.tsv` (off-target / default)
+### `{sample}.FSD.tsv` (Off-Target / Default)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `region` | str | Chromosome arm (chr:start-end) |
-| `65-69`, `70-74`, ... | float | Raw GC-weighted counts (67 bins) |
+| `region` | str | Chromosome arm (e.g., "chr1:0-125000000") |
+| `65-69`, `70-74`, ... | float | GC-weighted counts in 67 bins (5bp steps) |
 | `total` | float | Sum of all bins |
-| `65-69_logR`, ... | float | log2(sample / PoN_expected) *(with PoN)* |
-| `pon_stability` | float | 1 / (variance + k) *(with PoN)* |
+| `65-69_logR`, ... | float | log2(sample / PoN_expected) *(with -P)* |
+| `pon_stability` | float | 1 / (variance + k) *(with -P)* |
 
-### `{sample}.FSD.ontarget.tsv` (panel mode only)
+### `{sample}.FSD.ontarget.tsv` (Panel Mode Only)
 
-Same schema, for fragments overlapping target regions (capture-biased).
+Same schema as above, but for fragments overlapping target regions.
 
-## Biological Context
+> [!IMPORTANT]
+> **Off-target = unbiased** (preferred for biomarkers)  
+> **On-target = capture-biased** (use cautiously for local analysis only)
 
-| Signal | Healthy | Cancer |
-|--------|---------|--------|
-| Modal peak | ~166bp | Left-shifted (~145bp) |
-| 10bp periodicity | Clear nucleosome signal | May be altered |
-| Arm variation | Minimal | Increased (correlates with CNAs) |
+---
 
-## Normalization Order
+## GC Correction
 
-1. **GC-weighting** (Rust): Raw counts × correction factor
-2. **Log-ratio** (Python): log2(sample / PoN_expected) when PoN provided
+When `--gc-correct` is enabled (default):
 
-> **Note**: For panel data (MSK-ACCESS), use `--target-regions` in `run-all` to separate capture-biased on-target reads from unbiased off-target reads.
+```
+Normalization Order:
+1. GC-weighting (Rust): raw_count × gc_correction_factor
+2. PoN log-ratio (Python): log2((sample + 1) / (pon + 1))
+```
+
+| GC Option | Effect |
+|-----------|--------|
+| Enabled | Corrects for PCR/capture GC bias |
+| Disabled (`--no-gc-correct`) | Raw counts (faster, biased) |
+
+> See [GC Correction Details](../advanced/gc-correction.md) for the LOESS algorithm.
+
+---
+
+## PON Integration
+
+With `--pon-model`, FSD outputs include log-ratio normalization:
+
+| Column | Formula | Interpretation |
+|--------|---------|----------------|
+| `{bin}_logR` | `log2((sample + 1) / (PoN_expected + 1))` | > 0 = above normal |
+| `pon_stability` | `1 / (variance + 0.01)` | Higher = more reliable |
+
+**Formulas:**
+
+```
+Log-Ratio:
+              sample_count + 1
+logR = log₂( ─────────────────── )
+              PoN_expected + 1
+
+
+PON Stability:
+                    1
+stability = ─────────────────
+             variance + 0.01
+```
+
+**Algorithm:**
+1. For each arm and size bin, retrieve PoN expected value
+2. Compute log-ratio with pseudocount (+1) for zero-handling
+3. Calculate stability from PoN variance (inverse weighting)
+
+> See [PON Models](../advanced/pon.md) for model structure and building.
+
+---
+
+## Clinical Interpretation
+
+### Interpreting Log-Ratio Values
+
+| `*_logR` Value | Meaning | Possible Cause |
+|----------------|---------|----------------|
+| **~0** | Normal | No deviation from healthy |
+| **> 0.5** | Elevated short fragments | Tumor-derived cfDNA |
+| **< -0.5** | Depleted | Copy number loss? |
+
+### Arm-Level Variation
+
+| Pattern | Interpretation |
+|---------|----------------|
+| Uniform across arms | Healthy profile |
+| Single arm deviation | Focal CNA or arm-level event |
+| Multiple arm deviations | High tumor fraction (aneuploidy) |
+
+---
+
+## 67-Bin Structure
+
+| Bin Index | Size Range | Description |
+|-----------|------------|-------------|
+| 0 | 65-69bp | Ultra-short (sub-nucleosomal) |
+| 1-6 | 70-99bp | Short mono-nucleosomal |
+| 7-16 | 100-149bp | Core mono-nucleosomal |
+| 17-24 | 150-189bp | Peak mono-nucleosomal |
+| 25-34 | 190-239bp | Di-nucleosomal transition |
+| 35-50 | 240-319bp | Di-nucleosomal |
+| 51-66 | 320-399bp | Multi-nucleosomal |
+
+---
+
+## Panel Data Mode
+
+For targeted sequencing (MSK-ACCESS):
+
+```bash
+krewlyzer fsd -i sample.bed.gz -o output/ \
+    --target-regions MSK-ACCESS-v2_targets.bed
+```
+
+| Output | Contents | Use Case |
+|--------|----------|----------|
+| `.FSD.tsv` | Off-target fragments | Unbiased arm-level biomarkers |
+| `.FSD.ontarget.tsv` | On-target fragments | Local context (capture-biased) |
+
+> [!WARNING]
+> On-target FSD has capture bias and should not be used for global fragmentomics.
+
+---
+
+## See Also
+
+- [GC Correction](../advanced/gc-correction.md) - LOESS algorithm details
+- [PON Models](../advanced/pon.md) - Building and using PON
+- [Citation](../citation.md) - DELFI paper references
+- [Troubleshooting](../troubleshooting.md) - Common issues

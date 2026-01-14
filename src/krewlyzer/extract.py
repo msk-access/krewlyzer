@@ -30,7 +30,7 @@ from .core.bam_utils import check_bam_compatibility
 
 
 def extract(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
     genome_reference: Path = typer.Option(..., '-r', '--reference', help="Reference genome FASTA (indexed)"),
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
     

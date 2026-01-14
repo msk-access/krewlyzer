@@ -9,6 +9,8 @@ PON models enable:
 1. **GC Correction** - Assay-specific GC bias curves
 2. **FSD Normalization** - Expected size distributions per chromosome arm
 3. **WPS Baseline** - Mean/std nucleosome positioning per transcript
+4. **FSC/FSR Normalization** - Fragment size channel baselines
+5. **OCF Baseline** - Tissue-specific OCF baselines
 
 ---
 
@@ -37,11 +39,15 @@ krewlyzer run-all sample.bam \
 ### With Individual Tools
 
 ```bash
-krewlyzer fsc sample.bed.gz \
+krewlyzer fsc -i sample.bed.gz \
     --pon-model msk-access-v2.pon.parquet \
     -o output/
 
-krewlyzer wps sample.bed.gz \
+krewlyzer wps -i sample.bed.gz \
+    --pon-model msk-access-v2.pon.parquet \
+    -o output/
+
+krewlyzer ocf -i sample.bed.gz \
     --pon-model msk-access-v2.pon.parquet \
     -o output/
 ```

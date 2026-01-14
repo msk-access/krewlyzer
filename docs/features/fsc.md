@@ -45,31 +45,29 @@ FSC partitions fragments into **non-overlapping** channels optimized for ML:
 
 ### Counting Pipeline
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      FSC Pipeline                                │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                  │
-│   Input: sample.bed.gz (from extract)                           │
-│                                                                  │
-│   ┌──────────────────┐                                          │
-│   │  Rust Backend    │                                          │
-│   │  - Load bins (100kb default)                                │
-│   │  - GC correction per fragment                               │
-│   │  - Classify into 5 channels                                 │
-│   │  - Accumulate weighted counts                               │
-│   └─────────┬────────┘                                          │
-│             ▼                                                    │
-│   ┌──────────────────┐                                          │
-│   │  Python Post     │                                          │
-│   │  - Optional aggregation (see below)                         │
-│   │  - PoN log2 ratios (if model provided)                      │
-│   │  - Reliability scores                                       │
-│   └─────────┬────────┘                                          │
-│             ▼                                                    │
-│   Output: sample.FSC.tsv                                        │
-│                                                                  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    BED["sample.bed.gz"] --> RUST["Rust Backend"]
+    BINS["100kb Bins"] --> RUST
+    GC["GC Correction"] --> RUST
+    
+    RUST --> FSC["FSC.tsv"]
+    
+    subgraph "5 Channels"
+        FSC --> US["ultra_short (65-100bp)"]
+        FSC --> CS["core_short (101-149bp)"]
+        FSC --> MN["mono_nucl (150-220bp)"]
+        FSC --> DN["di_nucl (221-260bp)"]
+        FSC --> LG["long (261-400bp)"]
+    end
+    
+    subgraph "With --pon-model"
+        FSC --> PON["PON log₂ ratios"]
+    end
+    
+    subgraph "With --target-regions"
+        RUST --> FSC_ON["FSC.ontarget.tsv"]
+    end
 ```
 
 ### Aggregation Strategy
@@ -126,25 +124,29 @@ A fragment spanning two bins counts in **both**. This is intentional for coverag
 
 ```bash
 # Basic (auto-loads bundled 100kb bins)
-krewlyzer fsc sample.bed.gz -o output/ --genome hg38
+krewlyzer fsc -i sample.bed.gz -o output/ --genome hg38
 
 # With PoN for log2 ratios
-krewlyzer fsc sample.bed.gz -o output/ --pon-model cohort.pon
+krewlyzer fsc -i sample.bed.gz -o output/ --pon-model cohort.pon
 
 # Custom bin size
-krewlyzer fsc sample.bed.gz -o output/ --bin-input custom_bins.bed
+krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 ```
 
 ## CLI Options
 
 | Option | Short | Description |
 |--------|-------|-------------|
+| `--input` | `-i` | Input .bed.gz file (required) |
 | `--output` | `-o` | Output directory (required) |
 | `--sample-name` | `-s` | Override sample name |
 | `--bin-input` | `-b` | Custom bin file (default: 100kb genome-wide) |
+| `--target-regions` | `-T` | Target BED (for on/off-target FSC split) |
 | `--pon-model` | `-P` | PoN model for log2 ratio normalization |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
+| `--windows` | `-w` | Window size for aggregation (default: 100000) |
+| `--continue-n` | `-c` | Consecutive window number (default: 50) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
 
 ---
@@ -241,8 +243,54 @@ Higher ratio = more short fragments = potential tumor signal
 
 ---
 
+## Panel Mode (--target-regions)
+
+For targeted sequencing panels (MSK-ACCESS), use `--target-regions` to generate **separate on/off-target outputs**:
+
+```bash
+krewlyzer fsc -i sample.bed.gz -o output/ \
+    --target-regions MSK-ACCESS_targets.bed \
+    --bin-input gene_level_bins.bed
+```
+
+### Processing with Target Regions
+
+```mermaid
+flowchart TB
+    BED["sample.bed.gz"] --> SPLIT{"Fragment Location"}
+    
+    SPLIT -->|"Overlaps target"| ON["On-Target"]
+    SPLIT -->|"Does not overlap"| OFF["Off-Target"]
+    
+    ON --> FSC_ON["FSC.ontarget.tsv"]
+    OFF --> FSC_OFF["FSC.tsv"]
+```
+
+### Output Files
+
+| File | Contents | Use Case |
+|------|----------|----------|
+| `{sample}.FSC.tsv` | **Off-target** fragments | Unbiased global signal (primary) |
+| `{sample}.FSC.ontarget.tsv` | **On-target** fragments | Gene-level local signal |
+
+> [!IMPORTANT]
+> **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
+> **On-target = capture-biased** – reflects library prep + target selection.
+
+### When to Use On-Target FSC
+
+| Use Case | Recommended |
+|----------|-------------|
+| CNV detection | Off-target |
+| Tumor fraction | Off-target |
+| Gene-level amplification | **On-target** |
+| Panel-specific features | Both |
+
+---
+
 ## References
 
 > Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
 
 > Cristiano et al. (2019). Genome-wide cell-free DNA fragmentation in patients with cancer. *Nature*, 570(7761), 385-389.
+

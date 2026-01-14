@@ -48,9 +48,9 @@ def test_uxm_integration(tmp_path):
     output_dir = tmp_path / "output"
     
     runner = CliRunner()
-    # New CLI: uxm <bam> -o <output_dir> -s <sample_name> -m <markers>
+    # New CLI: uxm -i <bam> -o <output_dir> -s <sample_name> -m <markers>
     result = runner.invoke(app, [
-        "uxm", str(bam_file),
+        "uxm", "-i", str(bam_file),
         "-o", str(output_dir),
         "-s", "sample",
         "-m", str(mark_file)

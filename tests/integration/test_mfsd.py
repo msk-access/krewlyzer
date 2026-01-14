@@ -85,8 +85,8 @@ def test_mfsd_integration_snv(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -135,8 +135,8 @@ def test_mfsd_with_distributions(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test",
         "--output-distributions"
@@ -178,8 +178,8 @@ def test_mfsd_detects_mnv(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -202,8 +202,8 @@ def test_mfsd_detects_insertion(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -226,8 +226,8 @@ def test_mfsd_detects_deletion(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -250,8 +250,8 @@ def test_mfsd_detects_complex(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -283,8 +283,8 @@ def test_mfsd_low_count_handling(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test"
     ])
@@ -312,8 +312,8 @@ def test_mfsd_verbose_logging(tmp_path):
     
     runner = CliRunner()
     result = runner.invoke(app, [
-        "mfsd", str(bam_file), 
-        "-i", str(vcf_file), 
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
         "-o", str(output_dir),
         "-s", "test",
         "--verbose"

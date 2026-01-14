@@ -30,8 +30,8 @@ logging.basicConfig(
 logger = logging.getLogger("krewlyzer")
 
 def run_all(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
-    reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA (indexed)"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
+    reference: Path = typer.Option(..., "--reference", "-r", help="Reference genome FASTA (indexed)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
     
@@ -312,9 +312,20 @@ def run_all(
                 logger.debug(f"WPS transcript (fallback): {res_wps}")
         if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
 
-        # OCF Regions
-        res_ocf = ocr_file if ocr_file else assets.ocf_regions
-        if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
+        # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
+        run_ocf = True
+        if ocr_file:
+            res_ocf = ocr_file
+        elif assets.ocf_available:
+            res_ocf = assets.ocf_regions
+        else:
+            logger.warning(f"⚠️  OCF regions not available for {genome} (only GRCh37/hg19 currently supported)")
+            logger.warning("   Skipping OCF. Provide --ocr-file to run OCF on hg38")
+            run_ocf = False
+            res_ocf = None
+        
+        if run_ocf and res_ocf and not res_ocf.exists():
+            logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
         
         # GC Reference
         res_gc = assets.gc_reference
@@ -358,12 +369,13 @@ def run_all(
                 str(res_wps_bg) if res_wps_bg else None, str(out_wps_bg) if res_wps_bg else None,  # WPS background
                 False,
                 str(res_arms), str(out_fsd),
-                str(res_ocf), str(out_ocf_dir),
+                str(res_ocf) if run_ocf else None, str(out_ocf_dir) if run_ocf else None,  # OCF (skip for hg38)
                 str(target_regions) if (target_regions and isinstance(target_regions, Path) and target_regions.exists()) else None,
                 bait_padding,  # Bait edge padding (adaptive safety applies)
                 True  # silent=True
             )
-            progress.update(task_pipeline, description="[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+OCF)", completed=100)
+            ocf_status = "OCF" if run_ocf else "OCF skipped"
+            progress.update(task_pipeline, description=f"[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+{ocf_status})", completed=100)
             
             # ═══════════════════════════════════════════════════════════════════
             # 3. POST-PROCESSING (FSC/FSR, OCF, PON z-scores)

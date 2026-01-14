@@ -24,11 +24,12 @@ from krewlyzer import _core
 
 
 def fsr(
-    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSR)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
@@ -152,6 +153,11 @@ def fsr(
         # Call Unified Pipeline (FSC bins mode - same bins as FSR)
         # FSR uses the same bin-level counts as FSC, just computes ratios instead of z-scores
         logger.info("Running fragment counting via unified pipeline...")
+        
+        is_panel_mode = target_regions and target_regions.exists()
+        if is_panel_mode:
+            logger.info(f"Panel mode: on/off-target split enabled (targets: {target_regions.name})")
+        
         _core.run_unified_pipeline(
             str(bedgz_input),
             # GC Correction (compute)
@@ -162,10 +168,18 @@ def fsr(
             str(factors_input) if factors_input else None,
             # FSC (outputs count TSV that FSR also uses)
             str(bin_input), str(fsr_counts_file),
-            # Others disabled
-            None, None, False,  # WPS
-            None, None,         # FSD
-            None, None          # OCF
+            # WPS (disabled)
+            None, None,
+            # WPS Background (disabled)
+            None, None, False,
+            # FSD (disabled)
+            None, None,
+            # OCF (disabled)
+            None, None,
+            # Target regions for on/off-target split
+            str(target_regions) if is_panel_mode else None,
+            50,  # bait_padding
+            False  # silent
         )
         
         logger.info(f"Reading counts from {fsr_counts_file}")

@@ -274,8 +274,18 @@ pub fn run_unified_pipeline(
     
     let mut ocf_consumer = None;
     if let Some(regs) = ocf_regions {
+        // Load target regions if provided (for on/off-target split)
+        let target_tree = if let Some(ref target_path) = target_regions_path {
+            let tree = crate::fsd::load_target_regions(target_path, &mut chrom_map)
+                .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+            info!("OCF: Panel mode enabled, on/off-target split active");
+            Some(Arc::new(tree))
+        } else {
+            None
+        };
+        
         // OcfConsumer parses internally from path
-        let consumer = OcfConsumer::new(&regs, &mut chrom_map, factors_arc.clone())
+        let consumer = OcfConsumer::new(&regs, &mut chrom_map, factors_arc.clone(), target_tree)
               .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         ocf_consumer = Some(consumer);
     }

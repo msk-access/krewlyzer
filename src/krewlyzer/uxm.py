@@ -22,7 +22,7 @@ from krewlyzer import _core
 
 
 def uxm(
-    bam_input: Path = typer.Argument(..., help="Input bisulfite BAM file"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input bisulfite BAM file"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Path to genomic marker file"),

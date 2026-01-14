@@ -66,9 +66,13 @@ class AssetManager:
     
     @property
     def ocf_regions(self) -> Path:
-        """Open Chromatin Regions BED (currently hg19 specific filename used for both if missing hg38 specific?)"""
-        # TODO: Add hg38 specific OCF file if available
+        """Open Chromatin Regions BED (currently hg19/GRCh37 only)"""
         return self._get_path("OpenChromatinRegion", "7specificTissue.all.OC.bed.gz")
+    
+    @property
+    def ocf_available(self) -> bool:
+        """Check if OCF regions are available for this genome"""
+        return self.ocf_regions.exists()
 
     @property
     def wps_anchors(self) -> Path:
@@ -82,9 +86,8 @@ class AssetManager:
 
     @property
     def methylation_markers(self) -> Path:
-        """Methylation markers BED for UXM analysis"""
-        # Note: Currently hg19 only - hg38 markers need to be generated
-        return self.base_path / "methylation-markers" / f"uxm_markers_{self.file_prefix}.bed"
+        """Methylation markers BED for UXM analysis (Atlas U250 markers)"""
+        return self._get_path("MethMark", f"Markers.U250.{self.file_prefix}.bed.gz")
         
     def resolve(self, asset_name: str) -> Path:
         """

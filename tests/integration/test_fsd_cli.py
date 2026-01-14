@@ -52,7 +52,7 @@ def test_fsd_basic_run(tmp_path, sample_bedgz, sample_arms):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsd", str(sample_bedgz),
+        "fsd", "-i", str(sample_bedgz),
         "-a", str(sample_arms),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -73,7 +73,7 @@ def test_fsd_output_columns(tmp_path, sample_bedgz, sample_arms):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsd", str(sample_bedgz),
+        "fsd", "-i", str(sample_bedgz),
         "-a", str(sample_arms),
         "-o", str(output_dir),
         "-s", "test_sample"

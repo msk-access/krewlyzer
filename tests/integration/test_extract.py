@@ -86,7 +86,7 @@ def test_extract_exclude_regions(tmp_path):
     # Run extract via CLI
     runner = CliRunner()
     result = runner.invoke(app, [
-        "extract", str(bam_file),
+        "extract", "-i", str(bam_file),
         "--reference", str(genome_file),  # Fixed: was -g
         "-o", str(output_dir),
         "--exclude-regions", str(exclude_file),
@@ -218,7 +218,7 @@ def test_extract_target_regions_panel_mode(tmp_path):
     # Run extract with --target-regions (panel mode)
     runner = CliRunner()
     result = runner.invoke(app, [
-        "extract", str(bam_file),
+        "extract", "-i", str(bam_file),
         "--reference", str(genome_file),
         "-o", str(output_dir),
         "--target-regions", str(target_file),

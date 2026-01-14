@@ -31,11 +31,11 @@ pip install krewlyzer
 
 ```bash
 # Run all fragmentomics features
-krewlyzer run-all sample.bam --reference hg19.fa --output results/
+krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
 # Individual tools
-krewlyzer extract sample.bam -r hg19.fa -o output/
-krewlyzer fsc output/sample.bed.gz -o output/
+krewlyzer extract -i sample.bam -r hg19.fa -o output/
+krewlyzer fsc -i output/sample.bed.gz -o output/
 ```
 
 ---

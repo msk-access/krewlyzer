@@ -27,12 +27,12 @@ from krewlyzer import _core
 
 
 def wps(
-    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
-    tsv_input: Optional[Path] = typer.Option(None, "--tsv-input", "-T", help="Path to transcript/region TSV file (legacy)"),
+    tsv_input: Optional[Path] = typer.Option(None, "--tsv-input", "-W", help="Path to transcript/region TSV file (legacy)"),
     wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
-    target_regions: Optional[Path] = typer.Option(None, "--target-regions", help="Panel capture BED (enables bait edge masking)"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Panel capture BED (enables bait edge masking)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     background: Optional[Path] = typer.Option(None, "--background", "-B", help="Background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),

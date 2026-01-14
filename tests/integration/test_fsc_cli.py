@@ -63,7 +63,7 @@ def test_fsc_basic_run(tmp_path, sample_bedgz, sample_bins):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsc", str(sample_bedgz),
+        "fsc", "-i", str(sample_bedgz),
         "-b", str(sample_bins),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -84,7 +84,7 @@ def test_fsc_output_format(tmp_path, sample_bedgz, sample_bins):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsc", str(sample_bedgz),
+        "fsc", "-i", str(sample_bedgz),
         "-b", str(sample_bins),
         "-o", str(output_dir),
         "-s", "test_sample"

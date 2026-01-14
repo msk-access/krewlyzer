@@ -128,24 +128,25 @@ WPS generates **two complementary outputs** that capture different biological sc
 
 ```bash
 # Basic (auto-loads bundled assets)
-krewlyzer wps sample.bed.gz -o output/ --genome hg38
+krewlyzer wps -i sample.bed.gz -o output/ --genome hg38
 
 # With explicit background override
-krewlyzer wps sample.bed.gz -o output/ --background custom_alu.bed.gz
+krewlyzer wps -i sample.bed.gz -o output/ --background custom_alu.bed.gz
 
 # Panel data (MSK-ACCESS)
-krewlyzer wps sample.bed.gz -o output/ --target-regions msk_access_baits.bed --bait-padding 20
+krewlyzer wps -i sample.bed.gz -o output/ --target-regions msk_access_baits.bed --bait-padding 20
 ```
 
 ## CLI Options
 
 | Option | Short | Description |
 |--------|-------|-------------|
+| `--input` | `-i` | Input .bed.gz file (required) |
 | `--output` | `-o` | Output directory (required) |
 | `--sample-name` | `-s` | Override sample name |
 | `--wps-anchors` | | WPS anchors BED (TSS+CTCF), auto-loaded if not specified |
 | `--background` | `-B` | Background Alu BED for hierarchical stacking, auto-loaded if not specified |
-| `--target-regions` | | Panel capture BED (enables bait edge masking) |
+| `--target-regions` | `-T` | Panel capture BED (enables bait edge masking) |
 | `--bait-padding` | | Bait edge padding in bp (default: 50, see below) |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--pon-model` | `-P` | PON model for z-score computation |

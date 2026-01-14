@@ -26,7 +26,7 @@ def test_motif_help():
     assert result.exit_code == 0
     assert "motif" in output
     assert "--kmer" in output  # Changed: motif now uses --kmer, --minlen moved to extract
-    assert "-g" in output
+    assert "-r" in output  # Reference flag
     assert "-o" in output
 
 def test_extract_help():
