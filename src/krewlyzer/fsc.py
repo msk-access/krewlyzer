@@ -1,8 +1,20 @@
 """
 Fragment Size Coverage (FSC) calculation.
 
-Calculates FSC features for a single sample.
+Calculates FSC features for a single sample showing fragment coverage depth
+across genomic windows, stratified by fragment size bin.
+
 Uses Rust backend for accelerated computation with GC correction.
+
+Fragment Size Bins (from Rust backend):
+    - ultra_short: 65-99bp (TF footprints)
+    - core_short: 100-149bp (tumor-enriched)
+    - mono_nucl: 150-259bp (mono-nucleosomal)
+    - di_nucl: 260-399bp (di-nucleosomal)
+    - long: 400+bp
+
+Output: {sample}.FSC.tsv with per-window coverage counts and z-scores.
+Panel mode: Additional {sample}.FSC.ontarget.tsv for on-target regions.
 """
 
 import typer

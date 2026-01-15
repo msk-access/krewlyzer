@@ -1,5 +1,19 @@
 """
 Run all krewlyzer feature extraction tools for a single sample.
+
+Pipeline Overview:
+    1. **Extract + Motif**: Fragment extraction, GC correction, end/breakpoint motifs
+    2. **Unified Engine**: FSC, FSR, FSD, WPS, OCF (parallel via Rust backend)
+    3. **Post-processing**: WPS smoothing (Rust), periodicity extraction (Rust), PoN z-scores
+    4. **Optional**: UXM (bisulfite), mFSD (variants)
+
+Key Features:
+    - **BAM filter auto-detection**: Warns if duplex BAMs need --no-require-proper-pair
+    - **Panel mode**: Off-target GC model, on/off-target split for all tools
+    - **GC correction**: Per-fragment LOESS-based correction via Rust
+    - **WPS periodicity**: FFT-based NRL extraction with deviation scoring (Rust)
+
+Uses shared utilities from core/bam_utils.py for filter compatibility checking.
 """
 
 import typer
@@ -132,6 +146,31 @@ def run_all(
     
     logger.info(f"Processing sample: {sample}")
     logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
+    
+    # Pre-check BAM compatibility with current filters (avoid 0 fragment issue)
+    from .core.bam_utils import check_bam_compatibility
+    compat = check_bam_compatibility(bam_input, require_proper_pair, skip_duplicates, mapq)
+    
+    if compat["pass_rate"] < 0.01 and compat["total_sampled"] > 100:
+        console.print("\n[bold red]⚠️  FILTER COMPATIBILITY WARNING[/bold red]\n")
+        console.print(f"Only [bold]{compat['pass_rate']:.2%}[/bold] of sampled reads would pass current filters.\n")
+        
+        for issue in compat["issues"]:
+            console.print(f"  • {issue}")
+        
+        if compat["suggested_flags"]:
+            suggested = " ".join(compat["suggested_flags"])
+            console.print(f"\n[bold yellow]Suggested command:[/bold yellow]")
+            console.print(f"  krewlyzer run-all -i {bam_input.name} -r {reference.name} -o {output} [bold]{suggested}[/bold]\n")
+            
+            logger.error(f"Filter mismatch detected. Re-run with: {suggested}")
+            raise typer.Exit(1)
+    elif compat["pass_rate"] < 0.5 and compat["issues"]:
+        # Warning but continue
+        console.print("\n[yellow]⚠️  Filter compatibility note:[/yellow]")
+        for issue in compat["issues"]:
+            console.print(f"  • {issue}")
+        console.print()
     
     if is_panel_mode:
         logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
@@ -499,6 +538,9 @@ def run_all(
                     reference=reference,
                     correction_factors=out_gc_factors if out_gc_factors.exists() else None,
                     mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    require_proper_pair=require_proper_pair,
                     output_distributions=False,
                     verbose=debug,
                     threads=threads

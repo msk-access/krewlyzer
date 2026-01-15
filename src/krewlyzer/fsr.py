@@ -2,7 +2,19 @@
 Fragment Size Ratio (FSR) calculation.
 
 Calculates FSR features for a single sample with comprehensive counts and ratios.
-Uses Rust backend for accelerated computation with GCfix correction.
+Uses Rust backend for accelerated computation with GC correction.
+
+Fragment Size Bins (as defined by Rust backend):
+    - ultra_short: 65-99bp (TF footprints, highly tumor-specific)
+    - core_short: 100-149bp (tumor-enriched, primary biomarker)
+    - mono_nucl: 150-259bp (mono-nucleosomal fragments)
+    - di_nucl: 260-399bp (di-nucleosomal fragments)
+    - long: 400+bp (di-nucleosomal and larger)
+    
+Output Columns:
+    Counts: ultra_short_count, core_short_count, mono_nucl_count, di_nucl_count, long_count, total_count
+    Ratios: ultra_short_ratio, core_short_ratio, mono_nucl_ratio, di_nucl_ratio, long_ratio
+    Biomarker: core_short_long_ratio (primary cancer signal)
 """
 
 import typer
@@ -40,24 +52,14 @@ def fsr(
     """
     Calculate Fragment Size Ratio (FSR) features for a single sample.
     
-    Outputs comprehensive fragment counts and ratios for cancer biomarker analysis.
+    Computes fragment size distributions and ratios for cancer biomarker analysis.
+    Uses Rust backend for performance with GC-corrected counts.
     
     Input: .bed.gz file from extract step
-    Output: {sample}.FSR.tsv with columns:
-        Counts: ultra_short_count, short_count, inter_count, long_count, total_count
-        Ratios: short_ratio, inter_ratio, long_ratio, short_long_ratio, ultra_short_ratio
-    
-    Size categories (matching cfDNAFE):
-        - Ultra-short: 65-100bp (TF footprints)
-        - Short: 65-149bp (tumor-enriched)
-        - Intermediate: 151-259bp (nucleosome dynamics)
-        - Long: 261-399bp (healthy cell contribution)
-        - Total: 65-399bp
-    
-    GC Correction:
-        Uses GCfix LOESS-based correction via correction_factors.csv.
-        Factors are automatically loaded from the extract step output.
-        Use --no-gc-correct to disable.
+    Output: {sample}.FSR.tsv with:
+        - Counts: ultra_short, core_short, mono_nucl, di_nucl, long, total
+        - Ratios: per-bin fraction of total
+        - Biomarker: core_short_long_ratio (tumor vs healthy signal)
     """
     from .assets import AssetManager
     
@@ -184,36 +186,61 @@ def fsr(
         
         logger.info(f"Reading counts from {fsr_counts_file}")
         
-        # Load the counts TSV
-        # Format: chrom, start, end, ultra_short, short, intermediate, long, total, mean_gc
+        # Load the counts TSV from Rust backend
+        # Columns: chrom, start, end, ultra_short, core_short, mono_nucl, di_nucl, long, total, mean_gc
         df_counts = pd.read_csv(fsr_counts_file, sep='\t')
         
         logger.info(f"Loaded {len(df_counts)} bin counts")
+        logger.debug(f"Columns present: {list(df_counts.columns)}")
+        if 'total' in df_counts.columns:
+            logger.debug(f"Total fragments: {df_counts['total'].sum():.0f}")
+        
+        # Validate required columns exist (Rust column names)
+        # Rust outputs: ultra_short, core_short, mono_nucl, di_nucl, long, total
+        required_cols = ['chrom', 'ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long', 'total']
+        missing_cols = [c for c in required_cols if c not in df_counts.columns]
+        if missing_cols:
+            logger.warning(f"FSR: Missing columns {missing_cols}, skipping processing")
+            Path(output).mkdir(parents=True, exist_ok=True)
+            pd.DataFrame().to_csv(Path(output) / f"{sample_name}.FSR.tsv", sep='\t', index=False)
+            return
+        
+        # Check if there's any data
+        if len(df_counts) == 0 or df_counts['total'].sum() == 0:
+            logger.warning("FSR: No fragment data, writing empty output")
+            Path(output).mkdir(parents=True, exist_ok=True)
+            pd.DataFrame().to_csv(Path(output) / f"{sample_name}.FSR.tsv", sep='\t', index=False)
+            return
         
         # Step 2: Apply PON correction if available (overlay on corrected counts)
         if pon and pon.gc_bias:
             logger.info("Applying PON-based GC normalization...")
             gc_arr = df_counts['mean_gc'].values
-            short = df_counts['short'].values.astype(float)
-            intermediate = df_counts['intermediate'].values.astype(float)
-            long = df_counts['long'].values.astype(float)
+            core_short = df_counts['core_short'].values.astype(float)
+            mono_nucl = df_counts['mono_nucl'].values.astype(float)
+            di_nucl = df_counts['di_nucl'].values.astype(float)
+            long_arr = df_counts['long'].values.astype(float)
             
             for i, gc in enumerate(gc_arr):
-                short_exp = pon.gc_bias.get_expected(gc, "short")
-                inter_exp = pon.gc_bias.get_expected(gc, "intermediate")
+                core_exp = pon.gc_bias.get_expected(gc, "core_short")
+                mono_exp = pon.gc_bias.get_expected(gc, "mono_nucl")
+                di_exp = pon.gc_bias.get_expected(gc, "di_nucl")
                 long_exp = pon.gc_bias.get_expected(gc, "long")
                 
-                if short_exp > 0:
-                    short[i] /= short_exp
-                if inter_exp > 0:
-                    intermediate[i] /= inter_exp
+                if core_exp > 0:
+                    core_short[i] /= core_exp
+                if mono_exp > 0:
+                    mono_nucl[i] /= mono_exp
+                if di_exp > 0:
+                    di_nucl[i] /= di_exp
                 if long_exp > 0:
-                    long[i] /= long_exp
+                    long_arr[i] /= long_exp
             
-            df_counts['short'] = short
-            df_counts['intermediate'] = intermediate
-            df_counts['long'] = long
-            df_counts['total'] = short + intermediate + long
+            df_counts['core_short'] = core_short
+            df_counts['mono_nucl'] = mono_nucl
+            df_counts['di_nucl'] = di_nucl
+            df_counts['long'] = long_arr
+            df_counts['total'] = core_short + mono_nucl + di_nucl + long_arr
         
         # Step 3: Aggregate bins into windows and compute ratios
         results = []
@@ -227,14 +254,16 @@ def fsr(
             trunc_len = n_windows * continue_n
             
             ultra_mat = group['ultra_short'].values[:trunc_len].reshape(n_windows, continue_n)
-            short_mat = group['short'].values[:trunc_len].reshape(n_windows, continue_n)
-            inter_mat = group['intermediate'].values[:trunc_len].reshape(n_windows, continue_n)
+            core_short_mat = group['core_short'].values[:trunc_len].reshape(n_windows, continue_n)
+            mono_nucl_mat = group['mono_nucl'].values[:trunc_len].reshape(n_windows, continue_n)
+            di_nucl_mat = group['di_nucl'].values[:trunc_len].reshape(n_windows, continue_n)
             long_mat = group['long'].values[:trunc_len].reshape(n_windows, continue_n)
             total_mat = group['total'].values[:trunc_len].reshape(n_windows, continue_n)
             
             ultra_sums = ultra_mat.sum(axis=1)
-            short_sums = short_mat.sum(axis=1)
-            inter_sums = inter_mat.sum(axis=1)
+            core_short_sums = core_short_mat.sum(axis=1)
+            mono_nucl_sums = mono_nucl_mat.sum(axis=1)
+            di_nucl_sums = di_nucl_mat.sum(axis=1)
             long_sums = long_mat.sum(axis=1)
             total_sums = total_mat.sum(axis=1)
             
@@ -245,38 +274,42 @@ def fsr(
                 region = f"{chrom}:{window_starts[i]}-{window_ends[i]}"
                 
                 u = float(ultra_sums[i])
-                s = float(short_sums[i])
-                m = float(inter_sums[i])
+                c = float(core_short_sums[i])
+                m = float(mono_nucl_sums[i])
+                d = float(di_nucl_sums[i])
                 l = float(long_sums[i])
                 t = float(total_sums[i])
                 
                 # Calculate ratios (avoid division by zero)
                 if t > 0:
-                    s_r = s / t
-                    m_r = m / t
-                    l_r = l / t
                     u_r = u / t
+                    c_r = c / t
+                    m_r = m / t
+                    d_r = d / t
+                    l_r = l / t
                 else:
-                    s_r = m_r = l_r = u_r = 0.0
+                    u_r = c_r = m_r = d_r = l_r = 0.0
                     
-                # Short/Long ratio (primary cancer biomarker)
+                # Core short / Long ratio (primary cancer biomarker)
                 if l > 0:
-                    sl_r = s / l
+                    cl_r = c / l
                 else:
-                    sl_r = s if s > 0 else 0.0
+                    cl_r = c if c > 0 else 0.0
                 
                 results.append({
                     'region': region,
                     'ultra_short_count': int(u),
-                    'short_count': int(s),
-                    'inter_count': int(m),
+                    'core_short_count': int(c),
+                    'mono_nucl_count': int(m),
+                    'di_nucl_count': int(d),
                     'long_count': int(l),
                     'total_count': int(t),
-                    'short_ratio': s_r,
-                    'inter_ratio': m_r,
+                    'ultra_short_ratio': u_r,
+                    'core_short_ratio': c_r,
+                    'mono_nucl_ratio': m_r,
+                    'di_nucl_ratio': d_r,
                     'long_ratio': l_r,
-                    'short_long_ratio': sl_r,
-                    'ultra_short_ratio': u_r
+                    'core_short_long_ratio': cl_r,
                 })
         
         if not results:
@@ -288,7 +321,7 @@ def fsr(
         results_df.to_csv(output_file, sep='\t', index=False, float_format='%.6f')
         
         logger.info(f"FSR complete: {len(results_df)} windows → {output_file}")
-        logger.info("Output columns: counts (ultra_short, short, inter, long, total) + ratios (short, inter, long, short_long, ultra_short)")
+        logger.info("Output columns: counts (ultra_short, core_short, mono_nucl, di_nucl, long, total) + ratios")
 
     except Exception as e:
         logger.error(f"FSR calculation failed: {e}")

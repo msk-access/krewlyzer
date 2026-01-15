@@ -1,3 +1,14 @@
+//! Fragment Size Distribution (FSD) calculation
+//!
+//! Computes fragment size histograms per chromosome arm for cancer biomarker analysis.
+//! Key features:
+//! - **Size bins**: 65bp to 400bp (1bp resolution)
+//! - **Arm-level aggregation**: Separate histograms for p/q arms
+//! - **GC correction**: Per-fragment weight adjustment via correction factors
+//! - **Panel mode**: On-target and off-target split outputs
+//!
+//! Output: TSV with rows=arms (e.g., chr1p, chr1q), columns=fragment counts per size.
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;

@@ -1,8 +1,15 @@
 """
 Fragment-level Methylation analysis (UXM) calculation.
 
-Calculates UXM features for a single sample.
+Analyzes CpG methylation patterns in cell-free DNA fragments using bisulfite BAM.
+UXM (Unmethylated-to-methylated Xition) scores measure epigenetic tissue signatures.
+
 Uses Rust backend for accelerated computation.
+
+Input: Bisulfite-converted BAM file (from WGBS or capture panel)
+Output: {sample}.UXM.tsv - Fragment-level methylation scores at marker regions
+
+Markers: Genomic regions where methylation status differs between tissues.
 """
 
 import typer

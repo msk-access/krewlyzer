@@ -1,9 +1,20 @@
 """
 Fragment extraction from BAM files.
 
-Extracts cfDNA fragments with full filter control.
+Extracts cfDNA fragments with configurable read filters (MAPQ, length, proper pair).
+First step in the pipeline - generates .bed.gz for downstream feature extraction.
+
 Uses Rust backend for accelerated extraction.
-Computes GC correction factors for downstream tools.
+
+Output Files:
+    - {sample}.bed.gz: Fragment coordinates (chrom, start, end, strand, gc%, gc_weight)
+    - {sample}.correction_factors.csv: LOESS-based GC correction factors
+    - {sample}.metadata.json: Processing statistics
+
+GC Correction: Computes per-fragment GC weights for all downstream tools.
+Panel Mode: GC model trained on off-target reads only for unbiased correction.
+
+BAM Compatibility: Auto-detects duplex BAMs and warns to use --no-require-proper-pair.
 """
 
 import typer

@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer fsc`
 
+> **Plain English**: FSC counts how many DNA fragments of each size fall into each genomic region.
+> Think of it as a "heatmap" of fragment sizes across the genome.
+>
+> **Use case**: Copy number detection - regions with more short fragments suggest tumor amplification.
+
+---
+
 ## Purpose
 Computes GC-corrected coverage of cfDNA fragments in 5 biologically-meaningful size channels per genomic bin. Designed for ML feature extraction in cancer detection.
 

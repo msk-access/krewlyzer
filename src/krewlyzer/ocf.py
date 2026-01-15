@@ -1,8 +1,17 @@
 """
 Orientation-aware cfDNA Fragmentation (OCF) calculation.
 
-Calculates OCF features for a single sample.
+Calculates OCF features showing fragment orientation patterns around open chromatin regions.
+OCF measures tissue-of-origin based on end-motif orientation at regulatory elements.
+
 Uses Rust backend via unified pipeline for accelerated computation with GC correction.
+
+Output Files:
+    - {sample}.OCF.tsv: Per-region OCF scores and fragment counts
+    - {sample}.OCF.sync.tsv: Synchronized regions for panel comparison
+    - Panel mode: {sample}.OCF.ontarget.tsv for on-target regions
+
+OCF Score: Measures strand asymmetry of fragment ends = (U-D)/(U+D) where U=upstream, D=downstream.
 """
 
 import typer

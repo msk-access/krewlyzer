@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer extract`
 
+> **Plain English**: Extract converts your BAM file into cfDNA fragments with quality information.
+> It's the first step for most analyses—think of it as "preprocessing" your sequencing data.
+>
+> **Key output**: `.bed.gz` file containing fragment coordinates and GC correction factors.
+
+---
+
 ## Purpose
 The `extract` module serves as the entry point for most analysis workflows. It processes a BAM file to extract valid cell-free DNA (cfDNA) fragments and saves them in a standardized, compressed BED format with GC content.
 
@@ -120,7 +127,32 @@ flowchart TB
 
 ---
 
+## BAM Compatibility
+
+### Duplex/Consensus BAMs
+
+If you're using duplex or consensus BAMs, disable the proper pair filter:
+
+```bash
+krewlyzer extract -i duplex.bam -r hg19.fa -o output/ \
+    --no-require-proper-pair
+```
+
+| BAM Type | Proper Pairs? | Flag Needed? |
+|----------|---------------|--------------|
+| Standard WGS | ✅ Yes | Default works |
+| Standard Panel | ✅ Yes | Default works |
+| Duplex/UMI | ❌ No | `--no-require-proper-pair` |
+| Consensus | ❌ No | `--no-require-proper-pair` |
+
+### Auto-Detection
+
+The `run-all` command automatically detects BAM compatibility issues and suggests the correct flags.
+
+---
+
 ## See Also
 
 - [GC Correction](../advanced/gc-correction.md) - LOESS algorithm details
 - [Troubleshooting](../troubleshooting.md) - Common issues
+- [Glossary](../glossary.md) - Terminology reference

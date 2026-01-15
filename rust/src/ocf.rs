@@ -1,3 +1,18 @@
+//! Orientation-aware cfDNA Fragmentation (OCF) calculation
+//!
+//! Measures fragment end orientation patterns around open chromatin regions (OCRs).
+//! OCF captures tissue-of-origin signals based on strand asymmetry at regulatory elements.
+//!
+//! ## Key Features
+//! - **Strand asymmetry**: OCF = (Upstream - Downstream) / (Upstream + Downstream)
+//! - **Region types**: Calculates per-OCR and synchronized (pooled) scores
+//! - **GC correction**: Per-fragment weight adjustment via correction factors
+//! - **Panel mode**: On-target and off-target split outputs
+//!
+//! ## Output
+//! - {sample}.OCF.tsv: Per-region scores and fragment counts
+//! - {sample}.OCF.sync.tsv: Synchronized regions for cross-sample comparison
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;

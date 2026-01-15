@@ -1,7 +1,23 @@
 //! krewlyzer-core: High-performance Rust backend for cfDNA analysis
-//! 
+//!
 //! This crate provides fast implementations of fragment size analysis functions
 //! for cell-free DNA analysis, exposed to Python via PyO3.
+//!
+//! ## Feature Modules
+//! - **extract_motif**: Fragment extraction, End/Breakpoint motifs, GC correction
+//! - **fsc**: Fragment Size Coverage (windowed depth per size bin)
+//! - **fsd**: Fragment Size Distribution (histograms per chromosome arm)
+//! - **wps**: Windowed Protection Score (nucleosome/TF profiling, FFT periodicity, NRL)
+//! - **ocf**: Orientation-aware cfDNA Fragmentation (strand asymmetry at OCRs)
+//! - **mfsd**: Mutant Fragment Size Distribution (variant-level size profiles)
+//! - **uxm**: Fragment-level Methylation (bisulfite BAM analysis)
+//!
+//! ## Support Modules
+//! - **engine**: Generic fragment analysis engine with parallel processing
+//! - **pipeline**: Unified pipeline orchestration for run-all
+//! - **gc_correction**: LOESS-based GC bias correction
+//! - **filters**: Read filtering (MAPQ, length, proper pair, duplicates)
+//! - **bed**: BED file parsing (gzip-compressed)
 
 use pyo3::prelude::*;
 

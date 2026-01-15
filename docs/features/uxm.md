@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer uxm`
 
+> **Plain English**: UXM analyzes methylation patterns to determine which cell types contributed cfDNA.
+> Different tissues have unique methylation signatures—like a "fingerprint" for each cell type.
+>
+> **Use case**: Cell-type deconvolution - determine if cfDNA comes from liver, immune cells, tumor, etc.
+
+---
+
 ## Purpose
 Computes the proportions of Unmethylated (U), Mixed (X), and Methylated (M) fragments per genomic region for cell-type deconvolution.
 

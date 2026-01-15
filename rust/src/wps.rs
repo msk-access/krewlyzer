@@ -1,8 +1,22 @@
 //! Windowed Protection Score (WPS) calculation
 //!
-//! Calculates WPS Long, Short, and Ratio for transcript regions.
-//! Matches the reference cfDNAFE implementation exactly.
-//! Supports GC bias correction using LOESS.
+//! Calculates WPS for transcript/CTCF anchor regions and Alu background hierarchies.
+//!
+//! ## Features
+//! - **Dual-stream analysis**: WPS-Nuc (nucleosome, 120bp window) and WPS-TF (TF, 16bp window)
+//! - **Savitzky-Golay smoothing**: Applied via sci-rs (foreground: window=11, order=3; background: window=7, order=3)
+//! - **FFT periodicity extraction**: Nucleosome Repeat Length (NRL) and quality score via realfft
+//! - **NRL deviation scoring**: Deviation from expected 190bp with penalty (nrl_deviation_bp, adjusted_score)
+//! - **GC bias correction**: LOESS-based correction using correction_factors.csv
+//!
+//! ## Background WPS Parquet Schema
+//! - group_id: Hierarchical group (e.g., Global_All, Chr1_H, AluJb)
+//! - stacked_wps_nuc/wps_tf: Aggregated WPS profiles (200 bins)
+//! - nrl_bp: Nucleosome Repeat Length in bp (expected ~190bp)
+//! - nrl_deviation_bp: |nrl_bp - 190|
+//! - periodicity_score: Raw SNR-based quality (0-1)
+//! - adjusted_score: periodicity_score × deviation_penalty
+
 
 use std::path::Path;
 use std::io::{BufRead, BufReader, Write};
@@ -116,9 +130,11 @@ pub fn parse_regions(tsv_path: &Path) -> Result<Vec<Region>> {
 }
 
 /// Parse BED6 with configurable window size
+/// Supports both plain text and BGZF-compressed (.gz) BED files
 pub fn parse_regions_with_window(bed_path: &Path, window_bp: u64) -> Result<Vec<Region>> {
-    let file = File::open(bed_path).with_context(|| "Failed to open regions file")?;
-    let reader = BufReader::new(file);
+    // Use shared BGZF-aware reader
+    let reader = crate::bed::get_reader(bed_path)?;
+    
     let mut regions = Vec::new();
     
     let valid_chroms: Vec<String> = (1..=22).map(|i| i.to_string()).chain(vec!["X".to_string(), "Y".to_string()]).collect();
@@ -751,18 +767,18 @@ impl WpsConsumer {
         
         info!("WPS: Writing Parquet with {} bins per region", NUM_BINS);
         
-        // Define schema
+        // Define schema - inner List items must be nullable:true to match ListBuilder defaults
         let schema = Schema::new(vec![
             Field::new("region_id", DataType::Utf8, false),
             Field::new("chrom", DataType::Utf8, false),
             Field::new("center", DataType::Int32, false),
             Field::new("strand", DataType::Utf8, false),
             Field::new("region_type", DataType::Utf8, false),
-            Field::new("wps_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
-            Field::new("wps_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
-            Field::new("capture_mask", DataType::List(StdArc::new(Field::new("item", DataType::Int8, false))), false),
-            Field::new("prot_frac_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
-            Field::new("prot_frac_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
+            Field::new("wps_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
+            Field::new("wps_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
+            Field::new("capture_mask", DataType::List(StdArc::new(Field::new("item", DataType::Int8, true))), false),
+            Field::new("prot_frac_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
+            Field::new("prot_frac_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
             Field::new("local_depth", DataType::Float32, false),
         ]);
         
@@ -779,6 +795,9 @@ impl WpsConsumer {
         let mut prot_tf_builder = ListBuilder::new(Float32Builder::new());
         let mut depth_builder = Float32Builder::new();
         
+        eprintln!("DEBUG: Starting region loop, {} regions, {} accumulators", self.regions.len(), self.accumulators.len());
+        let mut processed_count = 0usize;
+        
         for (i, region) in self.regions.iter().enumerate() {
             let acc_opt = self.accumulators.get(&i);
             if acc_opt.is_none() { continue; }
@@ -793,7 +812,6 @@ impl WpsConsumer {
             let mut endpoints_long_raw = Vec::with_capacity(len);
             let mut spanning_short_raw = Vec::with_capacity(len);
             let mut endpoints_short_raw = Vec::with_capacity(len);
-            let mut cov_total = 0.0f64;
             
             let mut curr_wps_long = 0.0;
             let mut curr_wps_short = 0.0;
@@ -819,10 +837,9 @@ impl WpsConsumer {
                 spanning_short_raw.push(curr_span_short);
                 endpoints_short_raw.push(curr_end_short);
             }
-            cov_total = curr_cov;
             
             // Skip empty regions
-            if cov_total == 0.0 { continue; }
+            if curr_cov == 0.0 { continue; }
             
             // Bin aggregation: 2000bp → 200 bins
             let mut binned_wps_nuc = vec![0.0f32; NUM_BINS];
@@ -882,6 +899,23 @@ impl WpsConsumer {
                 binned_prot_tf.reverse();
             }
             
+            // Apply Savitzky-Golay smoothing (window=11, order=3, matching scipy defaults)
+            use sci_rs::signal::filter::savgol_filter_dyn;
+            const SAVGOL_WINDOW: usize = 11;
+            const SAVGOL_POLYORDER: usize = 3;
+            
+            if binned_wps_nuc.len() >= SAVGOL_WINDOW {
+                binned_wps_nuc = savgol_filter_dyn(
+                    binned_wps_nuc.iter().map(|x| *x as f64),
+                    SAVGOL_WINDOW, SAVGOL_POLYORDER, None, None
+                ).into_iter().map(|x| x as f32).collect();
+                
+                binned_wps_tf = savgol_filter_dyn(
+                    binned_wps_tf.iter().map(|x| *x as f64),
+                    SAVGOL_WINDOW, SAVGOL_POLYORDER, None, None
+                ).into_iter().map(|x| x as f32).collect();
+            }
+            
             // Region type
             let region_type = if region.id.starts_with("TSS|") { "TSS" } 
                 else if region.id.starts_with("CTCF|") { "CTCF" } 
@@ -910,8 +944,11 @@ impl WpsConsumer {
             for v in &binned_prot_tf { prot_tf_builder.values().append_value(*v); }
             prot_tf_builder.append(true);
             
-            depth_builder.append_value((cov_total / len as f64) as f32);
+            depth_builder.append_value((curr_cov / len as f64) as f32);
+            processed_count += 1;
         }
+        
+        eprintln!("DEBUG: Loop complete. Processed {} regions with data", processed_count);
         
         // Build arrays
         let arrays: Vec<ArrayRef> = vec![
@@ -928,14 +965,31 @@ impl WpsConsumer {
             StdArc::new(depth_builder.finish()),
         ];
         
-        let batch = RecordBatch::try_new(StdArc::new(schema), arrays)?;
+        // Log array lengths for debugging
+        eprintln!("DEBUG: Array lengths: region_id={}, chrom={}, center={}, strand={}, type={}, wps_nuc={}, wps_tf={}, mask={}, prot_nuc={}, prot_tf={}, depth={}",
+            arrays[0].len(), arrays[1].len(), arrays[2].len(), arrays[3].len(), arrays[4].len(),
+            arrays[5].len(), arrays[6].len(), arrays[7].len(), arrays[8].len(), arrays[9].len(), arrays[10].len());
+        
+        let batch = match RecordBatch::try_new(StdArc::new(schema), arrays) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("ERROR: RecordBatch::try_new failed: {:?}", e);
+                return Err(anyhow::anyhow!("RecordBatch creation failed: {}", e));
+            }
+        };
+        
+        eprintln!("DEBUG: Created batch with {} rows, writing to {:?}", batch.num_rows(), output_path);
         
         // Write Parquet
-        let file = File::create(output_path)?;
+        let file = File::create(output_path)
+            .context(format!("Creating output file: {:?}", output_path))?;
         let props = WriterProperties::builder().build();
-        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))?;
-        writer.write(&batch)?;
-        writer.close()?;
+        let mut writer = ArrowWriter::try_new(file, batch.schema(), Some(props))
+            .context("Creating ArrowWriter")?;
+        writer.write(&batch)
+            .context("Writing batch to Parquet")?;
+        writer.close()
+            .context("Closing Parquet writer")?;
         
         info!("WPS: Wrote {} regions to {:?}", batch.num_rows(), output_path);
         Ok(())
@@ -1215,15 +1269,18 @@ impl WpsBackgroundConsumer {
         
         info!("WPS Background: Writing hierarchical Parquet ({} groups)", self.accumulators.len());
         
-        // Schema
+        // Schema - inner List items must be nullable:true to match ListBuilder defaults
         let schema = Schema::new(vec![
             Field::new("group_id", DataType::Utf8, false),
-            Field::new("stacked_wps_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
-            Field::new("stacked_wps_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, false))), false),
+            Field::new("stacked_wps_nuc", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
+            Field::new("stacked_wps_tf", DataType::List(StdArc::new(Field::new("item", DataType::Float32, true))), false),
             Field::new("alu_count", DataType::Int64, false),
             Field::new("mean_wps_nuc", DataType::Float32, false),
             Field::new("mean_wps_tf", DataType::Float32, false),
-            Field::new("periodicity_score", DataType::Float32, false),
+            Field::new("nrl_bp", DataType::Float32, false),               // Nucleosome Repeat Length in bp
+            Field::new("nrl_deviation_bp", DataType::Float32, false),     // Deviation from expected (190bp)
+            Field::new("periodicity_score", DataType::Float32, false),    // Raw quality score 0-1 (SNR-based)
+            Field::new("adjusted_score", DataType::Float32, false),       // Deviation-penalized score
             Field::new("fragment_ratio", DataType::Float32, false),
         ]);
         
@@ -1234,7 +1291,10 @@ impl WpsBackgroundConsumer {
         let mut count_builder = Int64Builder::new();
         let mut mean_nuc_builder = Float32Builder::new();
         let mut mean_tf_builder = Float32Builder::new();
-        let mut periodicity_builder = Float32Builder::new();
+        let mut nrl_builder = Float32Builder::new();             // NRL in bp
+        let mut nrl_deviation_builder = Float32Builder::new();    // Deviation from 190bp
+        let mut periodicity_builder = Float32Builder::new();      // Raw quality score 0-1
+        let mut adjusted_score_builder = Float32Builder::new();   // Deviation-penalized score
         let mut frag_ratio_builder = Float32Builder::new();
         
         // Sort groups for consistent output order
@@ -1267,11 +1327,36 @@ impl WpsBackgroundConsumer {
                 binned_tf[bin_idx] = (sum_tf / cnt) as f32;
             }
             
+            // Apply Savitzky-Golay smoothing to stacked profiles
+            // Use smaller window for 30-bin background (window=7, order=3)
+            use sci_rs::signal::filter::savgol_filter_dyn;
+            const BG_SAVGOL_WINDOW: usize = 7;
+            const BG_SAVGOL_POLYORDER: usize = 3;
+            
+            if binned_nuc.len() >= BG_SAVGOL_WINDOW {
+                binned_nuc = savgol_filter_dyn(
+                    binned_nuc.iter().map(|x| *x as f64),
+                    BG_SAVGOL_WINDOW, BG_SAVGOL_POLYORDER, None, None
+                ).into_iter().map(|x| x as f32).collect();
+                
+                binned_tf = savgol_filter_dyn(
+                    binned_tf.iter().map(|x| *x as f64),
+                    BG_SAVGOL_WINDOW, BG_SAVGOL_POLYORDER, None, None
+                ).into_iter().map(|x| x as f32).collect();
+            }
+            
             // Metrics
             let mean_nuc = wps_nuc.iter().sum::<f64>() / Self::PROFILE_LENGTH as f64;
             let mean_tf = wps_tf.iter().sum::<f64>() / Self::PROFILE_LENGTH as f64;
             let frag_ratio = if *nuc_frags > 0 { *tf_frags as f32 / *nuc_frags as f32 } else { 0.0 };
-            let periodicity = self.estimate_periodicity(&binned_nuc);
+            let (nrl_bp, periodicity_score) = self.estimate_periodicity(&binned_nuc);
+            
+            // Calculate deviation from expected NRL (190bp) and penalized score
+            const EXPECTED_NRL_BP: f32 = 190.0;
+            const TOLERANCE_BP: f32 = 20.0;
+            let nrl_deviation = (nrl_bp - EXPECTED_NRL_BP).abs();
+            let deviation_penalty = (1.0 - nrl_deviation / TOLERANCE_BP).max(0.0);
+            let adjusted_score = periodicity_score * deviation_penalty;
             
             // Append row
             group_builder.append_value(group_name);
@@ -1282,7 +1367,10 @@ impl WpsBackgroundConsumer {
             count_builder.append_value(*count as i64);
             mean_nuc_builder.append_value(mean_nuc as f32);
             mean_tf_builder.append_value(mean_tf as f32);
-            periodicity_builder.append_value(periodicity);
+            nrl_builder.append_value(nrl_bp);
+            nrl_deviation_builder.append_value(nrl_deviation);
+            periodicity_builder.append_value(periodicity_score);
+            adjusted_score_builder.append_value(adjusted_score);
             frag_ratio_builder.append_value(frag_ratio);
         }
         
@@ -1293,7 +1381,10 @@ impl WpsBackgroundConsumer {
             StdArc::new(count_builder.finish()),
             StdArc::new(mean_nuc_builder.finish()),
             StdArc::new(mean_tf_builder.finish()),
+            StdArc::new(nrl_builder.finish()),
+            StdArc::new(nrl_deviation_builder.finish()),
             StdArc::new(periodicity_builder.finish()),
+            StdArc::new(adjusted_score_builder.finish()),
             StdArc::new(frag_ratio_builder.finish()),
         ];
         
@@ -1305,15 +1396,133 @@ impl WpsBackgroundConsumer {
         writer.write(&batch)?;
         writer.close()?;
         
+        if batch.num_rows() == 0 {
+            log::warn!("WPS Background: No hierarchical groups written - fragments may not overlap Alu regions");
+        }
         info!("WPS Background: Wrote {} hierarchical groups to {:?}", batch.num_rows(), output_path);
         Ok(())
     }
     
-    fn estimate_periodicity(&self, profile: &[f32]) -> f32 {
-        let mean = profile.iter().sum::<f32>() / profile.len() as f32;
-        if mean.abs() < 1e-6 { return 0.0; }
-        let variance = profile.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / profile.len() as f32;
-        (variance.sqrt() / mean.abs()).min(1.0)
+    /// Extract periodicity from WPS profile using FFT
+    /// 
+    /// Computes the Nucleosome Repeat Length (NRL) and quality score from a WPS profile.
+    /// 
+    /// ## Algorithm
+    /// 1. **Detrend**: Subtract mean to remove DC component
+    /// 2. **Z-score normalize**: Standardize to mean=0, std=1
+    /// 3. **Hann window**: Apply to reduce spectral leakage
+    /// 4. **FFT**: Compute real-to-complex FFT via realfft
+    /// 5. **Peak finding**: Find dominant peak in 140-200bp period range
+    /// 6. **Quality score**: SNR-based score capped at 1.0 (SNR > 3 = clear periodicity)
+    /// 
+    /// ## Returns
+    /// `(nrl_bp, quality_score)` tuple:
+    /// - `nrl_bp`: Nucleosome Repeat Length in bp (expected ~190bp for healthy cfDNA)
+    /// - `quality_score`: SNR-based quality 0-1 (higher = clearer periodicity signal)
+    fn estimate_periodicity(&self, profile: &[f32]) -> (f32, f32) {
+        use realfft::RealFftPlanner;
+        use std::f64::consts::PI;
+        
+        let n = profile.len();
+        if n < 10 { return (0.0, 0.0); }
+        
+        // Convert to f64 for precision
+        let mut data: Vec<f64> = profile.iter().map(|x| *x as f64).collect();
+        
+        // 1. Detrend (remove linear trend)
+        let n_f = n as f64;
+        let x_mean = (n_f - 1.0) / 2.0;
+        let y_mean = data.iter().sum::<f64>() / n_f;
+        
+        let mut slope_numer = 0.0;
+        let mut slope_denom = 0.0;
+        for i in 0..n {
+            let xi = i as f64 - x_mean;
+            let yi = data[i] - y_mean;
+            slope_numer += xi * yi;
+            slope_denom += xi * xi;
+        }
+        let slope = if slope_denom.abs() > 1e-9 { slope_numer / slope_denom } else { 0.0 };
+        let intercept = y_mean - slope * x_mean;
+        
+        for i in 0..n {
+            data[i] -= slope * i as f64 + intercept;
+        }
+        
+        // 2. Z-score normalize
+        let mean: f64 = data.iter().sum::<f64>() / n_f;
+        let variance: f64 = data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n_f;
+        let std = variance.sqrt();
+        
+        if std < 1e-9 {
+            return (0.0, 0.0); // Flat profile
+        }
+        
+        for val in data.iter_mut() {
+            *val /= std;
+        }
+        
+        // 3. Apply Hann window
+        for i in 0..n {
+            let window = 0.5 * (1.0 - (2.0 * PI * i as f64 / (n_f - 1.0)).cos());
+            data[i] *= window;
+        }
+        
+        // 4. Compute FFT using realfft
+        let mut planner = RealFftPlanner::<f64>::new();
+        let fft = planner.plan_fft_forward(n);
+        
+        let mut indata = data.clone();
+        let mut spectrum = fft.make_output_vec();
+        
+        if fft.process(&mut indata, &mut spectrum).is_err() {
+            return (0.0, 0.0);
+        }
+        
+        // 5. Find peak in target period range (140-200bp for nucleosomes)
+        // With 10bp bins, 30 bins = 300bp, so periods in range:
+        // Frequency f = 1/period, and freq[i] = i / (n * bin_size)
+        // So period[i] = n * bin_size / i
+        let bin_size_bp = 10.0;
+        let min_period_bp = 140.0;
+        let max_period_bp = 200.0;
+        
+        let amplitudes: Vec<f64> = spectrum.iter().map(|c| c.norm()).collect();
+        
+        let mut peak_amplitude = 0.0;
+        let mut peak_idx = 0;
+        let mut sum_amplitude = 0.0;
+        let mut count_in_range = 0;
+        
+        for i in 1..amplitudes.len() {
+            let period_bp = (n as f64 * bin_size_bp) / i as f64;
+            
+            if period_bp >= min_period_bp && period_bp <= max_period_bp {
+                sum_amplitude += amplitudes[i];
+                count_in_range += 1;
+                
+                if amplitudes[i] > peak_amplitude {
+                    peak_amplitude = amplitudes[i];
+                    peak_idx = i;
+                }
+            }
+        }
+        
+        if count_in_range == 0 || peak_idx == 0 {
+            return (0.0, 0.0);
+        }
+        
+        // 6. Calculate SNR and quality score
+        let background = sum_amplitude / count_in_range as f64;
+        let snr = if background > 0.0 { peak_amplitude / background } else { 0.0 };
+        
+        // Calculate NRL (nucleosome repeat length) from peak index
+        let nrl_bp = (n as f64 * bin_size_bp) / peak_idx as f64;
+        
+        // Quality score: SNR-based, capped at 1.0 (SNR > 3 indicates clear periodicity)
+        let quality_score = (snr / 3.0).min(1.0) as f32;
+        
+        (nrl_bp as f32, quality_score)
     }
 }
 

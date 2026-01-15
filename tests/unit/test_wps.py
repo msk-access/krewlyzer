@@ -167,95 +167,10 @@ def test_wps_fragment_dual_stream_independent():
 
 
 # ============================================================================
-# Savitzky-Golay Smoothing Tests
+# Note: Savitzky-Golay smoothing and FFT periodicity tests removed
+# These functions are now handled by Rust (sci-rs and realfft crates)
+# See rust/src/wps.rs for implementation
 # ============================================================================
-
-@pytest.mark.unit
-def test_savgol_smooth_preserves_length():
-    """Test smoothing preserves profile length."""
-    from krewlyzer.core.wps_processor import savgol_smooth
-    
-    profile = np.random.randn(200).astype(np.float32)
-    smoothed = savgol_smooth(profile)
-    
-    assert len(smoothed) == len(profile)
-
-
-@pytest.mark.unit
-def test_savgol_smooth_reduces_noise():
-    """Test smoothing reduces high-frequency noise."""
-    from krewlyzer.core.wps_processor import savgol_smooth
-    
-    # Create noisy signal
-    x = np.linspace(0, 4 * np.pi, 200)
-    clean = np.sin(x)
-    noisy = clean + np.random.randn(200) * 0.3
-    
-    smoothed = savgol_smooth(noisy.astype(np.float32))
-    
-    # Smoothed should be closer to clean signal
-    error_noisy = np.mean((noisy - clean) ** 2)
-    error_smoothed = np.mean((smoothed - clean) ** 2)
-    
-    assert error_smoothed < error_noisy
-
-
-@pytest.mark.unit
-def test_savgol_smooth_short_profile():
-    """Test smoothing handles short profiles gracefully."""
-    from krewlyzer.core.wps_processor import savgol_smooth
-    
-    short_profile = np.array([1, 2, 3], dtype=np.float32)
-    result = savgol_smooth(short_profile, window_length=11)
-    
-    # Should return unchanged (profile too short for window)
-    np.testing.assert_array_equal(result, short_profile)
-
-
-# ============================================================================
-# FFT Periodicity Tests
-# ============================================================================
-
-@pytest.mark.unit
-def test_fft_periodicity_detects_190bp():
-    """Test FFT correctly detects ~190bp nucleosome repeat."""
-    from krewlyzer.core.wps_processor import extract_periodicity_fft
-    
-    # Create synthetic profile with 190bp periodicity
-    # 200 bins × 10bp = 2000bp window
-    x = np.arange(200) * 10  # Position in bp
-    period_bp = 190
-    profile = np.sin(2 * np.pi * x / period_bp)
-    
-    result = extract_periodicity_fft(profile.astype(np.float64), bin_size_bp=10.0)
-    
-    # Should detect period near 190bp
-    assert 170 < result["period_bp"] < 210
-    assert result["amplitude"] > 0
-    assert result["snr"] > 1
-
-
-@pytest.mark.unit
-def test_fft_periodicity_empty_profile():
-    """Test FFT handles empty/short profiles."""
-    from krewlyzer.core.wps_processor import extract_periodicity_fft
-    
-    short = np.zeros(5)
-    result = extract_periodicity_fft(short)
-    
-    assert result["period_bp"] == 0.0
-    assert result["quality_score"] == 0.0
-
-
-@pytest.mark.unit
-def test_fft_periodicity_quality_score():
-    """Test quality score is 0-1 range."""
-    from krewlyzer.core.wps_processor import extract_periodicity_fft
-    
-    profile = np.random.randn(200)
-    result = extract_periodicity_fft(profile)
-    
-    assert 0 <= result["quality_score"] <= 1
 
 
 # ============================================================================

@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer ocf`
 
+> **Plain English**: OCF detects where cfDNA fragments came from by looking at their "orientation" near regulatory regions.
+> Different tissues cut DNA in different directions—OCF captures this signal for tissue-of-origin detection.
+>
+> **Use case**: Identify liver cancer vs. colon cancer based on cfDNA fragmentation patterns.
+
+---
+
 ## Purpose
 Computes orientation-aware cfDNA fragmentation (OCF) values in tissue-specific open chromatin regions. Enables tissue-of-origin analysis from cfDNA.
 
@@ -81,11 +88,14 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
 
 ### OCF Score Calculation
 
-```
-                    Signal                      Background
-OCF = Σ (Right ends at -60bp + Left ends at +60bp) - Σ (Left ends at -60bp + Right ends at +60bp)
-          └── Phased nucleosome boundaries ──┘         └── Unphased (background) ──┘
-```
+$$
+\text{OCF} = \sum \left( \text{Right}_{-60} + \text{Left}_{+60} \right) - \sum \left( \text{Left}_{-60} + \text{Right}_{+60} \right)
+$$
+
+Where:
+- $\text{Right}_{-60}$ = Right fragment ends at -60bp from OCR center (phased)
+- $\text{Left}_{+60}$ = Left fragment ends at +60bp from OCR center (phased)
+- $\text{Left}_{-60}$, $\text{Right}_{+60}$ = Background (unphased)
 
 **Calculation Details:**
 1. Fragments are mapped relative to the **center** of the Open Chromatin Region (OCR)

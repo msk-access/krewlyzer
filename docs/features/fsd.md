@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer fsd`
 
+> **Plain English**: FSD creates a "histogram" of fragment sizes for each chromosome arm.
+> Healthy samples have a peak at ~166bp. Cancer samples show a left-shifted peak (~145bp).
+>
+> **Use case**: Detect aneuploidy and copy number changes by comparing arm-level size distributions.
+
+---
+
 ## Purpose
 
 Computes high-resolution (5bp bins) fragment length distributions per chromosome arm. Produces ML-ready features with log-ratio normalization and on/off-target split for panel data.
@@ -137,18 +144,17 @@ With `--pon-model`, FSD outputs include log-ratio normalization:
 
 **Formulas:**
 
-```
-Log-Ratio:
-              sample_count + 1
-logR = log₂( ─────────────────── )
-              PoN_expected + 1
+**Log-Ratio:**
 
+$$
+\text{logR} = \log_2 \left( \frac{\text{sample\_count} + 1}{\text{PoN\_expected} + 1} \right)
+$$
 
-PON Stability:
-                    1
-stability = ─────────────────
-             variance + 0.01
-```
+**PON Stability:**
+
+$$
+\text{stability} = \frac{1}{\text{variance} + 0.01}
+$$
 
 **Algorithm:**
 1. For each arm and size bin, retrieve PoN expected value

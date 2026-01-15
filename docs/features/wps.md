@@ -2,6 +2,14 @@
 
 **Command**: `krewlyzer wps`
 
+> **Plain English**: WPS measures how well nucleosomes protect DNA from cutting.
+> Healthy cfDNA shows a regular ~190bp spacing pattern.
+> Cancer disrupts this pattern - **lower `nrl_quality` = more tumor burden**.
+>
+> **Quick metric**: `nrl_quality > 0.7` = healthy, `< 0.5` = potentially abnormal
+
+---
+
 ## Purpose
 Computes ML-ready nucleosome and transcription factor protection profiles from cfDNA fragments around genomic anchors (TSS, CTCF sites) and global chromatin metrics from Alu elements.
 
@@ -205,14 +213,20 @@ Hierarchical stacking of ~770K Alu elements into 29 groups.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `group_id` | string | Group name |
-| `stacked_wps_nuc` | float32[30] | Stacked nucleosome profile |
+| `group_id` | string | Group name (e.g., Global_All, Chr1_H, AluJb) |
+| `stacked_wps_nuc` | float32[30] | Stacked nucleosome profile (200 bins) |
 | `stacked_wps_tf` | float32[30] | Stacked TF profile |
-| `stacked_wps_nuc_smooth` | float32[30] | Smoothed profile |
+| `stacked_wps_nuc_smooth` | float32[30] | Savitzky-Golay smoothed profile |
 | `alu_count` | int64 | Number of Alu elements in group |
-| `nrl_period_bp` | float32 | Nucleosome repeat length |
-| `nrl_snr` | float32 | FFT signal-to-noise ratio |
-| `nrl_quality` | float32 | Periodicity quality score (0-1) |
+| `nrl_bp` | float32 | Nucleosome Repeat Length in bp (expected ~190bp) |
+| `nrl_deviation_bp` | float32 | **NEW**: Absolute deviation from expected 190bp |
+| `periodicity_score` | float32 | Raw SNR-based quality score (0-1) |
+| `adjusted_score` | float32 | **NEW**: periodicity_score × deviation_penalty |
+
+> **NRL Deviation Scoring**: The `adjusted_score` penalizes samples with abnormal NRL values.
+> A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
+>
+> Formula: `adjusted_score = periodicity_score × max(0, 1 - |nrl_bp - 190| / 50)`
 
 ---
 

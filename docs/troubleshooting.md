@@ -47,6 +47,53 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output/ --chromosomes chr1,chr2
 
 ---
 
+## Duplex/Consensus BAM Issues {#duplex-bam}
+
+### "FILTER COMPATIBILITY WARNING: 0% of reads pass"
+
+**Cause**: Duplex or consensus BAMs don't have proper pair flags set correctly. The default `--require-proper-pair` filter removes all reads.
+
+**What's happening**:
+- Standard BAMs: R1+R2 reads are flagged as "proper pairs"
+- Duplex BAMs: Consensus reads are often single-ended or unpaired
+- Result: `--require-proper-pair` (default) filters out everything
+
+**Solution**: Disable proper pair requirement:
+```bash
+krewlyzer extract -i duplex.bam -r hg19.fa -o output/ \
+    --no-require-proper-pair
+
+krewlyzer run-all -i duplex.bam -r hg19.fa -o output/ \
+    --no-require-proper-pair
+```
+
+### Auto-detection in run-all
+
+The `run-all` command automatically detects this situation:
+
+```
+⚠️ FILTER COMPATIBILITY WARNING
+   Only 0.00% of sampled reads would pass current filters.
+   Only 0.0% of reads are marked as proper pairs.
+
+   Suggested command:
+   krewlyzer run-all -i sample.bam ... --no-require-proper-pair
+```
+
+If you see this warning, re-run with `--no-require-proper-pair`.
+
+### Which BAM types need --no-require-proper-pair?
+
+| BAM Type | Proper Pairs? | Need Flag? |
+|----------|---------------|------------|
+| Standard WGS | ✅ Yes | No |
+| Standard Panel | ✅ Yes | No |
+| Duplex/UMI | ❌ No | **Yes** |
+| Consensus | ❌ No | **Yes** |
+| Single-end | ❌ No | **Yes** |
+
+---
+
 ## GC Correction Issues {#gc-correction}
 
 ### "GC correction assets not found"

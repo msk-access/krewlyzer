@@ -48,7 +48,11 @@ impl MultiConsumer {
         if let Some(c) = &self.wps {
             // Write foreground Parquet (ML-ready vectors)
             if let Some(p) = wps_parquet_path {
-                c.write_parquet(&p, None).context("Writing WPS Parquet output")?;
+                if let Err(e) = c.write_parquet(&p, None) {
+                    // Create detailed error message that will survive PyO3 conversion
+                    let full_error = format!("WPS Parquet write failed: {:#}", e);
+                    return Err(anyhow::anyhow!(full_error));
+                }
             }
         }
         

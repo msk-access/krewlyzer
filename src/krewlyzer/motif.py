@@ -1,8 +1,17 @@
 """
 Motif feature extraction from BAM files.
 
-Extracts End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS).
+Extracts End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS)
+from cfDNA fragment endpoints. These features capture tissue-of-origin signals.
+
 Uses Rust backend for accelerated extraction.
+
+Output Files:
+    - {sample}.EndMotif.tsv: End motif 4-mer frequencies (256 columns)
+    - {sample}.BreakPointMotif.tsv: Breakpoint motif frequencies
+    - {sample}.MDS.tsv: Motif Diversity Score summary
+
+Panel Mode: Generates separate on-target (.ontarget.tsv) files.
 
 Note: For fragment extraction (BED.gz), use `krewlyzer extract` instead.
 """

@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer mfsd`
 
+> **Plain English**: mFSD compares fragment sizes at known mutation sites.
+> Fragments carrying the mutation (ALT) tend to be shorter than healthy fragments (REF).
+>
+> **Use case**: MRD monitoring - track tumor DNA by comparing mutant vs. wild-type fragment sizes.
+
+---
+
 ## Purpose
 Compares the size distribution of mutant vs. wild-type fragments at variant sites, with support for all small variant types and 4-way fragment classification.
 

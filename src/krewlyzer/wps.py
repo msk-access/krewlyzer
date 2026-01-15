@@ -62,7 +62,7 @@ def wps(
     """
     from .assets import AssetManager
     from .core.pon_integration import load_pon_model
-    from .core.wps_processor import apply_wps_pon
+    from .core.wps_processor import subtract_pon_baseline
     
     # Configure verbose logging
     if verbose:
@@ -176,8 +176,8 @@ def wps(
                 factors_out = None
         
         # Output paths (Parquet only)
-        output_file = output / f"{file_stem}.WPS.parquet"
-        output_bg_file = output / f"{file_stem}.WPS_background.parquet"
+        output_file = output / f"{sample_name}.WPS.parquet"
+        output_bg_file = output / f"{sample_name}.WPS_background.parquet"
         
         # Load background Alu regions for hierarchical stacking
         # Explicit --background takes precedence over auto-load
@@ -232,7 +232,11 @@ def wps(
         if wps_result.get("smoothed"):
             logger.info("Applied Savitzky-Golay smoothing to WPS profiles")
         if wps_result.get("periodicity_extracted"):
-            logger.info(f"Extracted FFT periodicity (NRL score: {wps_result.get('periodicity_score', 0):.3f})")
+            score = wps_result.get('periodicity_score')
+            if score is not None:
+                logger.info(f"Extracted FFT periodicity (NRL score: {score:.3f})")
+            else:
+                logger.info("Extracted FFT periodicity")
 
     except Exception as e:
         logger.error(f"WPS calculation failed: {e}")

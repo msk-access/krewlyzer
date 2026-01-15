@@ -1,8 +1,17 @@
 """
 Fragment Size Distribution (FSD) calculation.
 
-Calculates FSD features for a single sample.
+Calculates FSD features showing fragment size histograms per chromosome arm.
+Key biomarker for cancer detection based on cfDNA fragmentation patterns.
+
 Uses Rust backend via unified pipeline for accelerated computation with GC correction.
+
+Output Structure:
+    - Rows: Chromosome arms (e.g., chr1p, chr1q, chr2p, ...)
+    - Columns: Fragment counts per size (65bp to 400bp)
+    - With --pon-model: Z-scores vs healthy baseline per arm
+
+Panel Mode: Generates both off-target (.FSD.tsv) and on-target (.FSD.ontarget.tsv) outputs.
 """
 
 import typer

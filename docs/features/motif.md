@@ -2,6 +2,13 @@
 
 **Command**: `krewlyzer motif`
 
+> **Plain English**: Motif analysis looks at the 4-letter DNA sequences at fragment ends.
+> Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
+>
+> **Key metric**: MDS (Motif Diversity Score) - **higher MDS = more abnormal cutting = potential tumor signal**
+
+---
+
 ## Purpose
 Extracts end motif, breakpoint motif, and Motif Diversity Score (MDS) from sequencing fragments.
 

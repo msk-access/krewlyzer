@@ -1,3 +1,25 @@
+//! Mutant Fragment Size Distribution (mFSD) calculation
+//!
+//! Analyzes fragment size distributions around variant positions to detect
+//! tumor-derived cfDNA. Supports all small variant types with CIGAR-aware extraction.
+//!
+//! ## Variant Types Supported
+//! - **SNV**: Single nucleotide variants
+//! - **MNV**: Multi-nucleotide variants
+//! - **Insertion**: Pure insertions (A→ATG)
+//! - **Deletion**: Pure deletions (ATG→A)
+//! - **Complex**: Combined substitution + indel
+//!
+//! ## Fragment Classification (4-way)
+//! - **REF**: Supports reference allele (healthy baseline)
+//! - **ALT**: Supports alternate allele (tumor signal)
+//! - **NonREF**: Non-REF, non-ALT (sequencing errors, subclones)
+//! - **N**: Contains N at variant position (low quality)
+//!
+//! ## Output
+//! - {sample}.mFSD.tsv: Summary statistics per variant (39 columns)
+//! - {sample}.mFSD.distributions.tsv: Per-size counts (optional)
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
