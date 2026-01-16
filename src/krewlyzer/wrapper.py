@@ -174,6 +174,34 @@ def run_all(
     # Panel mode detection (affects FSC/FSR aggregation)
     is_panel_mode = resolved_target_regions and resolved_target_regions.exists()
     
+    # === Centralized PON Model Loading ===
+    # Load once here and pass to all processors (FSC, FSR, FSD, WPS, OCF)
+    pon = None
+    if resolved_pon_model:
+        from .core.pon_integration import load_pon_model
+        pon = load_pon_model(resolved_pon_model)
+        if pon:
+            logger.info(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
+            # Log component availability
+            components = []
+            if pon.gc_bias:
+                components.append("GC-bias")
+            if pon.fsd_baseline:
+                components.append("FSD")
+            if pon.wps_baseline:
+                components.append("WPS")
+            if pon.ocf_baseline:
+                components.append("OCF")
+            if pon.mds_baseline:
+                components.append("MDS")
+            logger.info(f"  Components: {', '.join(components) if components else 'none'}")
+            
+            # Panel compatibility check
+            if hasattr(pon, 'check_panel_compatibility'):
+                pon.check_panel_compatibility(is_panel_mode)
+        else:
+            logger.warning(f"Failed to load PON model: {resolved_pon_model}")
+    
     # Window settings for FSC/FSR
     # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
     # - WGS default: aggregate 50 bins → 5Mb windows for arm-level CNV
@@ -472,11 +500,7 @@ def run_all(
             if out_fsc_raw.exists():
                 df_counts = pd.read_csv(out_fsc_raw, sep='\t')
                 
-                # Load PON if available
-                pon = None
-                if resolved_pon_model:
-                    from .core.pon_integration import load_pon_model
-                    pon = load_pon_model(resolved_pon_model)
+                # Use centralized PON loaded earlier (line 176+)
                 
                 # FSC Output (off-target - primary for biomarkers)
                 final_fsc = output / f"{sample}.FSC.tsv"
@@ -514,12 +538,7 @@ def run_all(
             except:
                 pass
             
-            # Apply processing to FSD and WPS (PoN if provided)
-            if resolved_pon_model:
-                from .core.pon_integration import load_pon_model
-                pon = load_pon_model(resolved_pon_model)
-            else:
-                pon = None
+            # Use centralized PON loaded earlier (line 176+)
             
             # FSD post-processing (log-ratios if PoN)
             from .core.fsd_processor import process_fsd
