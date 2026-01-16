@@ -122,31 +122,29 @@ flowchart TB
 
 ### KS Test (Kolmogorov-Smirnov)
 
-```
-KS statistic = max |F₁(x) - F₂(x)|
+$$
+\text{KS statistic} = \max |F_1(x) - F_2(x)|
+$$
 
 Where:
-  F₁(x) = CDF of ALT fragment sizes
-  F₂(x) = CDF of REF fragment sizes
-```
+- $F_1(x)$ = CDF of ALT fragment sizes
+- $F_2(x)$ = CDF of REF fragment sizes
 
 ### Size Delta
 
-```
-Delta_ALT_REF = ALT_MeanSize - REF_MeanSize
+$$
+\Delta_{\text{ALT-REF}} = \text{ALT\_MeanSize} - \text{REF\_MeanSize}
+$$
 
-Expected:
-  Healthy: ~0
-  Cancer:  < 0 (ALT shorter)
-```
+**Expected:**
+- Healthy: $\approx 0$
+- Cancer: $< 0$ (ALT shorter)
 
 ### VAF Proxy
 
-```
-                ALT_Count
-VAF_Proxy = ─────────────────
-            REF_Count + ALT_Count
-```
+$$
+\text{VAF\_Proxy} = \frac{\text{ALT\_Count}}{\text{REF\_Count} + \text{ALT\_Count}}
+$$
 
 ---
 

@@ -75,16 +75,14 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 
 MDS quantifies the randomness of 4-mer end motifs using normalized Shannon entropy:
 
-```
-        -Σ pᵢ × log₂(pᵢ)
-MDS = ─────────────────────
-          log₂(4^k)
-```
+$$
+\text{MDS} = \frac{-\sum_{i} p_i \times \log_2(p_i)}{\log_2(4^k)}
+$$
 
 **Variables:**
-- `pᵢ` = frequency of the i-th motif
-- `k` = k-mer length (default: 4)
-- Result range: `[0, 1]`
+- $p_i$ = frequency of the i-th motif
+- $k$ = k-mer length (default: 4)
+- Result range: $[0, 1]$
 
 **Interpretation:**
 | MDS Value | Meaning |

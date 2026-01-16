@@ -22,9 +22,10 @@ Computes ML-ready nucleosome and transcription factor protection profiles from c
 When DNA wraps around a nucleosome, the histone core **protects** ~147bp from enzymatic digestion. In cfDNA, fragments that span a nucleosome are "protected" (whole), while fragments that end at nucleosome boundaries are "fragmented" (cut).
 
 **WPS Formula:**
-```
-WPS = Fragments_spanning_window - Fragments_ending_in_window
-```
+
+$$
+\text{WPS} = \text{Fragments}_{\text{spanning}} - \text{Fragments}_{\text{ending}}
+$$
 
 | WPS Value | Meaning | Biological Interpretation |
 |-----------|---------|---------------------------|
@@ -225,8 +226,10 @@ Hierarchical stacking of ~770K Alu elements into 29 groups.
 
 > **NRL Deviation Scoring**: The `adjusted_score` penalizes samples with abnormal NRL values.
 > A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
->
-> Formula: `adjusted_score = periodicity_score × max(0, 1 - |nrl_bp - 190| / 50)`
+
+$$
+\text{adjusted\_score} = \text{periodicity\_score} \times \max\left(0, 1 - \frac{|\text{nrl\_bp} - 190|}{50}\right)
+$$
 
 ---
 
