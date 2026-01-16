@@ -196,7 +196,7 @@ def build_pon(
                 progress.update(task, description=f"Processing {sample_name}...")
                 
                 try:
-                    # Get FSC data (for GC curves)
+                    # Get FSC data (for GC curves) - this is off-target for WGS
                     _, short, intermediate, long, _, gc_values = _core.count_fragments_by_bins(
                         str(bed_path),
                         str(bin_file)
@@ -207,6 +207,25 @@ def build_pon(
                         "intermediate": np.array(intermediate),
                         "long": np.array(long),
                     })
+                    
+                    # For panel mode, look for pre-processed on-target FSC files
+                    # These would be in the same directory as the BED file
+                    if is_panel_mode:
+                        fsc_ontarget_file = bed_path.parent / f"{sample_name}.FSC.ontarget.tsv"
+                        if fsc_ontarget_file.exists():
+                            try:
+                                fsc_on_df = pd.read_csv(fsc_ontarget_file, sep="\t")
+                                # Extract GC-binned coverage from on-target FSC
+                                if "gc" in fsc_on_df.columns:
+                                    all_gc_data_ontarget.append({
+                                        "gc": fsc_on_df["gc"].values if "gc" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
+                                        "short": fsc_on_df["short"].values if "short" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
+                                        "intermediate": fsc_on_df["intermediate"].values if "intermediate" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
+                                        "long": fsc_on_df["long"].values if "long" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
+                                    })
+                                    logger.debug(f"Collected on-target FSC for {sample_name}")
+                            except Exception as fsc_on_e:
+                                logger.debug(f"Could not read on-target FSC: {fsc_on_e}")
                     
                     # Get FSD data per arm
                     try:

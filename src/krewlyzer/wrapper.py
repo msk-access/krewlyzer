@@ -380,6 +380,21 @@ def run_all(
                     )
                     logger.info(f"Motif on-target: {total_em_on:,} EM, {total_bpm_on:,} BPM")
                 
+                # MDS z-score using PON baseline
+                if pon and pon.mds_baseline and mds is not None:
+                    mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
+                    logger.debug(f"MDS z-score: {mds_z:.3f} (raw={mds:.4f}, pon_mean={pon.mds_baseline.mds_mean:.4f})")
+                    
+                    # Write z-score to MDS file if it exists
+                    if mds_output.exists():
+                        try:
+                            mds_df = pd.read_csv(mds_output, sep="\t")
+                            if "mds_z" not in mds_df.columns:
+                                mds_df["mds_z"] = mds_z
+                                mds_df.to_csv(mds_output, sep="\t", index=False)
+                        except Exception as mds_e:
+                            logger.debug(f"Could not add MDS z-score: {mds_e}")
+                
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
                     
             except Exception as e:

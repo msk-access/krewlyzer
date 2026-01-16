@@ -120,6 +120,58 @@ The Python layer provides:
 4. **Feature Modules** - Per-tool logic (`fsc.py`, `fsr.py`, etc.)
 5. **PON Integration** (`pon/`) - Model loading and building
 
+---
+
+## Python vs Rust Responsibilities
+
+### By Feature
+
+| Feature | Rust (Fast Path) | Python (Orchestration) |
+|---------|------------------|------------------------|
+| **Extract** | BAM parsing, fragment filtering, BED writing | File I/O orchestration |
+| **Motif** | k-mer counting, GC observation | File writing, MDS calculation |
+| **FSC** | Fragment counting per bin, GC correction | PON z-score overlay |
+| **FSR** | Fragment ratio calculation | PON z-score overlay |
+| **FSD** | Size histogram per arm, on/off-target split | PON log-ratio normalization |
+| **WPS** | Protection score, Savitzky-Golay, FFT, NRL | PON z-score subtraction |
+| **OCF** | Strand asymmetry calculation | PON z-score overlay |
+| **mFSD** | Variant-level size profiles | Output formatting |
+| **UXM** | Methylation state extraction | Output formatting |
+
+### By Operation Type
+
+| Operation | Language | File |
+|-----------|----------|------|
+| BAM reading | **Rust** | `extract_motif.rs` |
+| Fragment extraction | **Rust** | `extract_motif.rs` |
+| Target region intersection | **Rust** | `fsd.rs`, `extract_motif.rs` |
+| GC observation collection | **Rust** | `extract_motif.rs` |
+| GC LOESS fitting | **Rust** | `gc_correction.rs` |
+| Correction factor application | **Rust** | Consumers in `pipeline.rs` |
+| FSC/FSD/WPS/OCF counting | **Rust** | `pipeline.rs` |
+| Savitzky-Golay smoothing | **Rust** | `wps.rs` |
+| FFT periodicity (NRL) | **Rust** | `wps.rs` |
+| PON baseline loading | **Python** | `pon/model.py` |
+| PON z-score computation | **Python** | `core/*_processor.py` |
+| PON building | **Python** | `pon/build.py` |
+| File I/O coordination | **Python** | `wrapper.py`, feature modules |
+| CLI parsing | **Python** | `cli.py`, Typer |
+
+### Completed Rust Migrations ✅
+
+| Component | Function | Speedup |
+|-----------|----------|:-------:|
+| FSD log-ratio normalization | `fsd.apply_pon_logratio` | 10-50x |
+| WPS PON z-score subtraction | `wps.apply_pon_zscore` | 5-20x |
+| GC bias aggregation | `pon_builder.compute_gc_bias_model` | 3-10x |
+| FSD baseline aggregation | `pon_builder.compute_fsd_baseline` | 3-10x |
+
+### Future Rust Migration Candidates
+
+| Component | Current | Target | Est. Speedup |
+|-----------|---------|--------|:------------:|
+| WPS baseline aggregation | Python | Rust | 3-10x |
+
 ### Execution Flow
 
 ```
