@@ -295,8 +295,8 @@ def run_all(
             
             try:
                 # Call Unified Engine (silent=True to hide Rust progress)
-                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on)
-                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
+                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on, gc_obs_ontarget)
+                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on, gc_observations_ontarget = _core.extract_motif.process_bam_parallel(
                     str(bam_input),
                     str(reference),
                     mapq,

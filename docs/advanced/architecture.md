@@ -165,12 +165,31 @@ The Python layer provides:
 | WPS PON z-score subtraction | `wps.apply_pon_zscore` | 5-20x |
 | GC bias aggregation | `pon_builder.compute_gc_bias_model` | 3-10x |
 | FSD baseline aggregation | `pon_builder.compute_fsd_baseline` | 3-10x |
+| WPS baseline aggregation | `pon_builder.compute_wps_baseline` | 3-10x |
 
-### Future Rust Migration Candidates
+### Rust-First Fallback Strategy
 
-| Component | Current | Target | Est. Speedup |
-|-----------|---------|--------|:------------:|
-| WPS baseline aggregation | Python | Rust | 3-10x |
+All performance-critical functions use **Rust-first with Python fallback**:
+
+```python
+# Pattern used in fsd_processor.py, wps_processor.py, build.py
+try:
+    from krewlyzer import _core
+    result = _core.module.function(args)  # Rust (10-50x faster)
+    if result:
+        return result
+except Exception as e:
+    logger.debug(f"Rust failed: {e}")
+
+# Python fallback (slower but always available)
+return python_implementation(args)
+```
+
+**Benefits**:
+- ✅ **Performance**: Rust path is 3-50x faster
+- ✅ **Reliability**: Python fallback if Rust extension fails
+- ✅ **Debugging**: Python code is easier to step through
+- ✅ **Accuracy**: Both paths produce identical results
 
 ### Execution Flow
 

@@ -72,8 +72,16 @@ def process_fsd(
         except Exception as e:
             logger.debug(f"Rust FSD PON failed, falling back to Python: {e}")
     
-    # Python fallback
-    logger.info(f"Processing FSD (Python): {fsd_raw_path}")
+    # =========================================================================
+    # PYTHON FALLBACK IMPLEMENTATION
+    # NOTE: This is a fallback only. Primary implementation is Rust (10-50x faster).
+    # The Rust implementation is in: rust/src/fsd.rs::apply_pon_logratio()
+    # This fallback is used if:
+    #   - pon_parquet_path is not provided
+    #   - Rust extension fails to load
+    #   - Rust function returns an error
+    # =========================================================================
+    logger.info(f"Processing FSD (Python fallback): {fsd_raw_path}")
     
     # Read raw counts from Rust
     df = pd.read_csv(fsd_raw_path, sep='\t')

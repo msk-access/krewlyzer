@@ -78,6 +78,16 @@ def post_process_wps(
         except Exception as e:
             logger.debug(f"Rust WPS PON failed, will use Python fallback: {e}")
     
+    # =========================================================================
+    # PYTHON FALLBACK IMPLEMENTATION
+    # NOTE: This is a fallback only. Primary implementation is Rust (5-20x faster).
+    # The Rust implementation is in: rust/src/wps.rs::apply_pon_zscore()
+    # This fallback is used if:
+    #   - pon_parquet_path is not provided
+    #   - Rust extension fails to load
+    #   - Rust function returns an error
+    # =========================================================================
+    
     # 1. Add _smooth columns for compatibility (Rust already smoothed the data)
     # Note: Rust applies Savitzky-Golay smoothing (window=11, order=3) before writing Parquet
     if smooth and wps_parquet.exists():
