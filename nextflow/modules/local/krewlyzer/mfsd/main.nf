@@ -15,16 +15,17 @@ process KREWLYZER_MFSD {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def verbose_arg = params.verbose ? "--verbose" : ""
     
     """
     krewlyzer mfsd \\
-        $bam \\
-        --input-file $variants \\
+        -i $bam \\
+        -V $variants \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
         --output-distributions \\
-        --verbose \\
+        $verbose_arg \\
         $args
 
     # Copy filtered MAF to output if it exists (keeps the filtered subset with results)

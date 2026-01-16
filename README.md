@@ -17,6 +17,33 @@
 
 ---
 
+## Why Krewlyzer?
+
+Cancer cells leave molecular fingerprints in your blood. Krewlyzer finds them.
+
+### The Fragmentomics Advantage
+
+| Traditional Liquid Biopsy | Fragmentomics with Krewlyzer |
+|---------------------------|------------------------------|
+| Look for specific mutations | Analyze **how DNA is cut** |
+| Need prior knowledge of tumor | Works without knowing mutations |
+| Miss ~50% of early cancers | Detect more cancers, earlier |
+
+**Key insight**: Tumor DNA fragments are **shorter** (~145bp) than healthy DNA (~166bp). Krewlyzer quantifies this difference and extracts ML-ready features.
+
+### What You Get
+
+| Feature | Clinical Use |
+|---------|--------------|
+| **Fragment size ratios** | Tumor burden estimation |
+| **Cutting patterns** | Tissue of origin identification |
+| **Nucleosome positioning** | Epigenetic profiling |
+| **Mutation-specific sizes** | MRD monitoring |
+
+> **New to cfDNA?** Read [What is Cell-Free DNA?](https://msk-access.github.io/krewlyzer/introduction/) for background.
+
+---
+
 ## Quick Install
 
 ```bash
@@ -31,11 +58,11 @@ pip install krewlyzer
 
 ```bash
 # Run all fragmentomics features
-krewlyzer run-all sample.bam --reference hg19.fa --output results/
+krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
 # Individual tools
-krewlyzer extract sample.bam -r hg19.fa -o output/
-krewlyzer fsc output/sample.bed.gz -o output/
+krewlyzer extract -i sample.bam -r hg19.fa -o output/
+krewlyzer fsc -i output/sample.bed.gz -o output/
 ```
 
 ---

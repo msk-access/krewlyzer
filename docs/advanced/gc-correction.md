@@ -59,24 +59,46 @@ GC correction is applied per fragment length bin (17 bins, 20bp width):
 GC correction is **enabled by default** for most tools:
 
 ```bash
-krewlyzer extract sample.bam -r hg19.fa -o output/
+krewlyzer extract -i sample.bam -r hg19.fa -o output/
 # Generates: sample.correction_factors.csv
 ```
 
 ### Disable GC Correction
 
 ```bash
-krewlyzer fsc sample.bed.gz --no-gc-correct -o output/
+krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ```
 
 ### Using Pre-computed Factors
 
 ```bash
 # mFSD can use factors from extract
-krewlyzer mfsd sample.bam -i variants.vcf \
+krewlyzer mfsd -i sample.bam -V variants.vcf \
     --correction-factors output/sample.correction_factors.csv \
     -o output/
 ```
+
+---
+
+## Per-Tool GC Correction
+
+| Tool | GC Option | Source | Notes |
+|------|-----------|--------|-------|
+| **extract** | `--gc-correct` | Computes factors | Generates `.correction_factors.csv` |
+| **FSC** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **FSR** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
+| **motif** | N/A | N/A | No GC correction |
+| **UXM** | N/A | N/A | No GC correction |
+
+### Panel Data (--target-regions)
+
+When `--target-regions` is provided to `extract`:
+- GC model is built from **off-target** fragments only
+- Avoids capture bias contamination
 
 ---
 

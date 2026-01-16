@@ -1,8 +1,17 @@
 """
 Fragment Size Distribution (FSD) calculation.
 
-Calculates FSD features for a single sample.
+Calculates FSD features showing fragment size histograms per chromosome arm.
+Key biomarker for cancer detection based on cfDNA fragmentation patterns.
+
 Uses Rust backend via unified pipeline for accelerated computation with GC correction.
+
+Output Structure:
+    - Rows: Chromosome arms (e.g., chr1p, chr1q, chr2p, ...)
+    - Columns: Fragment counts per size (65bp to 400bp)
+    - With --pon-model: Z-scores vs healthy baseline per arm
+
+Panel Mode: Generates both off-target (.FSD.tsv) and on-target (.FSD.ontarget.tsv) outputs.
 """
 
 import typer
@@ -23,10 +32,11 @@ from krewlyzer import _core
 
 
 def fsd(
-    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Path to chromosome arms BED file"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSD)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
@@ -138,6 +148,11 @@ def fsd(
         
         # Call Unified Pipeline (FSD only)
         logger.info("Running unified pipeline for FSD...")
+        
+        is_panel_mode = target_regions and target_regions.exists()
+        if is_panel_mode:
+            logger.info(f"Panel mode: on/off-target split enabled (targets: {target_regions.name})")
+        
         _core.run_unified_pipeline(
             str(bedgz_input),
             # GC Correction (compute)
@@ -149,11 +164,17 @@ def fsd(
             # FSC - disabled
             None, None,
             # WPS - disabled
+            None, None,
+            # WPS Background - disabled
             None, None, False,
             # FSD - enabled
             str(arms_file), str(output_file),
             # OCF - disabled
-            None, None
+            None, None,
+            # Target regions for on/off-target split
+            str(target_regions) if is_panel_mode else None,
+            50,  # bait_padding
+            False  # silent
         )
         
         # If PON provided, apply z-scores using shared processor

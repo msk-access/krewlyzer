@@ -73,12 +73,40 @@ _core.extract_motif.process_bam_parallel(
 
 # Unified pipeline
 _core.run_unified_pipeline(
-    bed_path, bins, arms, transcripts, ocr, ...
+    bed_path, gc_ref, valid_regions, gc_factors_out,
+    gc_factors_in, bin_file, fsc_out, wps_anchors, wps_out,
+    wps_bg_anchors, wps_bg_out, wps_bg_flip,
+    arms_file, fsd_out, ocr_file, ocf_out_dir,
+    target_regions, bait_padding, silent
 )
 
 # GC correction
 _core.gc.compute_and_write_gc_factors(...)
 ```
+
+### run_unified_pipeline Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `bed_path` | str | Input .bed.gz file path |
+| `gc_ref` | str/None | GC reference parquet for computing factors |
+| `valid_regions` | str/None | Valid regions BED for GC |
+| `gc_factors_out` | str/None | Output path for computed GC factors |
+| `gc_factors_in` | str/None | Pre-computed GC factors CSV |
+| `bin_file` | str/None | FSC/FSR bins BED |
+| `fsc_out` | str/None | FSC output TSV path |
+| `wps_anchors` | str/None | WPS foreground anchors BED |
+| `wps_out` | str/None | WPS foreground output parquet |
+| `wps_bg_anchors` | str/None | WPS background (Alu) BED |
+| `wps_bg_out` | str/None | WPS background output parquet |
+| `wps_bg_flip` | bool | Flip WPS vectors for strand awareness |
+| `arms_file` | str/None | Chromosome arms BED for FSD |
+| `fsd_out` | str/None | FSD output TSV path |
+| `ocr_file` | str/None | Open chromatin regions for OCF |
+| `ocf_out_dir` | str/None | OCF output directory |
+| `target_regions` | str/None | Panel target BED (on/off split) |
+| `bait_padding` | int | Bait edge padding in bp (default: 50) |
+| `silent` | bool | Suppress progress output |
 
 ---
 

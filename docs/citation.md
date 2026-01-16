@@ -40,7 +40,9 @@ Krewlyzer implements or adapts methods from the following foundational papers in
 **Key Concept:** WPS quantifies nucleosome occupancy by comparing fragments that span a protection window vs those ending within it.
 
 **Formula:**
-$$WPS(k) = N_{spanning}(k) - N_{ends}(k)$$
+```
+WPS(k) = N_spanning(k) - N_ends(k)
+```
 
 **Interpretation:**
 | WPS Value | Meaning |

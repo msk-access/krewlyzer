@@ -1,9 +1,20 @@
 """
 Fragment extraction from BAM files.
 
-Extracts cfDNA fragments with full filter control.
+Extracts cfDNA fragments with configurable read filters (MAPQ, length, proper pair).
+First step in the pipeline - generates .bed.gz for downstream feature extraction.
+
 Uses Rust backend for accelerated extraction.
-Computes GC correction factors for downstream tools.
+
+Output Files:
+    - {sample}.bed.gz: Fragment coordinates (chrom, start, end, strand, gc%, gc_weight)
+    - {sample}.correction_factors.csv: LOESS-based GC correction factors
+    - {sample}.metadata.json: Processing statistics
+
+GC Correction: Computes per-fragment GC weights for all downstream tools.
+Panel Mode: GC model trained on off-target reads only for unbiased correction.
+
+BAM Compatibility: Auto-detects duplex BAMs and warns to use --no-require-proper-pair.
 """
 
 import typer
@@ -30,7 +41,7 @@ from .core.bam_utils import check_bam_compatibility
 
 
 def extract(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
     genome_reference: Path = typer.Option(..., '-r', '--reference', help="Reference genome FASTA (indexed)"),
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
     
@@ -40,6 +51,7 @@ def extract(
     
     # Configurable filters
     exclude_regions: Optional[Path] = typer.Option(None, '-x', '--exclude-regions', help="Exclude regions BED file"),
+    target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: GC model computed on off-target reads only)"),
     mapq: int = typer.Option(20, '--mapq', '-q', help="Minimum mapping quality"),
     minlen: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
     maxlen: int = typer.Option(400, '--maxlen', help="Maximum fragment length"),
@@ -174,9 +186,12 @@ def extract(
         logger.info(f"Extracting fragments from {bam_input.name}")
         logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
         
+        if target_regions:
+            logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
+        
         # Call Unified Rust Engine (Extract Mode)
-        # Returns (fragment_count, em_counts, bpm_counts, gc_observations)
-        fragment_count, _, _, gc_observations = _core.extract_motif.process_bam_parallel(
+        # Returns (fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on)
+        fragment_count, _, _, gc_observations, _, _ = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             mapq,
@@ -187,6 +202,7 @@ def extract(
             str(bed_temp),         # output_bed_path
             None,                  # output_motif_prefix (None = skip motif counting)
             str(exclude_regions) if exclude_regions else None,
+            str(target_regions) if target_regions else None,  # For off-target GC model
             skip_duplicates,
             require_proper_pair
         )
@@ -232,6 +248,8 @@ def extract(
             "total_fragments": fragment_count,
             "genome": genome,
             "gc_correction_computed": gc_correct,
+            "panel_mode": target_regions is not None,
+            "target_regions": str(target_regions) if target_regions else None,
             "filters": {
                 "mapq": mapq,
                 "min_length": minlen,

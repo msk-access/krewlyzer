@@ -1,8 +1,15 @@
 """
 Fragment-level Methylation analysis (UXM) calculation.
 
-Calculates UXM features for a single sample.
+Analyzes CpG methylation patterns in cell-free DNA fragments using bisulfite BAM.
+UXM (Unmethylated-to-methylated Xition) scores measure epigenetic tissue signatures.
+
 Uses Rust backend for accelerated computation.
+
+Input: Bisulfite-converted BAM file (from WGBS or capture panel)
+Output: {sample}.UXM.tsv - Fragment-level methylation scores at marker regions
+
+Markers: Genomic regions where methylation status differs between tissues.
 """
 
 import typer
@@ -22,7 +29,7 @@ from krewlyzer import _core
 
 
 def uxm(
-    bam_input: Path = typer.Argument(..., help="Input bisulfite BAM file"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input bisulfite BAM file"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Path to genomic marker file"),

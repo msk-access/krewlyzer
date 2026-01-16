@@ -76,7 +76,7 @@ def test_motif_cli_help():
     assert result.exit_code == 0
     output = strip_ansi(result.output)
     assert "--kmer" in output
-    assert "-g" in output
+    assert "-r" in output
 
 
 @pytest.mark.integration
@@ -85,8 +85,8 @@ def test_motif_extraction(tmp_path, mock_bam_for_motif, mock_reference):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "motif", str(mock_bam_for_motif),
-        "-g", str(mock_reference),
+        "motif", "-i", str(mock_bam_for_motif),
+        "-r", str(mock_reference),
         "-o", str(output_dir),
         "-s", "test",
         "--kmer", "4"
@@ -106,8 +106,8 @@ def test_motif_mds_score(tmp_path, mock_bam_for_motif, mock_reference):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "motif", str(mock_bam_for_motif),
-        "-g", str(mock_reference),
+        "motif", "-i", str(mock_bam_for_motif),
+        "-r", str(mock_reference),
         "-o", str(output_dir),
         "-s", "test"
     ])

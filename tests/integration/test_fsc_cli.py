@@ -63,7 +63,7 @@ def test_fsc_basic_run(tmp_path, sample_bedgz, sample_bins):
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsc", str(sample_bedgz),
+        "fsc", "-i", str(sample_bedgz),
         "-b", str(sample_bins),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -78,13 +78,13 @@ def test_fsc_basic_run(tmp_path, sample_bedgz, sample_bins):
 
 @pytest.mark.integration
 def test_fsc_output_format(tmp_path, sample_bedgz, sample_bins):
-    """Test FSC output format has expected columns."""
+    """Test FSC output format matches implementation plan schema."""
     import pandas as pd
     
     output_dir = tmp_path / "output"
     
     result = runner.invoke(app, [
-        "fsc", str(sample_bedgz),
+        "fsc", "-i", str(sample_bedgz),
         "-b", str(sample_bins),
         "-o", str(output_dir),
         "-s", "test_sample"
@@ -95,7 +95,11 @@ def test_fsc_output_format(tmp_path, sample_bedgz, sample_bins):
     fsc_out = output_dir / "test_sample.FSC.tsv"
     df = pd.read_csv(fsc_out, sep="\t")
     
-    # Check expected columns (FSC z-score outputs)
-    expected_cols = ["region", "short-fragment-zscore"]
+    # Check expected columns per implementation plan:
+    # chrom, start, end + 5 channels + total (no z-scores!)
+    expected_cols = ["chrom", "start", "end", 
+                     "ultra_short", "core_short", "mono_nucl", "di_nucl", "long", 
+                     "total"]
     for col in expected_cols:
         assert col in df.columns, f"Missing column: {col}"
+

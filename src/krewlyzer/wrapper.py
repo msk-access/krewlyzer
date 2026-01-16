@@ -1,5 +1,19 @@
 """
 Run all krewlyzer feature extraction tools for a single sample.
+
+Pipeline Overview:
+    1. **Extract + Motif**: Fragment extraction, GC correction, end/breakpoint motifs
+    2. **Unified Engine**: FSC, FSR, FSD, WPS, OCF (parallel via Rust backend)
+    3. **Post-processing**: WPS smoothing (Rust), periodicity extraction (Rust), PoN z-scores
+    4. **Optional**: UXM (bisulfite), mFSD (variants)
+
+Key Features:
+    - **BAM filter auto-detection**: Warns if duplex BAMs need --no-require-proper-pair
+    - **Panel mode**: Off-target GC model, on/off-target split for all tools
+    - **GC correction**: Per-fragment LOESS-based correction via Rust
+    - **WPS periodicity**: FFT-based NRL extraction with deviation scoring (Rust)
+
+Uses shared utilities from core/bam_utils.py for filter compatibility checking.
 """
 
 import typer
@@ -29,9 +43,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger("krewlyzer")
 
+def _resolve_path(value) -> Optional[Path]:
+    """Safely resolve a path value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    Optional[Path] parameters with defaults remain as OptionInfo objects.
+    This helper handles that case.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        return Path(value)
+    # If it's a typer.OptionInfo (or any other type), return None
+    return None
+
+def _resolve_int(value, default: int) -> int:
+    """Safely resolve an integer value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    parameters with defaults remain as OptionInfo objects.
+    This helper handles that case.
+    """
+    if isinstance(value, int):
+        return value
+    # If it's a typer.OptionInfo or other non-int type, return default
+    return default
+
 def run_all(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (sorted, indexed)"),
-    reference: Path = typer.Option(..., "--reference", "-g", help="Reference genome FASTA (indexed)"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
+    reference: Path = typer.Option(..., "--reference", "-r", help="Reference genome FASTA (indexed)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory for all results"),
     
@@ -42,6 +84,7 @@ def run_all(
     skip_duplicates: bool = typer.Option(True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads"),
     require_proper_pair: bool = typer.Option(True, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs"),
     exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-x", help="Exclude regions BED file"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: GC model from off-target reads only)"),
     
     # Optional inputs for specific tools
     bisulfite_bam: Optional[Path] = typer.Option(None, "--bisulfite-bam", help="Bisulfite BAM for UXM (optional)"),
@@ -56,7 +99,10 @@ def run_all(
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms file for FSD"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
     ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
-    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS"),
+    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS (legacy)"),
+    wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
+    wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
+    bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     
     # Observability
@@ -68,6 +114,20 @@ def run_all(
     Pipeline: extract → motif → [Unified Engine: FSC/FSR, FSD, WPS, OCF]
     Optional: uxm, mfsd
     """
+    # ═══════════════════════════════════════════════════════════════════
+    # RESOLVE TYPER PARAMETERS (handle direct function calls vs CLI)
+    # ═══════════════════════════════════════════════════════════════════
+    # When called directly (not via CLI), typer.Option defaults remain as
+    # OptionInfo objects. Resolve them to their intended values.
+    resolved_target_regions = _resolve_path(target_regions)
+    resolved_exclude_regions = _resolve_path(exclude_regions)
+    resolved_bisulfite_bam = _resolve_path(bisulfite_bam)
+    resolved_variants = _resolve_path(variants)
+    resolved_arms_file = _resolve_path(arms_file)
+    resolved_ocr_file = _resolve_path(ocr_file)
+    resolved_pon_model = _resolve_path(pon_model)
+    resolved_bait_padding = _resolve_int(bait_padding, 50)
+    
     # Configure Logging
     if debug:
         logger.setLevel(logging.DEBUG)
@@ -111,19 +171,83 @@ def run_all(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
+    # Panel mode detection (affects FSC/FSR aggregation)
+    is_panel_mode = resolved_target_regions and resolved_target_regions.exists()
+    
+    # === Centralized PON Model Loading ===
+    # Load once here and pass to all processors (FSC, FSR, FSD, WPS, OCF)
+    pon = None
+    if resolved_pon_model:
+        from .core.pon_integration import load_pon_model
+        pon = load_pon_model(resolved_pon_model)
+        if pon:
+            logger.info(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
+            # Log component availability
+            components = []
+            if pon.gc_bias:
+                components.append("GC-bias")
+            if pon.fsd_baseline:
+                components.append("FSD")
+            if pon.wps_baseline:
+                components.append("WPS")
+            if pon.ocf_baseline:
+                components.append("OCF")
+            if pon.mds_baseline:
+                components.append("MDS")
+            logger.info(f"  Components: {', '.join(components) if components else 'none'}")
+            
+            # Panel compatibility check
+            if hasattr(pon, 'check_panel_compatibility'):
+                pon.check_panel_compatibility(is_panel_mode)
+        else:
+            logger.warning(f"Failed to load PON model: {resolved_pon_model}")
+    
     # Window settings for FSC/FSR
-    if bin_input:
+    # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
+    # - WGS default: aggregate 50 bins → 5Mb windows for arm-level CNV
+    if bin_input or is_panel_mode:
         fsc_windows, fsc_continue_n = 1, 1
-        logger.info(f"Using custom bin file: {bin_input}")
+        if bin_input:
+            logger.info(f"Using custom bin file: {bin_input}")
+        if is_panel_mode:
+            logger.info(f"Panel mode: FSC/FSR aggregation disabled (preserving gene-level resolution)")
     else:
         fsc_windows, fsc_continue_n = 100000, 50
     
     logger.info(f"Processing sample: {sample}")
     logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
     
+    # Pre-check BAM compatibility with current filters (avoid 0 fragment issue)
+    from .core.bam_utils import check_bam_compatibility
+    compat = check_bam_compatibility(bam_input, require_proper_pair, skip_duplicates, mapq)
+    
+    if compat["pass_rate"] < 0.01 and compat["total_sampled"] > 100:
+        console.print("\n[bold red]⚠️  FILTER COMPATIBILITY WARNING[/bold red]\n")
+        console.print(f"Only [bold]{compat['pass_rate']:.2%}[/bold] of sampled reads would pass current filters.\n")
+        
+        for issue in compat["issues"]:
+            console.print(f"  • {issue}")
+        
+        if compat["suggested_flags"]:
+            suggested = " ".join(compat["suggested_flags"])
+            console.print(f"\n[bold yellow]Suggested command:[/bold yellow]")
+            console.print(f"  krewlyzer run-all -i {bam_input.name} -r {reference.name} -o {output} [bold]{suggested}[/bold]\n")
+            
+            logger.error(f"Filter mismatch detected. Re-run with: {suggested}")
+            raise typer.Exit(1)
+    elif compat["pass_rate"] < 0.5 and compat["issues"]:
+        # Warning but continue
+        console.print("\n[yellow]⚠️  Filter compatibility note:[/yellow]")
+        for issue in compat["issues"]:
+            console.print(f"  • {issue}")
+        console.print()
+    
+    if is_panel_mode:
+        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_regions.name})")
+    
     # Determine which optional tools will run
-    has_uxm = bisulfite_bam is not None and bisulfite_bam.exists()
-    has_mfsd = variants is not None and variants.exists()
+    has_uxm = resolved_bisulfite_bam is not None and resolved_bisulfite_bam.exists()
+    has_mfsd = resolved_variants is not None and resolved_variants.exists()
     
     # Multi-step progress display
     with Progress(
@@ -171,7 +295,8 @@ def run_all(
             
             try:
                 # Call Unified Engine (silent=True to hide Rust progress)
-                fragment_count, em_counts, bpm_counts, gc_observations = _core.extract_motif.process_bam_parallel(
+                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on)
+                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
                     str(bam_input),
                     str(reference),
                     mapq,
@@ -180,8 +305,9 @@ def run_all(
                     4,  # kmer
                     threads,
                     bed_out_arg,
-                    "enable",
-                    str(exclude_regions) if exclude_regions else str(assets.exclude_regions),
+                    "enable",  # output_motif_prefix
+                    str(resolved_exclude_regions) if resolved_exclude_regions else str(assets.exclude_regions),
+                    str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,  # Panel mode: off-target GC
                     skip_duplicates,
                     require_proper_pair,
                     True  # silent=True
@@ -224,6 +350,7 @@ def run_all(
                 # --- Post-Process Motif (Write Files) ---
                 from .core.motif_processor import process_motif_outputs
                 
+                # Off-target motifs (primary - unbiased for biomarkers)
                 total_em, total_bpm, mds = process_motif_outputs(
                     em_counts=em_counts,
                     bpm_counts=bpm_counts,
@@ -234,6 +361,24 @@ def run_all(
                     kmer=4,
                     include_headers=True
                 )
+                
+                # On-target motifs (for panel data comparison - PCR biased)
+                if is_panel_mode and sum(em_counts_on.values()) > 0:
+                    edm_on = output / f"{sample}.EndMotif.ontarget.tsv"
+                    bpm_on = output / f"{sample}.BreakPointMotif.ontarget.tsv"
+                    mds_on = output / f"{sample}.MDS.ontarget.tsv"
+                    
+                    total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
+                        em_counts=em_counts_on,
+                        bpm_counts=bpm_counts_on,
+                        edm_output=edm_on,
+                        bpm_output=bpm_on,
+                        mds_output=mds_on,
+                        sample_name=sample,
+                        kmer=4,
+                        include_headers=True
+                    )
+                    logger.info(f"Motif on-target: {total_em_on:,} EM, {total_bpm_on:,} BPM")
                 
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
                     
@@ -255,16 +400,45 @@ def run_all(
         if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
 
         # FSD Arms
-        res_arms = arms_file if arms_file else assets.arms
+        res_arms = resolved_arms_file if resolved_arms_file else assets.arms
         if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
-        # WPS Genes (Transcript Annotation)
-        res_wps = wps_file if wps_file else assets.transcript_anno
-        if not res_wps.exists(): logger.error(f"Transcript file missing: {res_wps}"); raise typer.Exit(1)
+        # WPS Regions (prefer wps_anchors, fallback to wps_file, then asset defaults)
+        # Resolve paths to handle typer.OptionInfo when called directly
+        resolved_wps_anchors = _resolve_path(wps_anchors)
+        resolved_wps_file = _resolve_path(wps_file)
+        resolved_wps_background = _resolve_path(wps_background)
+        
+        if resolved_wps_anchors and resolved_wps_anchors.exists():
+            res_wps = resolved_wps_anchors
+            logger.debug(f"WPS anchors: {resolved_wps_anchors}")
+        elif resolved_wps_file and resolved_wps_file.exists():
+            res_wps = resolved_wps_file
+            logger.debug(f"WPS transcript (legacy): {resolved_wps_file}")
+        else:
+            # Try wps_anchors asset first, fallback to transcript_anno
+            try:
+                res_wps = assets.wps_anchors
+                logger.debug(f"WPS anchors (default): {res_wps}")
+            except (AttributeError, FileNotFoundError):
+                res_wps = assets.transcript_anno
+                logger.debug(f"WPS transcript (fallback): {res_wps}")
+        if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
 
-        # OCF Regions
-        res_ocf = ocr_file if ocr_file else assets.ocf_regions
-        if not res_ocf.exists(): logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
+        # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
+        run_ocf = True
+        if resolved_ocr_file:
+            res_ocf = resolved_ocr_file
+        elif assets.ocf_available:
+            res_ocf = assets.ocf_regions
+        else:
+            logger.warning(f"⚠️  OCF regions not available for {genome} (only GRCh37/hg19 currently supported)")
+            logger.warning("   Skipping OCF. Provide --ocr-file to run OCF on hg38")
+            run_ocf = False
+            res_ocf = None
+        
+        if run_ocf and res_ocf and not res_ocf.exists():
+            logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
         
         # GC Reference
         res_gc = assets.gc_reference
@@ -280,10 +454,22 @@ def run_all(
         # Define Outputs
         out_gc_factors = output / f"{sample}.correction_factors.csv"
         out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
-        out_wps = output / f"{sample}.WPS.tsv.gz"
+        out_wps = output / f"{sample}.WPS.parquet"  # Foreground Parquet
+        out_wps_bg = output / f"{sample}.WPS_background.parquet"  # Alu stacking
         out_fsd = output / f"{sample}.FSD.tsv"
         out_ocf_dir = output / f"{sample}_ocf_tmp"
         out_ocf_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Resolve WPS background (explicit --wps-background takes precedence over auto-load)
+        if resolved_wps_background and resolved_wps_background.exists():
+            res_wps_bg = resolved_wps_background
+            logger.info(f"Using explicit WPS background: {res_wps_bg}")
+        elif assets.wps_background.exists():
+            res_wps_bg = assets.wps_background
+            logger.debug(f"Auto-loaded WPS background ({genome}): {res_wps_bg}")
+        else:
+            res_wps_bg = None
+            logger.warning("WPS background not found - skipping background stacking")
         
         try:
             # RUN RUST PIPELINE (silent=True)
@@ -292,12 +478,17 @@ def run_all(
                 str(res_gc), str(res_valid_regions), str(out_gc_factors),
                 None,
                 str(res_bin), str(out_fsc_raw),
-                str(res_wps), str(out_wps), False,
+                str(res_wps), str(out_wps),  # WPS foreground
+                str(res_wps_bg) if res_wps_bg else None, str(out_wps_bg) if res_wps_bg else None,  # WPS background
+                False,
                 str(res_arms), str(out_fsd),
-                str(res_ocf), str(out_ocf_dir),
+                str(res_ocf) if run_ocf else None, str(out_ocf_dir) if run_ocf else None,  # OCF (skip for hg38)
+                str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,
+                resolved_bait_padding,  # Bait edge padding (adaptive safety applies)
                 True  # silent=True
             )
-            progress.update(task_pipeline, description="[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+OCF)", completed=100)
+            ocf_status = "OCF" if run_ocf else "OCF skipped"
+            progress.update(task_pipeline, description=f"[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+{ocf_status})", completed=100)
             
             # ═══════════════════════════════════════════════════════════════════
             # 3. POST-PROCESSING (FSC/FSR, OCF, PON z-scores)
@@ -309,19 +500,29 @@ def run_all(
             if out_fsc_raw.exists():
                 df_counts = pd.read_csv(out_fsc_raw, sep='\t')
                 
-                # Load PON if available
-                pon = None
-                if pon_model:
-                    from .core.pon_integration import load_pon_model
-                    pon = load_pon_model(pon_model)
+                # Use centralized PON loaded earlier (line 176+)
                 
-                # FSC Output (using shared processor)
+                # FSC Output (off-target - primary for biomarkers)
                 final_fsc = output / f"{sample}.FSC.tsv"
                 process_fsc(df_counts, final_fsc, fsc_windows, fsc_continue_n, pon=pon)
                 
-                # FSR Output (using shared processor)
+                # FSR Output (off-target - primary for biomarkers)
                 final_fsr = output / f"{sample}.FSR.tsv"
                 process_fsr(df_counts, final_fsr, fsc_windows, fsc_continue_n, pon=pon)
+                
+                # Process on-target files if they exist (panel mode)
+                out_fsc_raw_ontarget = output / f"{sample}_raw.FSC.ontarget.tsv"
+                if out_fsc_raw_ontarget.exists():
+                    logger.info("Processing on-target FSC/FSR (for CNV only)")
+                    df_counts_on = pd.read_csv(out_fsc_raw_ontarget, sep='\t')
+                    
+                    # FSC on-target (for CNV analysis only)
+                    final_fsc_on = output / f"{sample}.FSC.ontarget.tsv"
+                    process_fsc(df_counts_on, final_fsc_on, fsc_windows, fsc_continue_n, pon=pon)
+                    
+                    # FSR on-target (for comparison only - PCR biased)
+                    final_fsr_on = output / f"{sample}.FSR.ontarget.tsv"
+                    process_fsr(df_counts_on, final_fsr_on, fsc_windows, fsc_continue_n, pon=pon)
         
             # OCF (Move files)
             src_ocf = out_ocf_dir / "all.ocf.tsv"
@@ -337,19 +538,40 @@ def run_all(
             except:
                 pass
             
-            # Apply PON z-scores to FSD and WPS (if PON model provided)
-            if pon_model:
-                from .core.pon_integration import load_pon_model
-                from .core.fsd_processor import apply_fsd_pon
-                from .core.wps_processor import apply_wps_pon
-                
-                pon = load_pon_model(pon_model)
-                
-                if pon is not None:
-                    if out_fsd.exists():
-                        apply_fsd_pon(out_fsd, pon)
-                    if out_wps.exists():
-                        apply_wps_pon(out_wps, pon)
+            # Use centralized PON loaded earlier (line 176+)
+            
+            # FSD post-processing (log-ratios if PoN)
+            from .core.fsd_processor import process_fsd
+            if out_fsd.exists():
+                process_fsd(out_fsd, out_fsd, pon=pon)
+                logger.debug(f"FSD off-target: {out_fsd}")
+            
+            # Check for on-target FSD (panel mode)
+            out_fsd_ontarget = output / f"{sample}.FSD.ontarget.tsv"
+            if out_fsd_ontarget.exists():
+                process_fsd(out_fsd_ontarget, out_fsd_ontarget, pon=pon)
+                logger.info(f"FSD on-target: {out_fsd_ontarget}")
+            
+            # WPS post-processing (smoothing, PoN subtraction, FFT periodicity)
+            from .core.wps_processor import post_process_wps
+            out_wps_bg = output / f"{sample}.WPS_background.parquet"
+            
+            # Save WPS baseline from PON model if available
+            pon_wps_baseline_path = None
+            if pon and pon.wps_baseline and pon.wps_baseline.regions is not None:
+                pon_wps_baseline_path = output / f".{sample}.pon_wps_baseline.parquet"
+                pon.wps_baseline.regions.to_parquet(pon_wps_baseline_path, index=False)
+                logger.debug(f"Saved PON WPS baseline: {pon_wps_baseline_path}")
+            
+            wps_result = post_process_wps(
+                wps_parquet=out_wps,
+                wps_background_parquet=out_wps_bg if out_wps_bg.exists() else None,
+                pon_baseline_parquet=pon_wps_baseline_path,
+                smooth=True,
+                extract_periodicity=True
+            )
+            if wps_result.get("periodicity_score"):
+                logger.info(f"WPS periodicity score: {wps_result['periodicity_score']:.3f}")
             
             progress.update(task_postproc, description="[3/5] Post-processing ✓", completed=100)
                 
@@ -368,7 +590,7 @@ def run_all(
             progress.update(task_uxm, description="[4/5] UXM ...")
             try:
                 from .uxm import uxm
-                uxm(bisulfite_bam, output, sample, None, 0)
+                uxm(resolved_bisulfite_bam, output, sample, None, 0)
                 progress.update(task_uxm, description="[4/5] UXM ✓", completed=100)
             except Exception as e:
                 progress.update(task_uxm, description="[4/5] UXM ✗ Error", completed=100)
@@ -382,12 +604,15 @@ def run_all(
                 from .mfsd import mfsd
                 mfsd(
                     bam_input=bam_input,
-                    input_file=variants,
+                    input_file=resolved_variants,
                     output=output,
                     sample_name=sample,
                     reference=reference,
                     correction_factors=out_gc_factors if out_gc_factors.exists() else None,
                     mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    require_proper_pair=require_proper_pair,
                     output_distributions=False,
                     verbose=debug,
                     threads=threads

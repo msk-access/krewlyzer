@@ -34,16 +34,16 @@ Alternatively, you can run tools individually. Note that most tools require a fr
 
 ```bash
 # 1. Extract fragments (BAM -> BED.gz)
-krewlyzer extract sample.bam -g hg19.fa -o output_dir
+krewlyzer extract -i sample.bam -r hg19.fa -o output_dir
 
 # 2. Run feature tools using the BED file
 # 2. Run feature tools using the BED file
-krewlyzer fsc output_dir/sample.bed.gz --output output_dir/
-krewlyzer wps output_dir/sample.bed.gz --output output_dir/
+krewlyzer fsc -i output_dir/sample.bed.gz --output output_dir/
+krewlyzer wps -i output_dir/sample.bed.gz --output output_dir/
 # ... (fsd, ocf, etc.)
 
 # 3. Motif analysis (Independent of BED, uses BAM directly)
-krewlyzer motif sample.bam -g hg19.fa -o output_dir 
+krewlyzer motif -i sample.bam -r hg19.fa -o output_dir 
 ```
 
 ## Targeted Panel Usage (ACCESS, etc.)
@@ -57,9 +57,8 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ \
 
 # Or run FSC/FSR individually with target regions
 # Or run FSC/FSR individually with target regions
-krewlyzer fsc motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
-krewlyzer fsr motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
+krewlyzer fsc -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
+krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 ```
 
 > **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
-

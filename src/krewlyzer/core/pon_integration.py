@@ -34,6 +34,41 @@ def load_pon_model(pon_path: Path):
         return None
 
 
+def normalize_to_pon(
+    df: pd.DataFrame, 
+    pon, 
+    columns: list
+) -> pd.DataFrame:
+    """
+    Divide count columns by PoN channel means.
+    
+    This normalizes raw counts to expected values from the panel of normals,
+    enabling cross-sample comparison.
+    
+    Args:
+        df: DataFrame with count columns
+        pon: Loaded PonModel instance
+        columns: List of column names to normalize
+        
+    Returns:
+        DataFrame with new *_norm columns added
+    """
+    if pon is None:
+        logger.debug("No PON provided, skipping normalization")
+        return df
+    
+    for col in columns:
+        mean = pon.get_mean(col) if hasattr(pon, 'get_mean') else None
+        if mean and mean > 0:
+            df[f'{col}_norm'] = df[col] / mean
+            logger.debug(f"Normalized {col} by PoN mean {mean:.2f}")
+        else:
+            df[f'{col}_norm'] = df[col]
+            logger.debug(f"No PoN mean for {col}, using raw values")
+    
+    return df
+
+
 def compute_gc_bias_correction(
     df: pd.DataFrame,
     pon,

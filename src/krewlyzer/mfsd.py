@@ -25,8 +25,8 @@ from krewlyzer import _core
 
 
 def mfsd(
-    bam_input: Path = typer.Argument(..., help="Input BAM file"),
-    input_file: Path = typer.Option(..., "--input-file", "-i", help="VCF or MAF file with variants"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file"),
+    input_file: Path = typer.Option(..., "--input-file", "-V", help="VCF or MAF file with variants"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     reference: Optional[Path] = typer.Option(None, "--reference", "-g", help="Reference genome FASTA (for GC correction)"),

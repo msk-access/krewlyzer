@@ -38,6 +38,7 @@ plugins:
 
 nav:
   - Home: index.md
+  - Introduction: introduction.md
   - Getting Started: getting-started.md
   - Installation: installation.md
   - Usage: usage.md
@@ -59,16 +60,28 @@ nav:
   - Pipeline: pipeline.md
   - Troubleshooting: troubleshooting.md
   - Citation: citation.md
+  - Glossary: glossary.md
   - Changelog: changelog.md
   - Contributing: contributing.md
 
 markdown_extensions:
   - admonition
   - pymdownx.details
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
   - pymdownx.snippets
+  - pymdownx.arithmatex:
+      generic: true
   - attr_list
   - md_in_html
+  - tables
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js

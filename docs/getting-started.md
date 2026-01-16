@@ -67,11 +67,11 @@ Run specific features separately:
 
 ```bash
 # Extract fragments first
-krewlyzer extract sample.bam -r hg19.fa -o output/
+krewlyzer extract -i sample.bam -r hg19.fa -o output/
 
 # Then run feature tools on the BED
-krewlyzer fsc output/sample.bed.gz -o output/
-krewlyzer wps output/sample.bed.gz -o output/
+krewlyzer fsc -i output/sample.bed.gz -o output/
+krewlyzer wps -i output/sample.bed.gz -o output/
 ```
 
 ## Next Steps

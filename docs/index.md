@@ -8,6 +8,26 @@
 
 Krewlyzer draws inspiration from [cfDNAFE](https://github.com/Cuiwanxin1998/cfDNAFE) and implements state-of-the-art methods for fragmentation, motif, and methylation analysis, all in a modern Pythonic interface with rich parallelization and logging.
 
+---
+
+## TL;DR
+
+Krewlyzer extracts **fragmentomics features** from cfDNA sequencing data:
+
+1. **Input**: BAM file (aligned reads from blood sample)
+2. **Output**: Tables of numerical features for ML/statistical analysis
+3. **Use case**: Cancer detection, treatment monitoring, tissue-of-origin
+
+**One command does it all:**
+```bash
+krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
+```
+
+> **New to cfDNA?** Start with [What is Cell-Free DNA?](introduction.md)  
+> **Need terminology help?** See the [Glossary](glossary.md)
+
+---
+
 ## Key Features
 
 *   **Motif Analysis**: End motifs, breakpoint motifs, and diversity scores.
@@ -30,7 +50,7 @@ Krewlyzer draws inspiration from [cfDNAFE](https://github.com/Cuiwanxin1998/cfDN
 ```bash
 docker pull ghcr.io/msk-access/krewlyzer:latest
 # Example usage:
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest run-all /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
 ```
 
 ### With uv / pip

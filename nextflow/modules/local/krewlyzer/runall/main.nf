@@ -5,9 +5,8 @@ process KREWLYZER_RUNALL {
     container "ghcr.io/msk-access/krewlyzer:0.3.2"
 
     input:
-    tuple val(meta), path(bam), path(bai), path(variants)
+    tuple val(meta), path(bam), path(bai), path(variants), path(pon), path(targets)
     path fasta
-    path targets   // Optional: bin_input/arms_file
 
     output:
     tuple val(meta), path("*.{txt,tsv,csv,bed.gz,tsv.gz}"), emit: results
@@ -18,16 +17,17 @@ process KREWLYZER_RUNALL {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def variant_arg = variants ? "--variants ${variants}" : ""
-    def targets_arg = targets ? "--bin-input ${targets}" : ""
+    def targets_arg = targets ? "--target-regions ${targets}" : ""
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
-    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def pon_arg = pon ? "--pon-model ${pon}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
     
     // Construct CLI command
     """
     krewlyzer run-all \\
-        $bam \\
-        --reference $fasta \\
+        -i $bam \\
+        -r $fasta \\
         --output ./ \\
         --threads $task.cpus \\
         --sample-name $prefix \\
@@ -36,6 +36,7 @@ process KREWLYZER_RUNALL {
         $genome_arg \\
         $gc_arg \\
         $pon_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

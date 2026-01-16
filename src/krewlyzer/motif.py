@@ -1,8 +1,17 @@
 """
 Motif feature extraction from BAM files.
 
-Extracts End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS).
+Extracts End Motif (EDM), Breakpoint Motif (BPM), and Motif Diversity Score (MDS)
+from cfDNA fragment endpoints. These features capture tissue-of-origin signals.
+
 Uses Rust backend for accelerated extraction.
+
+Output Files:
+    - {sample}.EndMotif.tsv: End motif 4-mer frequencies (256 columns)
+    - {sample}.BreakPointMotif.tsv: Breakpoint motif frequencies
+    - {sample}.MDS.tsv: Motif Diversity Score summary
+
+Panel Mode: Generates separate on-target (.ontarget.tsv) files.
 
 Note: For fragment extraction (BED.gz), use `krewlyzer extract` instead.
 """
@@ -26,9 +35,10 @@ from krewlyzer import _core
 
 
 def motif(
-    bam_input: Path = typer.Argument(..., help="Input BAM file"),
-    genome_reference: Path = typer.Option(..., '-g', '--genome', help="Reference genome FASTA (indexed)"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file"),
+    genome_reference: Path = typer.Option(..., '-r', '--reference', help="Reference genome FASTA (indexed)"),
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
+    target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: generates on/off-target motifs)"),
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
@@ -97,7 +107,7 @@ def motif(
             if compat["suggested_flags"]:
                 suggested = " ".join(compat["suggested_flags"])
                 console.print(f"\n[bold yellow]Suggested command:[/bold yellow]")
-                console.print(f"  krewlyzer motif {bam_input.name} -g {genome_reference.name} -o {output} [bold]{suggested}[/bold]\n")
+                console.print(f"  krewlyzer motif {bam_input.name} -r {genome_reference.name} -o {output} [bold]{suggested}[/bold]\n")
                 
                 logger.error(f"Filter mismatch detected. Re-run with: {suggested}")
                 raise typer.Exit(1)
@@ -119,10 +129,9 @@ def motif(
         chroms = chromosomes.split(',') if chromosomes else None
         
         # Call Unified Rust Engine (Extract + Motif)
-        # Returns: (fragment_count, em_counts, bpm_counts, dinuc_counts)
-        # We only need the first 3 for motif output
+        # Returns: (fragment_count, em_counts, bpm_counts, gc_obs, em_counts_on, bpm_counts_on)
         
-        fragment_count, em_counts, bpm_counts, _dinuc = _core.extract_motif.process_bam_parallel(
+        fragment_count, em_counts, bpm_counts, _dinuc, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ
@@ -133,6 +142,7 @@ def motif(
             None,  # output_bed_path
             "enable",  # output_motif_prefix (triggers counting)
             None,  # exclude_path
+            str(target_regions) if target_regions else None,  # target_regions_path
             True,  # skip_duplicates
             require_proper_pair,  # proper pair filter
             False  # silent
@@ -155,6 +165,30 @@ def motif(
             kmer=kmer,
             include_headers=True  # Consistent with run-all
         )
+        
+        # Process on-target motifs if target_regions was provided and we have data
+        is_panel_mode = target_regions and target_regions.exists()
+        if is_panel_mode and sum(em_counts_on.values()) > 0:
+            edm_on = output / f"{sample_name}.EndMotif.ontarget.tsv"
+            bpm_on = output / f"{sample_name}.BreakPointMotif.ontarget.tsv"
+            mds_on = output / f"{sample_name}.MDS.ontarget.tsv"
+            
+            End_motif_on = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
+            Breakpoint_motif_on = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
+            End_motif_on.update(em_counts_on)
+            Breakpoint_motif_on.update(bpm_counts_on)
+            
+            total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
+                em_counts=End_motif_on,
+                bpm_counts=Breakpoint_motif_on,
+                edm_output=edm_on,
+                bpm_output=bpm_on,
+                mds_output=mds_on,
+                sample_name=sample_name,
+                kmer=kmer,
+                include_headers=True
+            )
+            logger.info(f"On-target motifs: EM={total_em_on:,}, BPM={total_bpm_on:,}")
         
         logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
 

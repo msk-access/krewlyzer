@@ -86,6 +86,28 @@ class FsdBaseline:
             return 0.0
         arm_data = self.arms[arm]
         return float(np.interp(size, self.size_bins, arm_data["std"]))
+    
+    def get_stats(self, arm: str, size_bin: Optional[int] = None) -> Optional[tuple]:
+        """
+        Get (mean, std) for a chromosome arm.
+        
+        Used by pon_integration.compute_fsd_zscore().
+        
+        Args:
+            arm: Chromosome arm (e.g., "1p", "12q")
+            size_bin: Optional size bin - if None, returns aggregate stats
+            
+        Returns:
+            Tuple (expected, std) or None if arm not found
+        """
+        if arm not in self.arms:
+            return None
+        arm_data = self.arms[arm]
+        if size_bin is not None:
+            return (self.get_expected(arm, size_bin), self.get_std(arm, size_bin))
+        # Return median bin stats as aggregate
+        mid_idx = len(self.size_bins) // 2
+        return (arm_data["expected"][mid_idx], arm_data["std"][mid_idx])
 
 
 @dataclass
@@ -93,22 +115,212 @@ class WpsBaseline:
     """
     WPS baseline per transcript region.
     
-    Stores mean and std WPS for each region (both long and short).
+    Supports two formats:
+    - Legacy (v1.0): Scalar mean/std per region (wps_long_mean, wps_short_mean)
+    - Vector (v2.0): 200-bin mean/std vectors per region for ML integration
+    
+    Schema v2.0 enables position-specific z-score computation for cancer detection.
     """
-    regions: pd.DataFrame  # Columns: region_id, wps_long_mean, wps_long_std, wps_short_mean, wps_short_std
+    regions: pd.DataFrame  # Columns depend on schema version
+    schema_version: str = "1.0"  # "1.0" = scalar, "2.0" = vector
     
     def get_baseline(self, region_id: str) -> Optional[Dict[str, float]]:
-        """Get baseline stats for a region."""
+        """Get scalar baseline stats for a region (legacy v1.0 format)."""
         match = self.regions[self.regions["region_id"] == region_id]
         if match.empty:
             return None
         row = match.iloc[0]
         return {
-            "wps_long_mean": row["wps_long_mean"],
-            "wps_long_std": row["wps_long_std"],
-            "wps_short_mean": row["wps_short_mean"],
-            "wps_short_std": row["wps_short_std"],
+            "wps_long_mean": row.get("wps_long_mean", 0),
+            "wps_long_std": row.get("wps_long_std", 1),
+            "wps_short_mean": row.get("wps_short_mean", 0),
+            "wps_short_std": row.get("wps_short_std", 1),
         }
+    
+    def get_stats(self, region_id: str, wps_type: str = "wps_long") -> Optional[tuple]:
+        """
+        Get (mean, std) for a region.
+        
+        Used by pon_integration.compute_wps_zscore().
+        
+        Args:
+            region_id: Region/gene identifier
+            wps_type: Either "wps_long" or "wps_short"
+            
+        Returns:
+            Tuple (mean, std) or None if region not found
+        """
+        baseline = self.get_baseline(region_id)
+        if baseline is None:
+            return None
+        return (baseline[f"{wps_type}_mean"], baseline[f"{wps_type}_std"])
+    
+    # --- Vector format methods (v2.0) ---
+    
+    def get_baseline_vector(self, region_id: str, column: str = "wps_nuc") -> Optional[np.ndarray]:
+        """
+        Get 200-bin mean vector for a region (v2.0 format).
+        
+        Args:
+            region_id: Region identifier
+            column: Vector column prefix ('wps_nuc', 'wps_tf', 'prot_frac_nuc', 'prot_frac_tf')
+            
+        Returns:
+            200-element numpy array or None if not found
+        """
+        if self.schema_version != "2.0":
+            return None
+        match = self.regions[self.regions["region_id"] == region_id]
+        if match.empty:
+            return None
+        mean_col = f"{column}_mean"
+        if mean_col not in match.columns:
+            return None
+        return np.array(match.iloc[0][mean_col])
+    
+    def get_std_vector(self, region_id: str, column: str = "wps_nuc") -> Optional[np.ndarray]:
+        """Get 200-bin std vector for a region (v2.0 format)."""
+        if self.schema_version != "2.0":
+            return None
+        match = self.regions[self.regions["region_id"] == region_id]
+        if match.empty:
+            return None
+        std_col = f"{column}_std"
+        if std_col not in match.columns:
+            return None
+        return np.array(match.iloc[0][std_col])
+    
+    def compute_z_vector(self, region_id: str, sample_vector: np.ndarray,
+                          column: str = "wps_nuc") -> Optional[np.ndarray]:
+        """
+        Compute position-specific z-scores for sample vs PoN (v2.0 format).
+        
+        Args:
+            region_id: Region identifier
+            sample_vector: 200-element sample WPS vector
+            column: Vector column prefix
+            
+        Returns:
+            200-element z-score array or None if baseline not found
+        """
+        mean = self.get_baseline_vector(region_id, column)
+        std = self.get_std_vector(region_id, column)
+        if mean is None or std is None:
+            return None
+        
+        # Avoid division by zero
+        std_safe = np.where(std > 0, std, 1.0)
+        return (sample_vector - mean) / std_safe
+
+
+@dataclass
+class OcfBaseline:
+    """
+    OCF (Open Chromatin Footprinting) baseline per region.
+    
+    Stores expected OCF and synchronization scores for open chromatin regions
+    (promoters, enhancers) from healthy plasma samples.
+    
+    Used for z-score normalization of sample OCF profiles.
+    """
+    # DataFrame: region_id, ocf_mean, ocf_std, sync_mean, sync_std
+    regions: pd.DataFrame
+    
+    def get_stats(self, region_id: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a region's OCF score.
+        
+        Args:
+            region_id: Region identifier
+            
+        Returns:
+            Tuple (ocf_mean, ocf_std) or None if not found
+        """
+        match = self.regions[self.regions["region_id"] == region_id]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        return (row["ocf_mean"], row["ocf_std"])
+    
+    def get_sync_stats(self, region_id: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a region's synchronization score.
+        
+        Args:
+            region_id: Region identifier
+            
+        Returns:
+            Tuple (sync_mean, sync_std) or None if not found
+        """
+        match = self.regions[self.regions["region_id"] == region_id]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        return (row.get("sync_mean", 0), row.get("sync_std", 1))
+    
+    def compute_zscore(self, region_id: str, observed_ocf: float) -> Optional[float]:
+        """Compute z-score for observed OCF value."""
+        stats = self.get_stats(region_id)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_ocf - mean) / std
+        return 0.0
+
+
+@dataclass
+class MdsBaseline:
+    """
+    Motif Diversity Score baseline from healthy plasma samples.
+    
+    Stores expected k-mer frequencies and MDS value for healthy samples.
+    Enables detection of aberrant end-motif patterns in cancer cfDNA.
+    
+    Note: DNA damage and tissue-of-origin affect motif patterns.
+    """
+    # Expected k-mer frequencies (256 4-mers)
+    kmer_expected: Dict[str, float] = field(default_factory=dict)  # e.g., {"ACGT": 0.0042, ...}
+    kmer_std: Dict[str, float] = field(default_factory=dict)
+    
+    # Global MDS baseline
+    mds_mean: float = 0.0
+    mds_std: float = 1.0
+    
+    def get_kmer_zscore(self, kmer: str, observed_freq: float) -> Optional[float]:
+        """Compute z-score for a k-mer frequency."""
+        if kmer not in self.kmer_expected:
+            return None
+        expected = self.kmer_expected[kmer]
+        std = self.kmer_std.get(kmer, 0.001)
+        if std > 0:
+            return (observed_freq - expected) / std
+        return 0.0
+    
+    def get_mds_zscore(self, observed_mds: float) -> float:
+        """Compute z-score for MDS value."""
+        if self.mds_std > 0:
+            return (observed_mds - self.mds_mean) / self.mds_std
+        return 0.0
+    
+    def get_aberrant_kmers(self, observed_freqs: Dict[str, float], 
+                            threshold: float = 2.0) -> Dict[str, float]:
+        """
+        Find k-mers with z-scores exceeding threshold.
+        
+        Args:
+            observed_freqs: Dict of kmer -> observed frequency
+            threshold: Z-score threshold for aberrant detection
+            
+        Returns:
+            Dict of aberrant kmers -> z-scores
+        """
+        aberrant = {}
+        for kmer, freq in observed_freqs.items():
+            zscore = self.get_kmer_zscore(kmer, freq)
+            if zscore is not None and abs(zscore) > threshold:
+                aberrant[kmer] = zscore
+        return aberrant
 
 
 @dataclass
@@ -120,16 +332,22 @@ class PonModel:
     - GC bias curves (FSC, FSR, WPS)
     - FSD baseline (per-arm size distributions)
     - WPS baseline (per-region mean/std)
+    - OCF baseline (per-region open chromatin footprinting)
+    - MDS baseline (k-mer frequencies and motif diversity score)
     """
     schema_version: str = "1.0"
     assay: str = ""  # e.g., "msk-access-v2"
     build_date: str = ""
     n_samples: int = 0
     reference: str = ""  # e.g., "hg19"
+    panel_mode: bool = False  # True if built with --target-regions
+    target_regions_file: str = ""  # Original target regions BED file name
     
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
+    ocf_baseline: Optional[OcfBaseline] = None
+    mds_baseline: Optional[MdsBaseline] = None
     
     @classmethod
     def load(cls, path: Path) -> "PonModel":
@@ -194,6 +412,39 @@ class PonModel:
                                 "wps_short_mean", "wps_short_std"]].copy()
             wps_baseline = WpsBaseline(regions=regions_df)
         
+        # Parse OCF baseline
+        ocf_df = df_all[df_all["table"] == "ocf_baseline"]
+        ocf_baseline = None
+        if not ocf_df.empty:
+            ocf_cols = ["region_id", "ocf_mean", "ocf_std"]
+            if "sync_mean" in ocf_df.columns:
+                ocf_cols.extend(["sync_mean", "sync_std"])
+            regions_df = ocf_df[ocf_cols].copy()
+            ocf_baseline = OcfBaseline(regions=regions_df)
+        
+        # Parse MDS baseline
+        mds_df = df_all[df_all["table"] == "mds_baseline"]
+        mds_baseline = None
+        if not mds_df.empty:
+            row = mds_df.iloc[0]
+            # Parse k-mer frequencies from JSON columns if present
+            kmer_expected = {}
+            kmer_std = {}
+            if "kmer_expected" in mds_df.columns:
+                kmer_data = row.get("kmer_expected", {})
+                if isinstance(kmer_data, dict):
+                    kmer_expected = kmer_data
+            if "kmer_std" in mds_df.columns:
+                kmer_data = row.get("kmer_std", {})
+                if isinstance(kmer_data, dict):
+                    kmer_std = kmer_data
+            mds_baseline = MdsBaseline(
+                kmer_expected=kmer_expected,
+                kmer_std=kmer_std,
+                mds_mean=float(row.get("mds_mean", 0)),
+                mds_std=float(row.get("mds_std", 1))
+            )
+        
         # Build model
         model = cls(
             schema_version=str(meta.get("schema_version", "1.0")),
@@ -201,18 +452,28 @@ class PonModel:
             build_date=str(meta.get("build_date", "")),
             n_samples=int(meta.get("n_samples", 0)),
             reference=str(meta.get("reference", "")),
+            panel_mode=bool(meta.get("panel_mode", False)),
+            target_regions_file=str(meta.get("target_regions_file", "")),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
+            ocf_baseline=ocf_baseline,
+            mds_baseline=mds_baseline,
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")
+        if model.panel_mode:
+            logger.info(f"  Panel mode: ON (targets: {model.target_regions_file})")
         if gc_bias:
             logger.info(f"  GC bias: {len(gc_bias.gc_bins)} bins")
         if fsd_baseline:
             logger.info(f"  FSD baseline: {len(fsd_baseline.arms)} arms, {len(fsd_baseline.size_bins)} size bins")
         if wps_baseline:
             logger.info(f"  WPS baseline: {len(wps_baseline.regions)} regions")
+        if ocf_baseline:
+            logger.info(f"  OCF baseline: {len(ocf_baseline.regions)} regions")
+        if mds_baseline:
+            logger.info(f"  MDS baseline: {len(mds_baseline.kmer_expected)} k-mers")
         
         return model
     
@@ -241,7 +502,8 @@ class PonModel:
             "reference": self.reference,
         }])
         
-        # TODO: Build gc_bias, fsd_baseline, wps_baseline tables
+        # Note: This is a simplified save method. build.py uses _save_pon_model()
+        # for complete serialization including all baselines.
         
         # For now, just save metadata
         metadata.to_parquet(path, index=False)
@@ -282,3 +544,74 @@ class PonModel:
             logger.warning(
                 f"PON model built for {self.assay}, sample may be from different assay ({sample_assay})"
             )
+    
+    def get_mean(self, channel: str) -> Optional[float]:
+        """
+        Get expected mean coverage for a fragment size channel.
+        
+        Used by FSC/FSR processors for log-ratio normalization.
+        Returns the expected value at median GC (0.45) from GC bias curves.
+        
+        Args:
+            channel: One of 'short', 'intermediate', 'long', 'ultra_short', 
+                     'core_short', 'mono_nucl', 'di_nucl'
+        
+        Returns:
+            Expected mean coverage (1.0 = no bias), or None if not available
+        """
+        if self.gc_bias is None:
+            return None
+        
+        # Map FSC channels to GC bias model channels
+        channel_map = {
+            'ultra_short': 'short',
+            'core_short': 'short', 
+            'short': 'short',
+            'mono_nucl': 'intermediate',
+            'intermediate': 'intermediate',
+            'di_nucl': 'long',
+            'long': 'long',
+        }
+        
+        gc_channel = channel_map.get(channel, channel)
+        
+        # Return expected at median GC (0.45)
+        return self.gc_bias.get_expected(0.45, gc_channel)
+    
+    def get_variance(self, channel: str) -> Optional[float]:
+        """
+        Get variance for a fragment size channel from PoN samples.
+        
+        Used for reliability scoring: reliability = 1 / (variance + k)
+        
+        Args:
+            channel: Fragment size channel name
+            
+        Returns:
+            Variance across PoN samples, or None if not available
+        """
+        if self.gc_bias is None:
+            return None
+        
+        # Map channels to GC bias std arrays
+        channel_map = {
+            'ultra_short': 'short', 'core_short': 'short', 'short': 'short',
+            'mono_nucl': 'intermediate', 'intermediate': 'intermediate',
+            'di_nucl': 'long', 'long': 'long',
+        }
+        gc_channel = channel_map.get(channel, channel)
+        
+        # Get appropriate std array
+        std_map = {
+            'short': self.gc_bias.short_std,
+            'intermediate': self.gc_bias.intermediate_std,
+            'long': self.gc_bias.long_std,
+        }
+        
+        std_list = std_map.get(gc_channel)
+        if std_list and len(std_list) > 0:
+            # Return median std squared as variance
+            median_idx = len(std_list) // 2
+            return std_list[median_idx] ** 2
+        
+        return None

@@ -23,8 +23,12 @@ struct Chunk {
 // Result from a single chunk
 struct ChunkResult {
     fragments: Vec<String>,
+    // Off-target motifs (primary - unbiased)
     end_motifs: HashMap<String, u64>,
     bp_motifs: HashMap<String, u64>,
+    // On-target motifs (for comparison - PCR biased)
+    end_motifs_on: HashMap<String, u64>,
+    bp_motifs_on: HashMap<String, u64>,
     count: u64,
     // GC observations for correction factor computation
     // Key: (length_bin, gc_percent), Value: count
@@ -37,6 +41,8 @@ impl ChunkResult {
             fragments: Vec::new(),
             end_motifs: HashMap::new(),
             bp_motifs: HashMap::new(),
+            end_motifs_on: HashMap::new(),
+            bp_motifs_on: HashMap::new(),
             count: 0,
             gc_observations: HashMap::new(),
         }
@@ -109,7 +115,7 @@ pub struct UnifiedConfig {
 /// Unified Parallel Engine
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
-#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
+#[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, target_regions_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
 pub fn process_bam_parallel(
     bam_path: String,
     fasta_path: String,
@@ -121,10 +127,18 @@ pub fn process_bam_parallel(
     output_bed_path: Option<String>,
     output_motif_prefix: Option<String>,
     exclude_path: Option<String>,
+    target_regions_path: Option<String>,
     skip_duplicates: bool,
     require_proper_pair: bool,
     silent: bool,
-) -> PyResult<(u64, HashMap<String, u64>, HashMap<String, u64>, HashMap<(u8, u8), u64>)> {
+) -> PyResult<(
+    u64,                      // fragment count
+    HashMap<String, u64>,     // end_motifs (off-target)
+    HashMap<String, u64>,     // bp_motifs (off-target)
+    HashMap<(u8, u8), u64>,   // gc_observations
+    HashMap<String, u64>,     // end_motifs_on (on-target)
+    HashMap<String, u64>,     // bp_motifs_on (on-target)
+)> {
     
     // 1. Configure Global Thread Pool if needed
     if threads > 0 {
@@ -138,6 +152,18 @@ pub fn process_bam_parallel(
     };
     // To share with Rayon, we wrap in Arc
     let exclude_arc = std::sync::Arc::new(exclude_regions);
+
+    // Load target regions for off-target GC model (panel data like MSK-ACCESS)
+    let target_regions = match target_regions_path {
+        Some(ref p) => {
+            let regions = load_exclude_regions(p);  // Reuse same loader
+            info!("Panel mode: GC model will use off-target reads only ({} target regions)", regions.len());
+            regions
+        },
+        None => HashSet::new(),
+    };
+    let target_arc = std::sync::Arc::new(target_regions);
+    let is_panel_mode = !target_arc.is_empty();
 
     // Load available chromosomes from FASTA to avoid fetch crashes
     let valid_chroms = if let Ok(fa) = faidx::Reader::from_path(&fasta_path) {
@@ -285,10 +311,14 @@ pub fn process_bam_parallel(
                      
                      // Accumulate GC observation for correction factor computation
                      // Length bins: 60-80, 80-100, ..., 380-400 (17 bins)
-                     let length = tlen as u64;
-                     let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
-                     let gc_pct = (gc * 100.0).round() as u8;
-                     *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                     // Panel mode: Only use OFF-TARGET fragments for GC model
+                     let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
+                     if !is_on_target {
+                         let length = tlen as u64;
+                         let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
+                         let gc_pct = (gc * 100.0).round() as u8;
+                         *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                     }
                  }
             }
             
@@ -346,9 +376,16 @@ pub fn process_bam_parallel(
                      genomic_coords = (record.cigar().end_pos(), record.cigar().end_pos());
                 }
                 
-                // Store End Motif
+                // Check if fragment overlaps target regions (for on/off routing)
+                let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, frag_start, frag_end, &target_arc);
+                
+                // Store End Motif (route to on-target or off-target)
                 let motif_str = String::from_utf8_lossy(&motif_seq).to_string();
-                *result.end_motifs.entry(motif_str.clone()).or_default() += 1;
+                if is_on_target {
+                    *result.end_motifs_on.entry(motif_str.clone()).or_default() += 1;
+                } else {
+                    *result.end_motifs.entry(motif_str.clone()).or_default() += 1;
+                }
                 
                 // Breakpoint Motif ... (retained)
                 // Needs FASTA fetch
@@ -381,7 +418,12 @@ pub fn process_bam_parallel(
                         String::from_utf8_lossy(&full).to_string()
                     };
                     
-                     *result.bp_motifs.entry(bp_str).or_default() += 1;
+                    // Route BP motif to on-target or off-target
+                    if is_on_target {
+                        *result.bp_motifs_on.entry(bp_str).or_default() += 1;
+                    } else {
+                        *result.bp_motifs.entry(bp_str).or_default() += 1;
+                    }
                 }
                 } // End safe guard
             }
@@ -430,17 +472,35 @@ pub fn process_bam_parallel(
     debug!("Total GC observation bins: {}", final_gc_observations.len());
     info!("Extracted {} fragments", total_count);
     
-    // Merge Motifs
+    // Merge Motifs (off-target and on-target separately)
+    let mut final_end_motifs_on = HashMap::new();
+    let mut final_bp_motifs_on = HashMap::new();
+    
     if config.count_motifs {
         for res in results {
+            // Off-target motifs
             for (k, v) in res.end_motifs {
                 *final_end_motifs.entry(k).or_default() += v;
             }
             for (k, v) in res.bp_motifs {
                 *final_bp_motifs.entry(k).or_default() += v;
             }
+            // On-target motifs
+            for (k, v) in res.end_motifs_on {
+                *final_end_motifs_on.entry(k).or_default() += v;
+            }
+            for (k, v) in res.bp_motifs_on {
+                *final_bp_motifs_on.entry(k).or_default() += v;
+            }
+        }
+        
+        // Log on-target counts if present
+        let on_count: u64 = final_end_motifs_on.values().sum();
+        let off_count: u64 = final_end_motifs.values().sum();
+        if on_count > 0 {
+            info!("Motif: {} off-target, {} on-target fragment ends", off_count, on_count);
         }
     }
     
-    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations))
+    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on))
 }

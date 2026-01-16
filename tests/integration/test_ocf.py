@@ -32,9 +32,9 @@ def test_ocf_integration(tmp_path):
     from krewlyzer.cli import app
     runner = CliRunner()
     
-    # New CLI: ocf <input.bed.gz> -o <output_dir> --sample-name <name> -r <ocr>
+    # New CLI: ocf -i <input.bed.gz> -o <output_dir> --sample-name <name> -r <ocr>
     result = runner.invoke(app, [
-        "ocf", str(bed_file), 
+        "ocf", "-i", str(bed_file), 
         "-o", str(output_dir),
         "-s", "test_sample",
         "-r", str(ocr_file)

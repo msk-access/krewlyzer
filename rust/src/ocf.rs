@@ -1,3 +1,18 @@
+//! Orientation-aware cfDNA Fragmentation (OCF) calculation
+//!
+//! Measures fragment end orientation patterns around open chromatin regions (OCRs).
+//! OCF captures tissue-of-origin signals based on strand asymmetry at regulatory elements.
+//!
+//! ## Key Features
+//! - **Strand asymmetry**: OCF = (Upstream - Downstream) / (Upstream + Downstream)
+//! - **Region types**: Calculates per-OCR and synchronized (pooled) scores
+//! - **GC correction**: Per-fragment weight adjustment via correction factors
+//! - **Panel mode**: On-target and off-target split outputs
+//!
+//! ## Output
+//! - {sample}.OCF.tsv: Per-region scores and fragment counts
+//! - {sample}.OCF.sync.tsv: Synchronized regions for cross-sample comparison
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
@@ -19,7 +34,7 @@ pub fn calculate_ocf(
     output_dir: PathBuf,
 ) -> PyResult<()> {
     let mut chrom_map = ChromosomeMap::new();
-    let consumer = OcfConsumer::new(&ocr_path, &mut chrom_map, None)
+    let consumer = OcfConsumer::new(&ocr_path, &mut chrom_map, None, None)  // No target_regions for legacy API
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         
     let analyzer = FragmentAnalyzer::new(consumer, 100_000);
@@ -139,13 +154,24 @@ pub struct OcfConsumer {
     labels: Arc<Vec<String>>, // LabelID -> Name
     factors: Option<Arc<CorrectionFactors>>,
     
+    // Target regions for on/off-target split (panel data)
+    target_tree: Option<Arc<HashMap<u32, COITree<(), u32>>>>,
+    
     // Thread-local state
     // Indexed by LabelID
+    // Off-target stats (primary - unbiased)
     stats: Vec<LabelStats>,
+    // On-target stats (for comparison - PCR biased)
+    stats_on: Vec<LabelStats>,
 }
 
 impl OcfConsumer {
-    pub fn new(ocr_path: &Path, chrom_map: &mut ChromosomeMap, factors: Option<Arc<CorrectionFactors>>) -> Result<Self> {
+    pub fn new(
+        ocr_path: &Path, 
+        chrom_map: &mut ChromosomeMap, 
+        factors: Option<Arc<CorrectionFactors>>,
+        target_regions: Option<Arc<HashMap<u32, COITree<(), u32>>>>,
+    ) -> Result<Self> {
         // 1. Parse OCR File
         // Format: chrom start end label
         let reader = crate::bed::get_reader(ocr_path)?;
@@ -167,40 +193,73 @@ impl OcfConsumer {
             trees.insert(cid, COITree::new(&nodes));
         }
         
-        // Init stats
+        // Init stats (off-target and on-target)
         let stats = vec![LabelStats::new(); labels.len()];
+        let stats_on = vec![LabelStats::new(); labels.len()];
+        
+        if target_regions.is_some() {
+            log::info!("OCF: Panel mode enabled, on/off-target split active");
+        }
         
         Ok(Self {
             trees: Arc::new(trees),
             region_infos: Arc::new(region_infos),
             labels: Arc::new(labels),
             factors,
+            target_tree: target_regions,
             stats,
+            stats_on,
         })
     }
     
+    /// Check if a fragment overlaps any target region
+    fn is_on_target(&self, fragment: &Fragment) -> bool {
+        if let Some(ref target_tree) = self.target_tree {
+            if let Some(tree) = target_tree.get(&fragment.chrom_id) {
+                let start = fragment.start as i32;
+                let end = if fragment.end > fragment.start { (fragment.end - 1) as i32 } else { start };
+                let mut found = false;
+                tree.query(start, end, |_| { found = true; });
+                return found;
+            }
+        }
+        false
+    }
+    
     pub fn write_output(&self, output_dir: &Path) -> Result<()> {
-        // Output 1: all.ocf.csv
-        let summary_path = output_dir.join("all.ocf.tsv");
+        // Write off-target stats (primary - unbiased for biomarkers)
+        self.write_stats(&self.stats, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
+        
+        // Write on-target stats if we have any data
+        let has_on_target_data = self.stats_on.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
+        if has_on_target_data {
+            self.write_stats(&self.stats_on, output_dir, "all.ocf.ontarget.tsv", "all.sync.ontarget.tsv")?;
+            log::info!("OCF: Wrote on-target output files");
+        }
+        
+        Ok(())
+    }
+    
+    fn write_stats(&self, stats: &[LabelStats], output_dir: &Path, summary_name: &str, sync_name: &str) -> Result<()> {
+        // Output 1: OCF summary
+        let summary_path = output_dir.join(summary_name);
         let mut summary_file = File::create(&summary_path)
             .with_context(|| format!("Failed to create summary file: {:?}", summary_path))?;
         writeln!(summary_file, "tissue\tOCF")?;
 
-        // Output 2: all.sync.tsv
-        let sync_path = output_dir.join("all.sync.tsv");
+        // Output 2: sync positions
+        let sync_path = output_dir.join(sync_name);
         let mut sync_file = File::create(&sync_path)
              .with_context(|| format!("Failed to create sync file: {:?}", sync_path))?;
         writeln!(sync_file, "tissue\tposition\tleft_count\tleft_norm\tright_count\tright_norm")?;
 
         // Sort labels
-        // We have self.labels (Vec<String>) indexed by ID.
-        // We want output sorted by Label Name.
         let mut label_indices: Vec<usize> = (0..self.labels.len()).collect();
         label_indices.sort_by_key(|&i| &self.labels[i]);
         
         for &id in &label_indices {
             let label = &self.labels[id];
-            let s = &self.stats[id];
+            let s = &stats[id];
             
             let ts = if s.total_starts > 0.0 { s.total_starts / 10000.0 } else { 1.0 };
             let te = if s.total_ends > 0.0 { s.total_ends / 10000.0 } else { 1.0 };
@@ -243,6 +302,9 @@ impl FragmentConsumer for OcfConsumer {
     }
 
     fn consume(&mut self, fragment: &Fragment) {
+        // Check if fragment is on-target (for routing to correct stats vector)
+        let on_target = self.is_on_target(fragment);
+        
         if let Some(tree) = self.trees.get(&fragment.chrom_id) {
             let start = fragment.start as i32;
             let end_closed = if fragment.end > fragment.start { (fragment.end - 1) as i32 } else { start };
@@ -250,7 +312,13 @@ impl FragmentConsumer for OcfConsumer {
             tree.query(start, end_closed, |node| {
                 let region_idx = node.metadata.to_owned();
                 let region = &self.region_infos[region_idx];
-                let label_stats = &mut self.stats[region.label_id];
+                
+                // Route to correct stats vector based on on-target status
+                let label_stats = if on_target {
+                    &mut self.stats_on[region.label_id]
+                } else {
+                    &mut self.stats[region.label_id]
+                };
                 
                 // Logic per Legacy:
                 let r_start = fragment.start; // u64
@@ -270,17 +338,13 @@ impl FragmentConsumer for OcfConsumer {
                         label_stats.left_pos[s] += weight;
                         label_stats.total_starts += weight;
                     } else {
-                        // "else { total_starts++ }" implies we count even if out of window
                         label_stats.total_starts += weight;
                     }
                 }
                 
                 // Ends
                 if r_end <= reg_end {
-                    // Legacy: e = (r_end - region.start + 1)
-                    // r_end is u64.
                     let diff = r_end.wrapping_sub(reg_start).wrapping_add(1);
-                    
                     let e = diff as usize;
                     
                     if e < 2000 {
@@ -295,8 +359,13 @@ impl FragmentConsumer for OcfConsumer {
     }
 
     fn merge(&mut self, other: Self) {
+        // Merge off-target stats
         for (i, other_s) in other.stats.iter().enumerate() {
             self.stats[i].merge(other_s);
+        }
+        // Merge on-target stats
+        for (i, other_s) in other.stats_on.iter().enumerate() {
+            self.stats_on[i].merge(other_s);
         }
     }
 }

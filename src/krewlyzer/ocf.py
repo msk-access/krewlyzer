@@ -1,8 +1,17 @@
 """
 Orientation-aware cfDNA Fragmentation (OCF) calculation.
 
-Calculates OCF features for a single sample.
+Calculates OCF features showing fragment orientation patterns around open chromatin regions.
+OCF measures tissue-of-origin based on end-motif orientation at regulatory elements.
+
 Uses Rust backend via unified pipeline for accelerated computation with GC correction.
+
+Output Files:
+    - {sample}.OCF.tsv: Per-region OCF scores and fragment counts
+    - {sample}.OCF.sync.tsv: Synchronized regions for panel comparison
+    - Panel mode: {sample}.OCF.ontarget.tsv for on-target regions
+
+OCF Score: Measures strand asymmetry of fragment ends = (U-D)/(U+D) where U=upstream, D=downstream.
 """
 
 import typer
@@ -23,11 +32,13 @@ from krewlyzer import _core
 
 
 def ocf(
-    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files (default: derived from input filename)"),
     ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin regions file"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target OCF)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
@@ -72,6 +83,10 @@ def ocf(
     
     # Default OCR file from assets
     if ocr_input is None:
+        if not assets.ocf_available:
+            logger.error(f"OCF regions not available for {genome} (only GRCh37/hg19 currently supported)")
+            logger.error("Provide a custom OCR file with -r/--ocr-input to run OCF on hg38")
+            raise typer.Exit(1)
         try:
             ocr_input = assets.resolve("ocf_regions")
             logger.info(f"Using default OCR file: {ocr_input}")
@@ -127,6 +142,11 @@ def ocf(
         
         # Call Unified Pipeline (OCF only)
         logger.info("Running unified pipeline for OCF...")
+        
+        is_panel_mode = target_regions and target_regions.exists()
+        if is_panel_mode:
+            logger.info(f"Panel mode: on/off-target split enabled (targets: {target_regions.name})")
+        
         _core.run_unified_pipeline(
             str(bedgz_input),
             # GC Correction (compute)
@@ -138,11 +158,17 @@ def ocf(
             # FSC - disabled
             None, None,
             # WPS - disabled
+            None, None,
+            # WPS Background - disabled
             None, None, False,
             # FSD - disabled
             None, None,
             # OCF - enabled
-            str(ocr_input), str(sample_dir)
+            str(ocr_input), str(sample_dir),
+            # Target regions for on/off-target split
+            str(target_regions) if is_panel_mode else None,
+            50,  # bait_padding
+            False  # silent
         )
         
         # Rename/Move files to krewlyzer standard: {output}/{sample}.{EXT}
@@ -158,6 +184,21 @@ def ocf(
             shutil.move(str(rust_ocf), str(final_ocf))
         if rust_sync.exists():
             shutil.move(str(rust_sync), str(final_sync))
+        
+        # Handle on-target files if panel mode
+        if is_panel_mode:
+            rust_ocf_on = sample_dir / "all.ocf.ontarget.tsv"
+            rust_sync_on = sample_dir / "all.sync.ontarget.tsv"
+            final_ocf_on = output / f"{sample_name}.OCF.ontarget.tsv"
+            final_sync_on = output / f"{sample_name}.OCF.sync.ontarget.tsv"
+            
+            if rust_ocf_on.exists():
+                shutil.move(str(rust_ocf_on), str(final_ocf_on))
+            if rust_sync_on.exists():
+                shutil.move(str(rust_sync_on), str(final_sync_on))
+            
+            if final_ocf_on.exists():
+                logger.info(f"OCF on-target: {final_ocf_on}")
             
         # Clean up temporary sample dir if empty
         try:

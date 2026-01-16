@@ -6,27 +6,42 @@ process KREWLYZER_WPS {
     input:
     tuple val(meta), path(bed)
     path fasta
+    path wps_anchors
+    path wps_background
 
     output:
-    tuple val(meta), path("*.WPS.tsv.gz"), emit: tsv
-    path "versions.yml"                  , emit: versions
+    tuple val(meta), path("*.WPS.parquet")           , emit: parquet
+    tuple val(meta), path("*.WPS_background.parquet"), emit: background, optional: true
+    path "versions.yml"                              , emit: versions
 
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
-    def ref_arg = fasta ? "--reference ${fasta}" : ""
+    def ref_arg = fasta ? "-r ${fasta}" : ""
+    def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
+    def background_arg = wps_background ? "--background ${wps_background}" : ""
+    def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
+    def bait_arg = params.bait_padding ? "--bait-padding ${params.bait_padding}" : ""
+    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
 
     """
     krewlyzer wps \\
-        $bed \\
+        -i $bed \\
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
         $ref_arg \\
         $genome_arg \\
         $gc_arg \\
+        $anchors_arg \\
+        $background_arg \\
+        $targets_arg \\
+        $bait_arg \\
+        $pon_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -34,6 +34,7 @@ def build_pon(
     transcript_file: Optional[Path] = typer.Option(None, "--transcript-file", "-t", help="Transcript TSV for WPS baseline"),
     bin_file: Optional[Path] = typer.Option(None, "--bin-file", "-b", help="Bin file for FSC/FSR (default: hg19_window_100kb.bed)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="BED file with target regions (panel mode - builds dual on/off-target baselines)"),
     threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -46,8 +47,14 @@ def build_pon(
     - FSD baseline per chromosome arm
     - WPS baseline per transcript region
     
+    For panel data (--target-regions):
+    - Builds DUAL baselines for on-target and off-target regions
+    - GC model trained on off-target only (unbiased by capture)
+    - FSD/WPS include separate on-target stats
+    
     Example:
         krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+        krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
     """
     
     # Configure logging
@@ -79,6 +86,17 @@ def build_pon(
     if n_samples < 1:
         logger.error("No samples found in sample list")
         raise typer.Exit(1)
+    
+    # Panel mode detection
+    is_panel_mode = target_regions is not None and target_regions.exists()
+    target_regions_str = str(target_regions) if is_panel_mode else None
+    if is_panel_mode:
+        logger.info(f"PANEL MODE: Building dual on/off-target baselines")
+        logger.info(f"  Target regions: {target_regions}")
+        logger.info(f"  GC model will use OFF-TARGET fragments only (unbiased)")
+        logger.info(f"  FSD/WPS will have separate on/off-target stats")
+    else:
+        logger.info("WGS MODE: Building single baseline")
     
     logger.info(f"Building PON from {n_samples} samples")
     logger.info(f"Assay: {assay}")
@@ -124,8 +142,10 @@ def build_pon(
                     bed_output_path,   # output_bed_path
                     None,              # output_motif_prefix (skip motifs)
                     None,              # exclude_path
+                    target_regions_str,  # target_regions_path - for panel mode filtering
                     True,              # skip_duplicates
-                    require_proper_pair  # from CLI argument
+                    require_proper_pair,  # from CLI argument
+                    True               # silent
                 )
                 bed_path = Path(bed_output_path)
                 if bed_path.exists():
@@ -151,6 +171,8 @@ def build_pon(
     all_gc_data = []  # List of (gc_values, short, intermediate, long) tuples
     all_fsd_data = []  # List of DataFrames
     all_wps_data = []  # List of (region_id, wps_long_mean, wps_short_mean) tuples
+    all_ocf_data = []  # List of OCF region stats
+    all_mds_data = []  # List of MDS (kmer frequencies, mds score)
     
     try:
         with Progress(
@@ -230,6 +252,38 @@ def build_pon(
                         except Exception as wps_e:
                             logger.warning(f"WPS failed for {sample_name}: {wps_e}")
                     
+                    # Get OCF data per region (from open chromatin regions file)
+                    try:
+                        pkg_dir = Path(__file__).parent.parent
+                        ocr_file = pkg_dir / "data" / "OCR" / "hg19_ocr_regions.bed.gz"
+                        if ocr_file.exists():
+                            with tempfile.TemporaryDirectory() as tmpdir:
+                                ocf_output = Path(tmpdir) / f"{sample_name}.OCF.tsv"
+                                _core.ocf.calculate_ocf(
+                                    str(bed_path),
+                                    str(ocr_file),
+                                    str(ocf_output)
+                                )
+                                if ocf_output.exists():
+                                    ocf_df = pd.read_csv(ocf_output, sep="\t")
+                                    if "region_id" in ocf_df.columns and "ocf" in ocf_df.columns:
+                                        all_ocf_data.append(ocf_df[["region_id", "ocf"]])
+                    except Exception as ocf_e:
+                        logger.debug(f"OCF failed for {sample_name}: {ocf_e}")
+                    
+                    # Get MDS (Motif Diversity Score) from extract output
+                    try:
+                        # MDS is computed from the motif output - look for .MDS.tsv
+                        mds_file = bed_path.parent / f"{sample_name}.MDS.tsv"
+                        if mds_file.exists():
+                            mds_df = pd.read_csv(mds_file, sep="\t")
+                            if "kmer" in mds_df.columns and "frequency" in mds_df.columns:
+                                kmer_freqs = dict(zip(mds_df["kmer"], mds_df["frequency"]))
+                                mds_score = mds_df["mds"].iloc[0] if "mds" in mds_df.columns else None
+                                all_mds_data.append({"kmers": kmer_freqs, "mds": mds_score})
+                    except Exception as mds_e:
+                        logger.debug(f"MDS failed for {sample_name}: {mds_e}")
+                    
                 except Exception as e:
                     logger.warning(f"Failed to process {sample_name}: {e}")
                 
@@ -259,6 +313,18 @@ def build_pon(
     logger.info("Computing WPS baseline...")
     wps_baseline = _compute_wps_baseline(all_wps_data)
     
+    # Build OCF baseline
+    ocf_baseline = None
+    if all_ocf_data:
+        logger.info("Computing OCF baseline...")
+        ocf_baseline = _compute_ocf_baseline(all_ocf_data)
+    
+    # Build MDS baseline
+    mds_baseline = None
+    if all_mds_data:
+        logger.info("Computing MDS baseline...")
+        mds_baseline = _compute_mds_baseline(all_mds_data)
+    
     # Create PON model
     model = PonModel(
         schema_version="1.0",
@@ -266,9 +332,13 @@ def build_pon(
         build_date=datetime.now().isoformat()[:10],
         n_samples=len(all_gc_data),
         reference=reference.name.replace(".fa", "").replace(".fasta", ""),
+        panel_mode=is_panel_mode,
+        target_regions_file=target_regions.name if is_panel_mode else "",
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
+        ocf_baseline=ocf_baseline,
+        mds_baseline=mds_baseline,
     )
     
     # Validate model
@@ -420,26 +490,137 @@ def _compute_fsd_baseline(all_fsd_data: List[pd.DataFrame]) -> Optional[FsdBasel
 
 def _compute_wps_baseline(all_wps_data: List[pd.DataFrame]) -> Optional[WpsBaseline]:
     """
-    Compute WPS baseline from sample data.
+    Compute WPS baseline from Parquet vector format.
     
-    Aggregates mean WPS per region across samples.
+    For each region, computes mean and std vectors across all samples.
+    This enables PoN subtraction with per-position z-scores.
+    
+    Expected columns: region_id, wps_nuc[200], wps_tf[200], etc.
     """
+    import numpy as np
+    
     if not all_wps_data:
         return None
     
-    # Combine all samples
-    combined = pd.concat(all_wps_data, ignore_index=True)
+    template = all_wps_data[0].copy()
+    region_id_col = "region_id" if "region_id" in template.columns else "group_id"
     
-    # Aggregate per region
-    baseline = combined.groupby("gene_id").agg({
-        "wps_long": ["mean", "std"],
-        "wps_short": ["mean", "std"]
+    # Columns to aggregate
+    vector_cols = [c for c in ["wps_nuc", "wps_tf", "prot_frac_nuc", "prot_frac_tf"] 
+                   if c in template.columns]
+    
+    if not vector_cols:
+        logger.warning("No WPS vector columns found (expected wps_nuc, wps_tf)")
+        return None
+    
+    result_data = []
+    
+    for idx, row in template.iterrows():
+        region_id = row[region_id_col]
+        result_row = {region_id_col: region_id}
+        
+        # Copy non-vector metadata
+        for col in ["chrom", "center", "strand", "region_type"]:
+            if col in template.columns:
+                result_row[col] = row[col]
+        
+        for col in vector_cols:
+            # Collect vectors from all samples for this region
+            vectors = []
+            for df in all_wps_data:
+                if idx < len(df) and col in df.columns:
+                    vec = df.iloc[idx][col]
+                    if vec is not None and len(vec) > 0:
+                        vectors.append(np.array(vec, dtype=np.float32))
+            
+            if vectors:
+                stacked = np.stack(vectors, axis=0)  # (n_samples, n_bins)
+                mean_vec = np.mean(stacked, axis=0)
+                std_vec = np.std(stacked, axis=0)
+                
+                result_row[f"{col}_mean"] = mean_vec.tolist()
+                result_row[f"{col}_std"] = std_vec.tolist()
+        
+        result_data.append(result_row)
+    
+    result_df = pd.DataFrame(result_data)
+    logger.info(f"WPS baseline: {len(result_df)} regions, {len(all_wps_data)} samples")
+    
+    return WpsBaseline(regions=result_df)
+
+
+def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":
+    """
+    Compute OCF baseline from sample data.
+    
+    Aggregates OCF scores per region across samples.
+    """
+    from .model import OcfBaseline
+    
+    if not all_ocf_data:
+        return None
+    
+    # Concatenate all sample data
+    combined = pd.concat(all_ocf_data, ignore_index=True)
+    
+    # Group by region and compute mean/std
+    stats = combined.groupby("region_id").agg({
+        "ocf": ["mean", "std"]
     }).reset_index()
     
     # Flatten column names
-    baseline.columns = ["region_id", "wps_long_mean", "wps_long_std", "wps_short_mean", "wps_short_std"]
+    stats.columns = ["region_id", "ocf_mean", "ocf_std"]
+    stats["ocf_std"] = stats["ocf_std"].fillna(0.001)  # Handle single-sample case
     
-    return WpsBaseline(regions=baseline)
+    logger.info(f"OCF baseline: {len(stats)} regions, {len(all_ocf_data)} samples")
+    
+    return OcfBaseline(regions=stats)
+
+
+def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
+    """
+    Compute MDS baseline from sample data.
+    
+    Aggregates k-mer frequencies and MDS scores across samples.
+    """
+    from .model import MdsBaseline
+    
+    if not all_mds_data:
+        return None
+    
+    # Collect all k-mer frequencies
+    all_kmers = set()
+    for sample in all_mds_data:
+        if sample.get("kmers"):
+            all_kmers.update(sample["kmers"].keys())
+    
+    # Compute mean/std for each k-mer
+    kmer_expected = {}
+    kmer_std = {}
+    
+    for kmer in all_kmers:
+        values = []
+        for sample in all_mds_data:
+            if sample.get("kmers") and kmer in sample["kmers"]:
+                values.append(sample["kmers"][kmer])
+        
+        if values:
+            kmer_expected[kmer] = np.mean(values)
+            kmer_std[kmer] = np.std(values) if len(values) > 1 else 0.001
+    
+    # Compute MDS mean/std
+    mds_values = [s["mds"] for s in all_mds_data if s.get("mds") is not None]
+    mds_mean = np.mean(mds_values) if mds_values else 0.0
+    mds_std = np.std(mds_values) if len(mds_values) > 1 else 1.0
+    
+    logger.info(f"MDS baseline: {len(kmer_expected)} k-mers, {len(all_mds_data)} samples")
+    
+    return MdsBaseline(
+        kmer_expected=kmer_expected,
+        kmer_std=kmer_std,
+        mds_mean=mds_mean,
+        mds_std=mds_std
+    )
 
 
 def _save_pon_model(model: PonModel, output: Path) -> None:
@@ -455,6 +636,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         "build_date": model.build_date,
         "n_samples": model.n_samples,
         "reference": model.reference,
+        "panel_mode": model.panel_mode,
+        "target_regions_file": model.target_regions_file,
     }])
     
     # Build GC bias DataFrame
@@ -496,6 +679,23 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         wps_df = model.wps_baseline.regions.copy()
         wps_df["table"] = "wps_baseline"
     
+    # Build OCF baseline DataFrame
+    ocf_df = pd.DataFrame()
+    if model.ocf_baseline and model.ocf_baseline.regions is not None:
+        ocf_df = model.ocf_baseline.regions.copy()
+        ocf_df["table"] = "ocf_baseline"
+    
+    # Build MDS baseline DataFrame
+    mds_df = pd.DataFrame()
+    if model.mds_baseline:
+        mds_df = pd.DataFrame([{
+            "table": "mds_baseline",
+            "mds_mean": model.mds_baseline.mds_mean,
+            "mds_std": model.mds_baseline.mds_std,
+            "kmer_expected": model.mds_baseline.kmer_expected,
+            "kmer_std": model.mds_baseline.kmer_std,
+        }])
+    
     # Combine and save
     all_dfs = [metadata_df]
     if not gc_bias_df.empty:
@@ -504,6 +704,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(fsd_df)
     if not wps_df.empty:
         all_dfs.append(wps_df)
+    if not ocf_df.empty:
+        all_dfs.append(ocf_df)
+    if not mds_df.empty:
+        all_dfs.append(mds_df)
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
     combined_df.to_parquet(output, index=False)
@@ -512,8 +716,13 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     n_gc = len(gc_bias_rows)
     n_fsd = len(fsd_rows)
     n_wps = len(wps_df) if not wps_df.empty else 0
+    n_ocf = len(ocf_df) if not ocf_df.empty else 0
+    n_mds = len(model.mds_baseline.kmer_expected) if model.mds_baseline else 0
     logger.info(f"Saved PON model: {output}")
+    if model.panel_mode:
+        logger.info(f"   Panel mode: ON (targets: {model.target_regions_file})")
     logger.info(f"   GC bias: {n_gc} bins")
     logger.info(f"   FSD baseline: {n_fsd} arm×size entries")
     logger.info(f"   WPS baseline: {n_wps} regions")
-
+    logger.info(f"   OCF baseline: {n_ocf} regions")
+    logger.info(f"   MDS baseline: {n_mds} k-mers")
