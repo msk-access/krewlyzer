@@ -404,7 +404,7 @@ impl BaitMask {
             let mut is_reliable = false;
             
             tree.query(pos as i32, pos as i32, |node| {
-                let (bait_start, bait_end) = node.metadata;
+                let (bait_start, bait_end) = *node.metadata;
                 is_on_target = true;
                 
                 // Adaptive trim: min(user_trim, length/4) to handle small exons
@@ -1546,7 +1546,7 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
             // Collect overlapping region indices first (avoids borrow conflict)
             let mut overlaps: Vec<usize> = Vec::new();
             tree.query(start as i32, end_closed as i32, |node| {
-                overlaps.push(node.metadata);
+                overlaps.push(*node.metadata);
             });
             
             // Process each overlapping region

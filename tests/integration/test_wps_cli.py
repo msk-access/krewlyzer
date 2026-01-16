@@ -5,12 +5,19 @@ Tests the standalone wps command with Parquet output.
 """
 import pytest
 import pysam
+import re
 from pathlib import Path
 from typer.testing import CliRunner
 from krewlyzer.cli import app
 
 
 runner = CliRunner()
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text for clean assertions."""
+    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+    return ansi_escape.sub('', text)
 
 
 @pytest.fixture
@@ -55,9 +62,10 @@ def test_wps_cli_help():
     """Test WPS CLI help output."""
     result = runner.invoke(app, ["wps", "--help"])
     assert result.exit_code == 0
-    assert "--wps-anchors" in result.output
-    assert "--background" in result.output
-    assert "--genome" in result.output
+    output = strip_ansi(result.output)
+    assert "--wps-anchors" in output
+    assert "--background" in output
+    assert "--genome" in output
 
 
 @pytest.mark.integration
@@ -123,5 +131,6 @@ def test_wps_cli_smooth_columns(tmp_path, sample_bedgz, sample_anchors):
 def test_wps_genome_flag():
     """Test --genome flag is accepted."""
     result = runner.invoke(app, ["wps", "--help"])
-    assert "--genome" in result.output
-    assert "hg19" in result.output or "hg38" in result.output
+    output = strip_ansi(result.output)
+    assert "--genome" in output
+    assert "hg19" in output or "hg38" in output

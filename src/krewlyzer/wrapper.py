@@ -43,6 +43,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger("krewlyzer")
 
+def _resolve_path(value) -> Optional[Path]:
+    """Safely resolve a path value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    Optional[Path] parameters with defaults remain as OptionInfo objects.
+    This helper handles that case.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        return Path(value)
+    # If it's a typer.OptionInfo (or any other type), return None
+    return None
+
+def _resolve_int(value, default: int) -> int:
+    """Safely resolve an integer value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    parameters with defaults remain as OptionInfo objects.
+    This helper handles that case.
+    """
+    if isinstance(value, int):
+        return value
+    # If it's a typer.OptionInfo or other non-int type, return default
+    return default
+
 def run_all(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
     reference: Path = typer.Option(..., "--reference", "-r", help="Reference genome FASTA (indexed)"),
@@ -86,6 +114,20 @@ def run_all(
     Pipeline: extract → motif → [Unified Engine: FSC/FSR, FSD, WPS, OCF]
     Optional: uxm, mfsd
     """
+    # ═══════════════════════════════════════════════════════════════════
+    # RESOLVE TYPER PARAMETERS (handle direct function calls vs CLI)
+    # ═══════════════════════════════════════════════════════════════════
+    # When called directly (not via CLI), typer.Option defaults remain as
+    # OptionInfo objects. Resolve them to their intended values.
+    resolved_target_regions = _resolve_path(target_regions)
+    resolved_exclude_regions = _resolve_path(exclude_regions)
+    resolved_bisulfite_bam = _resolve_path(bisulfite_bam)
+    resolved_variants = _resolve_path(variants)
+    resolved_arms_file = _resolve_path(arms_file)
+    resolved_ocr_file = _resolve_path(ocr_file)
+    resolved_pon_model = _resolve_path(pon_model)
+    resolved_bait_padding = _resolve_int(bait_padding, 50)
+    
     # Configure Logging
     if debug:
         logger.setLevel(logging.DEBUG)
@@ -130,7 +172,7 @@ def run_all(
     output.mkdir(parents=True, exist_ok=True)
     
     # Panel mode detection (affects FSC/FSR aggregation)
-    is_panel_mode = target_regions and isinstance(target_regions, Path) and target_regions.exists()
+    is_panel_mode = resolved_target_regions and resolved_target_regions.exists()
     
     # Window settings for FSC/FSR
     # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
@@ -173,11 +215,11 @@ def run_all(
         console.print()
     
     if is_panel_mode:
-        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
+        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_regions.name})")
     
     # Determine which optional tools will run
-    has_uxm = bisulfite_bam is not None and bisulfite_bam.exists()
-    has_mfsd = variants is not None and variants.exists()
+    has_uxm = resolved_bisulfite_bam is not None and resolved_bisulfite_bam.exists()
+    has_mfsd = resolved_variants is not None and resolved_variants.exists()
     
     # Multi-step progress display
     with Progress(
@@ -236,8 +278,8 @@ def run_all(
                     threads,
                     bed_out_arg,
                     "enable",  # output_motif_prefix
-                    str(exclude_regions) if exclude_regions else str(assets.exclude_regions),
-                    str(target_regions) if (target_regions and isinstance(target_regions, Path) and target_regions.exists()) else None,  # Panel mode: off-target GC
+                    str(resolved_exclude_regions) if resolved_exclude_regions else str(assets.exclude_regions),
+                    str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,  # Panel mode: off-target GC
                     skip_duplicates,
                     require_proper_pair,
                     True  # silent=True
@@ -293,7 +335,6 @@ def run_all(
                 )
                 
                 # On-target motifs (for panel data comparison - PCR biased)
-                is_panel_mode = target_regions and isinstance(target_regions, Path) and target_regions.exists()
                 if is_panel_mode and sum(em_counts_on.values()) > 0:
                     edm_on = output / f"{sample}.EndMotif.ontarget.tsv"
                     bpm_on = output / f"{sample}.BreakPointMotif.ontarget.tsv"
@@ -331,16 +372,21 @@ def run_all(
         if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
 
         # FSD Arms
-        res_arms = arms_file if arms_file else assets.arms
+        res_arms = resolved_arms_file if resolved_arms_file else assets.arms
         if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
 
         # WPS Regions (prefer wps_anchors, fallback to wps_file, then asset defaults)
-        if wps_anchors and wps_anchors.exists():
-            res_wps = wps_anchors
-            logger.debug(f"WPS anchors: {wps_anchors}")
-        elif wps_file and wps_file.exists():
-            res_wps = wps_file
-            logger.debug(f"WPS transcript (legacy): {wps_file}")
+        # Resolve paths to handle typer.OptionInfo when called directly
+        resolved_wps_anchors = _resolve_path(wps_anchors)
+        resolved_wps_file = _resolve_path(wps_file)
+        resolved_wps_background = _resolve_path(wps_background)
+        
+        if resolved_wps_anchors and resolved_wps_anchors.exists():
+            res_wps = resolved_wps_anchors
+            logger.debug(f"WPS anchors: {resolved_wps_anchors}")
+        elif resolved_wps_file and resolved_wps_file.exists():
+            res_wps = resolved_wps_file
+            logger.debug(f"WPS transcript (legacy): {resolved_wps_file}")
         else:
             # Try wps_anchors asset first, fallback to transcript_anno
             try:
@@ -353,8 +399,8 @@ def run_all(
 
         # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
         run_ocf = True
-        if ocr_file:
-            res_ocf = ocr_file
+        if resolved_ocr_file:
+            res_ocf = resolved_ocr_file
         elif assets.ocf_available:
             res_ocf = assets.ocf_regions
         else:
@@ -387,8 +433,8 @@ def run_all(
         out_ocf_dir.mkdir(parents=True, exist_ok=True)
         
         # Resolve WPS background (explicit --wps-background takes precedence over auto-load)
-        if wps_background and wps_background.exists():
-            res_wps_bg = wps_background
+        if resolved_wps_background and resolved_wps_background.exists():
+            res_wps_bg = resolved_wps_background
             logger.info(f"Using explicit WPS background: {res_wps_bg}")
         elif assets.wps_background.exists():
             res_wps_bg = assets.wps_background
@@ -409,8 +455,8 @@ def run_all(
                 False,
                 str(res_arms), str(out_fsd),
                 str(res_ocf) if run_ocf else None, str(out_ocf_dir) if run_ocf else None,  # OCF (skip for hg38)
-                str(target_regions) if (target_regions and isinstance(target_regions, Path) and target_regions.exists()) else None,
-                bait_padding,  # Bait edge padding (adaptive safety applies)
+                str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,
+                resolved_bait_padding,  # Bait edge padding (adaptive safety applies)
                 True  # silent=True
             )
             ocf_status = "OCF" if run_ocf else "OCF skipped"
@@ -428,9 +474,9 @@ def run_all(
                 
                 # Load PON if available
                 pon = None
-                if pon_model:
+                if resolved_pon_model:
                     from .core.pon_integration import load_pon_model
-                    pon = load_pon_model(pon_model)
+                    pon = load_pon_model(resolved_pon_model)
                 
                 # FSC Output (off-target - primary for biomarkers)
                 final_fsc = output / f"{sample}.FSC.tsv"
@@ -469,9 +515,9 @@ def run_all(
                 pass
             
             # Apply processing to FSD and WPS (PoN if provided)
-            if pon_model:
+            if resolved_pon_model:
                 from .core.pon_integration import load_pon_model
-                pon = load_pon_model(pon_model)
+                pon = load_pon_model(resolved_pon_model)
             else:
                 pon = None
             
@@ -518,7 +564,7 @@ def run_all(
             progress.update(task_uxm, description="[4/5] UXM ...")
             try:
                 from .uxm import uxm
-                uxm(bisulfite_bam, output, sample, None, 0)
+                uxm(resolved_bisulfite_bam, output, sample, None, 0)
                 progress.update(task_uxm, description="[4/5] UXM ✓", completed=100)
             except Exception as e:
                 progress.update(task_uxm, description="[4/5] UXM ✗ Error", completed=100)
@@ -532,7 +578,7 @@ def run_all(
                 from .mfsd import mfsd
                 mfsd(
                     bam_input=bam_input,
-                    input_file=variants,
+                    input_file=resolved_variants,
                     output=output,
                     sample_name=sample,
                     reference=reference,
