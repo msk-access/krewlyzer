@@ -555,11 +555,18 @@ def run_all(
             # WPS post-processing (smoothing, PoN subtraction, FFT periodicity)
             from .core.wps_processor import post_process_wps
             out_wps_bg = output / f"{sample}.WPS_background.parquet"
-            pon_wps_baseline = pon.wps_baseline if pon else None
+            
+            # Save WPS baseline from PON model if available
+            pon_wps_baseline_path = None
+            if pon and pon.wps_baseline and pon.wps_baseline.regions is not None:
+                pon_wps_baseline_path = output / f".{sample}.pon_wps_baseline.parquet"
+                pon.wps_baseline.regions.to_parquet(pon_wps_baseline_path, index=False)
+                logger.debug(f"Saved PON WPS baseline: {pon_wps_baseline_path}")
+            
             wps_result = post_process_wps(
                 wps_parquet=out_wps,
                 wps_background_parquet=out_wps_bg if out_wps_bg.exists() else None,
-                pon_baseline_parquet=None,  # TODO: extract WPS baseline path from PoN
+                pon_baseline_parquet=pon_wps_baseline_path,
                 smooth=True,
                 extract_periodicity=True
             )

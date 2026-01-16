@@ -220,17 +220,31 @@ def wps(
         if bg_regions and output_bg_file.exists():
             logger.info(f"WPS background: {output_bg_file}")
         
-        # Post-processing: smoothing, FFT periodicity
+        # Load PON model if provided and extract WPS baseline
+        pon_wps_baseline_path = None
+        if pon_model and pon_model.exists():
+            try:
+                pon = load_pon_model(pon_model)
+                if pon and pon.wps_baseline and pon.wps_baseline.regions is not None:
+                    pon_wps_baseline_path = output / f".{sample_name}.pon_wps_baseline.parquet"
+                    pon.wps_baseline.regions.to_parquet(pon_wps_baseline_path, index=False)
+                    logger.info(f"Loaded PON WPS baseline: {len(pon.wps_baseline.regions)} regions")
+            except Exception as e:
+                logger.warning(f"Failed to load PON model: {e}")
+        
+        # Post-processing: smoothing, PON subtraction, FFT periodicity
         from .core.wps_processor import post_process_wps
         wps_result = post_process_wps(
             wps_parquet=output_file,
             wps_background_parquet=output_bg_file if output_bg_file.exists() else None,
-            pon_baseline_parquet=None,  # TODO: extract from pon_model if provided
+            pon_baseline_parquet=pon_wps_baseline_path,
             smooth=True,
             extract_periodicity=True
         )
         if wps_result.get("smoothed"):
             logger.info("Applied Savitzky-Golay smoothing to WPS profiles")
+        if wps_result.get("pon_subtracted"):
+            logger.info("Subtracted PON baseline (added *_delta and *_z columns)")
         if wps_result.get("periodicity_extracted"):
             score = wps_result.get('periodicity_score')
             if score is not None:

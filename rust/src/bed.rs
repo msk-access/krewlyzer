@@ -110,8 +110,7 @@ impl ChromosomeMap {
     }
 }
 
-// TODO: Phase 1 implementation
-// - parse_bed_regions() - load regions from BIN file
-// - count_fragments_in_regions() - parallel counting using rayon
-// - calc_fsc() - fragment size coverage with GC correction
-// - calc_fsr() - fragment size ratios
+// Note: Fragment counting functions are implemented in:
+//   - fsc.rs: calc_fsc() - fragment size coverage with GC correction
+//   - fsr.rs: calc_fsr() - fragment size ratios
+//   - fsd.rs: calculate_fsd() - fragment size distributions

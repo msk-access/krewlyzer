@@ -502,7 +502,8 @@ class PonModel:
             "reference": self.reference,
         }])
         
-        # TODO: Build gc_bias, fsd_baseline, wps_baseline tables
+        # Note: This is a simplified save method. build.py uses _save_pon_model()
+        # for complete serialization including all baselines.
         
         # For now, just save metadata
         metadata.to_parquet(path, index=False)
