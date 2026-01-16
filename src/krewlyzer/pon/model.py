@@ -340,6 +340,8 @@ class PonModel:
     build_date: str = ""
     n_samples: int = 0
     reference: str = ""  # e.g., "hg19"
+    panel_mode: bool = False  # True if built with --target-regions
+    target_regions_file: str = ""  # Original target regions BED file name
     
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
@@ -450,6 +452,8 @@ class PonModel:
             build_date=str(meta.get("build_date", "")),
             n_samples=int(meta.get("n_samples", 0)),
             reference=str(meta.get("reference", "")),
+            panel_mode=bool(meta.get("panel_mode", False)),
+            target_regions_file=str(meta.get("target_regions_file", "")),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
@@ -458,6 +462,8 @@ class PonModel:
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")
+        if model.panel_mode:
+            logger.info(f"  Panel mode: ON (targets: {model.target_regions_file})")
         if gc_bias:
             logger.info(f"  GC bias: {len(gc_bias.gc_bins)} bins")
         if fsd_baseline:

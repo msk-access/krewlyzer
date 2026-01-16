@@ -175,3 +175,59 @@ class TestPonModel:
         """Test get_mean returns None without GC bias."""
         pon = PonModel()
         assert pon.get_mean('short') is None
+
+
+class TestPonModelPanelMode:
+    """Tests for PonModel panel mode fields."""
+    
+    def test_panel_mode_default(self):
+        """Test panel_mode defaults to False."""
+        pon = PonModel()
+        assert pon.panel_mode == False
+        assert pon.target_regions_file == ""
+    
+    def test_panel_mode_set(self):
+        """Test panel_mode can be set."""
+        pon = PonModel(
+            panel_mode=True,
+            target_regions_file="targets.bed",
+            assay="msk-access"
+        )
+        assert pon.panel_mode == True
+        assert pon.target_regions_file == "targets.bed"
+
+
+class TestBuildComputeFunctions:
+    """Tests for build.py compute functions."""
+    
+    def test_compute_ocf_baseline(self):
+        """Test _compute_ocf_baseline aggregates correctly."""
+        import pandas as pd
+        from krewlyzer.pon.build import _compute_ocf_baseline
+        
+        data = [
+            pd.DataFrame({'region_id': ['R1', 'R2'], 'ocf': [0.5, 0.3]}),
+            pd.DataFrame({'region_id': ['R1', 'R2'], 'ocf': [0.7, 0.5]}),
+        ]
+        result = _compute_ocf_baseline(data)
+        
+        assert result is not None
+        assert len(result.regions) == 2
+        # R1 mean should be (0.5 + 0.7) / 2 = 0.6
+        r1 = result.regions[result.regions['region_id'] == 'R1'].iloc[0]
+        assert pytest.approx(r1['ocf_mean'], rel=0.01) == 0.6
+    
+    def test_compute_mds_baseline(self):
+        """Test _compute_mds_baseline aggregates correctly."""
+        from krewlyzer.pon.build import _compute_mds_baseline
+        
+        data = [
+            {'kmers': {'ACGT': 0.01, 'TGCA': 0.02}, 'mds': 4.0},
+            {'kmers': {'ACGT': 0.02, 'TGCA': 0.03}, 'mds': 5.0},
+        ]
+        result = _compute_mds_baseline(data)
+        
+        assert result is not None
+        assert len(result.kmer_expected) == 2
+        assert pytest.approx(result.kmer_expected['ACGT'], rel=0.01) == 0.015
+        assert pytest.approx(result.mds_mean, rel=0.01) == 4.5

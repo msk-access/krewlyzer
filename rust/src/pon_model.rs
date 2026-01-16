@@ -117,6 +117,82 @@ impl WpsBaseline {
     }
 }
 
+/// FSD baseline for a single chromosome arm.
+#[derive(Debug, Clone)]
+pub struct FsdArmBaseline {
+    pub size_bins: Vec<i32>,
+    pub expected: Vec<f64>,
+    pub std: Vec<f64>,
+}
+
+impl FsdArmBaseline {
+    /// Interpolate expected value for a size.
+    pub fn get_expected(&self, size: i32) -> f64 {
+        if self.size_bins.is_empty() || self.expected.is_empty() {
+            return 0.0;
+        }
+        
+        // Linear interpolation
+        if size <= self.size_bins[0] {
+            return self.expected[0];
+        }
+        if size >= *self.size_bins.last().unwrap() {
+            return *self.expected.last().unwrap();
+        }
+        
+        for i in 0..self.size_bins.len() - 1 {
+            if size >= self.size_bins[i] && size < self.size_bins[i + 1] {
+                let t = (size - self.size_bins[i]) as f64 / 
+                       (self.size_bins[i + 1] - self.size_bins[i]) as f64;
+                return self.expected[i] + t * (self.expected[i + 1] - self.expected[i]);
+            }
+        }
+        0.0
+    }
+}
+
+/// FSD baseline model containing per-arm statistics.
+#[derive(Debug, Clone, Default)]
+pub struct FsdBaseline {
+    pub arms: HashMap<String, FsdArmBaseline>,
+}
+
+impl FsdBaseline {
+    /// Get (expected, std) for an arm at a given size.
+    pub fn get_stats(&self, arm: &str, size: i32) -> Option<(f64, f64)> {
+        self.arms.get(arm).map(|baseline| {
+            (baseline.get_expected(size), 
+             baseline.std.get(0).copied().unwrap_or(1.0))
+        })
+    }
+}
+
+/// OCF baseline for a single region.
+#[derive(Debug, Clone)]
+pub struct OcfRegionBaseline {
+    pub ocf_mean: f64,
+    pub ocf_std: f64,
+}
+
+/// OCF baseline model containing per-region statistics.
+#[derive(Debug, Clone, Default)]
+pub struct OcfBaseline {
+    pub regions: HashMap<String, OcfRegionBaseline>,
+}
+
+impl OcfBaseline {
+    /// Compute z-score for OCF value.
+    pub fn compute_zscore(&self, region_id: &str, observed: f64) -> Option<f64> {
+        self.regions.get(region_id).map(|b| {
+            if b.ocf_std > 0.0 {
+                (observed - b.ocf_mean) / b.ocf_std
+            } else {
+                0.0
+            }
+        })
+    }
+}
+
 /// Unified Panel of Normals model.
 #[derive(Debug, Clone, Default)]
 pub struct PonModel {
@@ -128,12 +204,15 @@ pub struct PonModel {
     
     pub gc_bias: GcBiasModel,
     pub wps_baseline: WpsBaseline,
-    // TODO: Add FSD baseline
+    pub fsd_baseline: FsdBaseline,
+    pub ocf_baseline: OcfBaseline,
 }
 
 impl PonModel {
     /// Load PON model from Parquet file.
     pub fn load(path: &Path) -> Result<Self, String> {
+        use arrow::array::{Array, Float64Array, StringArray, Int32Array};
+        
         if !path.exists() {
             return Err(format!("PON model not found: {}", path.display()));
         }
@@ -150,14 +229,132 @@ impl PonModel {
         let mut model = PonModel::default();
         model.schema_version = "1.0".to_string();
         
-        // TODO: Parse record batches into model components
+        // Parse record batches - schema uses "table" column to identify row types
         for batch_result in reader {
-            let _batch = batch_result
+            let batch = batch_result
                 .map_err(|e| format!("Failed to read batch: {}", e))?;
-            // Parse batch into model
+            
+            // Get table column to identify row type
+            let table_col = batch.column_by_name("table");
+            if table_col.is_none() {
+                continue;
+            }
+            
+            let table_arr = table_col.unwrap()
+                .as_any()
+                .downcast_ref::<StringArray>();
+            if table_arr.is_none() {
+                continue;
+            }
+            let table_arr = table_arr.unwrap();
+            
+            for row in 0..batch.num_rows() {
+                let table_type = table_arr.value(row);
+                
+                match table_type {
+                    "metadata" => {
+                        // Parse metadata row
+                        if let Some(col) = batch.column_by_name("assay") {
+                            if let Some(arr) = col.as_any().downcast_ref::<StringArray>() {
+                                if !arr.is_null(row) {
+                                    model.assay = arr.value(row).to_string();
+                                }
+                            }
+                        }
+                        if let Some(col) = batch.column_by_name("n_samples") {
+                            if let Some(arr) = col.as_any().downcast_ref::<Int32Array>() {
+                                if !arr.is_null(row) {
+                                    model.n_samples = arr.value(row) as usize;
+                                }
+                            }
+                        }
+                    },
+                    "gc_bias" => {
+                        // Parse GC bias row
+                        let gc_bin = batch.column_by_name("gc_bin")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row));
+                        let short_exp = batch.column_by_name("short_expected")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row));
+                        let short_std = batch.column_by_name("short_std")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row));
+                            
+                        if let (Some(gc), Some(exp), Some(std)) = (gc_bin, short_exp, short_std) {
+                            // Add to short curve
+                            if model.gc_bias.short.is_none() {
+                                model.gc_bias.short = Some(GcCurve {
+                                    gc_bins: Vec::new(),
+                                    expected: Vec::new(),
+                                    std: Vec::new(),
+                                });
+                            }
+                            if let Some(ref mut curve) = model.gc_bias.short {
+                                curve.gc_bins.push(gc);
+                                curve.expected.push(exp);
+                                curve.std.push(std);
+                            }
+                        }
+                    },
+                    "wps_baseline" => {
+                        // Parse WPS baseline row
+                        let region_id = batch.column_by_name("region_id")
+                            .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                            .map(|a| a.value(row).to_string());
+                        let wps_long_mean = batch.column_by_name("wps_long_mean")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(0.0);
+                        let wps_long_std = batch.column_by_name("wps_long_std")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(1.0);
+                        let wps_short_mean = batch.column_by_name("wps_short_mean")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(0.0);
+                        let wps_short_std = batch.column_by_name("wps_short_std")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(1.0);
+                            
+                        if let Some(region) = region_id {
+                            model.wps_baseline.regions.insert(region, WpsRegionBaseline {
+                                wps_long_mean,
+                                wps_long_std,
+                                wps_short_mean,
+                                wps_short_std,
+                            });
+                        }
+                    },
+                    "ocf_baseline" => {
+                        // Parse OCF baseline row
+                        let region_id = batch.column_by_name("region_id")
+                            .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+                            .map(|a| a.value(row).to_string());
+                        let ocf_mean = batch.column_by_name("ocf_mean")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(0.0);
+                        let ocf_std = batch.column_by_name("ocf_std")
+                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
+                            .map(|a| a.value(row)).unwrap_or(1.0);
+                            
+                        if let Some(region) = region_id {
+                            model.ocf_baseline.regions.insert(region, OcfRegionBaseline {
+                                ocf_mean,
+                                ocf_std,
+                            });
+                        }
+                    },
+                    _ => {},
+                }
+            }
         }
         
         info!("Loaded PON model: {} (n={})", model.assay, model.n_samples);
+        if !model.wps_baseline.regions.is_empty() {
+            info!("  WPS baseline: {} regions", model.wps_baseline.regions.len());
+        }
+        if !model.ocf_baseline.regions.is_empty() {
+            info!("  OCF baseline: {} regions", model.ocf_baseline.regions.len());
+        }
         
         Ok(model)
     }

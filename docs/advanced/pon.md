@@ -1,163 +1,86 @@
 # Panel of Normals (PON)
 
-PON models provide baseline fragmentomics patterns from healthy cfDNA samples for normalization and z-score computation.
+The Panel of Normals (PON) is a unified model built from healthy plasma samples that enables:
 
-## Purpose
+1. **GC bias correction** - Per-fragment correction for GC content bias
+2. **Z-score normalization** - Detect deviations from healthy baseline for all features
+3. **Panel mode support** - Dual on/off-target baselines for capture panels
 
-PON models enable:
-
-1. **GC Correction** - Assay-specific GC bias curves
-2. **FSD Normalization** - Expected size distributions per chromosome arm
-3. **WPS Baseline** - Mean/std nucleosome positioning per transcript
-4. **FSC/FSR Normalization** - Fragment size channel baselines
-5. **OCF Baseline** - Tissue-specific OCF baselines
-
----
-
-## Available Models
-
-| Model | Assay | Status |
-|-------|-------|--------|
-| `msk-access-v1.pon.parquet` | MSK-ACCESS v1 | 🚧 Pending |
-| `msk-access-v2.pon.parquet` | MSK-ACCESS v2 | 🚧 Pending |
-
-Models are stored in `src/krewlyzer/data/pon/`.
-
----
-
-## Using a PON Model
-
-### With run-all
+## Quick Start
 
 ```bash
-krewlyzer run-all sample.bam \
-    --reference hg19.fa \
-    --pon-model msk-access-v2.pon.parquet \
-    --output results/
+# Build PON from healthy samples
+krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+
+# Use PON for sample processing
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -P pon.parquet
 ```
 
-### With Individual Tools
+## PON Components
+
+| Component | Description | Used By |
+|-----------|-------------|---------|
+| **GC Bias Model** | Expected coverage by GC content per fragment type | FSC, FSR, WPS |
+| **FSD Baseline** | Size distribution per chromosome arm | FSD |
+| **WPS Baseline** | WPS mean/std per transcript region | WPS |
+| **OCF Baseline** | Open chromatin scores per region | OCF |
+| **MDS Baseline** | k-mer frequencies and motif diversity | Motif |
+
+## Panel Mode
+
+For capture panels (like MSK-ACCESS), use `--target-regions` when building the PON:
 
 ```bash
-krewlyzer fsc -i sample.bed.gz \
-    --pon-model msk-access-v2.pon.parquet \
-    -o output/
-
-krewlyzer wps -i sample.bed.gz \
-    --pon-model msk-access-v2.pon.parquet \
-    -o output/
-
-krewlyzer ocf -i sample.bed.gz \
-    --pon-model msk-access-v2.pon.parquet \
-    -o output/
+krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
 ```
 
----
+This enables:
 
-## Building a Custom PON
+- **GC model trained on off-target only** - Avoids capture bias
+- **Separate on/off-target baselines** - For features that differ in captured regions
+- **Panel mode detection** - Sample processing auto-detects matching PON mode
 
-### Step 1: Prepare Sample List
+## Building a PON
 
-Create a text file with BAM paths (one per line):
+See [build-pon CLI](../features/build-pon.md) for detailed options.
 
+**Requirements:**
+- Minimum 10 healthy samples recommended
+- Same assay/panel as samples to be processed
+- Same reference genome
+
+## Using PON in Processing
+
+When `--pon-model` is provided to `run-all`:
+
+1. PON is loaded once and passed to all processors
+2. Each feature computes z-scores against healthy baseline
+3. Output includes both raw values and PON-normalized columns
+
+## Output Columns
+
+With PON, additional columns are added to outputs:
+
+| Feature | PON Column | Description |
+|---------|------------|-------------|
+| FSC | `*_log2` | Log2 ratio vs PON expected |
+| FSD | `ratio_log2` | Size distribution log ratio |
+| WPS | `wps_zscore` | Z-score vs region baseline |
+| OCF | `ocf_zscore` | Z-score vs OCF baseline |
+
+## API Reference
+
+```python
+from krewlyzer.pon.model import PonModel
+
+# Load existing PON
+pon = PonModel.load("path/to/pon.parquet")
+
+# Access components
+gc_expected = pon.get_mean("short")  # Expected at median GC
+variance = pon.get_variance("short")  # For reliability scoring
+
+# Check panel mode
+if pon.panel_mode:
+    print(f"Built with: {pon.target_regions_file}")
 ```
-/path/to/healthy_plasma_001.bam
-/path/to/healthy_plasma_002.bam
-...
-```
-
-### Step 2: Build PON
-
-```bash
-krewlyzer build-pon \
-    --sample-list healthy_samples.txt \
-    --assay my-assay \
-    --reference hg19.fa \
-    --output my-assay.pon.parquet
-```
-
-### Options
-
-| Option | Description |
-|--------|-------------|
-| `--sample-list` | Text file with BAM paths |
-| `--assay` | Assay identifier (e.g., "MSK-ACCESS-v2") |
-| `--reference` | Reference FASTA |
-| `--output` | Output Parquet file |
-| `--genome` | Genome build (hg19/hg38) |
-| `--threads` | Number of threads |
-
----
-
-## PON Model Format
-
-PON models use Parquet format with multiple row groups:
-
-### Metadata Row Group
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `schema_version` | string | Model format version |
-| `assay` | string | Assay identifier |
-| `build_date` | string | ISO timestamp |
-| `n_samples` | int | Number of samples |
-| `reference` | string | Genome build |
-
-### GC Bias Row Group
-
-| Column | Description |
-|--------|-------------|
-| `gc_bin` | GC content bin (0.0-1.0) |
-| `short_expected` | Expected coverage for short fragments |
-| `short_std` | Standard deviation |
-| `intermediate_expected` | Expected for intermediate |
-| `intermediate_std` | Standard deviation |
-| `long_expected` | Expected for long fragments |
-| `long_std` | Standard deviation |
-
-### FSD Baseline Row Group
-
-| Column | Description |
-|--------|-------------|
-| `arm` | Chromosome arm (e.g., "chr1p") |
-| `size_bin` | Fragment size (5bp bins) |
-| `proportion_mean` | Mean proportion |
-| `proportion_std` | Standard deviation |
-
-### WPS Baseline Row Group
-
-| Column | Description |
-|--------|-------------|
-| `region_id` | Transcript/region ID |
-| `wps_long_mean` | Mean long WPS |
-| `wps_long_std` | Standard deviation |
-| `wps_short_mean` | Mean short WPS |
-| `wps_short_std` | Standard deviation |
-
----
-
-## Hybrid GC Correction
-
-When a PON model is provided, Krewlyzer applies **hybrid correction**:
-
-```
-Algorithm:
-1. PON correction: corrected = observed / pon_expected[gc]
-2. Residual LOESS: residual = loess(gc, corrected)  
-3. Final: final = corrected / residual
-```
-
-This corrects for:
-- **Assay-specific bias** (from PON)
-- **Sample-specific residual** (within-sample LOESS)
-
----
-
-## Assay Compatibility
-
-PON models are assay-specific. If your sample's assay differs from the PON:
-
-!!! warning "Assay Mismatch"
-    Krewlyzer logs a warning but continues processing. Results may be less accurate.
-
-For best results, use a PON built from the same assay and protocol.
