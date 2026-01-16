@@ -334,6 +334,10 @@ class PonModel:
     - WPS baseline (per-region mean/std)
     - OCF baseline (per-region open chromatin footprinting)
     - MDS baseline (k-mer frequencies and motif diversity score)
+    
+    For panel mode (panel_mode=True), also includes:
+    - gc_bias_ontarget: GC curves from on-target fragments
+    - fsd_baseline_ontarget: FSD from on-target fragments
     """
     schema_version: str = "1.0"
     assay: str = ""  # e.g., "msk-access-v2"
@@ -343,11 +347,16 @@ class PonModel:
     panel_mode: bool = False  # True if built with --target-regions
     target_regions_file: str = ""  # Original target regions BED file name
     
+    # Off-target baselines (primary - always present)
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
     ocf_baseline: Optional[OcfBaseline] = None
     mds_baseline: Optional[MdsBaseline] = None
+    
+    # On-target baselines (panel mode only)
+    gc_bias_ontarget: Optional[GcBiasModel] = None
+    fsd_baseline_ontarget: Optional[FsdBaseline] = None
     
     @classmethod
     def load(cls, path: Path) -> "PonModel":
@@ -445,6 +454,35 @@ class PonModel:
                 mds_std=float(row.get("mds_std", 1))
             )
         
+        # Parse on-target FSD baseline (panel mode)
+        fsd_on_df = df_all[df_all["table"] == "fsd_baseline_ontarget"]
+        fsd_baseline_ontarget = None
+        if not fsd_on_df.empty:
+            size_bins = sorted(fsd_on_df["size_bin"].unique().tolist())
+            arms_on = {}
+            for arm in fsd_on_df["arm"].unique():
+                arm_data = fsd_on_df[fsd_on_df["arm"] == arm].sort_values("size_bin")
+                arms_on[arm] = {
+                    "expected": arm_data["expected"].tolist(),
+                    "std": arm_data["std"].tolist()
+                }
+            fsd_baseline_ontarget = FsdBaseline(size_bins=size_bins, arms=arms_on)
+        
+        # Parse on-target GC bias (panel mode)
+        gc_on_df = df_all[df_all["table"] == "gc_bias_ontarget"]
+        gc_bias_ontarget = None
+        if not gc_on_df.empty:
+            gc_on_df = gc_on_df.sort_values("gc_bin")
+            gc_bias_ontarget = GcBiasModel(
+                gc_bins=gc_on_df["gc_bin"].tolist(),
+                short_expected=gc_on_df["short_expected"].tolist(),
+                short_std=gc_on_df["short_std"].tolist(),
+                intermediate_expected=gc_on_df["intermediate_expected"].tolist(),
+                intermediate_std=gc_on_df["intermediate_std"].tolist(),
+                long_expected=gc_on_df["long_expected"].tolist(),
+                long_std=gc_on_df["long_std"].tolist()
+            )
+        
         # Build model
         model = cls(
             schema_version=str(meta.get("schema_version", "1.0")),
@@ -459,11 +497,17 @@ class PonModel:
             wps_baseline=wps_baseline,
             ocf_baseline=ocf_baseline,
             mds_baseline=mds_baseline,
+            fsd_baseline_ontarget=fsd_baseline_ontarget,
+            gc_bias_ontarget=gc_bias_ontarget,
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")
         if model.panel_mode:
             logger.info(f"  Panel mode: ON (targets: {model.target_regions_file})")
+            if fsd_baseline_ontarget:
+                logger.info(f"  FSD on-target: {len(fsd_baseline_ontarget.arms)} arms")
+            if gc_bias_ontarget:
+                logger.info(f"  GC on-target: {len(gc_bias_ontarget.gc_bins)} bins")
         if gc_bias:
             logger.info(f"  GC bias: {len(gc_bias.gc_bins)} bins")
         if fsd_baseline:

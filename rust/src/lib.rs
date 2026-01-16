@@ -35,6 +35,7 @@ pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;
 pub mod pon_model;
+pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
 
 /// Read filtering configuration
@@ -91,10 +92,12 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // FSD submodule
     let fsd_mod = PyModule::new(m.py(), "fsd")?;
     fsd_mod.add_function(wrap_pyfunction!(fsd::calculate_fsd, &fsd_mod)?)?;
+    fsd_mod.add_function(wrap_pyfunction!(fsd::apply_pon_logratio, &fsd_mod)?)?;
     m.add_submodule(&fsd_mod)?;
 
     // WPS submodule (also exposed as function above? Cleaned up duplication)
     let wps_mod = PyModule::new(m.py(), "wps")?;
+    wps_mod.add_function(wrap_pyfunction!(wps::apply_pon_zscore, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 
     // OCF submodule
@@ -123,9 +126,17 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // GC Reference submodule (pre-computed assets)
     let gc_mod = PyModule::new(m.py(), "gc")?;
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions_ontarget, &gc_mod)?)?;
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_ref_genome_gc, &gc_mod)?)?;
     gc_mod.add_function(wrap_pyfunction!(gc_correction::compute_and_write_gc_factors, &gc_mod)?)?;
     m.add_submodule(&gc_mod)?;
+    
+    // PON Builder submodule (aggregation functions)
+    let pon_builder_mod = PyModule::new(m.py(), "pon_builder")?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_gc_bias_model, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_fsd_baseline, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_wps_baseline, &pon_builder_mod)?)?;
+    m.add_submodule(&pon_builder_mod)?;
     
     // Version
     #[pyfn(m)]

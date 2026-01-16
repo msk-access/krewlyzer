@@ -190,8 +190,8 @@ def extract(
             logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
         
         # Call Unified Rust Engine (Extract Mode)
-        # Returns (fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on)
-        fragment_count, _, _, gc_observations, _, _ = _core.extract_motif.process_bam_parallel(
+        # Returns (fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on, gc_observations_ontarget)
+        fragment_count, _, _, gc_observations, _, _, gc_observations_ontarget = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             mapq,
@@ -222,17 +222,27 @@ def extract(
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
                 
+                # Off-target GC correction (primary - always computed)
                 logger.info(f"Computing GC correction factors from {len(gc_observations)} observation bins...")
-                
-                # Compute factors from observations collected during extraction
                 n_factors = _core.gc.compute_and_write_gc_factors(
                     gc_observations,
                     str(gc_ref),
                     str(valid_regions),
                     str(factors_output)
                 )
-                
                 logger.info(f"Computed {n_factors} correction factors: {factors_output}")
+                
+                # On-target GC correction (panel mode only)
+                if target_regions and len(gc_observations_ontarget) > 0:
+                    factors_ontarget = output / f"{sample_name}.correction_factors.ontarget.csv"
+                    logger.info(f"Computing ON-TARGET GC correction factors from {len(gc_observations_ontarget)} observation bins...")
+                    n_factors_on = _core.gc.compute_and_write_gc_factors(
+                        gc_observations_ontarget,
+                        str(gc_ref),
+                        str(valid_regions),
+                        str(factors_ontarget)
+                    )
+                    logger.info(f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}")
                 
             except FileNotFoundError as e:
                 logger.warning(f"GC correction assets not found: {e}")

@@ -32,7 +32,8 @@ struct ChunkResult {
     count: u64,
     // GC observations for correction factor computation
     // Key: (length_bin, gc_percent), Value: count
-    gc_observations: HashMap<(u8, u8), u64>,
+    gc_observations: HashMap<(u8, u8), u64>,         // Off-target (unbiased)
+    gc_observations_ontarget: HashMap<(u8, u8), u64>, // On-target (for panel mode)
 }
 
 impl ChunkResult {
@@ -45,6 +46,7 @@ impl ChunkResult {
             bp_motifs_on: HashMap::new(),
             count: 0,
             gc_observations: HashMap::new(),
+            gc_observations_ontarget: HashMap::new(),
         }
     }
 }
@@ -135,9 +137,10 @@ pub fn process_bam_parallel(
     u64,                      // fragment count
     HashMap<String, u64>,     // end_motifs (off-target)
     HashMap<String, u64>,     // bp_motifs (off-target)
-    HashMap<(u8, u8), u64>,   // gc_observations
+    HashMap<(u8, u8), u64>,   // gc_observations (off-target)
     HashMap<String, u64>,     // end_motifs_on (on-target)
     HashMap<String, u64>,     // bp_motifs_on (on-target)
+    HashMap<(u8, u8), u64>,   // gc_observations_ontarget (on-target)
 )> {
     
     // 1. Configure Global Thread Pool if needed
@@ -311,12 +314,15 @@ pub fn process_bam_parallel(
                      
                      // Accumulate GC observation for correction factor computation
                      // Length bins: 60-80, 80-100, ..., 380-400 (17 bins)
-                     // Panel mode: Only use OFF-TARGET fragments for GC model
+                     // Panel mode: Separate on-target and off-target for dual GC models
                      let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
-                     if !is_on_target {
-                         let length = tlen as u64;
-                         let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
-                         let gc_pct = (gc * 100.0).round() as u8;
+                     let length = tlen as u64;
+                     let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
+                     let gc_pct = (gc * 100.0).round() as u8;
+                     
+                     if is_on_target {
+                         *result.gc_observations_ontarget.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                     } else {
                          *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
                      }
                  }
@@ -441,6 +447,7 @@ pub fn process_bam_parallel(
     let mut final_end_motifs = HashMap::new();
     let mut final_bp_motifs = HashMap::new();
     let mut final_gc_observations: HashMap<(u8, u8), u64> = HashMap::new();
+    let mut final_gc_observations_ontarget: HashMap<(u8, u8), u64> = HashMap::new();
     
     // Write BED if requested
     if let Some(path) = output_bed_path {
@@ -452,9 +459,13 @@ pub fn process_bam_parallel(
                 writeln!(writer, "{}", line)?;
             }
             total_count += res.count;
-            // Merge GC observations
+            // Merge GC observations (off-target)
             for ((len_bin, gc_pct), count) in &res.gc_observations {
                 *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+            }
+            // Merge GC observations (on-target)
+            for ((len_bin, gc_pct), count) in &res.gc_observations_ontarget {
+                *final_gc_observations_ontarget.entry((*len_bin, *gc_pct)).or_insert(0) += count;
             }
         }
         writer.finish()?;  // Ensure proper EOF marker
@@ -466,10 +477,14 @@ pub fn process_bam_parallel(
             for ((len_bin, gc_pct), count) in &res.gc_observations {
                 *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
             }
+            for ((len_bin, gc_pct), count) in &res.gc_observations_ontarget {
+                *final_gc_observations_ontarget.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+            }
         }
     }
     
-    debug!("Total GC observation bins: {}", final_gc_observations.len());
+    debug!("Total GC observation bins: {} off-target, {} on-target", 
+           final_gc_observations.len(), final_gc_observations_ontarget.len());
     info!("Extracted {} fragments", total_count);
     
     // Merge Motifs (off-target and on-target separately)
@@ -502,5 +517,5 @@ pub fn process_bam_parallel(
         }
     }
     
-    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on))
+    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on, final_gc_observations_ontarget))
 }

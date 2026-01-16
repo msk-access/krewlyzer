@@ -295,8 +295,8 @@ def run_all(
             
             try:
                 # Call Unified Engine (silent=True to hide Rust progress)
-                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on)
-                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
+                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on, gc_obs_ontarget)
+                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on, gc_observations_ontarget = _core.extract_motif.process_bam_parallel(
                     str(bam_input),
                     str(reference),
                     mapq,
@@ -379,6 +379,21 @@ def run_all(
                         include_headers=True
                     )
                     logger.info(f"Motif on-target: {total_em_on:,} EM, {total_bpm_on:,} BPM")
+                
+                # MDS z-score using PON baseline
+                if pon and pon.mds_baseline and mds is not None:
+                    mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
+                    logger.debug(f"MDS z-score: {mds_z:.3f} (raw={mds:.4f}, pon_mean={pon.mds_baseline.mds_mean:.4f})")
+                    
+                    # Write z-score to MDS file if it exists
+                    if mds_output.exists():
+                        try:
+                            mds_df = pd.read_csv(mds_output, sep="\t")
+                            if "mds_z" not in mds_df.columns:
+                                mds_df["mds_z"] = mds_z
+                                mds_df.to_csv(mds_output, sep="\t", index=False)
+                        except Exception as mds_e:
+                            logger.debug(f"Could not add MDS z-score: {mds_e}")
                 
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
                     
@@ -532,6 +547,11 @@ def run_all(
             
             if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))
             if src_sync.exists(): shutil.move(str(src_sync), str(dst_sync))
+            
+            # Apply OCF PON z-scores if available
+            if dst_ocf.exists() and pon and pon.ocf_baseline:
+                from .core.ocf_processor import process_ocf_with_pon
+                process_ocf_with_pon(dst_ocf, pon.ocf_baseline)
             
             try:
                 out_ocf_dir.rmdir()

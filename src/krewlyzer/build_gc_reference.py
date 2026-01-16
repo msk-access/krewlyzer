@@ -28,6 +28,7 @@ def build_gc_reference(
     reference: Path = typer.Argument(..., help="Path to reference FASTA file"),
     output_dir: Path = typer.Option(..., "--output", "-o", help="Output directory for GC assets"),
     exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-e", help="Path to exclude regions BED file"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED for panel mode (generates ontarget files)"),
     bin_size: int = typer.Option(100000, "--bin-size", help="Size of each bin in bp (default: 100kb)"),
     genome_name: Optional[str] = typer.Option(None, "--genome-name", "-n", help="Genome name (default: derived from reference filename)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
@@ -39,8 +40,13 @@ def build_gc_reference(
     1. valid_regions_{genome}.bed - Curated bins for GC estimation
     2. ref_genome_GC_{genome}.parquet - Expected fragment counts per (length, GC)
     
+    For panel mode (--target-regions), also generates:
+    3. valid_regions_{genome}.ontarget.bed - Bins intersecting target regions
+    4. ref_genome_GC_{genome}.ontarget.parquet - Expected counts within targets
+    
     Example:
         krewlyzer build-gc-reference hg38.fa -o data/gc/ -e exclude-regions.bed
+        krewlyzer build-gc-reference hg38.fa -o data/gc/ -T msk_targets.bed
     """
     # Set log level based on verbose flag
     if verbose:
@@ -134,6 +140,48 @@ def build_gc_reference(
         logger.info(f"  Valid regions: {valid_regions_path}")
         logger.info(f"  Ref genome GC: {ref_gc_path}")
         
+        # Step 3: Generate on-target files if target_regions provided (panel mode)
+        if target_regions:
+            if not target_regions.exists():
+                logger.error(f"Target regions file not found: {target_regions}")
+                raise typer.Exit(1)
+            
+            logger.info("")
+            logger.info("Panel mode: Generating on-target GC reference assets...")
+            logger.info(f"  Target regions: {target_regions}")
+            
+            # On-target output paths
+            valid_regions_ontarget_path = output_dir / f"valid_regions_{genome_name}.ontarget.bed.gz"
+            ref_gc_ontarget_path = output_dir / f"ref_genome_GC_{genome_name}.ontarget.parquet"
+            
+            # Step 3a: Generate on-target valid regions (intersection with target regions)
+            logger.info(f"[3/4] Generating on-target valid regions...")
+            
+            ontarget_region_count = _core.gc.generate_valid_regions_ontarget(
+                str(valid_regions_path),
+                str(target_regions),
+                str(valid_regions_ontarget_path),
+            )
+            
+            logger.info(f"  Generated {ontarget_region_count:,} on-target valid regions: {valid_regions_ontarget_path}")
+            
+            # Step 3b: Generate on-target ref_genome_GC
+            logger.info(f"[4/4] Generating on-target ref_genome_GC...")
+            
+            ontarget_fragment_count = _core.gc.generate_ref_genome_gc(
+                str(reference),
+                str(valid_regions_ontarget_path),
+                str(ref_gc_ontarget_path),
+            )
+            
+            logger.info(f"  Counted {ontarget_fragment_count:,} on-target theoretical fragments: {ref_gc_ontarget_path}")
+            
+            logger.info("")
+            logger.info("On-target GC reference assets generated successfully!")
+            logger.info(f"  Valid regions (on-target): {valid_regions_ontarget_path}")
+            logger.info(f"  Ref genome GC (on-target): {ref_gc_ontarget_path}")
+        
     except Exception as e:
         logger.error(f"Failed to build GC reference assets: {e}")
         raise typer.Exit(1)
+

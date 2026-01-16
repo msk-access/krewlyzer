@@ -15,6 +15,17 @@ Panel mode addresses both by:
 
 ## Enabling Panel Mode
 
+### Building GC Reference Assets (One-time)
+
+For panel mode, generate panel-specific GC reference assets:
+
+```bash
+krewlyzer build-gc-reference hg19.fa -o data/gc/ \
+    --target-regions msk_access_baits.bed
+```
+
+This generates both standard and on-target GC reference files.
+
 ### At PON Build Time
 
 ```bash
@@ -33,6 +44,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
     --pon-model msk-access.pon.parquet
 ```
 
+
 ## How It Works
 
 ### GC Correction
@@ -40,11 +52,21 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
 ```
 WGS Mode:     All fragments → GC model → Single correction curve
 Panel Mode:   Off-target fragments → GC model → Unbiased correction curve
+              On-target fragments → GC model → Capture-aware correction curve
 ```
 
 The GC model is built from off-target fragments because:
 - On-target fragments have probe-specific GC bias
 - Off-target fragments represent natural cfDNA (similar to WGS)
+
+### Dual Correction Factor Files
+
+In panel mode, `krewlyzer extract` generates TWO correction factor files:
+
+| File | Source | Used For |
+|------|--------|----------|
+| `{sample}.correction_factors.csv` | Off-target fragments | Primary biomarker analysis |
+| `{sample}.correction_factors.ontarget.csv` | On-target fragments | Copy number, variant calling |
 
 ### Feature Splitting
 

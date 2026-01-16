@@ -131,7 +131,8 @@ def motif(
         # Call Unified Rust Engine (Extract + Motif)
         # Returns: (fragment_count, em_counts, bpm_counts, gc_obs, em_counts_on, bpm_counts_on)
         
-        fragment_count, em_counts, bpm_counts, _dinuc, em_counts_on, bpm_counts_on = _core.extract_motif.process_bam_parallel(
+        # Call Rust extraction - returns 7 values: (count, em_off, bpm_off, gc_obs, em_on, bpm_on, gc_obs_on)
+        fragment_count, em_counts, bpm_counts, _gc_obs, em_counts_on, bpm_counts_on, _gc_obs_on = _core.extract_motif.process_bam_parallel(
             str(bam_input),
             str(genome_reference),
             20,    # Default mapQ

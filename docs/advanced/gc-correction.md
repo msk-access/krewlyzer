@@ -99,8 +99,40 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 When `--target-regions` is provided to `extract`:
 - GC model is built from **off-target** fragments only
 - Avoids capture bias contamination
+- Generates both `.correction_factors.csv` (off-target) and `.correction_factors.ontarget.csv` (on-target)
 
 ---
+
+## Building GC Reference Assets
+
+The `build-gc-reference` command pre-computes reference GC data:
+
+```bash
+# Standard (WGS) mode
+krewlyzer build-gc-reference hg19.fa -o data/gc/ -e hg19-blacklist.bed
+
+# Panel mode (generates both WGS and on-target assets)
+krewlyzer build-gc-reference hg19.fa -o data/gc/ -T msk_targets.bed
+```
+
+### Output Files
+
+| Mode | File | Description |
+|------|------|-------------|
+| Standard | `valid_regions_{genome}.bed.gz` | 100kb bins for GC estimation |
+| Standard | `ref_genome_GC_{genome}.parquet` | Expected fragment counts |
+| Panel | `valid_regions_{genome}.ontarget.bed.gz` | Bins overlapping targets |
+| Panel | `ref_genome_GC_{genome}.ontarget.parquet` | On-target expected counts |
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-o, --output` | Output directory (required) |
+| `-e, --exclude-regions` | Blacklist BED to exclude |
+| `-T, --target-regions` | Target BED for panel mode |
+| `--bin-size` | Bin size in bp (default: 100kb) |
+| `-n, --genome-name` | Genome name (default: from FASTA) |
 
 ## Correction Factors File
 
