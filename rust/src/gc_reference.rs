@@ -7,7 +7,7 @@
 //! These assets are generated once per reference genome and shipped with krewlyzer.
 
 use std::path::Path;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::fs::File;
 use std::collections::HashMap;
 
@@ -162,6 +162,75 @@ fn parse_bed_line(line: &str) -> Option<ValidRegion> {
         gc_content,
     })
 }
+
+/// Generate on-target valid regions by intersecting with target regions
+/// 
+/// # Arguments
+/// * `valid_regions_path` - Path to existing valid_regions.bed.gz
+/// * `target_regions_path` - Path to target regions BED (e.g., capture baits)
+/// * `output_path` - Path to write valid_regions_ontarget.bed.gz
+/// 
+/// # Returns
+/// * Number of on-target valid regions generated
+#[pyfunction]
+pub fn generate_valid_regions_ontarget(
+    valid_regions_path: &str,
+    target_regions_path: &str,
+    output_path: &str,
+) -> PyResult<usize> {
+    info!("Generating on-target valid regions...");
+    info!("  Valid regions: {}", valid_regions_path);
+    info!("  Target regions: {}", target_regions_path);
+    
+    // Load existing valid regions
+    let valid_regions = load_valid_regions(std::path::Path::new(valid_regions_path))
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load valid regions: {}", e)))?;
+    
+    // Load target regions  
+    let target_regions = load_exclude_regions(std::path::Path::new(target_regions_path))
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load target regions: {}", e)))?;
+    
+    // Filter valid regions to those overlapping target regions
+    let mut ontarget_regions = Vec::new();
+    
+    for region in &valid_regions {
+        let chrom_key = region.chrom.trim_start_matches("chr").to_string();
+        
+        if let Some(targets) = target_regions.get(&chrom_key) {
+            // Check if this valid region overlaps any target region
+            for (t_start, t_end) in targets {
+                if region.start < *t_end && region.end > *t_start {
+                    // Overlaps - include this valid region
+                    ontarget_regions.push(region.clone());
+                    break;
+                }
+            }
+        }
+    }
+    
+    info!("  {} of {} valid regions overlap targets", ontarget_regions.len(), valid_regions.len());
+    
+    // Write output
+    let output_file = File::create(output_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to create output file: {}", e)))?;
+    
+    let mut writer = noodles::bgzf::io::Writer::new(output_file);
+    
+    for region in &ontarget_regions {
+        let line = format!("{}\t{}\t{}\t{:.6}\n", region.chrom, region.start, region.end, region.gc_content);
+        writer.write_all(line.as_bytes())
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to write: {}", e)))?;
+    }
+    
+    writer.finish()
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to finish BGZF: {}", e)))?;
+    
+    let count = ontarget_regions.len();
+    info!("Generated {} on-target valid regions", count);
+    
+    Ok(count)
+}
+
 
 /// Generate valid regions BED file by excluding problematic and gap regions
 /// 

@@ -533,6 +533,11 @@ def run_all(
             if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))
             if src_sync.exists(): shutil.move(str(src_sync), str(dst_sync))
             
+            # Apply OCF PON z-scores if available
+            if dst_ocf.exists() and pon and pon.ocf_baseline:
+                from .core.ocf_processor import process_ocf_with_pon
+                process_ocf_with_pon(dst_ocf, pon.ocf_baseline)
+            
             try:
                 out_ocf_dir.rmdir()
             except:
