@@ -46,6 +46,10 @@ workflow {
          --maxlen          Max fragment length (default: 400)
          --skip_duplicates Skip duplicates (default: true)
          
+         Output Format:
+         --generate_json   Generate unified sample.features.json for ML (default: false)
+         --output_format   Output format: auto, tsv, parquet, json (default: auto)
+         
          Profiles:
          -profile docker   Run with Docker
          -profile slurm    Run on Slurm cluster (cmobic_cpu)
