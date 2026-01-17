@@ -641,7 +641,7 @@ def run_all(
                     verbose=debug,
                     threads=threads
                 )
-            progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
+                progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
             except Exception as e:
                 progress.update(task_mfsd, description="[5/5] mFSD ✗ Error", completed=100)
                 logger.warning(f"mFSD failed: {e}")
