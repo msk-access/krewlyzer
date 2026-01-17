@@ -60,6 +60,9 @@ pip install krewlyzer
 # Run all fragmentomics features
 krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
+# Generate unified JSON for ML pipelines
+krewlyzer run-all -i sample.bam --reference hg19.fa --output results/ --generate-json
+
 # Individual tools
 krewlyzer extract -i sample.bam -r hg19.fa -o output/
 krewlyzer fsc -i output/sample.bed.gz -o output/
@@ -76,11 +79,12 @@ krewlyzer fsc -i output/sample.bed.gz -o output/
 | `fsc` | Fragment size coverage | `.FSC.tsv` |
 | `fsr` | Fragment size ratios | `.FSR.tsv` |
 | `fsd` | Size distribution by arm | `.FSD.tsv` |
-| `wps` | Windowed protection score | `.WPS.tsv.gz` |
+| `wps` | Windowed protection score | `.WPS.parquet` |
 | `ocf` | Orientation-aware fragmentation | `.OCF.tsv` |
 | `uxm` | Fragment-level methylation | `.UXM.tsv` |
 | `mfsd` | Mutant vs wild-type sizes | `.mFSD.tsv` |
 | `run-all` | All features in one pass | All outputs |
+| `--generate-json` | Unified JSON for ML | `.features.json` |
 
 ---
 

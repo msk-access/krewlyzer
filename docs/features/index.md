@@ -119,5 +119,7 @@ All feature commands share these core options:
 | `-G, --genome` | Genome build: hg19/hg38 |
 | `-t, --threads` | Thread count (0=all) |
 | `-v, --verbose` | Enable verbose logging |
+| `-f, --format` | Output format: tsv, parquet, json |
 
-See individual feature pages for command-specific options.
+See individual feature pages for command-specific options, or [Output Formats](output-formats.md) for format details.
+

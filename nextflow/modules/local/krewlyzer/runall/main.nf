@@ -9,8 +9,9 @@ process KREWLYZER_RUNALL {
     path fasta
 
     output:
-    tuple val(meta), path("*.{txt,tsv,csv,bed.gz,tsv.gz}"), emit: results
-    tuple val(meta), path("*.json")             , emit: metadata, optional: true
+    tuple val(meta), path("*.{txt,tsv,bed.gz,tsv.gz,parquet}"), emit: results
+    tuple val(meta), path("*.metadata.json")    , emit: metadata, optional: true
+    tuple val(meta), path("*.features.json")    , emit: unified_json, optional: true
     path "versions.yml"                         , emit: versions
 
     script:
@@ -22,6 +23,8 @@ process KREWLYZER_RUNALL {
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
     def pon_arg = pon ? "--pon-model ${pon}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def json_arg = params.generate_json ? "--generate-json" : ""
+    def format_arg = params.output_format != 'auto' ? "--output-format ${params.output_format}" : ""
     
     // Construct CLI command
     """
@@ -37,6 +40,8 @@ process KREWLYZER_RUNALL {
         $gc_arg \\
         $pon_arg \\
         $verbose_arg \\
+        $json_arg \\
+        $format_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -89,6 +89,7 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 | `--gc-correct` | | True | Apply GC bias correction |
 | `--threads` | `-t` | 0 | Threads (0=all cores) |
 | `--verbose` | `-v` | False | Enable debug logging |
+| `--format` | `-f` | tsv | Output format: tsv, parquet, json |
 
 ---
 

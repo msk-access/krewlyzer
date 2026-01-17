@@ -46,7 +46,8 @@ def fsc(
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)")
 ):
     """
     Calculate fragment size coverage (FSC) features for a single sample.
@@ -135,7 +136,7 @@ def fsc(
             try:
                 gc_ref = assets.resolve("gc_correction")
                 valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
+                factors_out = output / f"{sample_name}.correction_factors.tsv"
                 logger.debug(f"GC ref: {gc_ref}")
                 logger.debug(f"Valid regions: {valid_regions}")
             except FileNotFoundError as e:
@@ -146,7 +147,7 @@ def fsc(
         # Check for pre-computed correction factors (from extract step)
         factors_input = None
         if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
+            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
             if potential_factors.exists():
                 factors_input = potential_factors
                 logger.info(f"Using pre-computed correction factors: {factors_input}")

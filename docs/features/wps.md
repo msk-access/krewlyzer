@@ -161,6 +161,7 @@ krewlyzer wps -i sample.bed.gz -o output/ --target-regions msk_access_baits.bed 
 | `--pon-model` | `-P` | PON model for z-score computation |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
+| `--format` | `-f` | Output format: tsv, parquet, json |
 | `--verbose` | `-v` | Enable verbose logging |
 
 ### Bait Padding Trade-Off

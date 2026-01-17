@@ -8,7 +8,7 @@ Uses Rust backend for accelerated extraction.
 
 Output Files:
     - {sample}.bed.gz: Fragment coordinates (chrom, start, end, strand, gc%, gc_weight)
-    - {sample}.correction_factors.csv: LOESS-based GC correction factors
+    - {sample}.correction_factors.tsv: LOESS-based GC correction factors
     - {sample}.metadata.json: Processing statistics
 
 GC Correction: Computes per-fragment GC weights for all downstream tools.
@@ -84,7 +84,7 @@ def extract(
     - {sample}.bed.gz: Fragment coordinates with GC content
     - {sample}.bed.gz.tbi: Tabix index
     - {sample}.metadata.json: Fragment count and metadata
-    - {sample}.correction_factors.csv: GC correction factors (if --gc-correct)
+    - {sample}.correction_factors.tsv: GC correction factors (if --gc-correct)
     """
     from .assets import AssetManager
     
@@ -154,7 +154,7 @@ def extract(
     bed_temp = output / f"{sample_name}.bed"  # Temp uncompressed
     bed_output = output / f"{sample_name}.bed.gz"
     metadata_output = output / f"{sample_name}.metadata.json"
-    factors_output = output / f"{sample_name}.correction_factors.csv"
+    factors_output = output / f"{sample_name}.correction_factors.tsv"
     
     try:
         # Pre-check BAM compatibility with current filters

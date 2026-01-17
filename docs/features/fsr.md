@@ -86,6 +86,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--genome` | `-G` | Genome build: hg19/hg38 |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
+| `--format` | `-f` | Output format: tsv, parquet, json |
 
 ---
 
