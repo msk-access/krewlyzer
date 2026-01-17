@@ -288,59 +288,141 @@ class FeatureSerializer:
             version: Krewlyzer version
         
         Returns:
-            Populated FeatureSerializer
+            Populated FeatureSerializer with both off-target and on-target data
         """
         serializer = cls(sample_id, version)
+        output_dir = Path(output_dir)
         
-        # Try to load each feature type
+        # =====================================================================
+        # FSD - Fragment Size Distribution
+        # =====================================================================
         fsd_path = output_dir / f"{sample_id}.FSD.tsv"
-        if fsd_path.exists():
-            serializer.add_fsd(pd.read_csv(fsd_path, sep="\t"))
+        fsd_on_path = output_dir / f"{sample_id}.FSD.ontarget.tsv"
         
+        if fsd_path.exists() or fsd_on_path.exists():
+            fsd_data = {}
+            if fsd_path.exists():
+                fsd_df = pd.read_csv(fsd_path, sep="\t")
+                fsd_data["off_target"] = cls._parse_fsd(fsd_df)
+            if fsd_on_path.exists():
+                fsd_on_df = pd.read_csv(fsd_on_path, sep="\t")
+                fsd_data["on_target"] = cls._parse_fsd(fsd_on_df)
+            serializer.features["fsd"] = fsd_data
+        
+        # =====================================================================
+        # FSR - Fragment Size Ratio
+        # =====================================================================
         fsr_path = output_dir / f"{sample_id}.FSR.tsv"
-        if fsr_path.exists():
-            serializer.add_fsr(pd.read_csv(fsr_path, sep="\t"))
+        fsr_on_path = output_dir / f"{sample_id}.FSR.ontarget.tsv"
         
+        if fsr_path.exists() or fsr_on_path.exists():
+            fsr_data = {}
+            if fsr_path.exists():
+                fsr_data["off_target"] = pd.read_csv(fsr_path, sep="\t").to_dict(orient="records")
+            if fsr_on_path.exists():
+                fsr_data["on_target"] = pd.read_csv(fsr_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["fsr"] = fsr_data
+        
+        # =====================================================================
+        # FSC - Fragment Size Coverage
+        # =====================================================================
         fsc_path = output_dir / f"{sample_id}.FSC.tsv"
-        if fsc_path.exists():
-            serializer.add_fsc(pd.read_csv(fsc_path, sep="\t"))
+        fsc_on_path = output_dir / f"{sample_id}.FSC.ontarget.tsv"
         
+        if fsc_path.exists() or fsc_on_path.exists():
+            fsc_data = {}
+            if fsc_path.exists():
+                fsc_data["off_target"] = pd.read_csv(fsc_path, sep="\t").to_dict(orient="records")
+            if fsc_on_path.exists():
+                fsc_data["on_target"] = pd.read_csv(fsc_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["fsc"] = fsc_data
+        
+        # =====================================================================
+        # WPS - Windowed Protection Score
+        # =====================================================================
         wps_path = output_dir / f"{sample_id}.WPS.parquet"
         if wps_path.exists():
             serializer.add_wps(pd.read_parquet(wps_path))
         
+        # =====================================================================
+        # Motif - EDM, BPM, MDS
+        # =====================================================================
         edm_path = output_dir / f"{sample_id}.EndMotif.tsv"
         bpm_path = output_dir / f"{sample_id}.BreakPointMotif.tsv"
         mds_path = output_dir / f"{sample_id}.MDS.tsv"
+        edm_on_path = output_dir / f"{sample_id}.EndMotif.ontarget.tsv"
+        bpm_on_path = output_dir / f"{sample_id}.BreakPointMotif.ontarget.tsv"
+        mds_on_path = output_dir / f"{sample_id}.MDS.ontarget.tsv"
         
-        edm_df = pd.read_csv(edm_path, sep="\t") if edm_path.exists() else None
-        bpm_df = pd.read_csv(bpm_path, sep="\t") if bpm_path.exists() else None
-        mds = None
+        motif_data = {}
+        
+        # Off-target motifs
+        if edm_path.exists():
+            edm_df = pd.read_csv(edm_path, sep="\t")
+            motif_data["edm"] = edm_df.iloc[0].to_dict() if len(edm_df) == 1 else edm_df.to_dict(orient="records")
+        if bpm_path.exists():
+            bpm_df = pd.read_csv(bpm_path, sep="\t")
+            motif_data["bpm"] = bpm_df.iloc[0].to_dict() if len(bpm_df) == 1 else bpm_df.to_dict(orient="records")
         if mds_path.exists():
             mds_df = pd.read_csv(mds_path, sep="\t")
-            # Handle both 'MDS' and 'mds' column names
-            mds_col = None
             for col in mds_df.columns:
                 if col.lower() == "mds":
-                    mds_col = col
+                    motif_data["mds"] = float(mds_df[col].iloc[0])
                     break
-            if mds_col:
-                mds = float(mds_df[mds_col].iloc[0])
-        serializer.add_motif(edm_df, bpm_df, mds)
         
+        # On-target motifs
+        if edm_on_path.exists():
+            edm_on_df = pd.read_csv(edm_on_path, sep="\t")
+            motif_data["edm_on_target"] = edm_on_df.iloc[0].to_dict() if len(edm_on_df) == 1 else edm_on_df.to_dict(orient="records")
+        if bpm_on_path.exists():
+            bpm_on_df = pd.read_csv(bpm_on_path, sep="\t")
+            motif_data["bpm_on_target"] = bpm_on_df.iloc[0].to_dict() if len(bpm_on_df) == 1 else bpm_on_df.to_dict(orient="records")
+        if mds_on_path.exists():
+            mds_on_df = pd.read_csv(mds_on_path, sep="\t")
+            for col in mds_on_df.columns:
+                if col.lower() == "mds":
+                    motif_data["mds_on_target"] = float(mds_on_df[col].iloc[0])
+                    break
+        
+        if motif_data:
+            serializer.features["motif"] = motif_data
+        
+        # =====================================================================
+        # OCF - Orientation-aware cfDNA Fragmentation
+        # =====================================================================
         ocf_path = output_dir / f"{sample_id}.OCF.tsv"
-        if ocf_path.exists():
-            serializer.add_ocf(pd.read_csv(ocf_path, sep="\t"))
+        ocf_on_path = output_dir / f"{sample_id}.OCF.ontarget.tsv"
         
+        if ocf_path.exists() or ocf_on_path.exists():
+            ocf_data = {}
+            if ocf_path.exists():
+                ocf_data["off_target"] = pd.read_csv(ocf_path, sep="\t").to_dict(orient="records")
+            if ocf_on_path.exists():
+                ocf_data["on_target"] = pd.read_csv(ocf_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["ocf"] = ocf_data
+        
+        # =====================================================================
+        # UXM - Methylation (optional)
+        # =====================================================================
         uxm_path = output_dir / f"{sample_id}.UXM.tsv"
         if uxm_path.exists():
             serializer.add_uxm(pd.read_csv(uxm_path, sep="\t"))
         
+        # =====================================================================
+        # mFSD - Mutant Fragment Size Distribution (optional)
+        # =====================================================================
         mfsd_path = output_dir / f"{sample_id}.mFSD.tsv"
         if mfsd_path.exists():
-            serializer.add_mfsd(pd.read_csv(mfsd_path, sep="\t"))
+            mfsd_df = pd.read_csv(mfsd_path, sep="\t")
+            serializer.features["mfsd"] = {
+                "enabled": True,
+                "variants": mfsd_df.to_dict(orient="records"),
+                "n_variants": len(mfsd_df),
+            }
         
-        # Load metadata if present
+        # =====================================================================
+        # Metadata
+        # =====================================================================
         meta_path = output_dir / f"{sample_id}.metadata.json"
         if meta_path.exists():
             with open(meta_path) as f:
@@ -348,3 +430,26 @@ class FeatureSerializer:
                 serializer.set_metadata(meta.get("metadata", meta))
         
         return serializer
+    
+    @staticmethod
+    def _parse_fsd(df: pd.DataFrame) -> dict:
+        """Parse FSD DataFrame into dictionary."""
+        region_col = "region" if "region" in df.columns else df.columns[0]
+        size_bin_cols = [c for c in df.columns if "-" in c and c != region_col]
+        
+        result = {
+            "arms": df[region_col].tolist(),
+            "size_bins": size_bin_cols,
+            "counts": df[size_bin_cols].values.tolist(),
+        }
+        
+        if "total" in df.columns:
+            result["total"] = df["total"].tolist()
+        
+        logr_cols = [c for c in df.columns if "logR" in c or "log_ratio" in c]
+        if logr_cols:
+            result["log_ratios"] = df[logr_cols].values.tolist()
+            result["log_ratio_cols"] = logr_cols
+        
+        return result
+
