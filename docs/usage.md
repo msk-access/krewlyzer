@@ -62,3 +62,28 @@ krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_d
 ```
 
 > **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
+
+## Output Formats
+
+Krewlyzer outputs support multiple formats for different use cases.
+
+### Unified JSON for ML
+
+```bash
+# Generate single JSON with ALL features for ML pipelines
+krewlyzer run-all sample.bam --reference hg19.fa --output out/ --generate-json
+# Output: out/sample.features.json (contains FSD, FSR, WPS, Motif, OCF, etc.)
+```
+
+### Format Override
+
+```bash
+# Global format for all outputs
+krewlyzer run-all ... --output-format parquet
+
+# Per-tool format override
+krewlyzer fsd -i sample.bed.gz -o out/ --format json
+```
+
+See [Output Formats](features/output-formats.md) for full documentation.
+
