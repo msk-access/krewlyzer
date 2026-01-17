@@ -46,7 +46,8 @@ def fsc(
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)")
 ):
     """
     Calculate fragment size coverage (FSC) features for a single sample.
