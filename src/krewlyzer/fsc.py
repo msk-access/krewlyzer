@@ -135,7 +135,7 @@ def fsc(
             try:
                 gc_ref = assets.resolve("gc_correction")
                 valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
+                factors_out = output / f"{sample_name}.correction_factors.tsv"
                 logger.debug(f"GC ref: {gc_ref}")
                 logger.debug(f"Valid regions: {valid_regions}")
             except FileNotFoundError as e:
@@ -146,7 +146,7 @@ def fsc(
         # Check for pre-computed correction factors (from extract step)
         factors_input = None
         if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
+            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
             if potential_factors.exists():
                 factors_input = potential_factors
                 logger.info(f"Using pre-computed correction factors: {factors_input}")

@@ -155,7 +155,7 @@ def wps(
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
+                factors_out = output / f"{sample_name}.correction_factors.tsv"
                 logger.info(f"GC correction enabled using bundled assets for {genome}")
             except FileNotFoundError as e:
                 logger.warning(f"GC correction assets not found: {e}")
@@ -165,8 +165,8 @@ def wps(
         # Check for pre-computed correction factors (from extract step)
         factors_input = None
         if gc_correct:
-            # Look for existing correction_factors.csv next to input BED.gz
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
+            # Look for existing correction_factors.tsv next to input BED.gz
+            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
             if potential_factors.exists():
                 factors_input = potential_factors
                 logger.info(f"Using pre-computed correction factors: {factors_input}")

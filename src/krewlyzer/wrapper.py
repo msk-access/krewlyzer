@@ -105,6 +105,10 @@ def run_all(
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     
+    # Output format options
+    output_format: str = typer.Option("auto", "--output-format", "-F", help="Output format: auto (smart defaults), tsv, parquet, json"),
+    generate_json: bool = typer.Option(False, "--generate-json", help="Generate unified sample.features.json with ALL data for ML pipelines"),
+    
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
 ):
@@ -322,7 +326,7 @@ def run_all(
                     pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
                     
                     # Compute GC correction factors inline
-                    factors_file = output / f"{sample}.correction_factors.csv"
+                    factors_file = output / f"{sample}.correction_factors.tsv"
                     try:
                         gc_ref = assets.resolve("gc_reference")
                         valid_regions = assets.resolve("valid_regions")
@@ -467,7 +471,7 @@ def run_all(
             raise typer.Exit(1)
 
         # Define Outputs
-        out_gc_factors = output / f"{sample}.correction_factors.csv"
+        out_gc_factors = output / f"{sample}.correction_factors.tsv"
         out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
         out_wps = output / f"{sample}.WPS.parquet"  # Foreground Parquet
         out_wps_bg = output / f"{sample}.WPS_background.parquet"  # Alu stacking
@@ -637,9 +641,34 @@ def run_all(
                     verbose=debug,
                     threads=threads
                 )
-                progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
+            progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
             except Exception as e:
                 progress.update(task_mfsd, description="[5/5] mFSD ✗ Error", completed=100)
                 logger.warning(f"mFSD failed: {e}")
     
+    # ═══════════════════════════════════════════════════════════════════
+    # UNIFIED JSON OUTPUT (if requested)
+    # ═══════════════════════════════════════════════════════════════════
+    if generate_json:
+        try:
+            from .core.feature_serializer import FeatureSerializer
+            
+            logger.info("Generating unified features JSON...")
+            serializer = FeatureSerializer.from_outputs(sample, output, version="0.3.2")
+            
+            # Add runtime metadata
+            serializer.add_metadata("bam_path", str(bam_input))
+            serializer.add_metadata("genome", genome)
+            serializer.add_metadata("panel_mode", is_panel_mode)
+            if pon:
+                serializer.add_metadata("pon_assay", pon.assay)
+                serializer.add_metadata("pon_n_samples", pon.n_samples)
+            
+            json_path = output / sample
+            serializer.save(json_path)
+            logger.info(f"Unified JSON saved: {json_path}.features.json")
+        except Exception as e:
+            logger.warning(f"JSON generation failed: {e}")
+    
     logger.info(f"✅ All feature extraction complete: {output}")
+
