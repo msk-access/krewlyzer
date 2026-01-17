@@ -78,6 +78,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--bin-input` | `-b` | PATH | | Custom bins for FSC/FSR |
 | `--pon-model` | `-P` | PATH | | PON model for normalization |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--output-format` | `-F` | TEXT | auto | Output format: auto, tsv, parquet, json |
+| `--generate-json` | | FLAG | | Generate unified sample.features.json |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
@@ -101,6 +103,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.WPS_background.parquet` | wps | Alu element stacking |
 | `{sample}.OCF.tsv` | ocf | Tissue-of-origin OCF |
 | `{sample}.mFSD.tsv` | mfsd | Mutant vs WT sizes (with -v) |
+| `{sample}.features.json` | run-all | Unified JSON (with --generate-json) |
 
 ---
 

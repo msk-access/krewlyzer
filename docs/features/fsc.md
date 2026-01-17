@@ -155,6 +155,7 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--windows` | `-w` | Window size for aggregation (default: 100000) |
 | `--continue-n` | `-c` | Consecutive window number (default: 50) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
+| `--format` | `-f` | Output format: tsv, parquet, json |
 
 ---
 
