@@ -55,38 +55,62 @@ out/sample.features.json
   
   "metadata": {
     "total_fragments": 8200000,
-    "on_target_rate": 0.41,
-    "gc_bias_corrected": true
+    "genome": "hg19",
+    "panel_mode": true,
+    "gc_correction_computed": true
   },
   
   "features": {
     "fsd": {
-      "arms": ["1p", "1q", ...],
-      "size_bins": ["65-69", "70-74", ...],
-      "counts": [[120, 135, ...], ...]
+      "off_target": { "arms": [...], "counts": [...] },
+      "on_target": { "arms": [...], "counts": [...] }
     },
-    "fsr": [{...}, ...],
-    "wps": {"regions": [...], "wps_nuc": [...], ...},
-    "motif": {"mds": 0.87, "edm": {...}, "bpm": {...}},
-    "ocf": [{...}, ...]
+    "fsr": {
+      "off_target": [...],
+      "on_target": [...]
+    },
+    "fsc": {
+      "off_target": [...],
+      "on_target": [...]
+    },
+    "wps": { "regions": [...], "wps_nuc": [...] },
+    "motif": {
+      "edm": {...},
+      "edm_on_target": {...},
+      "mds": 0.87,
+      "mds_on_target": 0.84
+    },
+    "ocf": {
+      "off_target": [...],
+      "on_target": [...]
+    },
+    "mfsd": {
+      "enabled": true,
+      "n_variants": 15,
+      "variants": [...]
+    }
   },
   
   "qc": {...}
 }
 ```
 
+> [!NOTE]
+> For WGS samples (no `--target-regions`), only `off_target` data is present.
+> The `on_target` keys only appear when panel mode is enabled.
+
 ### Features Included
 
-| Feature | Data Included |
-|---------|---------------|
-| **FSD** | Full matrix (41 arms × size bins) |
-| **FSR** | All regions with ratios |
-| **FSC** | All windows with z-scores |
-| **WPS** | Full vectors per region |
-| **Motif** | All 256 k-mer frequencies + MDS |
-| **OCF** | All regions with scores |
-| **UXM** | If enabled (`--bisulfite-bam`) |
-| **mFSD** | If enabled (`--variants`) |
+| Feature | Off-Target | On-Target | Enabled By |
+|---------|:----------:|:---------:|------------|
+| **FSD** | ✅ | ✅ | `--target-regions` |
+| **FSR** | ✅ | ✅ | `--target-regions` |
+| **FSC** | ✅ | ✅ | `--target-regions` |
+| **OCF** | ✅ | ✅ | `--target-regions` |
+| **Motif** | ✅ | ✅ | `--target-regions` |
+| **WPS** | ✅ | - | Always |
+| **mFSD** | ✅ | - | `--variants` |
+| **UXM** | ✅ | - | `--bisulfite-bam` |
 
 ## Smart Defaults
 
@@ -104,15 +128,18 @@ After implementation, output files follow this pattern:
 ```
 out/
 ├── sample.FSD.tsv
+├── sample.FSD.ontarget.tsv      # Panel mode only
 ├── sample.FSR.tsv
+├── sample.FSR.ontarget.tsv      # Panel mode only
 ├── sample.FSC.tsv
 ├── sample.WPS.parquet
 ├── sample.EndMotif.tsv
 ├── sample.MDS.tsv
 ├── sample.OCF.tsv
-├── sample.correction_factors.tsv  # Was .csv
+├── sample.mFSD.tsv              # With --variants
+├── sample.correction_factors.tsv
 ├── sample.metadata.json
-└── sample.features.json  # With --generate-json
+└── sample.features.json         # With --generate-json
 ```
 
 ## Migration Notes
@@ -125,3 +152,4 @@ The `correction_factors.csv` file is now `correction_factors.tsv` for consistenc
 - sample.correction_factors.csv
 + sample.correction_factors.tsv
 ```
+
