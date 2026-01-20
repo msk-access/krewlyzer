@@ -105,7 +105,7 @@ def build_pon(
     # Default bin file
     if bin_file is None:
         pkg_dir = Path(__file__).parent.parent
-        bin_file = pkg_dir / "data" / "ChormosomeBins" / "hg19_window_100kb.bed.gz"
+        bin_file = pkg_dir / "data" / "ChromosomeBins" / "hg19_window_100kb.bed.gz"
     
     if not bin_file.exists():
         logger.error(f"Bin file not found: {bin_file}")
