@@ -1,3 +1,12 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    FILTER_MAF
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Pre-filter MAF file to extract variants for a specific sample.
+    Used before mFSD to isolate sample-specific variants from multi-sample MAFs.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process FILTER_MAF {
     tag "$meta.id"
     label 'process_low'
@@ -8,6 +17,9 @@ process FILTER_MAF {
     output:
     tuple val(meta), path("*.filtered.maf"), emit: maf
     path "versions.yml"                    , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def prefix = meta.id
@@ -63,6 +75,17 @@ process FILTER_MAF {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         python: \$(python3 --version | sed 's/Python //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = meta.id
+    """
+    echo -e "Hugo_Symbol\\tChromosome\\tStart_Position\\tTumor_Sample_Barcode" > ${prefix}.filtered.maf
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: 3.11.0
     END_VERSIONS
     """
 }

@@ -1,3 +1,16 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_RUNALL
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Run all krewlyzer fragmentomics feature extraction tools on a single BAM.
+    
+    Outputs: FSC, FSR, FSD, WPS, OCF, Motif (EndMotif, BreakpointMotif, MDS)
+    Optional: mFSD (with --variants), UXM (with bisulfite BAM)
+    
+    Panel mode: Use meta.assay (xs1/xs2) for gene-centric FSC and dual WPS output
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
@@ -14,6 +27,9 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.metadata.json")    , emit: metadata, optional: true
     tuple val(meta), path("*.features.json")    , emit: unified_json, optional: true
     path "versions.yml"                         , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -50,6 +66,29 @@ process KREWLYZER_RUNALL {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    touch ${prefix}.bed.gz
+    touch ${prefix}.bed.gz.tbi
+    touch ${prefix}.FSC.tsv
+    touch ${prefix}.FSR.tsv
+    touch ${prefix}.FSD.tsv
+    touch ${prefix}.WPS.parquet
+    touch ${prefix}.WPS_background.parquet
+    touch ${prefix}.OCF.tsv
+    touch ${prefix}.EndMotif.tsv
+    touch ${prefix}.BreakPointMotif.tsv
+    touch ${prefix}.MDS.tsv
+    touch ${prefix}.correction_factors.tsv
+    echo '{"sample_id":"${prefix}","total_fragments":0}' > ${prefix}.metadata.json
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

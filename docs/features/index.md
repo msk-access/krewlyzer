@@ -123,3 +123,10 @@ All feature commands share these core options:
 
 See individual feature pages for command-specific options, or [Output Formats](output-formats.md) for format details.
 
+---
+
+## Additional Resources
+
+- **[JSON Output](json-output.md)** - Unified JSON for ML pipelines (`--generate-json`)
+- **[Panel Mode](../advanced/panel-mode.md)** - MSK-ACCESS and targeted panel analysis (`--assay`)
+- **[PON Building](build-pon.md)** - Creating cohort baselines for z-score normalization

@@ -41,14 +41,33 @@ ls results/
 
 ### Targeted Panel (MSK-ACCESS)
 
-For targeted sequencing, provide a custom bins file:
+For MSK-ACCESS v1 or v2 panels, use the `--assay` flag for panel-optimized analysis:
 
 ```bash
 krewlyzer run-all sample.bam \
     --reference hg19.fa \
     --output results/ \
-    --bin-input MSK-ACCESS-targets.bed
+    --assay xs2 \
+    --target-regions MSK-ACCESS-v2_targets.bed
 ```
+
+This enables:
+- **Gene-level FSC** aggregation (146 genes)
+- **Dual WPS output** (genome-wide + panel-specific)
+- **On/off-target splitting** for all features
+
+For PON normalization:
+```bash
+krewlyzer run-all sample.bam \
+    --reference hg19.fa \
+    --output results/ \
+    --assay xs2 \
+    --target-regions targets.bed \
+    --pon-model xs2.pon.parquet \
+    --generate-json
+```
+
+**→ [Full MSK-ACCESS Quickstart](advanced/msk-access-quickstart.md)** for detailed workflows.
 
 ### With Variant Analysis
 

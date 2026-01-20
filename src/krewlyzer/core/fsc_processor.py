@@ -150,7 +150,7 @@ def _write_fsc_output(df: pd.DataFrame, output_path: Path, with_pon: bool):
     
     # Select and write
     output_df = df[cols].copy()
-    output_df.to_csv(output_path, sep='\\t', index=False, float_format='%.4f')
+    output_df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
 
 
 def aggregate_by_gene(

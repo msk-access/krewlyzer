@@ -1,3 +1,13 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_WPS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Windowed Protection Score - nucleosome/TF profiling at TSS/CTCF anchors.
+    Dual-stream: WPS-Nuc (150-180bp) and WPS-TF (35-80bp) fragments.
+    Includes FFT periodicity extraction for Nucleosome Repeat Length (NRL).
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_WPS {
     tag "$meta.id"
     label 'process_medium'
@@ -13,6 +23,9 @@ process KREWLYZER_WPS {
     tuple val(meta), path("*.WPS.parquet")           , emit: parquet
     tuple val(meta), path("*.WPS_background.parquet"), emit: background, optional: true
     path "versions.yml"                              , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -47,6 +60,18 @@ process KREWLYZER_WPS {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    touch ${prefix}.WPS.parquet
+    touch ${prefix}.WPS_background.parquet
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

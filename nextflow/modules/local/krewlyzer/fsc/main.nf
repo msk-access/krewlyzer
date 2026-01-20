@@ -1,3 +1,13 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_FSC
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Fragment Size Coverage - windowed depth per size channel.
+    Channels: ultra_short, core_short, mono_nucl, di_nucl, long
+    Panel mode: Also outputs gene-centric FSC with --assay flag
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_FSC {
     tag "$meta.id"
     label 'process_medium'
@@ -11,6 +21,9 @@ process KREWLYZER_FSC {
     tuple val(meta), path("*.FSC.tsv"), emit: tsv
     tuple val(meta), path("*.FSC.gene.tsv"), emit: gene_fsc, optional: true
     path "versions.yml"               , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -39,6 +52,17 @@ process KREWLYZER_FSC {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    echo -e "chrom\\tstart\\tend\\tultra_short\\tcore_short\\tmono_nucl\\tdi_nucl\\tlong\\ttotal" > ${prefix}.FSC.tsv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

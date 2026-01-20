@@ -1962,7 +1962,8 @@ dependencies = [
 [[package]]
 name = "sci-rs"
 version = "0.4.1"
-source = "git+https://github.com/qsib-cbie/sci-rs#a03090a3a2fe308e62f0295f28c6a9076b9c97d5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31b8816b9c331b2a1bab526920b92c289a3459221ee07cd63bce1bc9a3e2e020"
 dependencies = [
  "gaussfilt",
  "itertools 0.13.0",

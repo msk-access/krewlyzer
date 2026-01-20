@@ -7,8 +7,11 @@ to avoid code duplication across standalone tools.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TYPE_CHECKING
 import logging
+
+if TYPE_CHECKING:
+    from ..assets import AssetManager
 
 logger = logging.getLogger("krewlyzer.core.gc_assets")
 
@@ -24,7 +27,7 @@ class GcAssets:
 
 
 def resolve_gc_assets(
-    assets,
+    assets: "AssetManager",
     output_dir: Path,
     sample_name: str,
     bedgz_input: Path,

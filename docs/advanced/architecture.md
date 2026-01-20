@@ -119,6 +119,28 @@ The Python layer provides:
 3. **Asset Management** (`assets.py`) - Bundled data files
 4. **Feature Modules** - Per-tool logic (`fsc.py`, `fsr.py`, etc.)
 5. **PON Integration** (`pon/`) - Model loading and building
+6. **Core Utilities** (`core/`) - Shared helpers
+
+### Core Module (`core/`)
+
+| File | Purpose |
+|------|---------|
+| `gc_assets.py` | Centralized GC asset resolution |
+| `fsc_processor.py` | FSC z-score computation |
+| `fsr_processor.py` | FSR ratio calculation |
+| `wps_processor.py` | WPS post-processing |
+| `wps_anchor_filter.py` | Panel-specific anchor filtering |
+| `gene_bed.py` | Gene BED parsing for FSC gene aggregation |
+| `feature_serializer.py` | Unified JSON output generation |
+
+### Recent Improvements (2024)
+
+| Change | Files | Benefit |
+|--------|-------|---------|
+| **GC Asset Helper** | `core/gc_assets.py` | Eliminated 100+ lines duplication |
+| **Dual WPS Output** | `wps.py`, `wrapper.py` | Panel + genome-wide WPS |
+| **JSON Serializer** | `core/feature_serializer.py` | Unified ML output |
+| **Assay Support** | `assets.py`, `wrapper.py` | MSK-ACCESS v1/v2 auto-resolution |
 
 ---
 

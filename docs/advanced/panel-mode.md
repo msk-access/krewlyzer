@@ -38,10 +38,44 @@ krewlyzer build-pon samples.txt \
 
 ### At Sample Processing Time
 
+The `--assay` flag enables panel-specific optimizations:
+
 ```bash
+# MSK-ACCESS v2 with all panel features
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
+    --assay xs2 \
     --target-regions msk_access_baits.bed \
     --pon-model msk-access.pon.parquet
+```
+
+### What `--assay` Enables
+
+| Feature | Without --assay | With --assay |
+|---------|-----------------|--------------|
+| **Gene FSC** | Window-based only | + Gene-level aggregation (`FSC.gene.tsv`) |
+| **WPS Anchors** | Genome-wide (~15k) | Panel-specific (~2k + genome-wide) |
+| **WPS Output** | Single `WPS.parquet` | Dual: `WPS.parquet` + `WPS.panel.parquet` |
+| **JSON Output** | Standard features | + `fsc_gene`, `wps_panel` |
+
+### Dual WPS Output
+
+With `--assay`, Krewlyzer generates **two** WPS files:
+
+| File | Anchors | Use Case |
+|------|---------|----------|
+| `{sample}.WPS.parquet` | Genome-wide TSS+CTCF | Cancer detection signature |
+| `{sample}.WPS.panel.parquet` | Panel gene anchors | Targeted gene profiling |
+
+This dual output provides both broad cancer signals and focused gene-level analysis.
+
+### Minimal Panel Mode (No PON)
+
+For quick analysis without a custom PON:
+
+```bash
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
+    --assay xs2 \
+    --target-regions targets.bed
 ```
 
 

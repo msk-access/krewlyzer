@@ -205,6 +205,36 @@ This ensures you never mask more than 50% of a small exon (25% per side).
 
 ---
 
+## Dual WPS Output (with `--assay`)
+
+When using `--assay` (e.g., for MSK-ACCESS), Krewlyzer generates **two** WPS output files:
+
+```bash
+krewlyzer wps -i sample.bed.gz -o output/ --assay xs2
+```
+
+### Output Files
+
+| File | Anchors | Purpose |
+|------|---------|---------|
+| `{sample}.WPS.parquet` | Genome-wide (~15k) | Global cancer detection signature |
+| `{sample}.WPS.panel.parquet` | Panel genes (~2k) | Targeted gene-level profiling |
+
+### Why Dual Output?
+
+| Scenario | Use |
+|----------|-----|
+| **Pan-cancer detection** | Use `WPS.parquet` (genome-wide) |
+| **Specific gene analysis** | Use `WPS.panel.parquet` (focused) |
+| **Feature vectors for ML** | Combine both via [JSON output](json-output.md) |
+
+### How It Works
+
+1. **First pass**: Genome-wide anchors (TSS+CTCF for ~5,000 genes)
+2. **Second pass**: Panel-specific anchors (genes in your assay)
+
+Both use the same pre-computed GC correction factors for consistency.
+
 ## Output Files
 
 ### Foreground: `sample.WPS.parquet`
