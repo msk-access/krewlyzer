@@ -39,6 +39,7 @@ This model is used for bias correction and z-score normalization during sample p
 | Option | Default | Description |
 |--------|---------|-------------|
 | `-T, --target-regions` | None | BED file with target regions (panel mode) |
+| `--temp-dir` | System temp | Directory for temporary files during BAM extraction |
 | `-t, --transcript-file` | Built-in | Transcript TSV for WPS baseline |
 | `-b, --bin-file` | Built-in | Bin file for FSC/FSR |
 | `-p, --threads` | 4 | Number of threads |
@@ -61,7 +62,20 @@ krewlyzer build-pon healthy_samples.txt \
     --assay msk-access-v2 \
     --reference hg19.fa \
     --target-regions msk_access_targets.bed \
-    --output msk-access.pon.parquet
+    --output msk-access.pon.parquet \
+    --threads 16
+```
+
+**HPC with custom temp directory:**
+```bash
+krewlyzer build-pon healthy_samples.txt \
+    --assay xs1 \
+    --reference hg19.fa \
+    --target-regions msk_access_v1_targets.bed \
+    --temp-dir /scratch/$USER/pon_tmp \
+    --output xs1.pon.parquet \
+    --threads 16 \
+    --verbose
 ```
 
 ## Input Formats

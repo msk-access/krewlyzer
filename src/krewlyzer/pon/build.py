@@ -35,6 +35,7 @@ def build_pon(
     bin_file: Optional[Path] = typer.Option(None, "--bin-file", "-b", help="Bin file for FSC/FSR (default: hg19_window_100kb.bed)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="BED file with target regions (panel mode - builds dual on/off-target baselines)"),
+    temp_dir: Optional[Path] = typer.Option(None, "--temp-dir", help="Directory for temporary files (default: system temp)"),
     threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
@@ -139,7 +140,10 @@ def build_pon(
                 extract_progress.update(extract_task, description=f"[{i}/{len(bam_samples)}] Extracting {sample_name}...")
                 
                 if temp_extract_dir is None:
-                    temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_")
+                    # Use user-specified temp dir or system default
+                    temp_base = str(temp_dir) if temp_dir else None
+                    temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_", dir=temp_base)
+                    logger.info(f"Temporary extraction directory: {temp_extract_dir}")
                 
                 try:
                     bed_output_path = str(Path(temp_extract_dir) / f"{sample_name}.bed.gz")

@@ -122,6 +122,29 @@ Outputs: `sample.WPS.parquet` (genome-wide) + `sample.WPS.panel.parquet` (panel 
 
 ---
 
+## Building Your Own PON
+
+Create a PON from your healthy plasma samples:
+
+```bash
+# Create sample list file
+ls /path/to/healthy/*-duplex.bam > healthy_samples.txt
+
+# Build PON (HPC with custom temp directory)
+krewlyzer build-pon healthy_samples.txt \
+    --assay xs2 \
+    --reference hg19.fa \
+    --target-regions MSK-ACCESS-v2_targets.bed \
+    --temp-dir /scratch/$USER/pon_tmp \
+    --output xs2.pon.parquet \
+    --threads 16 \
+    --verbose
+```
+
+> **Tip**: Use `--temp-dir` to specify a directory with more disk space than `/tmp`. Each BAM extraction creates temporary BED.gz files (~100MB each).
+
+---
+
 ## Nextflow Batch Processing
 
 For multiple samples, use the Nextflow pipeline:
