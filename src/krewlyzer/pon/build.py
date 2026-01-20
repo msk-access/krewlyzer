@@ -116,48 +116,65 @@ def build_pon(
         pkg_dir = Path(__file__).parent.parent
         transcript_file = pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
     
-    # Handle BAM vs BED.gz input - convert all to BED.gz paths
     import tempfile
     import shutil
     temp_extract_dir = None
     bed_paths = []  # Final list of BED.gz paths to process
     
-    for sample_path in samples:
-        if sample_path.suffix == '.bam':
-            # Extract BAM to temp BED.gz
-            if temp_extract_dir is None:
-                temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_")
-                logger.info(f"Extracting BAM files to temp directory...")
+    # Count BAM files for progress tracking
+    bam_samples = [s for s in samples if s.suffix == '.bam']
+    bed_samples = [s for s in samples if s.suffix != '.bam']
+    
+    if bam_samples:
+        logger.info(f"Extracting {len(bam_samples)} BAM files to fragment BED.gz...")
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as extract_progress:
+            extract_task = extract_progress.add_task("Extracting BAM files...", total=len(bam_samples))
             
-            try:
-                bed_output_path = str(Path(temp_extract_dir) / f"{sample_path.stem}.bed.gz")
-                _core.extract_motif.process_bam_parallel(
-                    str(sample_path),  # bam_path
-                    str(reference),    # fasta_path
-                    20,                # mapq
-                    65,                # min_len
-                    400,               # max_len
-                    4,                 # kmer
-                    threads,           # threads
-                    bed_output_path,   # output_bed_path
-                    None,              # output_motif_prefix (skip motifs)
-                    None,              # exclude_path
-                    target_regions_str,  # target_regions_path - for panel mode filtering
-                    True,              # skip_duplicates
-                    require_proper_pair,  # from CLI argument
-                    True               # silent
-                )
-                bed_path = Path(bed_output_path)
-                if bed_path.exists():
-                    bed_paths.append(bed_path)
-                    logger.debug(f"Extracted: {sample_path.name} -> {bed_path.name}")
-                else:
-                    logger.warning(f"Extraction produced no output for {sample_path.name}")
-            except Exception as e:
-                logger.warning(f"Failed to extract {sample_path.name}: {e}")
-        else:
-            # Already BED.gz
-            bed_paths.append(sample_path)
+            for i, sample_path in enumerate(bam_samples, 1):
+                sample_name = sample_path.stem
+                extract_progress.update(extract_task, description=f"[{i}/{len(bam_samples)}] Extracting {sample_name}...")
+                
+                if temp_extract_dir is None:
+                    temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_")
+                
+                try:
+                    bed_output_path = str(Path(temp_extract_dir) / f"{sample_name}.bed.gz")
+                    _core.extract_motif.process_bam_parallel(
+                        str(sample_path),  # bam_path
+                        str(reference),    # fasta_path
+                        20,                # mapq
+                        65,                # min_len
+                        400,               # max_len
+                        4,                 # kmer
+                        threads,           # threads
+                        bed_output_path,   # output_bed_path
+                        None,              # output_motif_prefix (skip motifs)
+                        None,              # exclude_path
+                        target_regions_str,  # target_regions_path - for panel mode filtering
+                        True,              # skip_duplicates
+                        require_proper_pair,  # from CLI argument
+                        True               # silent
+                    )
+                    bed_path = Path(bed_output_path)
+                    if bed_path.exists():
+                        bed_paths.append(bed_path)
+                        logger.debug(f"Extracted: {sample_path.name} -> {bed_path.name}")
+                    else:
+                        logger.warning(f"Extraction produced no output for {sample_path.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to extract {sample_path.name}: {e}")
+                
+                extract_progress.advance(extract_task)
+        
+        logger.info(f"Extracted {len([p for p in bed_paths if temp_extract_dir and str(p).startswith(temp_extract_dir)])} BAM files successfully")
+    
+    # Add existing BED.gz files
+    for sample_path in bed_samples:
+        bed_paths.append(sample_path)
     
     if not bed_paths:
         logger.error("No valid samples after processing")
@@ -197,15 +214,24 @@ def build_pon(
                 
                 try:
                     # Get FSC data (for GC curves) - this is off-target for WGS
-                    _, short, intermediate, long, _, gc_values = _core.count_fragments_by_bins(
+                    # Rust returns 7 values: ultra_shorts, core_shorts, mono_nucls, di_nucls, longs, totals, gc_values
+                    ultra_shorts, core_shorts, mono_nucls, di_nucls, longs, totals, gc_values = _core.count_fragments_by_bins(
                         str(bed_path),
                         str(bin_file)
                     )
+                    # Map to legacy short/intermediate/long for GC model
+                    # short = ultra_shorts + core_shorts (65-149bp)
+                    # intermediate = mono_nucls (150-220bp)  
+                    # long = di_nucls + longs (221-400bp)
+                    short = np.array(ultra_shorts) + np.array(core_shorts)
+                    intermediate = np.array(mono_nucls)
+                    long = np.array(di_nucls) + np.array(longs)
+                    
                     all_gc_data.append({
                         "gc": np.array(gc_values),
-                        "short": np.array(short),
-                        "intermediate": np.array(intermediate),
-                        "long": np.array(long),
+                        "short": short,
+                        "intermediate": intermediate,
+                        "long": long,
                     })
                     
                     # For panel mode, look for pre-processed on-target FSC files
