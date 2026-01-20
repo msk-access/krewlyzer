@@ -411,8 +411,8 @@ def get_bundled_gene_bed(assay: str, genome: str = "GRCh37") -> Optional[Path]:
         if ref.is_file():
             # Return actual path for downstream compatibility
             return Path(str(ref))
-    except (ModuleNotFoundError, FileNotFoundError, TypeError):
-        pass
+    except (ModuleNotFoundError, FileNotFoundError, TypeError) as e:
+        logger.debug(f"importlib.resources lookup failed for {assay}/{genome}: {e}")
     
     # Fallback: check relative to this file
     data_dir = Path(__file__).parent.parent / "data" / "genes" / genome

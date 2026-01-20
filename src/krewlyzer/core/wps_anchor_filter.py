@@ -165,7 +165,7 @@ def get_bundled_wps_anchors(assay: str, genome: str = "GRCh37") -> Optional[Path
             anchors_path = genome_dir / f"{assay}.wps_anchors.bed.gz"
             if anchors_path.exists():
                 return Path(anchors_path)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Bundled WPS anchors lookup failed for {assay}/{genome}: {e}")
     
     return None

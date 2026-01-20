@@ -142,8 +142,8 @@ def process_fsd(
                     std = fsd_baseline.get_std(arm, size)
                     if std > 0:
                         stds.append(std)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Could not get PoN std for {arm}/{bin_col}: {e}")
             
             if stds:
                 avg_var = np.mean([s**2 for s in stds])
@@ -165,16 +165,3 @@ def process_fsd(
     logger.info(f"FSD processed: {output_path}")
     
     return output_path
-
-
-def apply_fsd_pon(
-    fsd_output: Path,
-    pon,
-    output_path: Optional[Path] = None
-) -> Path:
-    """
-    Apply PON z-scores to FSD output file (legacy compatibility).
-    
-    Deprecated: Use process_fsd() instead for log-ratio normalization.
-    """
-    return process_fsd(fsd_output, output_path, pon)

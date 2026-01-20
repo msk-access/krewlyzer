@@ -479,8 +479,8 @@ def run_all(
                 try:
                     res_wps_panel = assets.get_wps_anchors(resolved_assay)
                     logger.info(f"Dual WPS enabled: panel anchors ({resolved_assay}) will generate WPS.panel.parquet")
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Panel WPS anchors not available for {resolved_assay}: {e}")
         if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
 
         # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
@@ -635,8 +635,8 @@ def run_all(
             
             try:
                 out_ocf_dir.rmdir()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not remove temp OCF directory {out_ocf_dir}: {e}")
             
             # Use centralized PON loaded earlier (line 176+)
             
