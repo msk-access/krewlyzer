@@ -54,7 +54,7 @@ def fsd(
     """
     from .assets import AssetManager
     from .core.pon_integration import load_pon_model
-    from .core.fsd_processor import apply_fsd_pon
+    from .core.fsd_processor import process_fsd
     
     # Configure verbose logging
     if verbose:
@@ -162,7 +162,7 @@ def fsd(
         
         # If PON provided, apply z-scores using shared processor
         if pon:
-            apply_fsd_pon(output_file, pon)
+            process_fsd(output_file, pon=pon)
         
         logger.info(f"✅ FSD complete: {output_file}")
 
