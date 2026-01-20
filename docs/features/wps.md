@@ -144,7 +144,30 @@ krewlyzer wps -i sample.bed.gz -o output/ --background custom_alu.bed.gz
 
 # Panel data (MSK-ACCESS)
 krewlyzer wps -i sample.bed.gz -o output/ --target-regions msk_access_baits.bed --bait-padding 20
+
+# Panel data with panel-specific anchors (recommended for MSK-ACCESS)
+krewlyzer wps -i sample.bed.gz -o output/ \
+    --wps-anchors /path/to/xs2.wps_anchors.bed.gz \
+    --target-regions msk_access_baits.bed
 ```
+
+### Panel-Specific WPS Anchors
+
+For targeted panels like MSK-ACCESS, genome-wide WPS anchors include many regions with no coverage. Use **panel-specific anchors** for focused analysis:
+
+| Assay | Bundled File | Anchors | Genes |
+|-------|--------------|:-------:|:-----:|
+| MSK-ACCESS v1 | `xs1.wps_anchors.bed.gz` | 1,611 | 128 |
+| MSK-ACCESS v2 | `xs2.wps_anchors.bed.gz` | 1,820 | 146 |
+
+**What's included:**
+- **TSS anchors** for genes in the panel
+- **CTCF anchors** within 100kb of panel genes
+
+**Benefits:**
+- Reduced noise from off-target regions
+- Faster processing
+- More interpretable ML features
 
 ## CLI Options
 

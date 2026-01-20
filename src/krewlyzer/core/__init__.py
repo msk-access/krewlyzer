@@ -13,6 +13,7 @@ Submodules:
     - motif_processor: Motif file writing (EDM, BPM, MDS)
     - fsd_processor: FSD PON z-score overlay
     - wps_processor: WPS PON z-score overlay
+    - gene_bed: MSK-ACCESS panel BED parsing and gene grouping
 """
 
 from .logging import get_logger, set_verbose
@@ -23,6 +24,7 @@ from . import fsr_processor
 from . import motif_processor
 from . import fsd_processor
 from . import wps_processor
+from . import gene_bed
 
 __all__ = [
     'get_logger',
@@ -34,5 +36,5 @@ __all__ = [
     'motif_processor',
     'fsd_processor',
     'wps_processor',
+    'gene_bed',
 ]
-

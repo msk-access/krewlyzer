@@ -338,11 +338,37 @@ class FeatureSerializer:
             serializer.features["fsc"] = fsc_data
         
         # =====================================================================
+        # FSC Gene - Gene-Centric Fragment Size Coverage (for panel mode)
+        # =====================================================================
+        fsc_gene_path = output_dir / f"{sample_id}.FSC.gene.tsv"
+        if fsc_gene_path.exists():
+            serializer.features["fsc_gene"] = pd.read_csv(fsc_gene_path, sep="\t").to_dict(orient="records")
+        
+        # =====================================================================
         # WPS - Windowed Protection Score
         # =====================================================================
         wps_path = output_dir / f"{sample_id}.WPS.parquet"
+        wps_panel_path = output_dir / f"{sample_id}.WPS.panel.parquet"
+        
         if wps_path.exists():
             serializer.add_wps(pd.read_parquet(wps_path))
+        
+        # Panel-specific WPS (for panel mode with --assay)
+        if wps_panel_path.exists():
+            panel_df = pd.read_parquet(wps_panel_path)
+            serializer.features["wps_panel"] = {
+                "n_anchors": len(panel_df),
+                "data": panel_df.to_dict(orient="records")
+            }
+        
+        # WPS Background (Alu element stacking)
+        wps_bg_path = output_dir / f"{sample_id}.WPS_background.parquet"
+        if wps_bg_path.exists():
+            bg_df = pd.read_parquet(wps_bg_path)
+            serializer.features["wps_background"] = {
+                "n_elements": len(bg_df),
+                "data": bg_df.to_dict(orient="records")
+            }
         
         # =====================================================================
         # Motif - EDM, BPM, MDS

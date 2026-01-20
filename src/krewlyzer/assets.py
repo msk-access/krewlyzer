@@ -88,6 +88,86 @@ class AssetManager:
     def methylation_markers(self) -> Path:
         """Methylation markers BED for UXM analysis (Atlas U250 markers)"""
         return self._get_path("MethMark", f"Markers.U250.{self.file_prefix}.bed.gz")
+    
+    # =========================================================================
+    # Assay-aware asset resolution (for MSK-ACCESS panels)
+    # =========================================================================
+    
+    def get_gene_bed(self, assay: str) -> Path:
+        """
+        Get bundled gene BED file for a specific assay.
+        
+        Args:
+            assay: Assay code (xs1, xs2)
+            
+        Returns:
+            Path to gene BED file
+            
+        Raises:
+            FileNotFoundError: If the asset doesn't exist
+        """
+        path = self._get_path("genes", f"{assay}.genes.bed.gz")
+        if not path.exists():
+            raise FileNotFoundError(f"Gene BED not found for assay '{assay}': {path}")
+        return path
+    
+    def get_target_bed(self, assay: str) -> Path:
+        """
+        Get bundled target regions BED for a specific assay.
+        
+        Args:
+            assay: Assay code (xs1, xs2)
+            
+        Returns:
+            Path to target BED file
+        """
+        path = self._get_path("targets", f"{assay}.targets.bed")
+        if not path.exists():
+            raise FileNotFoundError(f"Target BED not found for assay '{assay}': {path}")
+        return path
+    
+    def get_wps_anchors(self, assay: str = None) -> Path:
+        """
+        Get WPS anchors BED, optionally filtered for a specific assay.
+        
+        Args:
+            assay: Optional assay code (xs1, xs2). If None, returns genome-wide anchors.
+            
+        Returns:
+            Path to WPS anchors file
+        """
+        if assay:
+            path = self._get_path("WpsAnchors", f"{assay}.wps_anchors.bed.gz")
+            if path.exists():
+                return path
+            logger.warning(f"Panel-specific WPS anchors not found for '{assay}', using genome-wide")
+        return self.wps_anchors
+    
+    def get_pon(self, assay: str) -> Path:
+        """
+        Get bundled PON model for a specific assay.
+        
+        Args:
+            assay: Assay code (xs1, xs2)
+            
+        Returns:
+            Path to PON parquet file
+        """
+        # New naming convention: pon/GRCh37/xs1.pon.parquet
+        path = self._get_path("pon", f"{assay}.pon.parquet")
+        if path.exists():
+            return path
+        raise FileNotFoundError(f"PON not found for assay '{assay}': {path}")
+    
+    def list_available_assays(self) -> list:
+        """List all available assays based on bundled gene BED files."""
+        genes_dir = self.base_path / "genes" / self.genome_dir
+        if not genes_dir.exists():
+            return []
+        return [
+            p.stem.replace(".genes.bed", "").replace(".genes", "")
+            for p in genes_dir.glob("*.genes.bed.gz")
+        ]
         
     def resolve(self, asset_name: str) -> Path:
         """
@@ -107,7 +187,6 @@ class AssetManager:
             "arms": self.arms,
             "valid_regions": self.valid_regions,
             "gc_reference": self.gc_reference,
-            "gc_correction": self.gc_reference,  # Alias
             "bins_100kb": self.bins_100kb,
             "exclude_regions": self.exclude_regions,
             "transcript_anno": self.transcript_anno,

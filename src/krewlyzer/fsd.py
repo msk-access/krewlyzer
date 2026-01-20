@@ -120,32 +120,14 @@ def fsd(
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Resolve GC correction assets
-        gc_ref = None
-        valid_regions = None
-        factors_out = None
-        
-        if gc_correct:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.tsv"
-                logger.info(f"GC correction enabled using bundled assets for {genome}")
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Proceeding without GC correction. Use --no-gc-correct to suppress this warning.")
-                gc_correct = False
-        
-        # Check for pre-computed correction factors (from extract step)
-        factors_input = None
-        if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
-            if potential_factors.exists():
-                factors_input = potential_factors
-                logger.info(f"Using pre-computed correction factors: {factors_input}")
-                gc_ref = None
-                valid_regions = None
-                factors_out = None
+        # Resolve GC correction assets (centralized helper)
+        from .core.gc_assets import resolve_gc_assets
+        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
+        gc_ref = gc.gc_ref
+        valid_regions = gc.valid_regions
+        factors_out = gc.factors_out
+        factors_input = gc.factors_input
+        gc_correct = gc.gc_correct_enabled
         
         # Call Unified Pipeline (FSD only)
         logger.info("Running unified pipeline for FSD...")

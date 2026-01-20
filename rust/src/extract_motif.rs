@@ -313,11 +313,12 @@ pub fn process_bam_parallel(
                      result.count += 1;
                      
                      // Accumulate GC observation for correction factor computation
-                     // Length bins: 60-80, 80-100, ..., 380-400 (17 bins)
+                     // Length bins: 5bp bins from 60-400bp = 68 bins (matches gc_correction.rs)
                      // Panel mode: Separate on-target and off-target for dual GC models
                      let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
                      let length = tlen as u64;
-                     let length_bin = ((length.saturating_sub(60)) / 20).min(16) as u8;
+                     // 5bp bins: (length - 60) / 5 -> 0..67
+                     let length_bin = ((length.saturating_sub(60)) / 5).min(67) as u8;
                      let gc_pct = (gc * 100.0).round() as u8;
                      
                      if is_on_target {

@@ -34,7 +34,7 @@ workflow {
          nextflow run main.nf --samplesheet samples.csv --ref hg19.fa [options]
 
          Input:
-         --samplesheet     CSV with columns: sample, bam, meth_bam, vcf, bed, maf, single_sample_maf
+         --samplesheet     CSV with columns: sample, bam, meth_bam, vcf, bed, maf, single_sample_maf, assay, pon, targets
          --ref             Reference genome FASTA
 
          Options:
@@ -45,6 +45,11 @@ workflow {
          --minlen          Min fragment length (default: 65)
          --maxlen          Max fragment length (default: 400)
          --skip_duplicates Skip duplicates (default: true)
+         
+         Assay Codes (samplesheet 'assay' column):
+         XS1               MSK-ACCESS v1 (128 genes)
+         XS2               MSK-ACCESS v2 (146 genes)
+         WGS               Whole Genome Sequencing
          
          Output Format:
          --generate_json   Generate unified sample.features.json for ML (default: false)
@@ -62,18 +67,25 @@ workflow {
     // ASSAY RESOLUTION FUNCTIONS (XS1, XS2, WGS)
     // =====================================================
     
-    // Assay code to PON filename mapping
+    // Assay code to PON filename mapping (matches data/pon/GRCh37/)
     def assayToPon = [
-        'XS1': 'msk-access-v1.pon.parquet',
-        'XS2': 'msk-access-v2.pon.parquet',
-        'WGS': 'wgs.pon.parquet'
+        'XS1': 'GRCh37/xs1.pon.parquet',
+        'XS2': 'GRCh37/xs2.pon.parquet',
+        'WGS': 'GRCh37/wgs.pon.parquet'
     ]
     
-    // Assay code to targets filename mapping
+    // Assay code to targets filename mapping (matches data/targets/GRCh37/)
     def assayToTargets = [
-        'XS1': 'XS1_targets.bed',
-        'XS2': 'XS2_targets.bed'
+        'XS1': 'GRCh37/xs1.targets.bed',
+        'XS2': 'GRCh37/xs2.targets.bed'
         // WGS has no targets
+    ]
+
+    // Assay code to WPS anchors filename mapping (matches data/WpsAnchors/GRCh37/)
+    def assayToWpsAnchors = [
+        'XS1': 'GRCh37/xs1.wps_anchors.bed.gz',
+        'XS2': 'GRCh37/xs2.wps_anchors.bed.gz'
+        // WGS uses genome-wide anchors (default)
     ]
 
     // Resolve PON model: explicit > assay-based > global param
@@ -97,6 +109,16 @@ workflow {
             log.warn "Targets not found for assay ${row.assay}: ${assay_targets}"
         }
         if (params.targets) return file(params.targets)
+        return []
+    }
+
+    // Resolve WPS anchors: assay-based > global param > default
+    def resolveWpsAnchors = { row ->
+        if (params.wps_anchors) return file(params.wps_anchors)
+        if (row.assay && params.asset_dir && assayToWpsAnchors[row.assay]) {
+            def assay_anchors = file("${params.asset_dir}/WpsAnchors/${assayToWpsAnchors[row.assay]}")
+            if (assay_anchors.exists()) return assay_anchors
+        }
         return []
     }
 

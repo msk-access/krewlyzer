@@ -15,12 +15,23 @@ data/
 ├── OpenChromatinRegion/ # OCF tissue-specific regions
 ├── TranscriptAnno/      # TSS annotations for WPS
 ├── WpsAnchors/          # WPS anchor regions (TSS + CTCF)
+│   └── GRCh37/
+│       ├── hg19.wps_anchors.bed.gz     # Genome-wide
+│       ├── xs1.wps_anchors.bed.gz      # MSK-ACCESS v1 (1,611 anchors)
+│       └── xs2.wps_anchors.bed.gz      # MSK-ACCESS v2 (1,820 anchors)
 ├── WpsBackground/       # Alu elements for background stacking
 ├── MethMark/            # Methylation markers for UXM
 ├── gc/                  # GC reference files for correction
 ├── exclude-regions/     # Blacklist regions (centromeres, etc.)
+├── genes/               # Gene-grouped BED files for panels
+│   └── GRCh37/
+│       ├── xs1.genes.bed.gz            # MSK-ACCESS v1 (128 genes)
+│       └── xs2.genes.bed.gz            # MSK-ACCESS v2 (146 genes)
+├── targets/             # Target region BEDs for panels
+│   └── GRCh37/
+│       ├── xs1.targets.bed             # MSK-ACCESS v1 targets
+│       └── xs2.targets.bed             # MSK-ACCESS v2 targets
 ├── pon/                 # Panel of Normals models
-├── targets/             # Target region BEDs (MSK-ACCESS)
 └── CNVdependency/       # Mappability and GC wig files
 ```
 
@@ -70,13 +81,18 @@ Blacklist regions excluded from analysis (centromeres, telomeres, low-mappabilit
 
 ### pon
 Panel of Normals (PON) models for z-score normalization.
-- `msk-access-v1.pon.parquet` - MSK-ACCESS v1 (XS1)
-- `msk-access-v2.pon.parquet` - MSK-ACCESS v2 (XS2)
-- `wgs.pon.parquet` - Whole genome sequencing
+- `GRCh37/xs1.pon.parquet` - MSK-ACCESS v1 (xs1)
+- `GRCh37/xs2.pon.parquet` - MSK-ACCESS v2 (xs2)
 
 ### targets
 Target region BED files for panel sequencing.
-- `MSK-ACCESS-v2_targets.bed` - MSK-ACCESS v2 capture regions
+- `xs1.targets.bed` - MSK-ACCESS v1 capture regions
+- `xs2.targets.bed` - MSK-ACCESS v2 capture regions
+
+### genes
+Gene-grouped target regions for gene-centric analysis.
+- `xs1.genes.bed.gz` - MSK-ACCESS v1 (128 genes)
+- `xs2.genes.bed.gz` - MSK-ACCESS v2 (146 genes)
 
 ---
 

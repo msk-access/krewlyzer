@@ -32,6 +32,7 @@ def wps(
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     tsv_input: Optional[Path] = typer.Option(None, "--tsv-input", "-W", help="Path to transcript/region TSV file (legacy)"),
     wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1, xs2) for dual WPS output (genome-wide + panel)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Panel capture BED (enables bait edge masking)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     background: Optional[Path] = typer.Option(None, "--background", "-B", help="Background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
@@ -125,6 +126,16 @@ def wps(
                 logger.error(f"No WPS anchor or transcript file found: {e}")
                 raise typer.Exit(1)
     
+    # Resolve assay for dual WPS output
+    resolved_assay = assay if isinstance(assay, str) else None
+    panel_anchors = None
+    if resolved_assay:
+        try:
+            panel_anchors = assets.get_wps_anchors(resolved_assay)
+            logger.info(f"Dual WPS enabled: panel anchors ({resolved_assay}) will generate WPS.panel.parquet")
+        except Exception:
+            logger.warning(f"Panel anchors not found for {resolved_assay}, dual WPS disabled")
+    
     # Log panel mode if target_regions provided
     if target_regions is not None:
         if target_regions.exists():
@@ -147,34 +158,14 @@ def wps(
         logger.info(f"Processing {bedgz_input.name}")
         logger.info("WPS dual-stream: Nuc (weighted 120-180bp), TF (35-80bp)")
         
-        # Resolve GC correction assets
-        gc_ref = None
-        valid_regions = None
-        factors_out = None
-        
-        if gc_correct:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.tsv"
-                logger.info(f"GC correction enabled using bundled assets for {genome}")
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Proceeding without GC correction. Use --no-gc-correct to suppress this warning.")
-                gc_correct = False
-        
-        # Check for pre-computed correction factors (from extract step)
-        factors_input = None
-        if gc_correct:
-            # Look for existing correction_factors.tsv next to input BED.gz
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
-            if potential_factors.exists():
-                factors_input = potential_factors
-                logger.info(f"Using pre-computed correction factors: {factors_input}")
-                # Don't recompute, just load
-                gc_ref = None
-                valid_regions = None
-                factors_out = None
+        # Resolve GC correction assets (centralized helper)
+        from .core.gc_assets import resolve_gc_assets
+        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
+        gc_ref = gc.gc_ref
+        valid_regions = gc.valid_regions
+        factors_out = gc.factors_out
+        factors_input = gc.factors_input
+        gc_correct = gc.gc_correct_enabled
         
         # Output paths (Parquet only)
         output_file = output / f"{sample_name}.WPS.parquet"
@@ -220,6 +211,26 @@ def wps(
         logger.info(f"WPS complete: {output_file}")
         if bg_regions and output_bg_file.exists():
             logger.info(f"WPS background: {output_bg_file}")
+        
+        # === DUAL WPS: Run panel-specific WPS if --assay was provided ===
+        output_panel_file = None
+        if panel_anchors and panel_anchors.exists():
+            output_panel_file = output / f"{sample_name}.WPS.panel.parquet"
+            logger.info(f"Running panel-specific WPS ({panel_anchors.name})...")
+            _core.run_unified_pipeline(
+                str(bedgz_input),
+                None, None, None,  # GC already computed
+                str(factors_out) if factors_out and factors_out.exists() else (str(factors_input) if factors_input else None),
+                None, None,  # No FSC
+                str(panel_anchors), str(output_panel_file),  # Panel WPS
+                None, None,  # No background for panel
+                empty,
+                None, None,  # No FSD
+                None, None,  # No OCF
+                str(target_regions) if target_regions else None,
+                bait_padding
+            )
+            logger.info(f"Panel WPS complete: {output_panel_file}")
         
         # Load PON model if provided and extract WPS baseline
         pon_wps_baseline_path = None

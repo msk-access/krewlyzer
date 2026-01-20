@@ -39,6 +39,7 @@ def motif(
     genome_reference: Path = typer.Option(..., '-r', '--reference', help="Reference genome FASTA (indexed)"),
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
     target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: generates on/off-target motifs)"),
+    pon_model: Optional[Path] = typer.Option(None, '-P', '--pon-model', help="PON model for MDS z-score computation"),
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
@@ -191,6 +192,32 @@ def motif(
                 include_headers=True
             )
             logger.info(f"On-target motifs: EM={total_em_on:,}, BPM={total_bpm_on:,}")
+        
+        # Apply PON normalization if model provided
+        mds_z = None
+        if pon_model and pon_model.exists():
+            try:
+                from .pon.model import PonModel
+                pon = PonModel.load(pon_model)
+                if pon.mds_baseline:
+                    mds_z = pon.mds_baseline.get_mds_zscore(mds)
+                    logger.info(f"MDS z-score (vs PON): {mds_z:.3f}")
+                    
+                    # Append z-score to MDS output file
+                    import pandas as pd
+                    mds_df = pd.read_csv(mds_output, sep='\t')
+                    mds_df['mds_z'] = mds_z
+                    mds_df.to_csv(mds_output, sep='\t', index=False)
+                    
+                    # Find aberrant k-mers
+                    edm_freqs = {k: v/total_em for k, v in End_motif.items()} if total_em > 0 else {}
+                    aberrant = pon.mds_baseline.get_aberrant_kmers(edm_freqs, threshold=3.0)
+                    if aberrant:
+                        logger.info(f"Found {len(aberrant)} aberrant k-mers (|z| > 3.0)")
+                else:
+                    logger.warning("PON model has no MDS baseline - skipping z-score")
+            except Exception as e:
+                logger.warning(f"Could not apply PON normalization: {e}")
         
         logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
 

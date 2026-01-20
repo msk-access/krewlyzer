@@ -101,6 +101,67 @@ chr1    27022522    27022622    ARID1A_exon1
 - Standard BED format (0-based, half-open)
 - Optional 4th column for region names
 
+
+## Gene-Centric FSC (MSK-ACCESS)
+
+For MSK-ACCESS panels (v1 and v2), krewlyzer provides **gene-level FSC aggregation**:
+
+```bash
+# FSC with gene-level output for MSK-ACCESS v2
+krewlyzer fsc -i sample.bed.gz -o out/ --assay xs2
+```
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `{sample}.FSC.tsv` | Standard window-based FSC |
+| `{sample}.FSC.gene.tsv` | Gene-level FSC (146 genes for xs2) |
+
+### Gene FSC Output Format
+
+```
+gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  ultra_short_ratio  ...
+ATM     62         8432      1234         5678        9012       3456     789   20169  0.0612             ...
+BRCA2   42         5689      ...
+```
+
+### Supported Assays
+
+| Assay | Flag | Genes |
+|-------|------|:-----:|
+| MSK-ACCESS v1 | `--assay xs1` | 128 |
+| MSK-ACCESS v2 | `--assay xs2` | 146 |
+
+The gene groupings are bundled with krewlyzer in `data/genes/GRCh37/`.
+
+
+## Panel WPS Anchors (MSK-ACCESS)
+
+For MSK-ACCESS panels, WPS analysis uses **panel-specific anchors** filtered to genes in the panel:
+
+```bash
+# WPS with panel-specific anchors for MSK-ACCESS v2
+krewlyzer wps -i sample.bed.gz -o out/ \
+    --wps-anchors $(python -c "from krewlyzer.core.wps_anchor_filter import get_bundled_wps_anchors; print(get_bundled_wps_anchors('xs2', 'GRCh37'))")
+```
+
+### Bundled Panel Anchors
+
+| Assay | File | Anchors |
+|-------|------|:-------:|
+| MSK-ACCESS v1 | `xs1.wps_anchors.bed.gz` | 1,611 |
+| MSK-ACCESS v2 | `xs2.wps_anchors.bed.gz` | 1,820 |
+
+### Anchor Types
+
+- **TSS anchors**: Transcription start sites for panel genes
+- **CTCF anchors**: CTCF binding sites within 100kb of panel TSS sites
+
+> [!TIP] 
+> Using panel-specific anchors reduces noise from irrelevant genome-wide signals and focuses WPS analysis on oncologically relevant regions.
+
+
 ## PON Compatibility
 
 The PON model stores whether it was built in panel mode:
