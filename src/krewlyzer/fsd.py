@@ -41,7 +41,8 @@ def fsd(
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)")
 ):
     """
     Calculate fragment size distribution (FSD) features for a single sample.
@@ -53,7 +54,7 @@ def fsd(
     """
     from .assets import AssetManager
     from .core.pon_integration import load_pon_model
-    from .core.fsd_processor import apply_fsd_pon
+    from .core.fsd_processor import process_fsd
     
     # Configure verbose logging
     if verbose:
@@ -119,32 +120,14 @@ def fsd(
     try:
         logger.info(f"Processing {bedgz_input.name}")
         
-        # Resolve GC correction assets
-        gc_ref = None
-        valid_regions = None
-        factors_out = None
-        
-        if gc_correct:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
-                logger.info(f"GC correction enabled using bundled assets for {genome}")
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Proceeding without GC correction. Use --no-gc-correct to suppress this warning.")
-                gc_correct = False
-        
-        # Check for pre-computed correction factors (from extract step)
-        factors_input = None
-        if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
-            if potential_factors.exists():
-                factors_input = potential_factors
-                logger.info(f"Using pre-computed correction factors: {factors_input}")
-                gc_ref = None
-                valid_regions = None
-                factors_out = None
+        # Resolve GC correction assets (centralized helper)
+        from .core.gc_assets import resolve_gc_assets
+        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
+        gc_ref = gc.gc_ref
+        valid_regions = gc.valid_regions
+        factors_out = gc.factors_out
+        factors_input = gc.factors_input
+        gc_correct = gc.gc_correct_enabled
         
         # Call Unified Pipeline (FSD only)
         logger.info("Running unified pipeline for FSD...")
@@ -179,7 +162,7 @@ def fsd(
         
         # If PON provided, apply z-scores using shared processor
         if pon:
-            apply_fsd_pon(output_file, pon)
+            process_fsd(output_file, pon=pon)
         
         logger.info(f"✅ FSD complete: {output_file}")
 

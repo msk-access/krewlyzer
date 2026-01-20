@@ -1,3 +1,12 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_OCF
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Orientation-aware cfDNA Fragmentation - strand asymmetry at Open Chromatin Regions.
+    Used for tissue-of-origin deconvolution (Sun et al. 2019).
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_OCF {
     tag "$meta.id"
     label 'process_medium'
@@ -10,6 +19,9 @@ process KREWLYZER_OCF {
     output:
     tuple val(meta), path("*.OCF.tsv"), emit: tsv
     path "versions.yml"               , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -36,6 +48,17 @@ process KREWLYZER_OCF {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    echo -e "tissue\\tocf_score\\tstrand_bias" > ${prefix}.OCF.tsv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

@@ -51,15 +51,16 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
     --variants mutations.maf
 
-# Panel data (MSK-ACCESS)
+# Panel data (MSK-ACCESS) with --assay for gene-centric output
 krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
     --target-regions panel_targets.bed \
-    --bin-input gene_bins.bed
+    --assay xs2
 
 # Full options
 krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
     --variants mutations.vcf \
     --target-regions targets.bed \
+    --assay xs2 \
     --pon-model cohort.pon.parquet \
     --threads 8
 ```
@@ -78,6 +79,9 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--bin-input` | `-b` | PATH | | Custom bins for FSC/FSR |
 | `--pon-model` | `-P` | PATH | | PON model for normalization |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
+| `--assay` | `-A` | TEXT | | Assay code (xs1, xs2) for gene-centric FSC |
+| `--output-format` | `-F` | TEXT | auto | Output format: auto, tsv, parquet, json |
+| `--generate-json` | | FLAG | | Generate unified sample.features.json |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
@@ -95,12 +99,14 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.EndMotif.tsv` | extract | 4-mer end motif frequencies |
 | `{sample}.MDS.tsv` | extract | Motif Diversity Score |
 | `{sample}.FSC.tsv` | fsc | 5-channel coverage per bin |
+| `{sample}.FSC.gene.tsv` | fsc | Gene-centric FSC (with --assay) |
 | `{sample}.FSR.tsv` | fsr | Short/long fragment ratios |
 | `{sample}.FSD.tsv` | fsd | Size distribution per arm |
 | `{sample}.WPS.parquet` | wps | Nucleosome protection profiles |
 | `{sample}.WPS_background.parquet` | wps | Alu element stacking |
 | `{sample}.OCF.tsv` | ocf | Tissue-of-origin OCF |
 | `{sample}.mFSD.tsv` | mfsd | Mutant vs WT sizes (with -v) |
+| `{sample}.features.json` | run-all | Unified JSON (with --generate-json) |
 
 ---
 
@@ -194,11 +200,11 @@ sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 
 When `assay` is set and `--asset_dir` is provided, the pipeline auto-resolves:
 
-| Assay | PON File | Targets File |
-|-------|----------|--------------|
-| `XS1` | `{asset_dir}/pon/msk-access-v1.pon.parquet` | `{asset_dir}/targets/XS1_targets.bed` |
-| `XS2` | `{asset_dir}/pon/msk-access-v2.pon.parquet` | `{asset_dir}/targets/XS2_targets.bed` |
-| `WGS` | `{asset_dir}/pon/wgs.pon.parquet` | None |
+| Assay | PON File | Targets File | Genes | WPS Anchors |
+|-------|----------|--------------|:-----:|:-----------:|
+| `XS1` | `{asset_dir}/pon/GRCh37/xs1.pon.parquet` | `{asset_dir}/targets/GRCh37/xs1.targets.bed` | 128 | 1,611 |
+| `XS2` | `{asset_dir}/pon/GRCh37/xs2.pon.parquet` | `{asset_dir}/targets/GRCh37/xs2.targets.bed` | 146 | 1,820 |
+| `WGS` | `{asset_dir}/pon/GRCh37/wgs.pon.parquet` | None | - | 147,772 |
 
 ### Example Samplesheet
 

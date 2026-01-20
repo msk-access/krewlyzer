@@ -16,21 +16,35 @@ use log::info;
 use pyo3::prelude::*;
 use rust_htslib::faidx;
 
-/// Length bins for GC correction (20bp bins from 60-400bp = 17 bins)
-pub const LENGTH_BINS: [(u32, u32); 17] = [
-    (60, 80), (80, 100), (100, 120), (120, 140), (140, 160),
-    (160, 180), (180, 200), (200, 220), (220, 240), (240, 260),
-    (260, 280), (280, 300), (300, 320), (320, 340), (340, 360),
-    (360, 380), (380, 400),
+/// Length bins for GC correction (5bp bins from 60-400bp = 68 bins)
+/// 
+/// 5bp granularity provides finer-grained GC bias modeling for ML features.
+/// Bin 0 = 60-64bp, Bin 1 = 65-69bp, ..., Bin 67 = 395-399bp
+/// 
+/// Note: This matches LengthBin in gc_correction.rs for consistency.
+pub const LENGTH_BINS: [(u32, u32); 68] = [
+    (60, 65), (65, 70), (70, 75), (75, 80), (80, 85), (85, 90), (90, 95), (95, 100),
+    (100, 105), (105, 110), (110, 115), (115, 120), (120, 125), (125, 130), (130, 135), (135, 140),
+    (140, 145), (145, 150), (150, 155), (155, 160), (160, 165), (165, 170), (170, 175), (175, 180),
+    (180, 185), (185, 190), (190, 195), (195, 200), (200, 205), (205, 210), (210, 215), (215, 220),
+    (220, 225), (225, 230), (230, 235), (235, 240), (240, 245), (245, 250), (250, 255), (255, 260),
+    (260, 265), (265, 270), (270, 275), (275, 280), (280, 285), (285, 290), (290, 295), (295, 300),
+    (300, 305), (305, 310), (310, 315), (315, 320), (320, 325), (325, 330), (330, 335), (335, 340),
+    (340, 345), (345, 350), (350, 355), (355, 360), (360, 365), (365, 370), (370, 375), (375, 380),
+    (380, 385), (385, 390), (390, 395), (395, 400),
 ];
 
-/// Get the length bin index for a given fragment length
-/// Returns None if the length is outside the range [60, 400]
+/// Number of length bins (5bp bins from 60-400bp)
+pub const NUM_LENGTH_BINS: usize = 68;
+
+/// Get the length bin index for a given fragment length (5bp bins)
+/// Returns None if the length is outside the range [60, 400)
 pub fn get_length_bin_index(length: u32) -> Option<usize> {
     if length < 60 || length >= 400 {
         return None;
     }
-    Some(((length - 60) / 20) as usize)
+    // (length - 60) / 5 -> 0..67
+    Some(((length - 60) / 5) as usize)
 }
 
 /// GC correction factors lookup table
@@ -47,10 +61,11 @@ pub struct GcCorrectionFactors {
 
 impl GcCorrectionFactors {
     /// Create a new empty correction factors table
+    /// Uses NUM_LENGTH_BINS (68 bins for 5bp granularity)
     pub fn new() -> Self {
         Self {
-            factors: vec![vec![1.0; 101]; 17],
-            counts: vec![vec![0; 101]; 17],
+            factors: vec![vec![1.0; 101]; NUM_LENGTH_BINS],
+            counts: vec![vec![0; 101]; NUM_LENGTH_BINS],
         }
     }
     
@@ -367,11 +382,11 @@ pub fn generate_valid_regions(
     Ok(region_count)
 }
 
-/// Load exclude regions from BED file
+/// Load exclude regions from BED file (supports plain and gzipped)
 fn load_exclude_regions(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>> {
-    let file = File::open(path)
+    // Use bed::get_reader for transparent BGZF/gzip handling
+    let reader = crate::bed::get_reader(path)
         .with_context(|| format!("Failed to open exclude regions file: {:?}", path))?;
-    let reader = BufReader::new(file);
     
     let mut exclude_regions: HashMap<String, Vec<(u64, u64)>> = HashMap::new();
     
@@ -441,7 +456,8 @@ pub fn generate_ref_genome_gc(
         ))?;
     
     // Initialize counts matrix [length_bin][gc_percent]
-    let mut counts: Vec<Vec<u64>> = vec![vec![0; 101]; 17];
+    // Uses NUM_LENGTH_BINS (68 bins for 5bp granularity)
+    let mut counts: Vec<Vec<u64>> = vec![vec![0; 101]; NUM_LENGTH_BINS];
     let mut total_fragments: u64 = 0;
     
     info!("Processing {} regions...", regions.len());
@@ -618,12 +634,16 @@ mod tests {
     
     #[test]
     fn test_length_bin_index() {
+        // 5bp bins: 60-64 = bin 0, 65-69 = bin 1, ..., 395-399 = bin 67
         assert_eq!(get_length_bin_index(60), Some(0));
-        assert_eq!(get_length_bin_index(79), Some(0));
-        assert_eq!(get_length_bin_index(80), Some(1));
-        assert_eq!(get_length_bin_index(399), Some(16));
-        assert_eq!(get_length_bin_index(400), None);
-        assert_eq!(get_length_bin_index(59), None);
+        assert_eq!(get_length_bin_index(64), Some(0));  // Still bin 0
+        assert_eq!(get_length_bin_index(65), Some(1));  // Now bin 1
+        assert_eq!(get_length_bin_index(79), Some(3));  // (79-60)/5 = 3
+        assert_eq!(get_length_bin_index(80), Some(4));  // (80-60)/5 = 4
+        assert_eq!(get_length_bin_index(166), Some(21)); // Nucleosome peak ~166bp
+        assert_eq!(get_length_bin_index(399), Some(67)); // Last bin
+        assert_eq!(get_length_bin_index(400), None);     // Out of range
+        assert_eq!(get_length_bin_index(59), None);      // Out of range
     }
     
     #[test]

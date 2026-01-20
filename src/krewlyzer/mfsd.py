@@ -30,7 +30,7 @@ def mfsd(
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     reference: Optional[Path] = typer.Option(None, "--reference", "-g", help="Reference genome FASTA (for GC correction)"),
-    correction_factors: Optional[Path] = typer.Option(None, "--correction-factors", "-F", help="Pre-computed correction_factors.csv (from extract/run-all)"),
+    correction_factors: Optional[Path] = typer.Option(None, "--correction-factors", "-F", help="Pre-computed correction_factors.tsv (from extract/run-all)"),
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
     minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length (filters discordant reads)"),
     maxlen: int = typer.Option(400, "--maxlen", help="Maximum fragment length (filters discordant reads)"),

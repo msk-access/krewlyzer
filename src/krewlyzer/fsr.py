@@ -46,6 +46,7 @@ def fsr(
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
 ):
@@ -123,34 +124,14 @@ def fsr(
             logger.warning("Falling back to within-sample correction only")
 
     try:
-        logger.info(f"Processing {bedgz_input.name}")
-        
-        # Resolve GC correction assets
-        gc_ref = None
-        valid_regions = None
-        factors_out = None
-        
-        if gc_correct:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Proceeding without GC correction")
-                gc_correct = False
-        
-        # Check for pre-computed correction factors (from extract step)
-        factors_input = None
-        if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
-            if potential_factors.exists():
-                factors_input = potential_factors
-                logger.info(f"Using pre-computed correction factors: {factors_input}")
-                # Skip computing new factors since we have pre-computed ones
-                gc_ref = None
-                valid_regions = None
-                factors_out = None
+        # Resolve GC correction assets (centralized helper)
+        from .core.gc_assets import resolve_gc_assets
+        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
+        gc_ref = gc.gc_ref
+        valid_regions = gc.valid_regions
+        factors_out = gc.factors_out
+        factors_input = gc.factors_input
+        gc_correct = gc.gc_correct_enabled
         
         # Call Unified Pipeline (FSC bins mode - same bins as FSR)
         # FSR uses the same bin-level counts as FSC, just computes ratios instead of z-scores

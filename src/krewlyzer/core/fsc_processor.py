@@ -151,3 +151,143 @@ def _write_fsc_output(df: pd.DataFrame, output_path: Path, with_pon: bool):
     # Select and write
     output_df = df[cols].copy()
     output_df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
+
+
+def aggregate_by_gene(
+    fragments_bed: Path,
+    genes: dict,
+    output_path: Path,
+    pon=None
+) -> Path:
+    """
+    Aggregate fragment counts by gene for panel-specific FSC.
+    
+    Instead of genomic windows, this function sums fragment counts
+    per gene target regions, producing gene-level FSC features.
+    
+    Args:
+        fragments_bed: Path to fragment BED file from extract step
+        genes: Dict[gene_name, List[Region]] from gene_bed.load_gene_bed()
+        output_path: Path to write gene FSC output
+        pon: Optional PON model for normalization
+        
+    Returns:
+        Path to output file
+        
+    Output columns:
+        - gene: Gene name
+        - n_regions: Number of target regions for this gene
+        - total_bp: Total basepairs covered
+        - ultra_short, core_short, mono_nucl, di_nucl, long: Channel counts
+        - total: Total fragments
+        - *_ratio: Channel / total ratio
+    """
+    import gzip
+    
+    logger.info(f"Aggregating FSC by gene: {len(genes)} genes")
+    
+    # Build interval tree for fast region lookup
+    # Structure: chrom -> [(start, end, gene), ...]
+    gene_intervals = {}
+    for gene, regions in genes.items():
+        for region in regions:
+            chrom = region.chrom
+            if chrom not in gene_intervals:
+                gene_intervals[chrom] = []
+            gene_intervals[chrom].append((region.start, region.end, gene))
+    
+    # Sort intervals per chromosome
+    for chrom in gene_intervals:
+        gene_intervals[chrom].sort(key=lambda x: x[0])
+    
+    # Initialize gene counts
+    gene_counts = {gene: {ch: 0 for ch in CHANNELS + ['total']} for gene in genes}
+    gene_meta = {gene: {'n_regions': len(regions), 'total_bp': sum(r.end - r.start for r in regions)} 
+                 for gene, regions in genes.items()}
+    
+    # Read fragments and count by gene
+    total_fragments = 0
+    assigned_fragments = 0
+    
+    open_func = gzip.open if str(fragments_bed).endswith('.gz') else open
+    with open_func(fragments_bed, 'rt') as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            
+            fields = line.strip().split('\\t')
+            if len(fields) < 3:
+                continue
+            
+            total_fragments += 1
+            chrom = fields[0]
+            try:
+                start = int(fields[1])
+                end = int(fields[2])
+            except ValueError:
+                continue
+            
+            # Determine size bin
+            frag_len = end - start
+            if frag_len < 65:
+                continue  # Too short
+            elif frag_len < 100:
+                size_bin = 'ultra_short'
+            elif frag_len < 150:
+                size_bin = 'core_short'
+            elif frag_len < 260:
+                size_bin = 'mono_nucl'
+            elif frag_len < 400:
+                size_bin = 'di_nucl'
+            else:
+                size_bin = 'long'
+            
+            # Find overlapping gene regions
+            if chrom not in gene_intervals:
+                continue
+            
+            frag_mid = (start + end) // 2
+            for reg_start, reg_end, gene in gene_intervals[chrom]:
+                if reg_start > frag_mid:
+                    break  # Past this fragment
+                if reg_start <= frag_mid < reg_end:
+                    gene_counts[gene][size_bin] += 1
+                    gene_counts[gene]['total'] += 1
+                    assigned_fragments += 1
+                    break  # Assign to first matching gene only
+    
+    logger.info(f"Processed {total_fragments} fragments, {assigned_fragments} assigned to genes")
+    
+    # Build output DataFrame
+    rows = []
+    for gene in sorted(genes.keys()):
+        row = {
+            'gene': gene,
+            'n_regions': gene_meta[gene]['n_regions'],
+            'total_bp': gene_meta[gene]['total_bp'],
+            **gene_counts[gene]
+        }
+        # Calculate channel ratios
+        total = gene_counts[gene]['total']
+        for ch in CHANNELS:
+            row[f'{ch}_ratio'] = gene_counts[gene][ch] / total if total > 0 else 0.0
+        rows.append(row)
+    
+    df = pd.DataFrame(rows)
+    
+    # Add PoN normalization if available
+    if pon is not None:
+        logger.info("Computing PoN log2 ratios for gene FSC...")
+        for ch in CHANNELS:
+            mean = pon.get_mean(f'gene_{ch}') if hasattr(pon, 'get_mean') else None
+            if mean and mean > 0:
+                df[f'{ch}_log2'] = np.log2(df[ch] / mean + 1e-9)
+            else:
+                df[f'{ch}_log2'] = 0.0
+    
+    # Write output
+    df.to_csv(output_path, sep='\\t', index=False, float_format='%.4f')
+    logger.info(f"Gene FSC complete: {output_path} ({len(df)} genes)")
+    
+    return output_path
+

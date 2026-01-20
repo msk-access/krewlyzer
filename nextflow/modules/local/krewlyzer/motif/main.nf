@@ -1,3 +1,12 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_MOTIF
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    End Motif and Motif Diversity Score (MDS) extraction.
+    Captures cfDNA cleavage preferences for enzymatic signature analysis.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_MOTIF {
     tag "$meta.id"
     label 'process_high'
@@ -11,6 +20,9 @@ process KREWLYZER_MOTIF {
     tuple val(meta), path("*.EndMotif.tsv"), emit: end_motif
     tuple val(meta), path("*.MDS.tsv")     , emit: mds
     path "versions.yml"                    , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -29,6 +41,18 @@ process KREWLYZER_MOTIF {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    echo -e "motif\\tcount\\tfrequency" > ${prefix}.EndMotif.tsv
+    echo -e "sample\\tmds" > ${prefix}.MDS.tsv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

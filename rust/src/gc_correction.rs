@@ -447,7 +447,7 @@ pub fn compute_and_write_gc_factors(
     Ok(n_factors)
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn variance(data: &[f64]) -> f64 {
     let n = data.len() as f64;
     if n < 2.0 {

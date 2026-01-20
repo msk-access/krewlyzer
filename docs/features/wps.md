@@ -144,7 +144,30 @@ krewlyzer wps -i sample.bed.gz -o output/ --background custom_alu.bed.gz
 
 # Panel data (MSK-ACCESS)
 krewlyzer wps -i sample.bed.gz -o output/ --target-regions msk_access_baits.bed --bait-padding 20
+
+# Panel data with panel-specific anchors (recommended for MSK-ACCESS)
+krewlyzer wps -i sample.bed.gz -o output/ \
+    --wps-anchors /path/to/xs2.wps_anchors.bed.gz \
+    --target-regions msk_access_baits.bed
 ```
+
+### Panel-Specific WPS Anchors
+
+For targeted panels like MSK-ACCESS, genome-wide WPS anchors include many regions with no coverage. Use **panel-specific anchors** for focused analysis:
+
+| Assay | Bundled File | Anchors | Genes |
+|-------|--------------|:-------:|:-----:|
+| MSK-ACCESS v1 | `xs1.wps_anchors.bed.gz` | 1,611 | 128 |
+| MSK-ACCESS v2 | `xs2.wps_anchors.bed.gz` | 1,820 | 146 |
+
+**What's included:**
+- **TSS anchors** for genes in the panel
+- **CTCF anchors** within 100kb of panel genes
+
+**Benefits:**
+- Reduced noise from off-target regions
+- Faster processing
+- More interpretable ML features
 
 ## CLI Options
 
@@ -161,6 +184,7 @@ krewlyzer wps -i sample.bed.gz -o output/ --target-regions msk_access_baits.bed 
 | `--pon-model` | `-P` | PON model for z-score computation |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
+| `--format` | `-f` | Output format: tsv, parquet, json |
 | `--verbose` | `-v` | Enable verbose logging |
 
 ### Bait Padding Trade-Off
@@ -180,6 +204,36 @@ effective_trim = min(user_trim, target_length / 4)
 This ensures you never mask more than 50% of a small exon (25% per side).
 
 ---
+
+## Dual WPS Output (with `--assay`)
+
+When using `--assay` (e.g., for MSK-ACCESS), Krewlyzer generates **two** WPS output files:
+
+```bash
+krewlyzer wps -i sample.bed.gz -o output/ --assay xs2
+```
+
+### Output Files
+
+| File | Anchors | Purpose |
+|------|---------|---------|
+| `{sample}.WPS.parquet` | Genome-wide (~15k) | Global cancer detection signature |
+| `{sample}.WPS.panel.parquet` | Panel genes (~2k) | Targeted gene-level profiling |
+
+### Why Dual Output?
+
+| Scenario | Use |
+|----------|-----|
+| **Pan-cancer detection** | Use `WPS.parquet` (genome-wide) |
+| **Specific gene analysis** | Use `WPS.panel.parquet` (focused) |
+| **Feature vectors for ML** | Combine both via [JSON output](json-output.md) |
+
+### How It Works
+
+1. **First pass**: Genome-wide anchors (TSS+CTCF for ~5,000 genes)
+2. **Second pass**: Panel-specific anchors (genes in your assay)
+
+Both use the same pre-computed GC correction factors for consistency.
 
 ## Output Files
 

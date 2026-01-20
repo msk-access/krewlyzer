@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/msk-access/krewlyzer//nextflow_schema.json",
+  "title": "msk-access/krewlyzer pipeline parameters",
+  "description": "Fragmentomics Feature Extraction Pipeline for cfDNA Analysis",
+  "type": "object",
+  "$defs": {
+    "input_output_options": {
+      "title": "Input/output options",
+      "type": "object",
+      "fa_icon": "fas fa-terminal",
+      "description": "Define where the pipeline should find input data and save output data.",
+      "required": ["outdir"],
+      "properties": {
+        "outdir": {
+          "type": "string",
+          "format": "directory-path",
+          "description": "The output directory where the results will be saved. You have to use absolute paths to storage on Cloud infrastructure.",
+          "fa_icon": "fas fa-folder-open",
+          "default": "./results"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "#/$defs/input_output_options"
+    }
+  ],
+  "properties": {
+    "ref": {
+      "type": "string"
+    },
+    "targets": {
+      "type": "string"
+    },
+    "genome": {
+      "type": "string",
+      "default": "hg19"
+    },
+    "gc_correct": {
+      "type": "boolean",
+      "default": true
+    },
+    "pon_model": {
+      "type": "string"
+    },
+    "asset_dir": {
+      "type": "string"
+    },
+    "bait_padding": {
+      "type": "integer",
+      "default": 50
+    },
+    "wps_anchors": {
+      "type": "string"
+    },
+    "wps_background": {
+      "type": "string"
+    },
+    "mapq": {
+      "type": "integer",
+      "default": 20
+    },
+    "minlen": {
+      "type": "integer",
+      "default": 65
+    },
+    "maxlen": {
+      "type": "integer",
+      "default": 400
+    },
+    "skip_duplicates": {
+      "type": "boolean",
+      "default": true
+    },
+    "require_proper_pair": {
+      "type": "boolean",
+      "default": true
+    },
+    "exclude_regions": {
+      "type": "string"
+    },
+    "threads": {
+      "type": "integer",
+      "default": 8
+    },
+    "verbose": {
+      "type": "boolean"
+    },
+    "generate_json": {
+      "type": "boolean"
+    },
+    "output_format": {
+      "type": "string",
+      "default": "auto"
+    },
+    "monochrome_logs": {
+      "type": "boolean"
+    },
+    "test_data_base": {
+      "type": "string"
+    }
+  }
+}

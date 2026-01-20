@@ -46,8 +46,8 @@ coitrees = "0.4"
 # LOESS/LOWESS for GC bias correction
 lowess = "0.4.1"
 
-# Savitzky-Golay smoothing for WPS profiles (sci-rs provides scipy-like signal processing)
-sci-rs = { git = "https://github.com/qsib-cbie/sci-rs" }
+# Savitzky-Golay smoothing for WPS profiles
+sci-rs = "0.4.1"
 
 # FFT for periodicity extraction (replaces scipy.fft)
 realfft = "3.5"

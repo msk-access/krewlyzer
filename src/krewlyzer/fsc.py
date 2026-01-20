@@ -41,12 +41,14 @@ def fsc(
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSC)"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay type (xs1/xs2) for gene-centric FSC aggregation"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)")
 ):
     """
     Calculate fragment size coverage (FSC) features for a single sample.
@@ -125,34 +127,14 @@ def fsc(
 
     try:
         logger.info(f"Processing {bedgz_input.name}")
-        
-        # Resolve GC correction assets
-        gc_ref = None
-        valid_regions = None
-        factors_out = None
-        
-        if gc_correct:
-            try:
-                gc_ref = assets.resolve("gc_correction")
-                valid_regions = assets.resolve("valid_regions")
-                factors_out = output / f"{sample_name}.correction_factors.csv"
-                logger.debug(f"GC ref: {gc_ref}")
-                logger.debug(f"Valid regions: {valid_regions}")
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Proceeding without GC correction")
-                gc_correct = False
-        
-        # Check for pre-computed correction factors (from extract step)
-        factors_input = None
-        if gc_correct:
-            potential_factors = bedgz_input.parent / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.csv"
-            if potential_factors.exists():
-                factors_input = potential_factors
-                logger.info(f"Using pre-computed correction factors: {factors_input}")
-                gc_ref = None
-                valid_regions = None
-                factors_out = None
+        # Resolve GC correction assets (centralized helper)
+        from .core.gc_assets import resolve_gc_assets
+        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
+        gc_ref = gc.gc_ref
+        valid_regions = gc.valid_regions
+        factors_out = gc.factors_out
+        factors_input = gc.factors_input
+        gc_correct = gc.gc_correct_enabled
         
         # Call Unified Pipeline (FSC only)
         logger.info("Running fragment counting via Rust backend...")
@@ -213,6 +195,32 @@ def fsc(
                 pon=pon
             )
             logger.info(f"✅ FSC on-target: {output_file_on}")
+        
+        # Gene-centric FSC aggregation if assay is specified
+        if assay:
+            from .core.gene_bed import load_gene_bed
+            from .core.fsc_processor import aggregate_by_gene
+            
+            # Map genome to GRCh format for gene_bed
+            genome_map = {'hg19': 'GRCh37', 'grch37': 'GRCh37', 'hg38': 'GRCh38', 'grch38': 'GRCh38'}
+            gene_genome = genome_map.get(genome.lower(), 'GRCh37')
+            
+            try:
+                genes = load_gene_bed(assay=assay, genome=gene_genome)
+                gene_fsc_file = output / f"{sample_name}.FSC.gene.tsv"
+                
+                aggregate_by_gene(
+                    fragments_bed=bedgz_input,
+                    genes=genes,
+                    output_path=gene_fsc_file,
+                    pon=pon
+                )
+                logger.info(f"✅ Gene FSC: {gene_fsc_file} ({len(genes)} genes)")
+            except Exception as e:
+                logger.warning(f"Gene FSC aggregation failed: {e}")
+                if verbose:
+                    import traceback
+                    traceback.print_exc()
         
         logger.info(f"✅ FSC complete: {output_file}")
 

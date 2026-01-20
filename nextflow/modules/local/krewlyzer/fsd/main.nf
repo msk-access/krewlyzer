@@ -1,3 +1,12 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_FSD
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Fragment Size Distribution - size histograms per chromosome arm (39 arms).
+    Used for arm-level CNV detection and log-ratio normalization with PON.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_FSD {
     tag "$meta.id"
     label 'process_medium'
@@ -9,6 +18,9 @@ process KREWLYZER_FSD {
     output:
     tuple val(meta), path("*.FSD.tsv"), emit: tsv
     path "versions.yml"                 , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -33,6 +45,17 @@ process KREWLYZER_FSD {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    echo -e "arm\\tsize\\tcount" > ${prefix}.FSD.tsv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

@@ -1,3 +1,12 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_UXM
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Fragment-level Methylation (UXM) from bisulfite sequencing BAMs.
+    Quantifies hypermethylated and unmethylated fragment fractions.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_UXM {
     tag "$meta.id"
     label 'process_medium'
@@ -10,6 +19,9 @@ process KREWLYZER_UXM {
     output:
     tuple val(meta), path("*.UXM.tsv"), emit: tsv
     path "versions.yml"               , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
@@ -30,6 +42,17 @@ process KREWLYZER_UXM {
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    echo -e "region\\thypermeth\\tunmeth\\tratio" > ${prefix}.UXM.tsv
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.3.2
     END_VERSIONS
     """
 }

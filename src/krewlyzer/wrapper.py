@@ -27,7 +27,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-from .core.fsc_processor import process_fsc
+from .core.fsc_processor import process_fsc, aggregate_by_gene
 from .core.fsr_processor import process_fsr
 from .assets import AssetManager
 
@@ -85,6 +85,7 @@ def run_all(
     require_proper_pair: bool = typer.Option(True, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs"),
     exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-x", help="Exclude regions BED file"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: GC model from off-target reads only)"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1, xs2) for panel-specific assets and gene-centric FSC"),
     
     # Optional inputs for specific tools
     bisulfite_bam: Optional[Path] = typer.Option(None, "--bisulfite-bam", help="Bisulfite BAM for UXM (optional)"),
@@ -104,6 +105,10 @@ def run_all(
     wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
+    
+    # Output format options
+    output_format: str = typer.Option("auto", "--output-format", "-F", help="Output format: auto (smart defaults), tsv, parquet, json"),
+    generate_json: bool = typer.Option(False, "--generate-json", help="Generate unified sample.features.json with ALL data for ML pipelines"),
     
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
@@ -199,6 +204,20 @@ def run_all(
             # Panel compatibility check
             if hasattr(pon, 'check_panel_compatibility'):
                 pon.check_panel_compatibility(is_panel_mode)
+            
+            # PON/sample panel mode validation
+            resolved_assay = assay if isinstance(assay, str) else None
+            from .pon.validation import validate_panel_config, print_validation_warnings
+            validation = validate_panel_config(
+                pon_model=pon,
+                target_regions=resolved_target_regions,
+                assay=resolved_assay
+            )
+            if validation.warnings or validation.errors:
+                print_validation_warnings(validation, console)
+            if not validation.valid:
+                logger.error("PON validation failed. Use compatible PON or correct assay flag.")
+                raise typer.Exit(1)
         else:
             logger.warning(f"Failed to load PON model: {resolved_pon_model}")
     
@@ -322,7 +341,7 @@ def run_all(
                     pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
                     
                     # Compute GC correction factors inline
-                    factors_file = output / f"{sample}.correction_factors.csv"
+                    factors_file = output / f"{sample}.correction_factors.tsv"
                     try:
                         gc_ref = assets.resolve("gc_reference")
                         valid_regions = assets.resolve("valid_regions")
@@ -336,14 +355,25 @@ def run_all(
                     import json
                     from datetime import datetime
                     meta_file = output / f"{sample}.metadata.json"
+                    
+                    # Resolve assay
+                    resolved_assay = assay if isinstance(assay, str) else None
+                    
                     metadata = {
                         "sample_id": sample,
                         "total_fragments": fragment_count,
                         "genome": genome,
+                        "assay": resolved_assay,
                         "gc_correction_computed": factors_file.exists(),
+                        "panel_mode": is_panel_mode,
                         "filters": { "mapq": mapq, "min_length": minlen, "max_length": maxlen },
                         "timestamp": datetime.now().isoformat()
                     }
+                    
+                    # Add on-target rate if available (from Rust output)
+                    if is_panel_mode and hasattr(result, 'on_target_rate'):
+                        metadata["on_target_rate"] = result.on_target_rate
+                    
                     with open(meta_file, 'w') as f:
                         json.dump(metadata, f, indent=2)
 
@@ -431,13 +461,26 @@ def run_all(
             res_wps = resolved_wps_file
             logger.debug(f"WPS transcript (legacy): {resolved_wps_file}")
         else:
-            # Try wps_anchors asset first, fallback to transcript_anno
+            # Resolve assay for panel-specific assets
+            resolved_assay = assay if isinstance(assay, str) else None
+            
+            # For dual WPS: always use genome-wide anchors for primary WPS
+            # Panel-specific anchors are used in a second pass
             try:
                 res_wps = assets.wps_anchors
-                logger.debug(f"WPS anchors (default): {res_wps}")
+                logger.debug(f"WPS anchors (genome-wide): {res_wps}")
             except (AttributeError, FileNotFoundError):
                 res_wps = assets.transcript_anno
                 logger.debug(f"WPS transcript (fallback): {res_wps}")
+            
+            # Track panel anchors for dual WPS output (will be used after primary run)
+            res_wps_panel = None
+            if resolved_assay:
+                try:
+                    res_wps_panel = assets.get_wps_anchors(resolved_assay)
+                    logger.info(f"Dual WPS enabled: panel anchors ({resolved_assay}) will generate WPS.panel.parquet")
+                except Exception as e:
+                    logger.debug(f"Panel WPS anchors not available for {resolved_assay}: {e}")
         if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
 
         # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
@@ -467,7 +510,7 @@ def run_all(
             raise typer.Exit(1)
 
         # Define Outputs
-        out_gc_factors = output / f"{sample}.correction_factors.csv"
+        out_gc_factors = output / f"{sample}.correction_factors.tsv"
         out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
         out_wps = output / f"{sample}.WPS.parquet"  # Foreground Parquet
         out_wps_bg = output / f"{sample}.WPS_background.parquet"  # Alu stacking
@@ -505,6 +548,26 @@ def run_all(
             ocf_status = "OCF" if run_ocf else "OCF skipped"
             progress.update(task_pipeline, description=f"[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+{ocf_status})", completed=100)
             
+            # === DUAL WPS: Run panel-specific WPS if --assay was provided ===
+            if 'res_wps_panel' in dir() and res_wps_panel and res_wps_panel.exists():
+                out_wps_panel = output / f"{sample}.WPS.panel.parquet"
+                logger.info(f"Running panel-specific WPS ({res_wps_panel.name})...")
+                _core.run_unified_pipeline(
+                    str(bedgz_file),
+                    None, None, None,  # GC already computed
+                    str(out_gc_factors) if out_gc_factors.exists() else None,  # Load pre-computed GC
+                    None, None,  # No FSC needed
+                    str(res_wps_panel), str(out_wps_panel),  # Panel WPS
+                    None, None,  # No background for panel
+                    False,
+                    None, None,  # No FSD
+                    None, None,  # No OCF
+                    str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,
+                    resolved_bait_padding,
+                    True  # silent=True
+                )
+                logger.info(f"Panel WPS complete: {out_wps_panel.name}")
+            
             # ═══════════════════════════════════════════════════════════════════
             # 3. POST-PROCESSING (FSC/FSR, OCF, PON z-scores)
             # ═══════════════════════════════════════════════════════════════════
@@ -538,6 +601,23 @@ def run_all(
                     # FSR on-target (for comparison only - PCR biased)
                     final_fsr_on = output / f"{sample}.FSR.ontarget.tsv"
                     process_fsr(df_counts_on, final_fsr_on, fsc_windows, fsc_continue_n, pon=pon)
+                
+                # Gene-centric FSC (if --assay provided)
+                resolved_assay = assay if isinstance(assay, str) else None
+                if resolved_assay:
+                    from .core.gene_bed import load_gene_bed
+                    try:
+                        gene_regions = load_gene_bed(assay=resolved_assay, genome=genome)
+                        gene_fsc_output = output / f"{sample}.FSC.gene.tsv"
+                        aggregate_by_gene(
+                            df_counts=df_counts,
+                            gene_regions=gene_regions,
+                            output_path=gene_fsc_output,
+                            pon=pon
+                        )
+                        logger.info(f"Gene-centric FSC: {len(gene_regions)} genes -> {gene_fsc_output.name}")
+                    except Exception as e:
+                        logger.warning(f"Gene-centric FSC skipped: {e}")
         
             # OCF (Move files)
             src_ocf = out_ocf_dir / "all.ocf.tsv"
@@ -555,8 +635,8 @@ def run_all(
             
             try:
                 out_ocf_dir.rmdir()
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Could not remove temp OCF directory {out_ocf_dir}: {e}")
             
             # Use centralized PON loaded earlier (line 176+)
             
@@ -642,4 +722,29 @@ def run_all(
                 progress.update(task_mfsd, description="[5/5] mFSD ✗ Error", completed=100)
                 logger.warning(f"mFSD failed: {e}")
     
+    # ═══════════════════════════════════════════════════════════════════
+    # UNIFIED JSON OUTPUT (if requested)
+    # ═══════════════════════════════════════════════════════════════════
+    if generate_json:
+        try:
+            from .core.feature_serializer import FeatureSerializer
+            
+            logger.info("Generating unified features JSON...")
+            serializer = FeatureSerializer.from_outputs(sample, output, version="0.3.2")
+            
+            # Add runtime metadata
+            serializer.add_metadata("bam_path", str(bam_input))
+            serializer.add_metadata("genome", genome)
+            serializer.add_metadata("panel_mode", is_panel_mode)
+            if pon:
+                serializer.add_metadata("pon_assay", pon.assay)
+                serializer.add_metadata("pon_n_samples", pon.n_samples)
+            
+            json_path = output / sample
+            serializer.save(json_path)
+            logger.info(f"Unified JSON saved: {json_path}.features.json")
+        except Exception as e:
+            logger.warning(f"JSON generation failed: {e}")
+    
     logger.info(f"✅ All feature extraction complete: {output}")
+

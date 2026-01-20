@@ -149,12 +149,14 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--sample-name` | `-s` | Override sample name |
 | `--bin-input` | `-b` | Custom bin file (default: 100kb genome-wide) |
 | `--target-regions` | `-T` | Target BED (for on/off-target FSC split) |
+| `--assay` | `-A` | Assay type (xs1/xs2) for gene-centric FSC |
 | `--pon-model` | `-P` | PoN model for log2 ratio normalization |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--windows` | `-w` | Window size for aggregation (default: 100000) |
 | `--continue-n` | `-c` | Consecutive window number (default: 50) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
+| `--format` | `-f` | Output format: tsv, parquet, json |
 
 ---
 
@@ -292,6 +294,41 @@ flowchart TB
 | Tumor fraction | Off-target |
 | Gene-level amplification | **On-target** |
 | Panel-specific features | Both |
+
+---
+
+## Gene-Centric FSC (MSK-ACCESS)
+
+For MSK-ACCESS panels, use `--assay` to aggregate fragment counts by **gene** instead of genomic windows:
+
+```bash
+krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
+```
+
+### Output Files
+
+| File | Description |
+|------|-------------|
+| `{sample}.FSC.tsv` | Standard window-based FSC |
+| `{sample}.FSC.gene.tsv` | Gene-level FSC (146 genes for xs2) |
+
+### Gene FSC Output Format
+
+```
+gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  ultra_short_ratio  ...
+ATM     62         8432      1234         5678        9012       3456     789   20169  0.0612             ...
+BRCA2   42         5689      ...
+```
+
+### Supported Assays
+
+| Assay | Flag | Genes |
+|-------|------|:-----:|
+| MSK-ACCESS v1 | `--assay xs1` | 128 |
+| MSK-ACCESS v2 | `--assay xs2` | 146 |
+
+> [!TIP]
+> Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
 
 ---
 
