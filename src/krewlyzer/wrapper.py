@@ -370,9 +370,8 @@ def run_all(
                         "timestamp": datetime.now().isoformat()
                     }
                     
-                    # Add on-target rate if available (from Rust output)
-                    if is_panel_mode and hasattr(result, 'on_target_rate'):
-                        metadata["on_target_rate"] = result.on_target_rate
+                    # Note: on_target_rate is available from fragment counts but not exposed here
+                    # Consider adding this from em_counts_on/em_counts ratio if needed
                     
                     with open(meta_file, 'w') as f:
                         json.dump(metadata, f, indent=2)
