@@ -95,8 +95,9 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     fsd_mod.add_function(wrap_pyfunction!(fsd::apply_pon_logratio, &fsd_mod)?)?;
     m.add_submodule(&fsd_mod)?;
 
-    // WPS submodule (also exposed as function above? Cleaned up duplication)
+    // WPS submodule
     let wps_mod = PyModule::new(m.py(), "wps")?;
+    wps_mod.add_function(wrap_pyfunction!(wps::calculate_wps, &wps_mod)?)?;
     wps_mod.add_function(wrap_pyfunction!(wps::apply_pon_zscore, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 

@@ -103,10 +103,13 @@ def build_pon(
     logger.info(f"Assay: {assay}")
     logger.info(f"Reference: {reference}")
     
+    # Use AssetManager for bundled data files
+    from krewlyzer.assets import AssetManager
+    assets = AssetManager("GRCh37")  # TODO: detect from reference
+    
     # Default bin file
     if bin_file is None:
-        pkg_dir = Path(__file__).parent.parent
-        bin_file = pkg_dir / "data" / "ChromosomeBins" / "GRCh37" / "hg19_window_100kb.bed.gz"
+        bin_file = assets.bins_100kb
     
     if not bin_file.exists():
         logger.error(f"Bin file not found: {bin_file}")
@@ -114,8 +117,7 @@ def build_pon(
     
     # Default transcript file for WPS
     if transcript_file is None:
-        pkg_dir = Path(__file__).parent.parent
-        transcript_file = pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
+        transcript_file = assets.transcript_anno
     
     import tempfile
     import shutil
@@ -271,8 +273,7 @@ def build_pon(
                     with tempfile.TemporaryDirectory(dir=temp_base) as tmpdir:
                         fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
                         fsd_output_ontarget = Path(tmpdir) / f"{sample_name}.FSD.ontarget.tsv"
-                        pkg_dir = Path(__file__).parent.parent
-                        arms_file = pkg_dir / "data" / "ChromosomeArms" / "GRCh37" / "hg19.arms.bed.gz"
+                        arms_file = assets.arms
                         if arms_file.exists():
                             # Calculate FSD (Rust handles target_regions internally)
                             _core.fsd.calculate_fsd(
@@ -326,21 +327,33 @@ def build_pon(
                 
                 # Get OCF data per region (from open chromatin regions file)
                 try:
-                    pkg_dir = Path(__file__).parent.parent
-                    ocr_file = pkg_dir / "data" / "OCR" / "hg19_ocr_regions.bed.gz"
+                    ocr_file = assets.ocf_regions
                     if ocr_file.exists():
                         temp_base = str(temp_dir) if temp_dir else None
                         with tempfile.TemporaryDirectory(dir=temp_base) as tmpdir:
-                            ocf_output = Path(tmpdir) / f"{sample_name}.OCF.tsv"
+                            # OCF Rust function expects output_dir, not output_file
+                            ocf_output_dir = Path(tmpdir) / f"{sample_name}_ocf"
+                            ocf_output_dir.mkdir(exist_ok=True)
                             _core.ocf.calculate_ocf(
                                 str(bed_path),
                                 str(ocr_file),
-                                str(ocf_output)
+                                str(ocf_output_dir)
                             )
+                            # OCF writes to <output_dir>/all.ocf.tsv
+                            ocf_output = ocf_output_dir / "all.ocf.tsv"
                             if ocf_output.exists():
                                 ocf_df = pd.read_csv(ocf_output, sep="\t")
-                                if "region_id" in ocf_df.columns and "ocf" in ocf_df.columns:
+                                # OCF Rust outputs: tissue, OCF (not region_id, ocf)
+                                if "tissue" in ocf_df.columns and "OCF" in ocf_df.columns:
+                                    # Rename to standard format expected by baseline computation
+                                    ocf_df = ocf_df.rename(columns={"tissue": "region_id", "OCF": "ocf"})
                                     all_ocf_data.append(ocf_df[["region_id", "ocf"]])
+                                    logger.debug(f"  Collected OCF for {sample_name}: {len(ocf_df)} tissues")
+                                elif "region_id" in ocf_df.columns and "ocf" in ocf_df.columns:
+                                    all_ocf_data.append(ocf_df[["region_id", "ocf"]])
+                                    logger.debug(f"  Collected OCF for {sample_name}: {len(ocf_df)} regions")
+                    else:
+                        logger.debug(f"  OCF regions file not found: {ocr_file}")
                 except Exception as ocf_e:
                     logger.debug(f"  OCF failed for {sample_name}: {ocf_e}")
                 
@@ -689,14 +702,16 @@ def _compute_wps_baseline(all_wps_data: List[pd.DataFrame], wps_paths: List[str]
         return None
     
     template = all_wps_data[0].copy()
-    region_id_col = "region_id" if "region_id" in template.columns else "group_id"
+    region_id_col = "gene_id" if "gene_id" in template.columns else ("region_id" if "region_id" in template.columns else "group_id")
     
-    # Columns to aggregate
-    vector_cols = [c for c in ["wps_nuc", "wps_tf", "prot_frac_nuc", "prot_frac_tf"] 
+    # Columns to aggregate - support both naming conventions
+    # Rust WPS uses: wps_long, wps_short
+    # Legacy naming: wps_nuc, wps_tf
+    vector_cols = [c for c in ["wps_nuc", "wps_tf", "wps_long", "wps_short", "prot_frac_nuc", "prot_frac_tf"] 
                    if c in template.columns]
     
     if not vector_cols:
-        logger.warning("No WPS vector columns found (expected wps_nuc, wps_tf)")
+        logger.warning(f"No WPS vector columns found in columns: {list(template.columns)}")
         return None
     
     result_data = []
@@ -711,21 +726,31 @@ def _compute_wps_baseline(all_wps_data: List[pd.DataFrame], wps_paths: List[str]
                 result_row[col] = row[col]
         
         for col in vector_cols:
-            # Collect vectors from all samples for this region
-            vectors = []
+            # Collect values from all samples for this region
+            values = []
             for df in all_wps_data:
                 if idx < len(df) and col in df.columns:
-                    vec = df.iloc[idx][col]
-                    if vec is not None and len(vec) > 0:
-                        vectors.append(np.array(vec, dtype=np.float32))
+                    val = df.iloc[idx][col]
+                    if val is not None:
+                        # Check if it's a scalar or array
+                        if np.isscalar(val) or isinstance(val, (int, float, np.floating)):
+                            values.append(float(val))
+                        elif hasattr(val, '__len__') and len(val) > 0:
+                            values.append(np.array(val, dtype=np.float32))
             
-            if vectors:
-                stacked = np.stack(vectors, axis=0)  # (n_samples, n_bins)
-                mean_vec = np.mean(stacked, axis=0)
-                std_vec = np.std(stacked, axis=0)
-                
-                result_row[f"{col}_mean"] = mean_vec.tolist()
-                result_row[f"{col}_std"] = std_vec.tolist()
+            if values:
+                # Check if we have scalars or vectors
+                if all(np.isscalar(v) or isinstance(v, (int, float, np.floating)) for v in values):
+                    # Scalar values - just compute mean/std across samples
+                    result_row[f"{col}_mean"] = float(np.mean(values))
+                    result_row[f"{col}_std"] = float(np.std(values))
+                else:
+                    # Vector values - stack and compute per-bin stats
+                    stacked = np.stack(values, axis=0)  # (n_samples, n_bins)
+                    mean_vec = np.mean(stacked, axis=0)
+                    std_vec = np.std(stacked, axis=0)
+                    result_row[f"{col}_mean"] = mean_vec.tolist()
+                    result_row[f"{col}_std"] = std_vec.tolist()
         
         result_data.append(result_row)
     
