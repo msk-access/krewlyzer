@@ -433,251 +433,75 @@ def run_all(
                 raise typer.Exit(1)
 
         # ═══════════════════════════════════════════════════════════════════
-        # 2. UNIFIED SINGLE-PASS PIPELINE (FSC, FSR, FSD, WPS, OCF)
+        # 2. UNIFIED FEATURE PIPELINE (FSC, FSR, FSD, WPS, OCF)
+        # Using consolidated unified_processor for all feature extraction
         # ═══════════════════════════════════════════════════════════════════
         progress.start_task(task_pipeline)
         progress.update(task_pipeline, description="[2/5] Unified Pipeline ...")
-
-        # Define Resource Paths (Resolve defaults via AssetManager)
         
-        # FSC/FSR Bins
-        res_bin = bin_input if bin_input else assets.bins_100kb
-        if not res_bin.exists(): logger.error(f"Bin file missing: {res_bin}"); raise typer.Exit(1)
-
-        # FSD Arms
-        res_arms = resolved_arms_file if resolved_arms_file else assets.arms
-        if not res_arms.exists(): logger.error(f"Arms file missing: {res_arms}"); raise typer.Exit(1)
-
-        # WPS Regions (prefer wps_anchors, fallback to wps_file, then asset defaults)
-        # Resolve paths to handle typer.OptionInfo when called directly
+        # Resolve optional paths for unified processor
         resolved_wps_anchors = _resolve_path(wps_anchors)
         resolved_wps_file = _resolve_path(wps_file)
         resolved_wps_background = _resolve_path(wps_background)
-        
-        if resolved_wps_anchors and resolved_wps_anchors.exists():
-            res_wps = resolved_wps_anchors
-            logger.debug(f"WPS anchors: {resolved_wps_anchors}")
-        elif resolved_wps_file and resolved_wps_file.exists():
-            res_wps = resolved_wps_file
-            logger.debug(f"WPS transcript (legacy): {resolved_wps_file}")
-        else:
-            # Resolve assay for panel-specific assets
-            resolved_assay = assay if isinstance(assay, str) else None
-            
-            # For dual WPS: always use genome-wide anchors for primary WPS
-            # Panel-specific anchors are used in a second pass
-            try:
-                res_wps = assets.wps_anchors
-                logger.debug(f"WPS anchors (genome-wide): {res_wps}")
-            except (AttributeError, FileNotFoundError):
-                res_wps = assets.transcript_anno
-                logger.debug(f"WPS transcript (fallback): {res_wps}")
-            
-            # Track panel anchors for dual WPS output (will be used after primary run)
-            res_wps_panel = None
-            if resolved_assay:
-                try:
-                    res_wps_panel = assets.get_wps_anchors(resolved_assay)
-                    logger.info(f"Dual WPS enabled: panel anchors ({resolved_assay}) will generate WPS.panel.parquet")
-                except Exception as e:
-                    logger.debug(f"Panel WPS anchors not available for {resolved_assay}: {e}")
-        if not res_wps.exists(): logger.error(f"WPS regions file missing: {res_wps}"); raise typer.Exit(1)
-
-        # OCF Regions (only available for GRCh37/hg19 unless user provides custom file)
-        run_ocf = True
-        if resolved_ocr_file:
-            res_ocf = resolved_ocr_file
-        elif assets.ocf_available:
-            res_ocf = assets.ocf_regions
-        else:
-            logger.warning(f"⚠️  OCF regions not available for {genome} (only GRCh37/hg19 currently supported)")
-            logger.warning("   Skipping OCF. Provide --ocr-file to run OCF on hg38")
-            run_ocf = False
-            res_ocf = None
-        
-        if run_ocf and res_ocf and not res_ocf.exists():
-            logger.error(f"OCR file missing: {res_ocf}"); raise typer.Exit(1)
-        
-        # GC Reference
-        res_gc = assets.gc_reference
-        if not res_gc.exists():
-            logger.error(f"GC reference missing: {res_gc}")
-            raise typer.Exit(1)
-            
-        res_valid_regions = assets.valid_regions
-        if not res_valid_regions.exists():
-            logger.error(f"Valid regions file missing: {res_valid_regions}")
-            raise typer.Exit(1)
-
-        # Define Outputs
-        out_gc_factors = output / f"{sample}.correction_factors.tsv"
-        out_fsc_raw = output / f"{sample}.fsc_counts.tsv"
-        out_wps = output / f"{sample}.WPS.parquet"  # Foreground Parquet
-        out_wps_bg = output / f"{sample}.WPS_background.parquet"  # Alu stacking
-        out_fsd = output / f"{sample}.FSD.tsv"
-        out_ocf_dir = output / f"{sample}_ocf_tmp"
-        out_ocf_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Resolve WPS background (explicit --wps-background takes precedence over auto-load)
-        if resolved_wps_background and resolved_wps_background.exists():
-            res_wps_bg = resolved_wps_background
-            logger.info(f"Using explicit WPS background: {res_wps_bg}")
-        elif assets.wps_background.exists():
-            res_wps_bg = assets.wps_background
-            logger.debug(f"Auto-loaded WPS background ({genome}): {res_wps_bg}")
-        else:
-            res_wps_bg = None
-            logger.warning("WPS background not found - skipping background stacking")
+        resolved_assay = assay if isinstance(assay, str) else None
         
         try:
-            # RUN RUST PIPELINE (silent=True)
-            _core.run_unified_pipeline(
-                str(bedgz_file),
-                str(res_gc), str(res_valid_regions), str(out_gc_factors),
-                None,
-                str(res_bin), str(out_fsc_raw),
-                str(res_wps), str(out_wps),  # WPS foreground
-                str(res_wps_bg) if res_wps_bg else None, str(out_wps_bg) if res_wps_bg else None,  # WPS background
-                False,
-                str(res_arms), str(out_fsd),
-                str(res_ocf) if run_ocf else None, str(out_ocf_dir) if run_ocf else None,  # OCF (skip for hg38)
-                str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,
-                resolved_bait_padding,  # Bait edge padding (adaptive safety applies)
-                True  # silent=True
-            )
-            ocf_status = "OCF" if run_ocf else "OCF skipped"
-            progress.update(task_pipeline, description=f"[2/5] Unified Pipeline ✓ (FSC+WPS+FSD+{ocf_status})", completed=100)
+            from .core.unified_processor import run_features
             
-            # === DUAL WPS: Run panel-specific WPS if --assay was provided ===
-            if 'res_wps_panel' in dir() and res_wps_panel and res_wps_panel.exists():
-                out_wps_panel = output / f"{sample}.WPS.panel.parquet"
-                logger.info(f"Running panel-specific WPS ({res_wps_panel.name})...")
-                _core.run_unified_pipeline(
-                    str(bedgz_file),
-                    None, None, None,  # GC already computed
-                    str(out_gc_factors) if out_gc_factors.exists() else None,  # Load pre-computed GC
-                    None, None,  # No FSC needed
-                    str(res_wps_panel), str(out_wps_panel),  # Panel WPS
-                    None, None,  # No background for panel
-                    False,
-                    None, None,  # No FSD
-                    None, None,  # No OCF
-                    str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,
-                    resolved_bait_padding,
-                    True  # silent=True
+            # Call unified processor for FSC, FSR, FSD, WPS, OCF
+            # This handles all Rust pipeline calls and Python post-processing
+            feature_outputs = run_features(
+                bed_path=bedgz_file,
+                output_dir=output,
+                sample_name=sample,
+                genome=genome,
+                enable_fsc=True,
+                enable_fsr=True,
+                enable_fsd=True,
+                enable_wps=True,
+                enable_ocf=assets.ocf_available,  # Skip OCF if not available for genome
+                target_regions=resolved_target_regions,
+                assay=resolved_assay,
+                pon_model=resolved_pon_model,
+                fsc_bins=bin_input,
+                fsc_windows=fsc_windows,
+                fsc_continue_n=fsc_continue_n,
+                fsd_arms=resolved_arms_file,
+                wps_anchors=resolved_wps_anchors or resolved_wps_file,
+                wps_background=resolved_wps_background,
+                wps_bait_padding=resolved_bait_padding,
+                ocf_regions=resolved_ocr_file,
+                gc_correct=True,
+                threads=threads,
+                verbose=debug,
+            )
+            
+            # Report WPS periodicity if available
+            if feature_outputs.wps and feature_outputs.wps.exists():
+                from .core.wps_processor import post_process_wps
+                wps_result = post_process_wps(
+                    wps_parquet=feature_outputs.wps,
+                    wps_background_parquet=feature_outputs.wps_background if feature_outputs.wps_background and feature_outputs.wps_background.exists() else None,
+                    smooth=True,
+                    extract_periodicity=True
                 )
-                logger.info(f"Panel WPS complete: {out_wps_panel.name}")
+                if wps_result.get("periodicity_score"):
+                    logger.info(f"WPS periodicity score: {wps_result['periodicity_score']:.3f}")
+            
+            progress.update(task_pipeline, description="[2/5] Unified Pipeline ✓", completed=100)
             
             # ═══════════════════════════════════════════════════════════════════
-            # 3. POST-PROCESSING (FSC/FSR, OCF, PON z-scores)
+            # 3. POST-PROCESSING (already done by unified processor)
             # ═══════════════════════════════════════════════════════════════════
             progress.start_task(task_postproc)
-            progress.update(task_postproc, description="[3/5] Post-processing ...")
+            progress.update(task_postproc, description="[3/5] Post-processing ✓ (included)", completed=100)
             
-            # FSC & FSR (From same raw counts)
-            if out_fsc_raw.exists():
-                df_counts = pd.read_csv(out_fsc_raw, sep='\t')
-                
-                # Use centralized PON loaded earlier (line 176+)
-                
-                # FSC Output (off-target - primary for biomarkers)
-                final_fsc = output / f"{sample}.FSC.tsv"
-                process_fsc(df_counts, final_fsc, fsc_windows, fsc_continue_n, pon=pon)
-                
-                # FSR Output (off-target - primary for biomarkers)
-                final_fsr = output / f"{sample}.FSR.tsv"
-                process_fsr(df_counts, final_fsr, fsc_windows, fsc_continue_n, pon=pon)
-                
-                # Process on-target files if they exist (panel mode)
-                out_fsc_raw_ontarget = output / f"{sample}_raw.FSC.ontarget.tsv"
-                if out_fsc_raw_ontarget.exists():
-                    logger.info("Processing on-target FSC/FSR (for CNV only)")
-                    df_counts_on = pd.read_csv(out_fsc_raw_ontarget, sep='\t')
-                    
-                    # FSC on-target (for CNV analysis only)
-                    final_fsc_on = output / f"{sample}.FSC.ontarget.tsv"
-                    process_fsc(df_counts_on, final_fsc_on, fsc_windows, fsc_continue_n, pon=pon)
-                    
-                    # FSR on-target (for comparison only - PCR biased)
-                    final_fsr_on = output / f"{sample}.FSR.ontarget.tsv"
-                    process_fsr(df_counts_on, final_fsr_on, fsc_windows, fsc_continue_n, pon=pon)
-                
-                # Gene-centric FSC (if --assay provided)
-                resolved_assay = assay if isinstance(assay, str) else None
-                if resolved_assay:
-                    from .core.gene_bed import load_gene_bed
-                    try:
-                        gene_regions = load_gene_bed(assay=resolved_assay, genome=genome)
-                        gene_fsc_output = output / f"{sample}.FSC.gene.tsv"
-                        aggregate_by_gene(
-                            df_counts=df_counts,
-                            gene_regions=gene_regions,
-                            output_path=gene_fsc_output,
-                            pon=pon
-                        )
-                        logger.info(f"Gene-centric FSC: {len(gene_regions)} genes -> {gene_fsc_output.name}")
-                    except Exception as e:
-                        logger.warning(f"Gene-centric FSC skipped: {e}")
-        
-            # OCF (Move files)
-            src_ocf = out_ocf_dir / "all.ocf.tsv"
-            src_sync = out_ocf_dir / "all.sync.tsv"
-            dst_ocf = output / f"{sample}.OCF.tsv"
-            dst_sync = output / f"{sample}.OCF.sync.tsv"
-            
-            if src_ocf.exists(): shutil.move(str(src_ocf), str(dst_ocf))
-            if src_sync.exists(): shutil.move(str(src_sync), str(dst_sync))
-            
-            # Apply OCF PON z-scores if available
-            if dst_ocf.exists() and pon and pon.ocf_baseline:
-                from .core.ocf_processor import process_ocf_with_pon
-                process_ocf_with_pon(dst_ocf, pon.ocf_baseline)
-            
-            try:
-                out_ocf_dir.rmdir()
-            except Exception as e:
-                logger.debug(f"Could not remove temp OCF directory {out_ocf_dir}: {e}")
-            
-            # Use centralized PON loaded earlier (line 176+)
-            
-            # FSD post-processing (log-ratios if PoN)
-            from .core.fsd_processor import process_fsd
-            if out_fsd.exists():
-                process_fsd(out_fsd, out_fsd, pon=pon)
-                logger.debug(f"FSD off-target: {out_fsd}")
-            
-            # Check for on-target FSD (panel mode)
-            out_fsd_ontarget = output / f"{sample}.FSD.ontarget.tsv"
-            if out_fsd_ontarget.exists():
-                process_fsd(out_fsd_ontarget, out_fsd_ontarget, pon=pon)
-                logger.info(f"FSD on-target: {out_fsd_ontarget}")
-            
-            # WPS post-processing (smoothing, PoN subtraction, FFT periodicity)
-            from .core.wps_processor import post_process_wps
-            out_wps_bg = output / f"{sample}.WPS_background.parquet"
-            
-            # Save WPS baseline from PON model if available
-            pon_wps_baseline_path = None
-            if pon and pon.wps_baseline and pon.wps_baseline.regions is not None:
-                pon_wps_baseline_path = output / f".{sample}.pon_wps_baseline.parquet"
-                pon.wps_baseline.regions.to_parquet(pon_wps_baseline_path, index=False)
-                logger.debug(f"Saved PON WPS baseline: {pon_wps_baseline_path}")
-            
-            wps_result = post_process_wps(
-                wps_parquet=out_wps,
-                wps_background_parquet=out_wps_bg if out_wps_bg.exists() else None,
-                pon_baseline_parquet=pon_wps_baseline_path,
-                smooth=True,
-                extract_periodicity=True
-            )
-            if wps_result.get("periodicity_score"):
-                logger.info(f"WPS periodicity score: {wps_result['periodicity_score']:.3f}")
-            
-            progress.update(task_postproc, description="[3/5] Post-processing ✓", completed=100)
-                
         except Exception as e:
             progress.update(task_pipeline, description="[2/5] Unified Pipeline ✗ Error", completed=100)
             logger.error(f"Unified Pipeline failed: {e}")
+            if debug:
+                import traceback
+                traceback.print_exc()
             raise typer.Exit(1)
 
         # ═══════════════════════════════════════════════════════════════════
