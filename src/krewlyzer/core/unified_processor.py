@@ -47,6 +47,52 @@ from krewlyzer import _core
 logger = logging.getLogger("krewlyzer.core.unified_processor")
 
 
+def _resolve_int(value, default: int) -> int:
+    """Safely resolve an integer value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    parameters with defaults remain as OptionInfo objects. This helper handles that.
+    """
+    if isinstance(value, int):
+        return value
+    # If it's a typer.OptionInfo or other non-int type, return default
+    return default
+
+
+def _resolve_path(value) -> Optional[Path]:
+    """Safely resolve a path value, handling typer.OptionInfo objects.
+    
+    When a typer-decorated function is called directly (not via CLI),
+    Optional[Path] parameters with defaults remain as OptionInfo objects.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Path):
+        return value
+    if isinstance(value, str):
+        return Path(value)
+    # If it's a typer.OptionInfo (or any other type), return None
+    return None
+
+
+def _resolve_bool(value, default: bool) -> bool:
+    """Safely resolve a boolean value, handling typer.OptionInfo objects."""
+    if isinstance(value, bool):
+        return value
+    return default
+
+
+def _resolve_str(value) -> Optional[str]:
+    """Safely resolve a string value, handling typer.OptionInfo objects."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return None
+
+
+
+
 @dataclass
 class FeatureOutputs:
     """Container for all feature output paths."""
@@ -179,11 +225,31 @@ def run_features(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
     
+    # Resolve optional int parameters (handles typer.OptionInfo when called directly)
+    resolved_threads = _resolve_int(threads, 0)
+    resolved_fsc_windows = _resolve_int(fsc_windows, 100000)
+    resolved_fsc_continue_n = _resolve_int(fsc_continue_n, 50)
+    resolved_wps_bait_padding = _resolve_int(wps_bait_padding, 50)
+    
+    # Resolve optional Path parameters (handles typer.OptionInfo when called directly)
+    resolved_target_regions = _resolve_path(target_regions)
+    resolved_pon_model = _resolve_path(pon_model)
+    resolved_fsc_bins = _resolve_path(fsc_bins)
+    resolved_fsd_arms = _resolve_path(fsd_arms)
+    resolved_wps_anchors = _resolve_path(wps_anchors)
+    resolved_wps_tsv = _resolve_path(wps_tsv)
+    resolved_wps_background = _resolve_path(wps_background)
+    resolved_ocf_regions = _resolve_path(ocf_regions)
+    
+    # Resolve optional bool and string parameters
+    resolved_wps_empty = _resolve_bool(wps_empty, False)
+    resolved_assay = _resolve_str(assay)
+    
     # Configure thread pool
-    if threads > 0:
+    if resolved_threads > 0:
         try:
-            _core.configure_threads(threads)
-            logger.debug(f"Configured {threads} threads")
+            _core.configure_threads(resolved_threads)
+            logger.debug(f"Configured {resolved_threads} threads")
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
     
@@ -197,13 +263,13 @@ def run_features(
     logger.info(f"Features: {', '.join(features) or 'None enabled'}")
     
     # Panel mode detection
-    is_panel_mode = target_regions is not None and target_regions.exists()
+    is_panel_mode = resolved_target_regions is not None and resolved_target_regions.exists()
     if is_panel_mode:
         logger.info(f"Panel mode: on/off-target split enabled")
-        logger.info(f"  Target regions: {target_regions.name}")
+        logger.info(f"  Target regions: {resolved_target_regions.name}")
     
-    if assay:
-        logger.info(f"Assay: {assay} (enables gene-centric FSC, panel WPS)")
+    if resolved_assay:
+        logger.info(f"Assay: {resolved_assay} (enables gene-centric FSC, panel WPS)")
     
     # =========================================================================
     # 2. ASSET RESOLUTION
@@ -226,7 +292,7 @@ def run_features(
     # FSC/FSR bins (shared - only load if either enabled)
     need_fsc_bins = enable_fsc or enable_fsr
     if need_fsc_bins:
-        res_bins = fsc_bins or assets.bins_100kb
+        res_bins = resolved_fsc_bins or assets.bins_100kb
         if not res_bins.exists():
             raise FileNotFoundError(f"Bin file not found: {res_bins}")
         logger.debug(f"FSC/FSR bins: {res_bins}")
@@ -235,7 +301,7 @@ def run_features(
     
     # FSD arms
     if enable_fsd:
-        res_arms = fsd_arms or assets.arms
+        res_arms = resolved_fsd_arms or assets.arms
         if not res_arms.exists():
             raise FileNotFoundError(f"Arms file not found: {res_arms}")
         logger.debug(f"FSD arms: {res_arms}")
@@ -244,10 +310,10 @@ def run_features(
     
     # WPS anchors
     if enable_wps:
-        if wps_anchors and wps_anchors.exists():
-            res_wps = wps_anchors
-        elif wps_tsv and wps_tsv.exists():
-            res_wps = wps_tsv  # Legacy
+        if resolved_wps_anchors and resolved_wps_anchors.exists():
+            res_wps = resolved_wps_anchors
+        elif resolved_wps_tsv and resolved_wps_tsv.exists():
+            res_wps = resolved_wps_tsv  # Legacy
         else:
             res_wps = assets.wps_anchors if hasattr(assets, 'wps_anchors') else assets.transcript_anno
         if not res_wps.exists():
@@ -255,8 +321,8 @@ def run_features(
         logger.debug(f"WPS regions: {res_wps}")
         
         # WPS background (Alu stacking)
-        if wps_background and wps_background.exists():
-            res_wps_bg = wps_background
+        if resolved_wps_background and resolved_wps_background.exists():
+            res_wps_bg = resolved_wps_background
         elif hasattr(assets, 'wps_background') and assets.wps_background.exists():
             res_wps_bg = assets.wps_background
         else:
@@ -270,8 +336,8 @@ def run_features(
     
     # OCF regions
     if enable_ocf:
-        if ocf_regions and ocf_regions.exists():
-            res_ocf = ocf_regions
+        if resolved_ocf_regions and resolved_ocf_regions.exists():
+            res_ocf = resolved_ocf_regions
         elif hasattr(assets, 'ocf_available') and assets.ocf_available:
             res_ocf = assets.ocf_regions
         else:
@@ -344,7 +410,7 @@ def run_features(
             # WPS background
             str(res_wps_bg) if res_wps_bg else None,
             str(outputs.wps_background) if res_wps_bg else None,
-            wps_empty,
+            resolved_wps_empty,
             # FSD
             str(res_arms) if enable_fsd else None,
             str(outputs.fsd) if enable_fsd else None,
@@ -352,8 +418,8 @@ def run_features(
             str(res_ocf) if enable_ocf else None,
             str(ocf_tmp_dir) if enable_ocf else None,
             # Target regions for on/off-target split
-            str(target_regions) if is_panel_mode else None,
-            wps_bait_padding,
+            str(resolved_target_regions) if is_panel_mode else None,
+            resolved_wps_bait_padding,
             not verbose  # silent = not verbose
         )
     except Exception as e:
@@ -371,9 +437,9 @@ def run_features(
     # Load PON model if provided
     pon = None
     pon_parquet = None
-    if pon_model:
-        pon = load_pon_model(pon_model)
-        pon_parquet = pon_model
+    if resolved_pon_model:
+        pon = load_pon_model(resolved_pon_model)
+        pon_parquet = resolved_pon_model
         if pon:
             logger.info(f"PON loaded: {pon.assay} (n={pon.n_samples})")
     
@@ -381,7 +447,7 @@ def run_features(
     if enable_fsc and out_fsc_counts and out_fsc_counts.exists():
         import pandas as pd
         df_counts = pd.read_csv(out_fsc_counts, sep='\t')
-        process_fsc(df_counts, outputs.fsc, fsc_windows, fsc_continue_n, pon=pon)
+        process_fsc(df_counts, outputs.fsc, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
         logger.info(f"✓ FSC: {outputs.fsc.name}")
         
         # On-target FSC (panel mode)
@@ -389,23 +455,23 @@ def run_features(
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
             df_counts_on = pd.read_csv(out_fsc_counts_on, sep='\t')
-            process_fsc(df_counts_on, outputs.fsc_ontarget, fsc_windows, fsc_continue_n, pon=pon)
+            process_fsc(df_counts_on, outputs.fsc_ontarget, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
             logger.info(f"✓ FSC on-target: {outputs.fsc_ontarget.name}")
     
     # Process FSR (same counts, different output)
     if enable_fsr and out_fsc_counts and out_fsc_counts.exists():
         import pandas as pd
         df_counts = pd.read_csv(out_fsc_counts, sep='\t')
-        process_fsr(df_counts, outputs.fsr, fsc_windows, fsc_continue_n, pon=pon)
+        process_fsr(df_counts, outputs.fsr, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
         logger.info(f"✓ FSR: {outputs.fsr.name}")
     
     # Gene-centric FSC (if assay provided)
-    if assay and enable_fsc:
+    if resolved_assay and enable_fsc:
         try:
             from .fsc_processor import aggregate_by_gene
             genome_map = {'hg19': 'GRCh37', 'grch37': 'GRCh37', 'hg38': 'GRCh38', 'grch38': 'GRCh38'}
             gene_genome = genome_map.get(genome.lower(), 'GRCh37')
-            genes = load_gene_bed(assay=assay, genome=gene_genome)
+            genes = load_gene_bed(assay=resolved_assay, genome=gene_genome)
             outputs.fsc_gene = output_dir / f"{sample_name}.FSC.gene.tsv"
             aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon)
             logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
@@ -434,12 +500,12 @@ def run_features(
         logger.info(f"✓ WPS: {outputs.wps.name}")
     
     # Panel WPS (assay-specific)
-    if assay and enable_wps:
+    if resolved_assay and enable_wps:
         try:
-            panel_anchors = assets.get_wps_anchors(assay)
+            panel_anchors = assets.get_wps_anchors(resolved_assay)
             if panel_anchors and panel_anchors.exists():
                 outputs.wps_panel = output_dir / f"{sample_name}.WPS.panel.parquet"
-                logger.info(f"Running panel WPS ({assay})...")
+                logger.info(f"Running panel WPS ({resolved_assay})...")
                 _core.run_unified_pipeline(
                     str(bed_path),
                     None, None, None,  # GC already computed
@@ -449,8 +515,8 @@ def run_features(
                     None, None, False,  # No background
                     None, None,  # No FSD
                     None, None,  # No OCF
-                    str(target_regions) if is_panel_mode else None,
-                    wps_bait_padding,
+                    str(resolved_target_regions) if is_panel_mode else None,
+                    resolved_wps_bait_padding,
                     True  # silent
                 )
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")
