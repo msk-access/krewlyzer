@@ -2,9 +2,9 @@
 Orientation-aware cfDNA Fragmentation (OCF) calculation.
 
 Calculates OCF features showing fragment orientation patterns around open chromatin regions.
-OCF measures tissue-of-origin based on end-motif orientation at regulatory elements.
+This CLI is a thin wrapper around the unified processor.
 
-Uses Rust backend via unified pipeline for accelerated computation with GC correction.
+OCF measures tissue-of-origin based on end-motif orientation at regulatory elements.
 
 Output Files:
     - {sample}.OCF.tsv: Per-region OCF scores and fragment counts
@@ -18,7 +18,6 @@ import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import shutil
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -27,14 +26,11 @@ console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("ocf")
 
-# Rust backend is required
-from krewlyzer import _core
-
 
 def ocf(
     bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files (default: derived from input filename)"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files"),
     ocr_input: Optional[Path] = typer.Option(None, "--ocr-input", "-r", help="Path to open chromatin regions file"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target OCF)"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
@@ -50,146 +46,52 @@ def ocf(
     Input: .bed.gz file from extract step
     Output: {sample}.OCF.tsv (summary) and {sample}.OCF.sync.tsv (detailed sync data)
     """
-    from .assets import AssetManager
+    from .core.unified_processor import run_features
     
     # Configure verbose logging
     if verbose:
         logger.setLevel(logging.DEBUG)
-        logger.debug("Verbose logging enabled")
-    
-    # Configure Rust thread pool
-    if threads > 0:
-        try:
-            _core.configure_threads(threads)
-            logger.info(f"Configured {threads} threads for parallel processing")
-        except Exception as e:
-            logger.warning(f"Could not configure threads: {e}")
+        logging.getLogger("krewlyzer.core.unified_processor").setLevel(logging.DEBUG)
     
     # Input validation
     if not bedgz_input.exists():
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
-    if not str(bedgz_input).endswith('.bed.gz'):
-        logger.error(f"Input must be a .bed.gz file: {bedgz_input}")
-        raise typer.Exit(1)
-    
-    # Initialize Asset Manager
-    try:
-        assets = AssetManager(genome)
-        logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
-    except ValueError as e:
-        logger.error(str(e))
-        raise typer.Exit(1)
-    
-    # Default OCR file from assets
-    if ocr_input is None:
-        if not assets.ocf_available:
-            logger.error(f"OCF regions not available for {genome} (only GRCh37/hg19 currently supported)")
-            logger.error("Provide a custom OCR file with -r/--ocr-input to run OCF on hg38")
-            raise typer.Exit(1)
-        try:
-            ocr_input = assets.resolve("ocf_regions")
-            logger.info(f"Using default OCR file: {ocr_input}")
-        except FileNotFoundError as e:
-            logger.error(str(e))
-            raise typer.Exit(1)
-    
-    if not ocr_input.exists():
-        logger.error(f"OCR file not found: {ocr_input}")
-        raise typer.Exit(1)
-    
-    # Create output directory
-    output.mkdir(parents=True, exist_ok=True)
-    
-    # Derive sample name (use provided or derive from input filename)
+    # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
-    # Use a subdirectory for Rust output to avoid collisions/hardcoded names
-    # Rust writes 'all.ocf.tsv' and 'all.sync.tsv'
-    sample_dir = output / f"{sample_name}_ocf_tmp"
-    sample_dir.mkdir(parents=True, exist_ok=True)
-    
     try:
-        logger.info(f"Processing {bedgz_input.name}")
-        # Resolve GC correction assets (centralized helper)
-        from .core.gc_assets import resolve_gc_assets
-        gc = resolve_gc_assets(assets, output, sample_name, bedgz_input, gc_correct, genome)
-        gc_ref = gc.gc_ref
-        valid_regions = gc.valid_regions
-        factors_out = gc.factors_out
-        factors_input = gc.factors_input
-        gc_correct = gc.gc_correct_enabled
-        
-        # Call Unified Pipeline (OCF only)
-        logger.info("Running unified pipeline for OCF...")
-        
-        is_panel_mode = target_regions and target_regions.exists()
-        if is_panel_mode:
-            logger.info(f"Panel mode: on/off-target split enabled (targets: {target_regions.name})")
-        
-        _core.run_unified_pipeline(
-            str(bedgz_input),
-            # GC Correction (compute)
-            str(gc_ref) if gc_ref else None,
-            str(valid_regions) if valid_regions else None,
-            str(factors_out) if factors_out else None,
-            # GC Correction (load pre-computed)
-            str(factors_input) if factors_input else None,
-            # FSC - disabled
-            None, None,
-            # WPS - disabled
-            None, None,
-            # WPS Background - disabled
-            None, None, False,
-            # FSD - disabled
-            None, None,
-            # OCF - enabled
-            str(ocr_input), str(sample_dir),
-            # Target regions for on/off-target split
-            str(target_regions) if is_panel_mode else None,
-            50,  # bait_padding
-            False  # silent
+        # Call unified processor with OCF enabled
+        outputs = run_features(
+            bed_path=bedgz_input,
+            output_dir=output,
+            sample_name=sample_name,
+            genome=genome,
+            enable_ocf=True,
+            target_regions=target_regions,
+            pon_model=pon_model,
+            ocf_regions=ocr_input,
+            gc_correct=gc_correct,
+            threads=threads,
+            verbose=verbose,
         )
         
-        # Rename/Move files to krewlyzer standard: {output}/{sample}.{EXT}
-        # Rust hardcoded outputs
-        rust_ocf = sample_dir / "all.ocf.tsv"
-        rust_sync = sample_dir / "all.sync.tsv"
-        
-        # Standardized outputs
-        final_ocf = output / f"{sample_name}.OCF.tsv"
-        final_sync = output / f"{sample_name}.OCF.sync.tsv"
-        
-        if rust_ocf.exists():
-            shutil.move(str(rust_ocf), str(final_ocf))
-        if rust_sync.exists():
-            shutil.move(str(rust_sync), str(final_sync))
-        
-        # Handle on-target files if panel mode
-        if is_panel_mode:
-            rust_ocf_on = sample_dir / "all.ocf.ontarget.tsv"
-            rust_sync_on = sample_dir / "all.sync.ontarget.tsv"
-            final_ocf_on = output / f"{sample_name}.OCF.ontarget.tsv"
-            final_sync_on = output / f"{sample_name}.OCF.sync.ontarget.tsv"
+        # Report results
+        if outputs.ocf and outputs.ocf.exists():
+            logger.info(f"✅ OCF complete: {outputs.ocf}")
+        if outputs.ocf_sync and outputs.ocf_sync.exists():
+            logger.info(f"✅ OCF sync: {outputs.ocf_sync}")
+        if outputs.ocf_ontarget and outputs.ocf_ontarget.exists():
+            logger.info(f"✅ OCF on-target: {outputs.ocf_ontarget}")
             
-            if rust_ocf_on.exists():
-                shutil.move(str(rust_ocf_on), str(final_ocf_on))
-            if rust_sync_on.exists():
-                shutil.move(str(rust_sync_on), str(final_sync_on))
-            
-            if final_ocf_on.exists():
-                logger.info(f"OCF on-target: {final_ocf_on}")
-            
-        # Clean up temporary sample dir if empty
-        try:
-            sample_dir.rmdir()
-        except OSError:
-            pass  # Directory not empty or other error, leave it
-        
-        logger.info(f"OCF complete: {final_ocf}, {final_sync}")
-
-    except Exception as e:
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
+    except RuntimeError as e:
         logger.error(f"OCF calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)
