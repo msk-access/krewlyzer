@@ -215,7 +215,7 @@ def aggregate_by_gene(
             if line.startswith('#'):
                 continue
             
-            fields = line.strip().split('\\t')
+            fields = line.strip().split('\t')
             if len(fields) < 3:
                 continue
             
@@ -286,7 +286,7 @@ def aggregate_by_gene(
                 df[f'{ch}_log2'] = 0.0
     
     # Write output
-    df.to_csv(output_path, sep='\\t', index=False, float_format='%.4f')
+    df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
     logger.info(f"Gene FSC complete: {output_path} ({len(df)} genes)")
     
     return output_path
