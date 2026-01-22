@@ -125,6 +125,7 @@ The Python layer provides:
 
 | File | Purpose |
 |------|---------|
+| `unified_processor.py` | **Central feature runner** - single-pass FSC/FSR/FSD/WPS/OCF |
 | `gc_assets.py` | Centralized GC asset resolution |
 | `fsc_processor.py` | FSC z-score computation |
 | `fsr_processor.py` | FSR ratio calculation |
@@ -133,10 +134,13 @@ The Python layer provides:
 | `gene_bed.py` | Gene BED parsing for FSC gene aggregation |
 | `feature_serializer.py` | Unified JSON output generation |
 
+> **Note**: `unified_processor.py` consolidates feature extraction logic that was previously duplicated across CLI tools and wrapper.py. All CLI tools (fsc, fsr, fsd, wps, ocf) and run-all now delegate to the `run_features()` function.
+
 ### Recent Improvements (2024)
 
 | Change | Files | Benefit |
 |--------|-------|---------|
+| **Unified Processor** | `core/unified_processor.py` | Single entry point for all features, ~350 lines reduced |
 | **GC Asset Helper** | `core/gc_assets.py` | Eliminated 100+ lines duplication |
 | **Dual WPS Output** | `wps.py`, `wrapper.py` | Panel + genome-wide WPS |
 | **JSON Serializer** | `core/feature_serializer.py` | Unified ML output |
