@@ -26,6 +26,9 @@ logger = logging.getLogger("build-pon")
 # Import core tools for processing samples
 from krewlyzer import _core
 
+# Import unified sample processor
+from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
+
 
 def build_pon(
     sample_list: Path = typer.Argument(..., help="Text file with paths to BED.gz files (one per line)"),
@@ -121,277 +124,185 @@ def build_pon(
     
     import tempfile
     import shutil
-    temp_extract_dir = None
-    bed_paths = []  # Final list of BED.gz paths to process
+    import time
+    from concurrent.futures import ProcessPoolExecutor, as_completed
     
-    # Count BAM files for progress tracking
-    bam_samples = [s for s in samples if s.suffix == '.bam']
-    bed_samples = [s for s in samples if s.suffix != '.bam']
+    # ═══════════════════════════════════════════════════════════════════════════
+    # UNIFIED SAMPLE PROCESSING (replaces Phase 1 + Phase 2)
+    # Uses process_sample() from core/sample_processor.py for consistent processing
+    # ═══════════════════════════════════════════════════════════════════════════
     
-    if bam_samples:
-        import time
-        logger.info(f"=" * 60)
-        logger.info(f"PHASE 1: BAM Extraction ({len(bam_samples)} samples)")
-        logger.info(f"=" * 60)
-        
-        extraction_start = time.time()
-        extracted_count = 0
-        failed_count = 0
-        
-        for i, sample_path in enumerate(bam_samples, 1):
-            sample_name = sample_path.stem
+    logger.info(f"=" * 60)
+    logger.info(f"SAMPLE PROCESSING ({n_samples} samples)")
+    logger.info(f"=" * 60)
+    
+    # Setup parameters for sample processing
+    sample_params = SampleParams(
+        genome="GRCh37",  # TODO: detect from reference
+        mapq=20,
+        minlen=65,
+        maxlen=400,
+        skip_duplicates=True,
+        require_proper_pair=require_proper_pair,
+        kmer=4,
+        threads=max(1, threads // max(1, min(4, n_samples))),  # Divide threads among samples
+        bin_file=bin_file,
+        wps_anchors=transcript_file,  # Use transcript file for WPS anchors
+    )
+    
+    # Use temp directory for sample processing outputs
+    temp_base = str(temp_dir) if temp_dir else None
+    temp_output_dir = tempfile.mkdtemp(prefix="pon_build_", dir=temp_base)
+    logger.info(f"Temporary output directory: {temp_output_dir}")
+    
+    # Process samples
+    all_outputs: List[SampleOutputs] = []
+    processing_start = time.time()
+    succeeded_count = 0
+    failed_count = 0
+    
+    try:
+        for i, sample_path in enumerate(samples, 1):
+            sample_name = sample_path.stem.replace('.bed', '').replace('.gz', '')
             sample_start = time.time()
             
-            # Log starting extraction for each sample
-            logger.info(f"[{i}/{len(bam_samples)}] Extracting: {sample_name}")
-            
-            if temp_extract_dir is None:
-                # Use user-specified temp dir or system default
-                temp_base = str(temp_dir) if temp_dir else None
-                temp_extract_dir = tempfile.mkdtemp(prefix="pon_extract_", dir=temp_base)
-                logger.info(f"  Temporary directory: {temp_extract_dir}")
+            logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")
             
             try:
-                bed_output_path = str(Path(temp_extract_dir) / f"{sample_name}.bed.gz")
-                _core.extract_motif.process_bam_parallel(
-                    str(sample_path),  # bam_path
-                    str(reference),    # fasta_path
-                    20,                # mapq
-                    65,                # min_len
-                    400,               # max_len
-                    4,                 # kmer
-                    threads,           # threads
-                    bed_output_path,   # output_bed_path
-                    None,              # output_motif_prefix (skip motifs)
-                    None,              # exclude_path
-                    target_regions_str,  # target_regions_path - for panel mode filtering
-                    True,              # skip_duplicates
-                    require_proper_pair,  # from CLI argument
-                    True               # silent
+                outputs = process_sample(
+                    input_path=sample_path,
+                    output_dir=Path(temp_output_dir) / sample_name,
+                    sample_name=sample_name,
+                    reference=reference,
+                    params=sample_params,
+                    target_regions=target_regions if is_panel_mode else None,
+                    enable_fsc=True,
+                    enable_fsr=False,  # Not needed for PON
+                    enable_fsd=True,
+                    enable_wps=True,
+                    enable_ocf=True,
+                    pon_mode=True,  # Skip PON normalization (we're building the PON)
                 )
-                bed_path = Path(bed_output_path)
-                if bed_path.exists():
-                    bed_paths.append(bed_path)
-                    elapsed = time.time() - sample_start
-                    logger.info(f"  ✓ Done in {elapsed:.1f}s -> {bed_path.name}")
-                    extracted_count += 1
-                else:
-                    logger.warning(f"  ✗ No output produced")
-                    failed_count += 1
+                
+                all_outputs.append(outputs)
+                elapsed = time.time() - sample_start
+                logger.info(f"  ✓ Done in {elapsed:.1f}s ({outputs.fragment_count:,} frags)")
+                succeeded_count += 1
+                
             except Exception as e:
                 logger.warning(f"  ✗ Failed: {e}")
                 failed_count += 1
         
-        total_elapsed = time.time() - extraction_start
+        processing_elapsed = time.time() - processing_start
         logger.info(f"-" * 60)
-        logger.info(f"Extraction complete: {extracted_count} succeeded, {failed_count} failed ({total_elapsed:.1f}s total)")
-    
-    # Add existing BED.gz files
-    for sample_path in bed_samples:
-        bed_paths.append(sample_path)
-    
-    if not bed_paths:
-        logger.error("No valid samples after processing")
-        if temp_extract_dir:
-            shutil.rmtree(temp_extract_dir)
-        raise typer.Exit(1)
-    
-    logger.info(f"=" * 60)
-    logger.info(f"PHASE 2: Feature Collection ({len(bed_paths)} samples)")
-    logger.info(f"=" * 60)
-    
-    # Collect data from all samples
-    all_gc_data = []  # List of (gc_values, short, intermediate, long) tuples
-    all_fsd_data = []  # List of DataFrames
-    all_wps_data = []  # List of (region_id, wps_long_mean, wps_short_mean) tuples
-    all_ocf_data = []  # List of OCF region stats
-    all_mds_data = []  # List of MDS (kmer frequencies, mds score)
-    
-    # On-target data (panel mode only)
-    all_fsd_data_ontarget = []  # List of on-target FSD DataFrames
-    all_gc_data_ontarget = []   # List of on-target GC data (from ontarget correction factors)
-    
-    collection_start = time.time()
-    processed_count = 0
-    failed_count = 0
-    
-    try:
-        for i, bed_path in enumerate(bed_paths, 1):
-            if not bed_path.exists():
-                logger.warning(f"[{i}/{len(bed_paths)}] Sample not found, skipping: {bed_path}")
-                failed_count += 1
-                continue
+        logger.info(f"Processing complete: {succeeded_count} succeeded, {failed_count} failed ({processing_elapsed:.1f}s)")
+        
+        if len(all_outputs) < 1:
+            logger.error("No samples processed successfully")
+            raise typer.Exit(1)
+        
+        # ═══════════════════════════════════════════════════════════════════════════
+        # COLLECT DATA FOR BASELINE AGGREGATION
+        # ═══════════════════════════════════════════════════════════════════════════
+        
+        logger.info(f"=" * 60)
+        logger.info(f"COLLECTING BASELINE DATA ({len(all_outputs)} samples)")
+        logger.info(f"=" * 60)
+        
+        all_gc_data = []
+        all_fsd_data = []
+        all_wps_data = []
+        all_ocf_data = []
+        all_mds_data = []
+        all_fsd_data_ontarget = []
+        all_gc_data_ontarget = []
+        
+        for outputs in all_outputs:
+            sample_name = outputs.sample_id
+            feat = outputs.feature_outputs
             
-            sample_name = bed_path.name.replace(".bed.gz", "")
-            sample_start = time.time()
-            logger.info(f"[{i}/{len(bed_paths)}] Collecting features: {sample_name}")
+            # Collect GC data from FSC output
+            if feat and feat.fsc_counts and feat.fsc_counts.exists():
+                try:
+                    fsc_df = pd.read_csv(feat.fsc_counts, sep='\t')
+                    if all(col in fsc_df.columns for col in ['ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long', 'mean_gc']):
+                        all_gc_data.append({
+                            "gc": fsc_df['mean_gc'].values,
+                            "short": (fsc_df['ultra_short'] + fsc_df['core_short']).values,
+                            "intermediate": fsc_df['mono_nucl'].values,
+                            "long": (fsc_df['di_nucl'] + fsc_df['long']).values,
+                        })
+                except Exception as e:
+                    logger.debug(f"  Could not read GC data for {sample_name}: {e}")
             
-            try:
-                # Get FSC data (for GC curves) - this is off-target for WGS
-                # Rust returns 7 values: ultra_shorts, core_shorts, mono_nucls, di_nucls, longs, totals, gc_values
-                ultra_shorts, core_shorts, mono_nucls, di_nucls, longs, totals, gc_values = _core.count_fragments_by_bins(
-                    str(bed_path),
-                    str(bin_file)
-                )
-                # Map to legacy short/intermediate/long for GC model
-                # short = ultra_shorts + core_shorts (65-149bp)
-                # intermediate = mono_nucls (150-220bp)  
-                # long = di_nucls + longs (221-400bp)
-                short = np.array(ultra_shorts) + np.array(core_shorts)
-                intermediate = np.array(mono_nucls)
-                long = np.array(di_nucls) + np.array(longs)
-                
-                all_gc_data.append({
-                    "gc": np.array(gc_values),
-                    "short": short,
-                    "intermediate": intermediate,
-                    "long": long,
+            # Collect FSD data
+            if feat and feat.fsd and feat.fsd.exists():
+                try:
+                    fsd_df = pd.read_csv(feat.fsd, sep='\t')
+                    all_fsd_data.append(fsd_df)
+                except Exception as e:
+                    logger.debug(f"  Could not read FSD for {sample_name}: {e}")
+            
+            # Collect on-target FSD (panel mode)
+            if feat and feat.fsd_ontarget and feat.fsd_ontarget.exists():
+                try:
+                    fsd_on_df = pd.read_csv(feat.fsd_ontarget, sep='\t')
+                    all_fsd_data_ontarget.append(fsd_on_df)
+                except Exception as e:
+                    logger.debug(f"  Could not read on-target FSD for {sample_name}: {e}")
+            
+            # Collect WPS data
+            if feat and feat.wps and feat.wps.exists():
+                try:
+                    wps_df = pd.read_parquet(feat.wps)
+                    # Aggregate by region for baseline
+                    if 'gene_id' in wps_df.columns:
+                        region_stats = wps_df.groupby('gene_id').agg({
+                            'wps_long': 'mean',
+                            'wps_short': 'mean'
+                        }).reset_index()
+                        all_wps_data.append(region_stats)
+                    elif 'region_id' in wps_df.columns:
+                        all_wps_data.append(wps_df)
+                except Exception as e:
+                    logger.debug(f"  Could not read WPS for {sample_name}: {e}")
+            
+            # Collect OCF data
+            if feat and feat.ocf and feat.ocf.exists():
+                try:
+                    ocf_df = pd.read_csv(feat.ocf, sep='\t')
+                    if 'tissue' in ocf_df.columns and 'OCF' in ocf_df.columns:
+                        ocf_df = ocf_df.rename(columns={'tissue': 'region_id', 'OCF': 'ocf'})
+                    if 'region_id' in ocf_df.columns and 'ocf' in ocf_df.columns:
+                        all_ocf_data.append(ocf_df[['region_id', 'ocf']])
+                except Exception as e:
+                    logger.debug(f"  Could not read OCF for {sample_name}: {e}")
+            
+            # Collect MDS data (from extraction)
+            if outputs.mds_counts:
+                all_mds_data.append({
+                    "kmers": outputs.mds_counts,
+                    "mds": outputs.mds_score
                 })
-                
-                # For panel mode, look for pre-processed on-target FSC files
-                # These would be in the same directory as the BED file
-                if is_panel_mode:
-                    fsc_ontarget_file = bed_path.parent / f"{sample_name}.FSC.ontarget.tsv"
-                    if fsc_ontarget_file.exists():
-                        try:
-                            fsc_on_df = pd.read_csv(fsc_ontarget_file, sep="\t")
-                            # Extract GC-binned coverage from on-target FSC
-                            if "gc" in fsc_on_df.columns:
-                                all_gc_data_ontarget.append({
-                                    "gc": fsc_on_df["gc"].values if "gc" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
-                                    "short": fsc_on_df["short"].values if "short" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
-                                    "intermediate": fsc_on_df["intermediate"].values if "intermediate" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
-                                    "long": fsc_on_df["long"].values if "long" in fsc_on_df.columns else np.zeros(len(fsc_on_df)),
-                                })
-                                logger.debug(f"  Collected on-target FSC for {sample_name}")
-                        except Exception as fsc_on_e:
-                            logger.debug(f"  Could not read on-target FSC: {fsc_on_e}")
-                
-                # Get FSD data per arm
-                try:
-                    temp_base = str(temp_dir) if temp_dir else None
-                    with tempfile.TemporaryDirectory(dir=temp_base) as tmpdir:
-                        fsd_output = Path(tmpdir) / f"{sample_name}.FSD.tsv"
-                        fsd_output_ontarget = Path(tmpdir) / f"{sample_name}.FSD.ontarget.tsv"
-                        arms_file = assets.arms
-                        if arms_file.exists():
-                            # Calculate FSD (Rust handles target_regions internally)
-                            _core.fsd.calculate_fsd(
-                                str(bed_path),
-                                str(arms_file),
-                                str(fsd_output),
-                                target_regions_str  # Pass target regions for split output
-                            )
-                            # Collect off-target FSD
-                            if fsd_output.exists():
-                                fsd_df = pd.read_csv(fsd_output, sep="\t")
-                                all_fsd_data.append(fsd_df)
-                            # Collect on-target FSD (panel mode)
-                            if is_panel_mode and fsd_output_ontarget.exists():
-                                fsd_on_df = pd.read_csv(fsd_output_ontarget, sep="\t")
-                                all_fsd_data_ontarget.append(fsd_on_df)
-                                logger.debug(f"  Collected on-target FSD for {sample_name}")
-                except Exception as fsd_e:
-                    logger.debug(f"  FSD failed for {sample_name}: {fsd_e}")
-                
-                # Get WPS data per region (if transcript_file provided)
-                if transcript_file and transcript_file.exists():
-                    try:
-                        temp_base = str(temp_dir) if temp_dir else None
-                        with tempfile.TemporaryDirectory(dir=temp_base) as tmpdir:
-                            logger.debug(f"  Calling WPS for {sample_name} with transcript: {transcript_file}")
-                            _core.wps.calculate_wps(
-                                str(bed_path),
-                                str(transcript_file),
-                                str(tmpdir),
-                                sample_name,
-                                False,  # empty
-                                None,   # total_fragments
-                                str(reference) if reference else None,
-                                False,  # gc_correct
-                                False   # verbose
-                            )
-                            wps_file = Path(tmpdir) / f"{sample_name}.WPS.tsv.gz"
-                            if wps_file.exists():
-                                wps_df = pd.read_csv(wps_file, sep="\t", compression="gzip")
-                                logger.debug(f"  WPS output has {len(wps_df)} rows")
-                                region_stats = wps_df.groupby("gene_id").agg({
-                                    "wps_long": "mean",
-                                    "wps_short": "mean"
-                                }).reset_index()
-                                all_wps_data.append(region_stats)
-                            else:
-                                logger.warning(f"  WPS output file not created for {sample_name}")
-                    except Exception as wps_e:
-                        logger.warning(f"  WPS failed for {sample_name}: {wps_e}")
-                
-                # Get OCF data per region (from open chromatin regions file)
-                try:
-                    ocr_file = assets.ocf_regions
-                    if ocr_file.exists():
-                        temp_base = str(temp_dir) if temp_dir else None
-                        with tempfile.TemporaryDirectory(dir=temp_base) as tmpdir:
-                            # OCF Rust function expects output_dir, not output_file
-                            ocf_output_dir = Path(tmpdir) / f"{sample_name}_ocf"
-                            ocf_output_dir.mkdir(exist_ok=True)
-                            _core.ocf.calculate_ocf(
-                                str(bed_path),
-                                str(ocr_file),
-                                str(ocf_output_dir)
-                            )
-                            # OCF writes to <output_dir>/all.ocf.tsv
-                            ocf_output = ocf_output_dir / "all.ocf.tsv"
-                            if ocf_output.exists():
-                                ocf_df = pd.read_csv(ocf_output, sep="\t")
-                                # OCF Rust outputs: tissue, OCF (not region_id, ocf)
-                                if "tissue" in ocf_df.columns and "OCF" in ocf_df.columns:
-                                    # Rename to standard format expected by baseline computation
-                                    ocf_df = ocf_df.rename(columns={"tissue": "region_id", "OCF": "ocf"})
-                                    all_ocf_data.append(ocf_df[["region_id", "ocf"]])
-                                    logger.debug(f"  Collected OCF for {sample_name}: {len(ocf_df)} tissues")
-                                elif "region_id" in ocf_df.columns and "ocf" in ocf_df.columns:
-                                    all_ocf_data.append(ocf_df[["region_id", "ocf"]])
-                                    logger.debug(f"  Collected OCF for {sample_name}: {len(ocf_df)} regions")
-                    else:
-                        logger.debug(f"  OCF regions file not found: {ocr_file}")
-                except Exception as ocf_e:
-                    logger.debug(f"  OCF failed for {sample_name}: {ocf_e}")
-                
-                # Get MDS (Motif Diversity Score) from extract output
-                try:
-                    # MDS is computed from the motif output - look for .MDS.tsv
-                    mds_file = bed_path.parent / f"{sample_name}.MDS.tsv"
-                    if mds_file.exists():
-                        mds_df = pd.read_csv(mds_file, sep="\t")
-                        if "kmer" in mds_df.columns and "frequency" in mds_df.columns:
-                            kmer_freqs = dict(zip(mds_df["kmer"], mds_df["frequency"]))
-                            mds_score = mds_df["mds"].iloc[0] if "mds" in mds_df.columns else None
-                            all_mds_data.append({"kmers": kmer_freqs, "mds": mds_score})
-                except Exception as mds_e:
-                    logger.debug(f"  MDS failed for {sample_name}: {mds_e}")
-                
-                elapsed = time.time() - sample_start
-                logger.info(f"  ✓ Done in {elapsed:.1f}s (FSC + FSD + WPS)")
-                processed_count += 1
-                
-            except Exception as e:
-                logger.warning(f"  ✗ Failed to process {sample_name}: {e}")
-                failed_count += 1
+        
+        logger.info(f"  GC samples: {len(all_gc_data)}")
+        logger.info(f"  FSD samples: {len(all_fsd_data)}")
+        logger.info(f"  WPS samples: {len(all_wps_data)}")
+        logger.info(f"  OCF samples: {len(all_ocf_data)}")
+        logger.info(f"  MDS samples: {len(all_mds_data)}")
+        if is_panel_mode:
+            logger.info(f"  FSD on-target samples: {len(all_fsd_data_ontarget)}")
     
     finally:
-        # Clean up temp extraction directory
-        if temp_extract_dir and Path(temp_extract_dir).exists():
-            shutil.rmtree(temp_extract_dir)
-            logger.debug(f"Cleaned up temp directory: {temp_extract_dir}")
-    
-    # Phase 2 summary
-    collection_elapsed = time.time() - collection_start
-    logger.info(f"-" * 60)
-    logger.info(f"Collection complete: {processed_count} succeeded, {failed_count} failed ({collection_elapsed:.1f}s total)")
+        # Cleanup temp directory
+        if temp_output_dir and Path(temp_output_dir).exists():
+            shutil.rmtree(temp_output_dir)
+            logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
     
     if len(all_gc_data) < 1:
         logger.error("No samples processed successfully")
         raise typer.Exit(1)
+
     
     logger.info(f"=" * 60)
     logger.info(f"PHASE 3: Model Building ({len(all_gc_data)} samples)")
