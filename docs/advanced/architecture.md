@@ -125,21 +125,26 @@ The Python layer provides:
 
 | File | Purpose |
 |------|---------|
-| `unified_processor.py` | **Central feature runner** - single-pass FSC/FSR/FSD/WPS/OCF |
+| `sample_processor.py` | **Unified BAM extraction** - `extract_sample()`, `write_motif_outputs()`, `write_extraction_outputs()` |
+| `unified_processor.py` | **Central feature runner** - single-pass FSC/FSR/FSD/WPS/OCF via `run_features()` |
 | `gc_assets.py` | Centralized GC asset resolution |
 | `fsc_processor.py` | FSC z-score computation |
 | `fsr_processor.py` | FSR ratio calculation |
 | `wps_processor.py` | WPS post-processing |
 | `wps_anchor_filter.py` | Panel-specific anchor filtering |
+| `motif_processor.py` | Motif file writing (EDM, BPM, MDS) |
 | `gene_bed.py` | Gene BED parsing for FSC gene aggregation |
 | `feature_serializer.py` | Unified JSON output generation |
 
-> **Note**: `unified_processor.py` consolidates feature extraction logic that was previously duplicated across CLI tools and wrapper.py. All CLI tools (fsc, fsr, fsd, wps, ocf) and run-all now delegate to the `run_features()` function.
+> **Architecture Note**: 
+> - `sample_processor.py` provides `extract_sample()` for unified BAM extraction used by `extract.py`, `motif.py`, `wrapper.py`, and `build-pon`
+> - `unified_processor.py` provides `run_features()` for unified feature extraction used by all CLI tools and `wrapper.py`
 
-### Recent Improvements (2024)
+### Recent Improvements (2024-2025)
 
 | Change | Files | Benefit |
 |--------|-------|---------|
+| **Unified Extraction** | `core/sample_processor.py` | Single `extract_sample()` for all BAM extraction, ~150 lines reduced |
 | **Unified Processor** | `core/unified_processor.py` | Single entry point for all features, ~350 lines reduced |
 | **GC Asset Helper** | `core/gc_assets.py` | Eliminated 100+ lines duplication |
 | **Dual WPS Output** | `wps.py`, `wrapper.py` | Panel + genome-wide WPS |
