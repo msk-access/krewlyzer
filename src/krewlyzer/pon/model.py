@@ -270,6 +270,65 @@ class OcfBaseline:
 
 
 @dataclass
+class WpsBackgroundBaseline:
+    """
+    WPS background (Alu) baseline for periodicity/NRL analysis.
+    
+    Stores nucleosome repeat length (NRL) statistics from Alu element stacking
+    across healthy plasma samples. Used for:
+    - NRL deviation scoring (cancer detection)
+    - Periodicity z-score computation
+    
+    The Alu stacking method provides a robust measure of nucleosome spacing
+    independent of gene expression patterns.
+    """
+    # DataFrame: group_id, nrl_mean, nrl_std, periodicity_mean, periodicity_std
+    groups: pd.DataFrame
+    
+    def get_nrl_stats(self, group_id: str = "all") -> Optional[tuple]:
+        """
+        Get (mean, std) for nucleosome repeat length.
+        
+        Args:
+            group_id: Group identifier (default: "all" for genome-wide)
+            
+        Returns:
+            Tuple (nrl_mean, nrl_std) or None if not found
+        """
+        match = self.groups[self.groups["group_id"] == group_id]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        return (row["nrl_mean"], row["nrl_std"])
+    
+    def get_periodicity_stats(self, group_id: str = "all") -> Optional[tuple]:
+        """
+        Get (mean, std) for periodicity score.
+        
+        Args:
+            group_id: Group identifier (default: "all" for genome-wide)
+            
+        Returns:
+            Tuple (periodicity_mean, periodicity_std) or None if not found
+        """
+        match = self.groups[self.groups["group_id"] == group_id]
+        if match.empty:
+            return None
+        row = match.iloc[0]
+        return (row.get("periodicity_mean", 0), row.get("periodicity_std", 1))
+    
+    def compute_nrl_zscore(self, observed_nrl: float, group_id: str = "all") -> Optional[float]:
+        """Compute z-score for observed NRL value."""
+        stats = self.get_nrl_stats(group_id)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_nrl - mean) / std
+        return 0.0
+
+
+@dataclass
 class MdsBaseline:
     """
     Motif Diversity Score baseline from healthy plasma samples.
@@ -351,6 +410,7 @@ class PonModel:
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
+    wps_background_baseline: Optional[WpsBackgroundBaseline] = None  # Alu periodicity
     ocf_baseline: Optional[OcfBaseline] = None
     mds_baseline: Optional[MdsBaseline] = None
     
