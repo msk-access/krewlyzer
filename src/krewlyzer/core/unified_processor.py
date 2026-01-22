@@ -44,52 +44,13 @@ from .gene_bed import load_gene_bed
 # Rust backend
 from krewlyzer import _core
 
+# Import shared resolver functions
+from .utils import resolve_int as _resolve_int
+from .utils import resolve_path as _resolve_path
+from .utils import resolve_bool as _resolve_bool
+from .utils import resolve_str as _resolve_str
+
 logger = logging.getLogger("krewlyzer.core.unified_processor")
-
-
-def _resolve_int(value, default: int) -> int:
-    """Safely resolve an integer value, handling typer.OptionInfo objects.
-    
-    When a typer-decorated function is called directly (not via CLI),
-    parameters with defaults remain as OptionInfo objects. This helper handles that.
-    """
-    if isinstance(value, int):
-        return value
-    # If it's a typer.OptionInfo or other non-int type, return default
-    return default
-
-
-def _resolve_path(value) -> Optional[Path]:
-    """Safely resolve a path value, handling typer.OptionInfo objects.
-    
-    When a typer-decorated function is called directly (not via CLI),
-    Optional[Path] parameters with defaults remain as OptionInfo objects.
-    """
-    if value is None:
-        return None
-    if isinstance(value, Path):
-        return value
-    if isinstance(value, str):
-        return Path(value)
-    # If it's a typer.OptionInfo (or any other type), return None
-    return None
-
-
-def _resolve_bool(value, default: bool) -> bool:
-    """Safely resolve a boolean value, handling typer.OptionInfo objects."""
-    if isinstance(value, bool):
-        return value
-    return default
-
-
-def _resolve_str(value) -> Optional[str]:
-    """Safely resolve a string value, handling typer.OptionInfo objects."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    return None
-
 
 
 
