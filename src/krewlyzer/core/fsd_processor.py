@@ -81,7 +81,10 @@ def process_fsd(
     #   - Rust extension fails to load
     #   - Rust function returns an error
     # =========================================================================
-    logger.info(f"Processing FSD (Python fallback): {fsd_raw_path}")
+    if pon_parquet_path:
+        logger.info(f"Processing FSD (Python fallback): {fsd_raw_path}")
+    else:
+        logger.info(f"Processing FSD (no PON provided, skipping normalization): {fsd_raw_path}")
     
     # Read raw counts from Rust
     df = pd.read_csv(fsd_raw_path, sep='\t')
