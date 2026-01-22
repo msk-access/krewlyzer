@@ -189,94 +189,63 @@ def extract(
         if target_regions:
             logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
         
-        # Call Unified Rust Engine (Extract Mode)
-        # Returns (fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on, gc_observations_ontarget)
-        fragment_count, _, _, gc_observations, _, _, gc_observations_ontarget = _core.extract_motif.process_bam_parallel(
-            str(bam_input),
-            str(genome_reference),
-            mapq,
-            minlen,
-            maxlen,
-            4,  # kmer
-            threads,
-            str(bed_temp),         # output_bed_path
-            None,                  # output_motif_prefix (None = skip motif counting)
-            str(exclude_regions) if exclude_regions else None,
-            str(target_regions) if target_regions else None,  # For off-target GC model
-            skip_duplicates,
-            require_proper_pair
+        # Use unified extract_sample() for extraction
+        from .core.sample_processor import extract_sample, write_extraction_outputs
+        
+        result = extract_sample(
+            input_path=bam_input,
+            reference=genome_reference,
+            mapq=mapq,
+            minlen=minlen,
+            maxlen=maxlen,
+            kmer=4,
+            threads=threads,
+            skip_duplicates=skip_duplicates,
+            require_proper_pair=require_proper_pair,
+            target_regions=target_regions,
+            exclude_regions=exclude_regions,
+            write_bed=True,
+            output_dir=output,
+            sample_name=sample_name,
+            genome=genome,
         )
         
-        logger.info(f"Extracted {fragment_count:,} fragments")
+        logger.info(f"Extracted {result.fragment_count:,} fragments")
         
-        # Rust writes BGZF directly - just need to index with tabix
-        # The temp file is already .bed.gz format from noodles::bgzf
-        import shutil
-        logger.info("Moving and indexing BED.gz...")
-        shutil.move(str(bed_temp), str(bed_output))
-        pysam.tabix_index(str(bed_output), preset="bed", force=True)
+        # Write extraction outputs (BED index, metadata, GC factors)
+        write_extraction_outputs(
+            result=result,
+            output_dir=output,
+            genome=genome,
+            assay=None,
+            compute_gc_factors=gc_correct and assets is not None,
+        )
         
-        # Compute GC correction factors inline (no second BED pass!)
-        if gc_correct and assets:
+        # On-target GC correction (panel mode only) - additional to standard outputs
+        if target_regions and gc_correct and assets and len(result.gc_observations_ontarget) > 0:
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                
-                # Off-target GC correction (primary - always computed)
-                logger.info(f"Computing GC correction factors from {len(gc_observations)} observation bins...")
-                n_factors = _core.gc.compute_and_write_gc_factors(
-                    gc_observations,
+                factors_ontarget = output / f"{sample_name}.correction_factors.ontarget.csv"
+                logger.info(f"Computing ON-TARGET GC correction factors from {len(result.gc_observations_ontarget)} observation bins...")
+                n_factors_on = _core.gc.compute_and_write_gc_factors(
+                    result.gc_observations_ontarget,
                     str(gc_ref),
                     str(valid_regions),
-                    str(factors_output)
+                    str(factors_ontarget)
                 )
-                logger.info(f"Computed {n_factors} correction factors: {factors_output}")
-                
-                # On-target GC correction (panel mode only)
-                if target_regions and len(gc_observations_ontarget) > 0:
-                    factors_ontarget = output / f"{sample_name}.correction_factors.ontarget.csv"
-                    logger.info(f"Computing ON-TARGET GC correction factors from {len(gc_observations_ontarget)} observation bins...")
-                    n_factors_on = _core.gc.compute_and_write_gc_factors(
-                        gc_observations_ontarget,
-                        str(gc_ref),
-                        str(valid_regions),
-                        str(factors_ontarget)
-                    )
-                    logger.info(f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}")
-                
-            except FileNotFoundError as e:
-                logger.warning(f"GC correction assets not found: {e}")
-                logger.warning("Skipping GC correction. Run 'krewlyzer build-gc-reference' to generate assets.")
-                gc_correct = False
+                logger.info(f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}")
             except Exception as e:
-                logger.warning(f"GC correction failed: {e}")
-                gc_correct = False
+                logger.warning(f"On-target GC correction failed: {e}")
         
-        # Write metadata
-        metadata = {
-            "sample_id": sample_name,
-            "total_fragments": fragment_count,
-            "genome": genome,
-            "gc_correction_computed": gc_correct,
-            "panel_mode": target_regions is not None,
-            "target_regions": str(target_regions) if target_regions else None,
-            "filters": {
-                "mapq": mapq,
-                "min_length": minlen,
-                "max_length": maxlen,
-                "skip_duplicates": skip_duplicates,
-                "require_proper_pair": require_proper_pair
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        with open(metadata_output, 'w') as f:
-            json.dump(metadata, f, indent=2)
-        
-        logger.info(f"Output: {bed_output}")
-        logger.info(f"Metadata: {metadata_output}")
+        logger.info(f"Output: {result.bed_path}")
+        logger.info(f"Metadata: {output / f'{sample_name}.metadata.json'}")
         if gc_correct:
-            logger.info(f"Correction factors: {factors_output}")
+            logger.info(f"Correction factors: {output / f'{sample_name}.correction_factors.tsv'}")
 
     except Exception as e:
         logger.error(f"Fragment extraction failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

@@ -79,14 +79,14 @@ class ExtractionResult:
     fragment_count: int = 0
     bed_path: Optional[Path] = None
     
-    # Off-target data (primary, unbiased)
-    em_counts: List[int] = field(default_factory=list)
-    bpm_counts: List[int] = field(default_factory=list)
+    # Off-target data (primary, unbiased) - dicts map k-mer -> count
+    em_counts: Dict[str, int] = field(default_factory=dict)
+    bpm_counts: Dict[str, int] = field(default_factory=dict)
     gc_observations: List[Any] = field(default_factory=list)
     
-    # On-target data (panel mode only)
-    em_counts_ontarget: List[int] = field(default_factory=list)
-    bpm_counts_ontarget: List[int] = field(default_factory=list)
+    # On-target data (panel mode only) - dicts map k-mer -> count
+    em_counts_ontarget: Dict[str, int] = field(default_factory=dict)
+    bpm_counts_ontarget: Dict[str, int] = field(default_factory=dict)
     gc_observations_ontarget: List[Any] = field(default_factory=list)
     
     # Derived data
@@ -97,6 +97,7 @@ class ExtractionResult:
     is_panel_mode: bool = False
     extraction_time_seconds: float = 0.0
     kmer: int = 4
+    target_regions_path: Optional[str] = None  # For metadata output
 
 
 @dataclass
@@ -345,15 +346,11 @@ def extract_sample(
     if is_panel_mode:
         logger.info(f"  Panel mode: off-target GC from {target_regions.name}")
     
-    # Resolve exclude regions from assets if not provided
-    if exclude_regions is None:
-        try:
-            assets = AssetManager(genome)
-            exclude_regions = assets.exclude_regions
-            if exclude_regions:
-                logger.debug(f"  Exclude regions: {exclude_regions.name}")
-        except Exception as e:
-            logger.debug(f"  Could not resolve exclude regions: {e}")
+    # Note: exclude_regions is NOT auto-resolved here.
+    # The caller (wrapper.py, extract.py) should pass it explicitly.
+    # This avoids issues with mismatched chromosome naming in tests.
+    if exclude_regions:
+        logger.debug(f"  Exclude regions: {exclude_regions.name}")
     
     # Prepare BED output path
     bed_path = None
@@ -388,31 +385,37 @@ def extract_sample(
         raise RuntimeError(f"Extraction failed: {e}") from e
     
     # Unpack Rust results
-    (fragment_count, em_counts, bpm_counts, gc_obs,
-     em_counts_on, bpm_counts_on, gc_obs_on) = result
+    (fragment_count, em_counts_raw, bpm_counts_raw, gc_obs,
+     em_counts_on_raw, bpm_counts_on_raw, gc_obs_on) = result
     
-    # Convert to Python lists
-    em_counts = list(em_counts) if em_counts else []
-    bpm_counts = list(bpm_counts) if bpm_counts else []
+    # em_counts and bpm_counts from Rust are dicts (k-mer -> count)
+    # Keep as dicts for compatibility with motif_processor
+    em_counts = dict(em_counts_raw) if em_counts_raw else {}
+    bpm_counts = dict(bpm_counts_raw) if bpm_counts_raw else {}
     gc_observations = list(gc_obs) if gc_obs else []
-    em_counts_ontarget = list(em_counts_on) if em_counts_on else []
-    bpm_counts_ontarget = list(bpm_counts_on) if bpm_counts_on else []
+    
+    # On-target counts (also keep as dicts)
+    em_counts_ontarget = dict(em_counts_on_raw) if em_counts_on_raw else {}
+    bpm_counts_ontarget = dict(bpm_counts_on_raw) if bpm_counts_on_raw else {}
     gc_observations_ontarget = list(gc_obs_on) if gc_obs_on else []
     
     # Compute derived data
     kmer_frequencies = {}
     mds_score = 0.0
     if em_counts:
-        kmer_frequencies = _compute_kmer_frequencies(em_counts, kmer)
-        mds_score = _compute_mds_from_counts(em_counts)
+        # kmer_frequencies is just normalized em_counts
+        total_em = sum(em_counts.values())
+        if total_em > 0:
+            kmer_frequencies = {k: v / total_em for k, v in em_counts.items()}
+        mds_score = _compute_mds_from_counts(list(em_counts.values()))
     
     elapsed = time.time() - start_time
     
     # Log results
     logger.info(f"  Extracted {fragment_count:,} fragments ({elapsed:.1f}s)")
-    logger.debug(f"  Off-target: {sum(em_counts):,} EM, {len(gc_observations):,} GC obs")
+    logger.debug(f"  Off-target: {sum(em_counts.values()):,} EM, {len(gc_observations):,} GC obs")
     if is_panel_mode:
-        logger.debug(f"  On-target: {sum(em_counts_ontarget):,} EM")
+        logger.debug(f"  On-target: {sum(em_counts_ontarget.values()):,} EM")
     logger.debug(f"  MDS: {mds_score:.4f}")
     
     return ExtractionResult(
@@ -431,6 +434,7 @@ def extract_sample(
         is_panel_mode=is_panel_mode,
         extraction_time_seconds=elapsed,
         kmer=kmer,
+        target_regions_path=str(target_regions) if target_regions else None,
     )
 
 
@@ -525,7 +529,7 @@ def write_motif_outputs(
             logger.debug(f"  Could not add MDS z-score: {e}")
     
     # Write on-target motif files (panel mode)
-    if include_ontarget and result.is_panel_mode and sum(result.em_counts_ontarget) > 0:
+    if include_ontarget and result.is_panel_mode and sum(result.em_counts_ontarget.values()) > 0:
         edm_on = output_dir / f"{sample}.EndMotif.ontarget.tsv"
         bpm_on = output_dir / f"{sample}.BreakPointMotif.ontarget.tsv"
         mds_on = output_dir / f"{sample}.MDS.ontarget.tsv"
@@ -614,10 +618,11 @@ def write_extraction_outputs(
         "genome": genome,
         "assay": assay,
         "panel_mode": result.is_panel_mode,
+        "target_regions": result.target_regions_path,
         "extraction_time_seconds": round(result.extraction_time_seconds, 2),
         "mds_score": round(result.mds_score, 6),
         "filters": {
-            "mapq": 20,  # Could be passed through result
+            "mapq": 20,
             "min_length": 65,
             "max_length": 400,
         },

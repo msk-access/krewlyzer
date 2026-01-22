@@ -114,113 +114,64 @@ def motif(
                 logger.error(f"Filter mismatch detected. Re-run with: {suggested}")
                 raise typer.Exit(1)
     
-    # Output file paths
-    edm_output = output / f"{sample_name}.EndMotif.tsv"
-    bpm_output = output / f"{sample_name}.BreakPointMotif.tsv"
-    mds_output = output / f"{sample_name}.MDS.tsv"
-    
     try:
         logger.info(f"Extracting motif features from {bam_input.name}")
         
-        # Initialize motif dictionaries
-        bases = ['A', 'C', 'T', 'G']
-        End_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-        Breakpoint_motif = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
+        # Use unified extract_sample() for extraction
+        from .core.sample_processor import extract_sample, write_motif_outputs
         
-        # Parse chromosomes
-        chroms = chromosomes.split(',') if chromosomes else None
-        
-        # Call Unified Rust Engine (Extract + Motif)
-        # Returns: (fragment_count, em_counts, bpm_counts, gc_obs, em_counts_on, bpm_counts_on)
-        
-        # Call Rust extraction - returns 7 values: (count, em_off, bpm_off, gc_obs, em_on, bpm_on, gc_obs_on)
-        fragment_count, em_counts, bpm_counts, _gc_obs, em_counts_on, bpm_counts_on, _gc_obs_on = _core.extract_motif.process_bam_parallel(
-            str(bam_input),
-            str(genome_reference),
-            20,    # Default mapQ
-            65,    # Default min length
-            400,   # Default max length
-            kmer,
-            threads,
-            None,  # output_bed_path
-            "enable",  # output_motif_prefix (triggers counting)
-            None,  # exclude_path
-            str(target_regions) if target_regions else None,  # target_regions_path
-            True,  # skip_duplicates
-            require_proper_pair,  # proper pair filter
-            False  # silent
-        )
-        
-        End_motif.update(em_counts)
-        Breakpoint_motif.update(bpm_counts)
-        logger.info(f"Processed {fragment_count:,} fragments")
-        
-        # Write all motif outputs using shared processor
-        from .core.motif_processor import process_motif_outputs
-        
-        total_em, total_bpm, mds = process_motif_outputs(
-            em_counts=End_motif,
-            bpm_counts=Breakpoint_motif,
-            edm_output=edm_output,
-            bpm_output=bpm_output,
-            mds_output=mds_output,
-            sample_name=sample_name,
+        result = extract_sample(
+            input_path=bam_input,
+            reference=genome_reference,
+            mapq=20,  # Default mapQ for motif
+            minlen=65,
+            maxlen=400,
             kmer=kmer,
-            include_headers=True  # Consistent with run-all
+            threads=threads,
+            skip_duplicates=True,
+            require_proper_pair=require_proper_pair,
+            target_regions=target_regions,
+            exclude_regions=None,
+            write_bed=False,  # Motif command doesn't write BED
+            output_dir=None,
+            sample_name=sample_name,
+            genome="hg19",  # Default for motif
         )
         
-        # Process on-target motifs if target_regions was provided and we have data
-        is_panel_mode = target_regions and target_regions.exists()
-        if is_panel_mode and sum(em_counts_on.values()) > 0:
-            edm_on = output / f"{sample_name}.EndMotif.ontarget.tsv"
-            bpm_on = output / f"{sample_name}.BreakPointMotif.ontarget.tsv"
-            mds_on = output / f"{sample_name}.MDS.ontarget.tsv"
-            
-            End_motif_on = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            Breakpoint_motif_on = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-            End_motif_on.update(em_counts_on)
-            Breakpoint_motif_on.update(bpm_counts_on)
-            
-            total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
-                em_counts=End_motif_on,
-                bpm_counts=Breakpoint_motif_on,
-                edm_output=edm_on,
-                bpm_output=bpm_on,
-                mds_output=mds_on,
-                sample_name=sample_name,
-                kmer=kmer,
-                include_headers=True
-            )
-            logger.info(f"On-target motifs: EM={total_em_on:,}, BPM={total_bpm_on:,}")
+        logger.info(f"Processed {result.fragment_count:,} fragments")
         
-        # Apply PON normalization if model provided
-        mds_z = None
+        # Load PON model if provided
+        pon = None
         if pon_model and pon_model.exists():
             try:
                 from .pon.model import PonModel
                 pon = PonModel.load(pon_model)
-                if pon.mds_baseline:
-                    mds_z = pon.mds_baseline.get_mds_zscore(mds)
-                    logger.info(f"MDS z-score (vs PON): {mds_z:.3f}")
-                    
-                    # Append z-score to MDS output file
-                    import pandas as pd
-                    mds_df = pd.read_csv(mds_output, sep='\t')
-                    mds_df['mds_z'] = mds_z
-                    mds_df.to_csv(mds_output, sep='\t', index=False)
-                    
-                    # Find aberrant k-mers
-                    edm_freqs = {k: v/total_em for k, v in End_motif.items()} if total_em > 0 else {}
-                    aberrant = pon.mds_baseline.get_aberrant_kmers(edm_freqs, threshold=3.0)
-                    if aberrant:
-                        logger.info(f"Found {len(aberrant)} aberrant k-mers (|z| > 3.0)")
-                else:
-                    logger.warning("PON model has no MDS baseline - skipping z-score")
+                logger.debug(f"Loaded PON model for z-score computation")
             except Exception as e:
-                logger.warning(f"Could not apply PON normalization: {e}")
+                logger.warning(f"Could not load PON model: {e}")
         
-        logger.info(f"Motif extraction complete (EM={total_em:,}, BPM={total_bpm:,}, MDS={mds:.4f})")
+        # Write motif outputs using shared function
+        outputs = write_motif_outputs(
+            result=result,
+            output_dir=output,
+            pon=pon,
+            include_ontarget=target_regions is not None and target_regions.exists(),
+        )
+        
+        # Additional aberrant k-mer analysis if PON provided
+        if pon and hasattr(pon, 'mds_baseline') and pon.mds_baseline:
+            try:
+                aberrant = pon.mds_baseline.get_aberrant_kmers(result.kmer_frequencies, threshold=3.0)
+                if aberrant:
+                    logger.info(f"Found {len(aberrant)} aberrant k-mers (|z| > 3.0)")
+            except Exception as e:
+                logger.debug(f"Could not compute aberrant k-mers: {e}")
+        
+        logger.info(f"Motif extraction complete (MDS={result.mds_score:.4f})")
 
     except Exception as e:
         logger.error(f"Motif extraction failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)
