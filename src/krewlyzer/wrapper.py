@@ -43,33 +43,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("krewlyzer")
 
-def _resolve_path(value) -> Optional[Path]:
-    """Safely resolve a path value, handling typer.OptionInfo objects.
-    
-    When a typer-decorated function is called directly (not via CLI),
-    Optional[Path] parameters with defaults remain as OptionInfo objects.
-    This helper handles that case.
-    """
-    if value is None:
-        return None
-    if isinstance(value, Path):
-        return value
-    if isinstance(value, str):
-        return Path(value)
-    # If it's a typer.OptionInfo (or any other type), return None
-    return None
-
-def _resolve_int(value, default: int) -> int:
-    """Safely resolve an integer value, handling typer.OptionInfo objects.
-    
-    When a typer-decorated function is called directly (not via CLI),
-    parameters with defaults remain as OptionInfo objects.
-    This helper handles that case.
-    """
-    if isinstance(value, int):
-        return value
-    # If it's a typer.OptionInfo or other non-int type, return default
-    return default
+# Import shared resolver functions
+from .core.utils import resolve_path as _resolve_path
+from .core.utils import resolve_int as _resolve_int
 
 def run_all(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
