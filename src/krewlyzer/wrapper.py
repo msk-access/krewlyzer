@@ -261,17 +261,18 @@ def run_all(
         task_mfsd = progress.add_task(f"[5/5] mFSD", total=100, start=False, visible=has_mfsd)
         
         # ═══════════════════════════════════════════════════════════════════
-        # 1. EXTRACT + MOTIF (Unified Engine)
+        # 1. EXTRACT + MOTIF (Using unified extract_sample)
         # ═══════════════════════════════════════════════════════════════════
+        from .core.sample_processor import extract_sample, write_motif_outputs, write_extraction_outputs, ExtractionResult
     
         bedgz_file = output / f"{sample}.bed.gz"
-        bed_temp = output / f"{sample}.bed.tmp"
         
-        # Motif Outputs
+        # Motif Outputs (for caching check)
         edm_output = output / f"{sample}.EndMotif.tsv"
         bpm_output = output / f"{sample}.BreakPointMotif.tsv"
         mds_output = output / f"{sample}.MDS.tsv"
         
+        # Caching logic: determine what needs to run
         should_run_extract = not bedgz_file.exists()
         should_run_engine = (
             not bedgz_file.exists() or 
@@ -280,131 +281,62 @@ def run_all(
             not mds_output.exists()
         )
         
+        extraction_result: ExtractionResult = None
+        
         if not should_run_engine:
             progress.update(task_extract, description="[1/5] Extract + Motif  ✓ (cached)", completed=100)
         else:
             progress.update(task_extract, description="[1/5] Extract + Motif  ...")
             
-            # Decide if we write BED
-            bed_out_arg = str(bed_temp) if should_run_extract else None
-            
             try:
-                # Call Unified Engine (silent=True to hide Rust progress)
-                # Returns: (count, em_off, bpm_off, gc_obs, em_on, bpm_on, gc_obs_ontarget)
-                fragment_count, em_counts, bpm_counts, gc_observations, em_counts_on, bpm_counts_on, gc_observations_ontarget = _core.extract_motif.process_bam_parallel(
-                    str(bam_input),
-                    str(reference),
-                    mapq,
-                    minlen,
-                    maxlen,
-                    4,  # kmer
-                    threads,
-                    bed_out_arg,
-                    "enable",  # output_motif_prefix
-                    str(resolved_exclude_regions) if resolved_exclude_regions else str(assets.exclude_regions),
-                    str(resolved_target_regions) if resolved_target_regions and resolved_target_regions.exists() else None,  # Panel mode: off-target GC
-                    skip_duplicates,
-                    require_proper_pair,
-                    True  # silent=True
-                )
-                
-                # --- Post-Process Extract (Move BGZF BED, compute GC factors) ---
-                if should_run_extract and bed_temp.exists():
-                    import pysam
-                    
-                    # Rust already writes BGZF - just move and index
-                    shutil.move(str(bed_temp), str(bedgz_file))
-                    pysam.tabix_index(str(bedgz_file), preset="bed", force=True)
-                    
-                    # Compute GC correction factors inline
-                    factors_file = output / f"{sample}.correction_factors.tsv"
-                    try:
-                        gc_ref = assets.resolve("gc_reference")
-                        valid_regions = assets.resolve("valid_regions")
-                        n_factors = _core.gc.compute_and_write_gc_factors(
-                            gc_observations, str(gc_ref), str(valid_regions), str(factors_file)
-                        )
-                    except Exception as e:
-                        logger.debug(f"GC factor computation failed: {e}")
-                    
-                    # Write Metadata
-                    import json
-                    from datetime import datetime
-                    meta_file = output / f"{sample}.metadata.json"
-                    
-                    # Resolve assay
-                    resolved_assay = assay if isinstance(assay, str) else None
-                    
-                    metadata = {
-                        "sample_id": sample,
-                        "total_fragments": fragment_count,
-                        "genome": genome,
-                        "assay": resolved_assay,
-                        "gc_correction_computed": factors_file.exists(),
-                        "panel_mode": is_panel_mode,
-                        "filters": { "mapq": mapq, "min_length": minlen, "max_length": maxlen },
-                        "timestamp": datetime.now().isoformat()
-                    }
-                    
-                    # Note: on_target_rate is available from fragment counts but not exposed here
-                    # Consider adding this from em_counts_on/em_counts ratio if needed
-                    
-                    with open(meta_file, 'w') as f:
-                        json.dump(metadata, f, indent=2)
-
-                # --- Post-Process Motif (Write Files) ---
-                from .core.motif_processor import process_motif_outputs
-                
-                # Off-target motifs (primary - unbiased for biomarkers)
-                total_em, total_bpm, mds = process_motif_outputs(
-                    em_counts=em_counts,
-                    bpm_counts=bpm_counts,
-                    edm_output=edm_output,
-                    bpm_output=bpm_output,
-                    mds_output=mds_output,
-                    sample_name=sample,
+                # Use unified extract_sample() for all extraction
+                extraction_result = extract_sample(
+                    input_path=bam_input,
+                    reference=reference,
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
                     kmer=4,
-                    include_headers=True
+                    threads=threads,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                    target_regions=resolved_target_regions,
+                    exclude_regions=resolved_exclude_regions or assets.exclude_regions,
+                    write_bed=should_run_extract,
+                    output_dir=output if should_run_extract else None,
+                    sample_name=sample,
+                    genome=genome,
                 )
                 
-                # On-target motifs (for panel data comparison - PCR biased)
-                if is_panel_mode and sum(em_counts_on.values()) > 0:
-                    edm_on = output / f"{sample}.EndMotif.ontarget.tsv"
-                    bpm_on = output / f"{sample}.BreakPointMotif.ontarget.tsv"
-                    mds_on = output / f"{sample}.MDS.ontarget.tsv"
-                    
-                    total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
-                        em_counts=em_counts_on,
-                        bpm_counts=bpm_counts_on,
-                        edm_output=edm_on,
-                        bpm_output=bpm_on,
-                        mds_output=mds_on,
-                        sample_name=sample,
-                        kmer=4,
-                        include_headers=True
+                # Write extraction outputs (BED index, metadata, GC factors)
+                if should_run_extract and extraction_result.bed_path:
+                    resolved_assay = assay if isinstance(assay, str) else None
+                    write_extraction_outputs(
+                        result=extraction_result,
+                        output_dir=output,
+                        genome=genome,
+                        assay=resolved_assay,
+                        compute_gc_factors=True,
                     )
-                    logger.info(f"Motif on-target: {total_em_on:,} EM, {total_bpm_on:,} BPM")
+                    bedgz_file = extraction_result.bed_path
                 
-                # MDS z-score using PON baseline
-                if pon and pon.mds_baseline and mds is not None:
-                    mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
-                    logger.debug(f"MDS z-score: {mds_z:.3f} (raw={mds:.4f}, pon_mean={pon.mds_baseline.mds_mean:.4f})")
-                    
-                    # Write z-score to MDS file if it exists
-                    if mds_output.exists():
-                        try:
-                            mds_df = pd.read_csv(mds_output, sep="\t")
-                            if "mds_z" not in mds_df.columns:
-                                mds_df["mds_z"] = mds_z
-                                mds_df.to_csv(mds_output, sep="\t", index=False)
-                        except Exception as mds_e:
-                            logger.debug(f"Could not add MDS z-score: {mds_e}")
+                # Write motif outputs (EDM, BPM, MDS with z-score)
+                write_motif_outputs(
+                    result=extraction_result,
+                    output_dir=output,
+                    pon=pon,
+                    include_ontarget=is_panel_mode,
+                )
                 
+                fragment_count = extraction_result.fragment_count
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✓ ({fragment_count:,} frags)", completed=100)
                     
             except Exception as e:
                 progress.update(task_extract, description=f"[1/5] Extract + Motif  ✗ Error", completed=100)
                 logger.error(f"Unified Extract+Motif failed: {e}")
+                if debug:
+                    import traceback
+                    traceback.print_exc()
                 raise typer.Exit(1)
 
         # ═══════════════════════════════════════════════════════════════════
