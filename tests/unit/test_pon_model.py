@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from krewlyzer.pon.model import (
     PonModel, GcBiasModel, FsdBaseline, WpsBaseline,
-    OcfBaseline, MdsBaseline
+    OcfBaseline, MdsBaseline, WpsBackgroundBaseline
 )
 
 
@@ -129,6 +129,49 @@ class TestMdsBaseline:
         aberrant = sample_mds_baseline.get_aberrant_kmers(observed, threshold=2.0)
         assert 'ACGT' in aberrant
         assert 'TGCA' not in aberrant
+
+
+class TestWpsBackgroundBaseline:
+    """Tests for WpsBackgroundBaseline class."""
+    
+    @pytest.fixture
+    def sample_wps_background(self):
+        df = pd.DataFrame({
+            'group_id': ['all', 'chr1'],
+            'nrl_mean': [196.0, 195.0],
+            'nrl_std': [3.0, 4.0],
+            'periodicity_mean': [0.85, 0.82],
+            'periodicity_std': [0.05, 0.06]
+        })
+        return WpsBackgroundBaseline(groups=df)
+    
+    def test_get_nrl_stats(self, sample_wps_background):
+        """Test get_nrl_stats returns (mean, std) tuple."""
+        stats = sample_wps_background.get_nrl_stats('all')
+        assert stats[0] == 196.0
+        assert stats[1] == 3.0
+    
+    def test_get_nrl_stats_missing(self, sample_wps_background):
+        """Test get_nrl_stats returns None for missing group."""
+        stats = sample_wps_background.get_nrl_stats('chr99')
+        assert stats is None
+    
+    def test_get_periodicity_stats(self, sample_wps_background):
+        """Test get_periodicity_stats returns (mean, std) tuple."""
+        stats = sample_wps_background.get_periodicity_stats('all')
+        assert stats[0] == 0.85
+        assert stats[1] == 0.05
+    
+    def test_compute_nrl_zscore(self, sample_wps_background):
+        """Test NRL z-score computation."""
+        # observed=202, mean=196, std=3 -> z=(202-196)/3=2.0
+        zscore = sample_wps_background.compute_nrl_zscore(202.0, 'all')
+        assert pytest.approx(zscore) == 2.0
+    
+    def test_compute_nrl_zscore_missing(self, sample_wps_background):
+        """Test NRL z-score returns None for missing group."""
+        zscore = sample_wps_background.compute_nrl_zscore(200.0, 'chr99')
+        assert zscore is None
 
 
 class TestPonModel:
