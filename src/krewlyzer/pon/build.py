@@ -31,25 +31,32 @@ from krewlyzer.core.sample_processor import process_sample, SampleParams, Sample
 
 
 def build_pon(
-    sample_list: Path = typer.Argument(..., help="Text file with paths to BED.gz files (one per line)"),
+    sample_list: Path = typer.Argument(..., help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline."),
     assay: str = typer.Option(..., "--assay", "-a", help="Assay name (e.g., msk-access-v2)"),
     reference: Path = typer.Option(..., "--reference", "-r", help="Reference FASTA file"),
-    transcript_file: Optional[Path] = typer.Option(None, "--transcript-file", "-t", help="Transcript TSV for WPS baseline"),
+    wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", "-W", help="WPS anchors BED.gz for WPS baseline (default: bundled TSS+CTCF anchors)"),
+    transcript_file: Optional[Path] = typer.Option(None, "--transcript-file", "-t", help="[LEGACY] Transcript TSV for WPS baseline (use --wps-anchors instead)"),
     bin_file: Optional[Path] = typer.Option(None, "--bin-file", "-b", help="Bin file for FSC/FSR (default: hg19_window_100kb.bed)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="BED file with target regions (panel mode - builds dual on/off-target baselines)"),
     temp_dir: Optional[Path] = typer.Option(None, "--temp-dir", help="Directory for temporary files (default: system temp)"),
     threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
 ):
     """
     Build a unified PON model from healthy plasma samples.
     
+    Input can be BAM/CRAM files or pre-extracted BED.gz files:
+    - BAM/CRAM: Full extraction + MDS baseline (recommended)
+    - BED.gz: Faster but no MDS baseline (requires sequence data)
+    
     The PON model contains:
     - GC bias curves for FSC/FSR/WPS correction
     - FSD baseline per chromosome arm
     - WPS baseline per transcript region
+    - MDS baseline (BAM input only)
     
     For panel data (--target-regions):
     - Builds DUAL baselines for on-target and off-target regions
@@ -57,7 +64,7 @@ def build_pon(
     - FSD/WPS include separate on-target stats
     
     Example:
-        krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+        krewlyzer build-pon bams.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
         krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
     """
     
@@ -105,10 +112,11 @@ def build_pon(
     logger.info(f"Building PON from {n_samples} samples")
     logger.info(f"Assay: {assay}")
     logger.info(f"Reference: {reference}")
+    logger.info(f"Genome: {genome}")
     
     # Use AssetManager for bundled data files
     from krewlyzer.assets import AssetManager
-    assets = AssetManager("GRCh37")  # TODO: detect from reference
+    assets = AssetManager(genome)
     
     # Default bin file
     if bin_file is None:
@@ -118,9 +126,13 @@ def build_pon(
         logger.error(f"Bin file not found: {bin_file}")
         raise typer.Exit(1)
     
-    # Default transcript file for WPS
-    if transcript_file is None:
-        transcript_file = assets.transcript_anno
+    # Default WPS anchors file (prefer wps_anchors, fallback to transcript_file for legacy)
+    wps_regions = wps_anchors or transcript_file
+    if wps_regions is None:
+        wps_regions = assets.wps_anchors if hasattr(assets, 'wps_anchors') and assets.wps_anchors.exists() else assets.transcript_anno
+    
+    if not wps_regions.exists():
+        logger.warning(f"WPS regions file not found: {wps_regions}")
     
     import tempfile
     import shutil
@@ -138,7 +150,7 @@ def build_pon(
     
     # Setup parameters for sample processing
     sample_params = SampleParams(
-        genome="GRCh37",  # TODO: detect from reference
+        genome=genome,
         mapq=20,
         minlen=65,
         maxlen=400,
@@ -147,7 +159,7 @@ def build_pon(
         kmer=4,
         threads=max(1, threads // max(1, min(4, n_samples))),  # Divide threads among samples
         bin_file=bin_file,
-        wps_anchors=transcript_file,  # Use transcript file for WPS anchors
+        wps_anchors=wps_regions,  # Use resolved WPS anchors (modern) or transcript file (legacy)
     )
     
     # Use temp directory for sample processing outputs
@@ -163,7 +175,10 @@ def build_pon(
     
     try:
         for i, sample_path in enumerate(samples, 1):
-            sample_name = sample_path.stem.replace('.bed', '').replace('.gz', '')
+            # Extract sample name from path (handle BAM, CRAM, and BED.gz)
+            sample_name = sample_path.stem
+            for suffix in ['.bed', '.bam', '.cram']:
+                sample_name = sample_name.replace(suffix, '')
             sample_start = time.time()
             
             logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")

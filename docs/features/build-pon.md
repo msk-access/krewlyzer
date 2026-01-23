@@ -38,13 +38,57 @@ This model is used for bias correction and z-score normalization during sample p
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `-G, --genome` | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
 | `-T, --target-regions` | None | BED file with target regions (panel mode) |
-| `--temp-dir` | System temp | Directory for temporary files during BAM extraction |
-| `-t, --transcript-file` | Built-in | Transcript TSV for WPS baseline |
+| `-W, --wps-anchors` | Built-in | WPS anchors BED.gz (merged TSS+CTCF) |
+| `-t, --transcript-file` | — | [LEGACY] Use `--wps-anchors` instead |
 | `-b, --bin-file` | Built-in | Bin file for FSC/FSR |
+| `--temp-dir` | System temp | Directory for temporary files |
 | `-p, --threads` | 4 | Number of threads |
 | `--require-proper-pair` | False | Only properly paired reads |
 | `-v, --verbose` | False | Verbose output |
+
+## Pipeline Flow
+
+```mermaid
+flowchart TB
+    subgraph Input
+        SL["sample_list.txt"]
+        BAM["BAM/CRAM files"]
+        BED["BED.gz files"]
+    end
+    
+    subgraph "Per-Sample Processing (Rust + Python)"
+        EXT["Extract fragments"]
+        GC["GC observations"]
+        FSD["FSD per arm"]
+        WPS["WPS per anchor"]
+        OCF["OCF per region"]
+        MDS["MDS k-mers"]
+    end
+    
+    subgraph "Baseline Aggregation (Python)"
+        AGG_GC["GC bias curves\nmean/std per bin"]
+        AGG_FSD["FSD baseline\nmean/std per arm"]
+        AGG_WPS["WPS baseline\nmean/std per region"]
+        AGG_OCF["OCF baseline\nmean/std per region"]
+        AGG_MDS["MDS baseline\nk-mer mean/std"]
+    end
+    
+    subgraph Output
+        PON["PON.parquet"]
+    end
+    
+    SL --> BAM & BED
+    BAM --> EXT --> GC & FSD & WPS & OCF & MDS
+    BED --> GC & FSD & WPS & OCF
+    
+    GC --> AGG_GC --> PON
+    FSD --> AGG_FSD --> PON
+    WPS --> AGG_WPS --> PON
+    OCF --> AGG_OCF --> PON
+    MDS --> AGG_MDS --> PON
+```
 
 ## Examples
 
@@ -78,6 +122,7 @@ krewlyzer build-pon healthy_samples.txt \
     --verbose
 ```
 
+
 ## Input Formats
 
 **Sample list file (`samples.txt`):**
@@ -87,7 +132,15 @@ krewlyzer build-pon healthy_samples.txt \
 /path/to/sample3.bed.gz
 ```
 
-Both BAM and BED.gz inputs are supported. BAM files are automatically extracted.
+Both BAM/CRAM and BED.gz inputs are supported:
+
+| Input Type | Extraction | MDS Baseline | Speed |
+|------------|------------|--------------|-------|
+| **BAM/CRAM** | Full | ✓ Included | Slower |
+| **BED.gz** | Skip | ✗ Not available | Faster |
+
+> [!NOTE]
+> **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
 
 ## Output
 
@@ -116,3 +169,25 @@ When `--target-regions` is provided:
 - **Same assay**: All samples must be from the same assay
 - **Same reference**: Must match reference used for processing
 - **Healthy samples**: Use confirmed non-cancer samples only
+
+## MDS Baseline
+
+The **MDS (Motif Diversity Score)** baseline is computed from k-mer frequencies at fragment ends:
+
+| Metric | Description |
+|--------|-------------|
+| `kmer_expected` | Mean frequency per 4-mer across samples |
+| `kmer_std` | Standard deviation per 4-mer |
+| `mds_mean` | Mean MDS (Shannon entropy) |
+| `mds_std` | MDS standard deviation |
+
+> [!IMPORTANT]
+> MDS baseline **requires BAM/CRAM input** because it needs fragment end sequences. BED.gz files cannot provide this data.
+
+Z-score interpretation:
+
+| mds_z | Interpretation |
+|-------|----------------|
+| -2 to +2 | Normal range |
+| < -2 | Abnormally low diversity |
+| > +2 | Rare, check data quality |

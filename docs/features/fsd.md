@@ -34,6 +34,28 @@ flowchart LR
     end
 ```
 
+### Python/Rust Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Python (CLI)"
+        CLI["fsd.py"] --> UP["unified_processor.py"]
+        UP --> ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Backend"
+        UP --> RUST["_core.run_unified_pipeline()"]
+        RUST --> GC["GC correction"]
+        GC --> HIST["67-bin histogram per arm"]
+    end
+    
+    subgraph "Python (Post-processing)"
+        HIST --> PROC["fsd_processor.py"]
+        PROC --> PON["PON log-ratio"]
+        PON --> OUT["FSD.tsv"]
+    end
+```
+
 ## Biological Context
 
 ### Why Fragment Sizes Matter

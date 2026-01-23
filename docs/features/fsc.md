@@ -77,6 +77,29 @@ flowchart LR
     end
 ```
 
+### Python/Rust Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Python (CLI)"
+        CLI["fsc.py"] --> UP["unified_processor.py"]
+        UP --> ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Backend"
+        UP --> RUST["_core.run_unified_pipeline()"]
+        RUST --> GC["GC correction"]
+        GC --> COUNT["5-channel counting"]
+    end
+    
+    subgraph "Python (Post-processing)"
+        COUNT --> PROC["fsc_processor.py"]
+        PROC --> AGG["Window aggregation"]
+        AGG --> PON["PON log2 ratios"]
+        PON --> OUT["FSC.tsv"]
+    end
+```
+
 ### Aggregation Strategy
 
 > **Critical**: Aggregation should match your analysis goal.

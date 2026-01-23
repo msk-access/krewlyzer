@@ -37,6 +37,28 @@ flowchart LR
 > [!WARNING]
 > OCF regions are **only available for GRCh37/hg19**. For hg38, you must provide a custom OCR file with `-r/--ocr-input`.
 
+### Python/Rust Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Python (CLI)"
+        CLI["ocf.py"] --> UP["unified_processor.py"]
+        UP --> ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Backend"
+        UP --> RUST["_core.run_unified_pipeline()"]
+        RUST --> GC["GC correction"]
+        GC --> OCF_CALC["OCF strand counting"]
+    end
+    
+    subgraph "Python (Post-processing)"
+        OCF_CALC --> PROC["Output cleanup"]
+        PROC --> PON["PON z-scores"]
+        PON --> OUT["OCF.tsv"]
+    end
+```
+
 ---
 
 ## Biological Context
@@ -101,6 +123,27 @@ Where:
 1. Fragments are mapped relative to the **center** of the Open Chromatin Region (OCR)
 2. Left/Right ends counted in 10bp bins across ±1000bp window
 3. Counts normalized by total sequencing depth
+
+---
+
+## PON Normalization
+
+When `--pon-model` is provided, OCF output includes z-score columns:
+
+### Output Columns with PON
+
+| Column | Formula | Description |
+|--------|---------|-------------|
+| `OCF` | Raw OCF score | Phased fragment orientation |
+| `ocf_z` | `(OCF - PON_mean) / PON_std` | Z-score vs healthy baseline |
+
+### Z-Score Interpretation
+
+| ocf_z | Meaning |
+|-------|---------|
+| -2 to +2 | Normal tissue contribution |
+| > +2 | **Elevated tissue signal** (possible tumor origin) |
+| < -2 | Decreased tissue contribution |
 
 ---
 

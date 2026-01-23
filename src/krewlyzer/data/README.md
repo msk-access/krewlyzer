@@ -51,13 +51,13 @@ Chromosome arm boundary BED files for FSD arm-level analysis.
 
 ### WpsAnchors
 Combined TSS + CTCF anchor regions for WPS foreground profiling.
-- `hg19_wps_anchors.bed.gz`
-- `hg38_wps_anchors.bed.gz`
+- `hg19.wps_anchors.bed.gz`
+- `hg38.wps_anchors.bed.gz`
 
 ### WpsBackground
 Alu element coordinates for WPS background hierarchical stacking.
-- `hg19_alu_background.bed.gz`
-- `hg38_alu_background.bed.gz`
+- `hg19.alu_consensus.bed.gz`
+- `hg38.alu_consensus.bed.gz`
 
 ### OpenChromatinRegion
 Tissue-specific open chromatin regions for OCF analysis.
@@ -72,12 +72,12 @@ Methylation marker BED files for UXM cell-type deconvolution.
 
 ### gc
 GC content reference files for LOESS bias correction.
-- `hg19.gc_reference.parquet` / `hg38.gc_reference.parquet`
+- `ref_genome_GC_hg19.parquet` / `ref_genome_GC_hg38.parquet`
 
 ### exclude-regions
 Blacklist regions excluded from analysis (centromeres, telomeres, low-mappability).
-- `hg19-blacklist.v2.bed`
-- `hg38-blacklist.v2.bed`
+- `hg19-blacklist.v2.bed.gz`
+- `hg38-blacklist.v2.bed.gz`
 
 ### pon
 Panel of Normals (PON) models for z-score normalization.

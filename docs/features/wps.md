@@ -45,6 +45,32 @@ Krewlyzer separates fragments into two biological signals:
 
 The tiered weights for nucleosome fragments prioritize "perfect" mono-nucleosome sizes (~167bp) over edge cases.
 
+### Python/Rust Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Python (CLI)"
+        CLI["wps.py"] --> UP["unified_processor.py"]
+        UP --> ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Backend"
+        UP --> RUST["_core.run_unified_pipeline()"]
+        RUST --> GC["GC correction"]
+        GC --> WPS_NUC["WPS foreground (anchors)"]
+        GC --> WPS_BG["WPS background (Alu)"]
+    end
+    
+    subgraph "Python (Post-processing)"
+        WPS_NUC --> PROC["wps_processor.py"]
+        WPS_BG --> PROC
+        PROC --> SMOOTH["Savitzky-Golay smoothing"]
+        SMOOTH --> FFT["FFT periodicity (Rust)"]
+        FFT --> PON["PON z-scores"]
+        PON --> OUT["WPS.parquet"]
+    end
+```
+
 ---
 
 ## Foreground vs Background

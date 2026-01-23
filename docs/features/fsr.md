@@ -36,6 +36,28 @@ flowchart LR
     end
 ```
 
+### Python/Rust Architecture
+
+```mermaid
+flowchart TB
+    subgraph "Python (CLI)"
+        CLI["fsr.py"] --> UP["unified_processor.py"]
+        UP --> ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Backend"
+        UP --> RUST["_core.run_unified_pipeline()"]
+        RUST --> GC["GC correction"]
+        GC --> COUNT["Size bin counting"]
+    end
+    
+    subgraph "Python (Post-processing)"
+        COUNT --> PROC["fsr_processor.py"]
+        PROC --> PON["PON normalization"]
+        PON --> OUT["FSR.tsv"]
+    end
+```
+
 ---
 
 ## Biological Context
@@ -130,6 +152,18 @@ $$
 $$
 
 This removes batch effects **before** ratio calculation, ensuring accurate cross-sample comparison.
+
+**Step 4 - Log2 ratio (optional):**
+
+$$
+\text{short\_long\_log2} = \log_2(\text{core\_short\_long\_ratio})
+$$
+
+| log2 Value | Meaning |
+|------------|---------|
+| 0 | Equal short/long (baseline) |
+| > 0.5 | **Elevated short fragments** (tumor signal) |
+| < -0.5 | Depleted short fragments |
 
 ---
 

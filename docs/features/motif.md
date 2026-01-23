@@ -92,6 +92,35 @@ $$
 
 ---
 
+## PON Normalization
+
+When `--pon-model` is provided, MDS output includes z-score normalization:
+
+```bash
+krewlyzer motif -i sample.bam -r hg19.fa -o output/ \
+    --pon-model healthy_cohort.pon.parquet
+```
+
+### Output Columns with PON
+
+| Column | Formula | Description |
+|--------|---------|-------------|
+| `MDS` | Shannon entropy | Raw score (0-1) |
+| `mds_z` | `(MDS - PON_mean) / PON_std` | Z-score vs healthy baseline |
+
+### Z-Score Interpretation
+
+| mds_z | Meaning |
+|-------|---------|
+| -2 to +2 | Within normal range |
+| < -2 | **Abnormally low diversity** (possible tumor) |
+| > +2 | Rare (check data quality) |
+
+> [!TIP]
+> Lower MDS (negative z-score) indicates stereotyped cutting patterns often associated with tumor-derived cfDNA.
+
+---
+
 ## Panel Mode (--target-regions)
 
 When `--target-regions` is provided, motif analysis produces **separate outputs** for on-target and off-target fragments:

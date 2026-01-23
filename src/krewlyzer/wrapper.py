@@ -433,13 +433,18 @@ def run_all(
             progress.update(task_mfsd, description="[5/5] mFSD ...")
             try:
                 from .mfsd import mfsd
+                # Resolve GC correction factors using the same logic as other tools
+                from .core.gc_assets import resolve_gc_assets
+                gc = resolve_gc_assets(assets, output, sample, bedgz_file, gc_correct=True, genome=genome)
+                correction_factors_path = gc.factors_input or gc.factors_out
+                
                 mfsd(
                     bam_input=bam_input,
                     input_file=resolved_variants,
                     output=output,
                     sample_name=sample,
                     reference=reference,
-                    correction_factors=out_gc_factors if out_gc_factors.exists() else None,
+                    correction_factors=correction_factors_path if correction_factors_path and correction_factors_path.exists() else None,
                     mapq=mapq,
                     minlen=minlen,
                     maxlen=maxlen,

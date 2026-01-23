@@ -153,6 +153,77 @@ The Python layer provides:
 
 ---
 
+## Asset Management
+
+The `AssetManager` class in `assets.py` provides centralized resolution of bundled data files based on genome build.
+
+### Initialization
+
+```python
+from krewlyzer.assets import AssetManager
+
+assets = AssetManager("hg19")  # or "hg38", "GRCh37", "GRCh38"
+print(assets.genome_dir)       # "GRCh37"
+print(assets.file_prefix)      # "hg19"
+```
+
+### Asset Properties
+
+| Property | Path Pattern | Used By |
+|----------|--------------|---------|
+| `bins_100kb` | `ChromosomeBins/{genome}/{prefix}_window_100kb.bed.gz` | FSC, FSR |
+| `arms` | `ChromosomeArms/{genome}/{prefix}.arms.bed.gz` | FSD |
+| `wps_anchors` | `WpsAnchors/{genome}/{prefix}.wps_anchors.bed.gz` | WPS |
+| `wps_background` | `WpsBackground/{genome}/{prefix}.alu_consensus.bed.gz` | WPS |
+| `ocf_regions` | `OpenChromatinRegion/{genome}/7specificTissue.all.OC.bed.gz` | OCF |
+| `gc_ref` | `gc/{genome}/ref_genome_GC_{prefix}.parquet` | GC correction |
+| `valid_regions` | `gc/{genome}/valid_regions_{prefix}.bed.gz` | GC correction |
+| `transcript_anno` | `TranscriptAnno/{genome}/transcriptAnno-{prefix}-1kb.tsv` | Legacy WPS |
+| `exclude_regions` | `exclude-regions/{genome}/{prefix}-blacklist.v2.bed.gz` | Extract |
+
+### Assay-Specific Assets
+
+For MSK-ACCESS panels, `AssetManager` provides assay-aware resolution:
+
+```python
+# Get panel-specific WPS anchors
+xs2_anchors = assets.get_wps_anchors("xs2")  
+# → WpsAnchors/GRCh37/xs2.wps_anchors.bed.gz
+
+# Get panel targets
+xs2_targets = assets.get_targets("xs2")
+# → targets/GRCh37/xs2.targets.bed
+
+# Get panel PON
+xs2_pon = assets.get_pon("xs2")
+# → pon/GRCh37/xs2.pon.parquet
+```
+
+| Assay | WPS Anchors | Target Genes | PON |
+|-------|:-----------:|:------------:|:---:|
+| `xs1` (MSK-ACCESS v1) | 1,611 | 128 | ✓ |
+| `xs2` (MSK-ACCESS v2) | 1,820 | 146 | ✓ |
+
+### Data Folder Structure
+
+```
+data/
+├── ChromosomeArms/{GRCh37,GRCh38}/
+├── ChromosomeBins/{GRCh37,GRCh38}/
+├── WpsAnchors/{GRCh37,GRCh38}/
+│   ├── {hg19,hg38}.wps_anchors.bed.gz    # Genome-wide
+│   ├── xs1.wps_anchors.bed.gz             # MSK-ACCESS v1
+│   └── xs2.wps_anchors.bed.gz             # MSK-ACCESS v2
+├── WpsBackground/{GRCh37,GRCh38}/
+├── OpenChromatinRegion/{GRCh37}/          # hg19 only
+├── gc/{GRCh37,GRCh38}/
+├── genes/{GRCh37}/                         # Gene BEDs per assay
+├── targets/{GRCh37}/                       # Target BEDs per assay
+└── pon/{GRCh37}/                           # Pre-built PON models
+```
+
+---
+
 ## Python vs Rust Responsibilities
 
 ### By Feature
@@ -224,20 +295,61 @@ return python_implementation(args)
 
 ### Execution Flow
 
+```mermaid
+flowchart TB
+    subgraph "1. CLI Layer"
+        CLI["krewlyzer run-all"]
+        CLI --> WRAPPER["wrapper.py"]
+    end
+    
+    subgraph "2. Asset Resolution"
+        WRAPPER --> ASSETS["AssetManager(genome)"]
+        ASSETS --> |"bins_100kb, arms, wps_anchors..."| CONFIG["Tool Configuration"]
+    end
+    
+    subgraph "3. Extraction (Rust)"
+        CONFIG --> EXTRACT["_core.extract_motif.process_bam_parallel()"]
+        EXTRACT --> BED["sample.bed.gz"]
+        EXTRACT --> MOTIF["EndMotif.tsv, MDS.tsv"]
+        EXTRACT --> GC_OBS["GC observations"]
+    end
+    
+    subgraph "4. GC Correction (Rust)"
+        GC_OBS --> GC_LOESS["_core.gc.compute_gc_factors()"]
+        GC_LOESS --> GC_FACTORS["correction_factors.tsv"]
+    end
+    
+    subgraph "5. Unified Pipeline (Rust)"
+        BED --> UNIFIED["_core.run_unified_pipeline()"]
+        GC_FACTORS --> UNIFIED
+        UNIFIED --> FSC_RAW["fsc_counts.tsv"]
+        UNIFIED --> FSD_RAW["FSD.tsv"]
+        UNIFIED --> WPS_RAW["WPS.parquet"]
+        UNIFIED --> OCF_RAW["OCF.tsv"]
+    end
+    
+    subgraph "6. Post-Processing (Python)"
+        FSC_RAW --> FSC_PROC["fsc_processor.py"]
+        FSC_RAW --> FSR_PROC["fsr_processor.py"]
+        FSD_RAW --> FSD_PROC["fsd_processor.py"]
+        WPS_RAW --> WPS_PROC["wps_processor.py"]
+        
+        PON["PON Model"] --> FSC_PROC & FSR_PROC & FSD_PROC & WPS_PROC
+        
+        FSC_PROC --> FSC_OUT["FSC.tsv (z-scores)"]
+        FSR_PROC --> FSR_OUT["FSR.tsv (ratios)"]
+        FSD_PROC --> FSD_OUT["FSD.tsv (logR)"]
+        WPS_PROC --> WPS_OUT["WPS.parquet (smoothed)"]
+    end
 ```
-krewlyzer run-all sample.bam -r hg19.fa -o output/
-    │
-    ├──► extract.py ──► _core.extract_motif.process_bam_parallel()
-    │       └──► sample.bed.gz, sample.EndMotif.tsv, sample.MDS.tsv
-    │
-    ├──► fsc.py ──► _core.run_unified_pipeline() or _core.count_fragments_by_bins()
-    │       └──► sample.FSC.tsv
-    │
-    ├──► fsr.py ──► (Python + Rust)
-    │       └──► sample.FSR.tsv
-    │
-    └──► ... (parallel feature extraction)
-```
+
+**Key Points:**
+
+1. **Single BAM Read**: Extraction reads BAM once, outputs BED.gz + motifs
+2. **GC Correction First**: LOESS-based correction computed before features
+3. **Single BED Pass**: `run_unified_pipeline()` processes BED.gz once for all features
+4. **Python Post-processing**: PON normalization and z-scores added in Python
+5. **Parallel Features**: FSC, FSD, WPS, OCF computed simultaneously in Rust
 
 ---
 

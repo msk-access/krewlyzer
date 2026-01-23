@@ -39,6 +39,42 @@ flowchart TB
     end
 ```
 
+### Python/Rust Boundary
+
+```mermaid
+flowchart TB
+    subgraph "Python Layer"
+        CLI["run-all CLI (wrapper.py)"]
+        UP["unified_processor.py"]
+        PROC["*_processor.py (post-processing)"]
+        PON["PonModel (normalization)"]
+        ASSETS["AssetManager"]
+    end
+    
+    subgraph "Rust Layer (_core)"
+        EXTRACT["extract_fragments()"]
+        UNIFIED["run_unified_pipeline()"]
+        GC["GC correction"]
+        FSC_R["FSC/FSR counting"]
+        FSD_R["FSD per arm"]
+        WPS_R["WPS profiling"]
+        OCF_R["OCF calculation"]
+    end
+    
+    CLI --> ASSETS
+    CLI --> UP
+    UP --> UNIFIED
+    
+    UNIFIED --> GC --> FSC_R & FSD_R & WPS_R & OCF_R
+    
+    FSC_R --> PROC
+    FSD_R --> PROC
+    WPS_R --> PROC
+    OCF_R --> PROC
+    
+    PROC --> PON
+```
+
 ---
 
 ## Usage
