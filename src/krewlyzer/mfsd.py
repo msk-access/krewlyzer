@@ -35,6 +35,7 @@ def mfsd(
     minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length (filters discordant reads)"),
     maxlen: int = typer.Option(400, "--maxlen", help="Maximum fragment length (filters discordant reads)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs (disable for duplex BAMs)"),
+    duplex: bool = typer.Option(False, "--duplex", "-D", help="Enable duplex weighting (fgbio cD tag or Marianas read names). Only use for duplex consensus BAMs."),
     output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose/debug logging"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
@@ -117,6 +118,10 @@ def mfsd(
         else:
             logger.info("GC correction disabled (no --correction-factors provided)")
         
+        # Log duplex mode
+        if duplex:
+            logger.info("Duplex mode enabled: using fgbio cD tag or Marianas read names for family size weighting")
+        
         # Call Rust backend with optional reference and correction factors
         _core.mfsd.calculate_mfsd(
             str(bam_input),
@@ -130,6 +135,7 @@ def mfsd(
             str(reference) if reference else None,
             str(correction_factors) if correction_factors else None,
             require_proper_pair,
+            duplex,
         )
         
         logger.info(f"mFSD complete: {output_file}")

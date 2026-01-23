@@ -695,7 +695,7 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `reference_path` - Optional path to reference FASTA (for GC computation)
 /// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, silent=false))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
@@ -708,6 +708,7 @@ pub fn calculate_mfsd(
     reference_path: Option<PathBuf>,
     correction_factors_path: Option<PathBuf>,
     require_proper_pair: bool,
+    duplex_mode: bool,
     silent: bool,
 ) -> PyResult<()> {
     use crate::gc_correction::CorrectionFactors;
@@ -924,8 +925,12 @@ pub fn calculate_mfsd(
                 };
                 
                 // Compute duplex consensus weight (for fgbio/Marianas duplex BAMs)
-                // High-confidence duplex families get higher weight
-                let duplex_weight = get_duplex_weight(&record);
+                // Only applied when --duplex flag is set
+                let duplex_weight = if duplex_mode {
+                    get_duplex_weight(&record)
+                } else {
+                    1.0  // No duplex weighting for non-duplex data
+                };
                 
                 // Combined weight: GC correction * duplex confidence
                 let weight = gc_weight * duplex_weight;
