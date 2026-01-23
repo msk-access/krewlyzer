@@ -27,8 +27,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
-from .core.fsc_processor import process_fsc, aggregate_by_gene
-from .core.fsr_processor import process_fsr
+
+# Note: FSC/FSR processing is now handled by unified_processor, not called directly from here
 from .assets import AssetManager
 
 # Rust backend

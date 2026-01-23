@@ -427,14 +427,29 @@ def run_features(
         logger.info(f"✓ FSR: {outputs.fsr.name}")
     
     # Gene-centric FSC (if assay provided)
+    # Uses on-target GC correction factors for accurate copy number analysis
     if resolved_assay and enable_fsc:
         try:
-            from .fsc_processor import aggregate_by_gene
+            from .fsc_processor import aggregate_by_gene, load_correction_factors
             genome_map = {'hg19': 'GRCh37', 'grch37': 'GRCh37', 'hg38': 'GRCh38', 'grch38': 'GRCh38'}
             gene_genome = genome_map.get(genome.lower(), 'GRCh37')
             genes = load_gene_bed(assay=resolved_assay, genome=gene_genome)
             outputs.fsc_gene = output_dir / f"{sample_name}.FSC.gene.tsv"
-            aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon)
+            
+            # Load GC correction factors (prefer on-target for panel mode)
+            # On-target factors match the capture bias of gene regions
+            gene_fsc_factors = None
+            if is_panel_mode:
+                ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.csv"
+                if ontarget_path.exists():
+                    gene_fsc_factors = load_correction_factors(ontarget_path)
+                    if gene_fsc_factors:
+                        logger.info(f"Gene FSC: Using on-target GC factors ({ontarget_path.name})")
+                else:
+                    logger.debug("Gene FSC: No on-target factors found, using raw counting")
+            
+            aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon, 
+                            correction_factors=gene_fsc_factors)
             logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")

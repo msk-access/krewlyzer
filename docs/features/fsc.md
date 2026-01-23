@@ -353,6 +353,32 @@ BRCA2   42         5689      ...
 > [!TIP]
 > Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
 
+### GC Correction for Gene FSC
+
+In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.csv`) for accurate copy number estimates.
+
+**Why this matters:**
+- Different genes have different GC content
+- High-GC genes (e.g., *EGFR*) capture with different efficiency than low-GC genes
+- Without correction, high-GC genes appear **falsely deleted**, low-GC genes appear **amplified**
+
+**How it works:**
+```python
+# Instead of raw counting (+= 1):
+weight = correction_factors[(len_bin, gc_pct)]
+gene_count += weight  # GC-corrected counting
+```
+
+**Log output example:**
+```
+Aggregating FSC by gene: 146 genes, GC correction: ON (weighted counting)
+Processed 2.4M fragments, 2.4M assigned to genes
+  GC correction: avg_weight=1.898, missing_gc=0
+```
+
+> [!NOTE]
+> On-target factors are automatically used when available. If not found, raw counting is used with a debug log message.
+
 ---
 
 ## References
