@@ -12,6 +12,8 @@
 
 **Krewlyzer** is a high-performance toolkit for extracting biological features from cell-free DNA (cfDNA) sequencing data. Designed for cancer genomics, liquid biopsy research, and clinical bioinformatics.
 
+**Built with Python + Rust** for maximum performance. The compute-intensive core uses [PyO3](https://pyo3.rs/) to deliver 5-50x speedups over pure Python.
+
 > [!TIP]
 > **Full Documentation**: [msk-access.github.io/krewlyzer](https://msk-access.github.io/krewlyzer/)
 
@@ -66,6 +68,11 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/ --generate
 # Individual tools
 krewlyzer extract -i sample.bam -r hg19.fa -o output/
 krewlyzer fsc -i output/sample.bed.gz -o output/
+
+# Panel data (MSK-ACCESS) with target regions
+krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
+    --target-regions panel_targets.bed \
+    --pon-model msk-access.pon.parquet
 ```
 
 ---
@@ -83,8 +90,22 @@ krewlyzer fsc -i output/sample.bed.gz -o output/
 | `ocf` | Orientation-aware fragmentation | `.OCF.tsv` |
 | `uxm` | Fragment-level methylation | `.UXM.tsv` |
 | `mfsd` | Mutant vs wild-type sizes | `.mFSD.tsv` |
+| `build-pon` | Build Panel of Normals | `.pon.parquet` |
 | `run-all` | All features in one pass | All outputs |
 | `--generate-json` | Unified JSON for ML | `.features.json` |
+
+### Panel Mode (`--target-regions`)
+
+For targeted sequencing panels (MSK-ACCESS):
+
+```bash
+krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
+    --target-regions panel_targets.bed
+```
+
+- **GC model**: Trained on off-target fragments (unbiased)
+- **Outputs**: Split into `.tsv` (off-target) and `.ontarget.tsv`
+- **PON normalization**: Use `--pon-model` for z-score outputs
 
 ---
 
