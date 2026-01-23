@@ -138,6 +138,89 @@ fn compute_gc_content(seq: &[u8]) -> f64 {
     gc_count as f64 / seq.len() as f64
 }
 
+// ============================================================================
+// DUPLEX CONSENSUS WEIGHTING
+// ============================================================================
+//
+// Duplex sequencing produces high-confidence consensus reads from multiple
+// raw observations. The family size (number of raw reads) indicates confidence.
+// We apply log-weighting to prioritize high-confidence duplex families.
+//
+// Supported formats:
+// 1. fgbio/picard (XS2): Uses SAM tags aD/bD/cD for depths
+//    - cD = duplex consensus depth (primary weight source)
+//    - See: https://fulcrumgenomics.github.io/fgbio/tools/latest/CallDuplexConsensusReads.html
+//
+// 2. Marianas (XS1): Encodes family size in read name
+//    - Format: Marianas:UMI:chr:start:posCount:negCount:chr2:start2:pos2:neg2
+//    - Family size = posCount + negCount
+//    - See: https://cmo-ci.gitbook.io/marianas/read-name-information
+// ============================================================================
+
+/// Get duplex consensus weight from BAM record
+/// 
+/// Returns a log-scaled weight based on duplex family size.
+/// Higher family size = more sequencing evidence = higher weight.
+/// 
+/// Weight formula: ln(family_size).max(1.0)
+/// - Family size 1: weight 1.0
+/// - Family size 3: weight 1.1
+/// - Family size 10: weight 2.3
+/// - Family size 50: weight 3.9
+fn get_duplex_weight(record: &bam::Record) -> f64 {
+    use rust_htslib::bam::record::Aux;
+    
+    // Method 1: fgbio/picard cD tag (duplex consensus depth)
+    // cD = maximum depth of raw reads at any point in the duplex consensus
+    if let Ok(aux) = record.aux(b"cD") {
+        let depth = match aux {
+            Aux::I8(v) => v as f64,
+            Aux::U8(v) => v as f64,
+            Aux::I16(v) => v as f64,
+            Aux::U16(v) => v as f64,
+            Aux::I32(v) => v as f64,
+            Aux::U32(v) => v as f64,
+            _ => 0.0,
+        };
+        if depth > 0.0 {
+            return depth.ln().max(1.0);
+        }
+    }
+    
+    // Method 2: Marianas read name format
+    // Format: Marianas:UMI:chr:start:posCount:negCount:chr2:start2:pos2:neg2
+    if let Ok(qname) = std::str::from_utf8(record.qname()) {
+        if qname.starts_with("Marianas:") {
+            if let Some(family_size) = parse_marianas_family(qname) {
+                if family_size > 0 {
+                    return (family_size as f64).ln().max(1.0);
+                }
+            }
+        }
+    }
+    
+    1.0  // Default: no duplex weighting
+}
+
+/// Parse Marianas read name to extract family size
+/// 
+/// Read name format: Marianas:UMI:contig:start:posCount:negCount:contig2:start2:pos2:neg2
+/// Family size = posCount + negCount (for read1, fields 4 and 5)
+/// 
+/// Example: "Marianas:ACT+TTA:2:48033828:4:3:2:48033899:4:3"
+/// → posCount=4, negCount=3, family_size=7
+fn parse_marianas_family(qname: &str) -> Option<u32> {
+    let parts: Vec<&str> = qname.split(':').collect();
+    if parts.len() >= 6 {
+        let pos_count: u32 = parts[4].parse().ok()?;
+        let neg_count: u32 = parts[5].parse().ok()?;
+        Some(pos_count + neg_count)
+    } else {
+        None
+    }
+}
+
+
 /// Fetch sequence from reference FASTA for a genomic region
 fn fetch_reference_gc(
     fasta: &faidx::Reader,
@@ -468,6 +551,65 @@ fn classify_fragment(extracted: &str, var: &Variant) -> FragmentClass {
 
 const MIN_FOR_KS: usize = 2;
 
+// ============================================================================
+// LOG-LIKELIHOOD RATIO (LLR) SCORING
+// ============================================================================
+//
+// For duplex/panel mode with very low fragment counts (N<5), traditional
+// statistical tests (KS, t-test) are unreliable. We use a probabilistic
+// approach that answers: "Are these fragments more likely tumor or healthy?"
+//
+// Model: Gaussian size distributions for tumor vs healthy cfDNA
+// - Healthy: Peak at 167bp (mono-nucleosome), SD=30bp (tight)
+// - Tumor: Peak at 145bp (shifted), SD=35bp (wider tails)
+//
+// LLR > 0 → fragments are tumor-like
+// LLR < 0 → fragments are healthy-like
+// ============================================================================
+
+/// Probability density function for healthy cfDNA fragment sizes
+/// Peak at 167bp (classic cfDNA mono-nucleosome), tight distribution
+fn prob_healthy(length: f64) -> f64 {
+    const MU: f64 = 167.0;
+    const SIGMA: f64 = 30.0;
+    let z = (length - MU) / SIGMA;
+    let norm_const = SIGMA * (2.0 * std::f64::consts::PI).sqrt();
+    (-0.5 * z * z).exp() / norm_const
+}
+
+/// Probability density function for tumor-derived cfDNA fragment sizes
+/// Peak at 145bp (left-shifted), wider distribution
+fn prob_tumor(length: f64) -> f64 {
+    const MU: f64 = 145.0;
+    const SIGMA: f64 = 35.0;
+    let z = (length - MU) / SIGMA;
+    let norm_const = SIGMA * (2.0 * std::f64::consts::PI).sqrt();
+    (-0.5 * z * z).exp() / norm_const
+}
+
+/// Calculate Log-Likelihood Ratio for a set of fragment lengths
+/// 
+/// Returns: sum of log(P_tumor / P_healthy) for each fragment
+/// 
+/// Interpretation:
+/// - LLR > +1.0: Strong tumor signature
+/// - LLR > +0.5: Weak tumor signature  
+/// - LLR between -0.5 and +0.5: Inconclusive
+/// - LLR < -0.5: Healthy-like
+/// 
+/// Works well even with N=1-5 fragments (unlike KS test)
+fn calc_log_likelihood_ratio(lengths: &[f64]) -> f64 {
+    if lengths.is_empty() {
+        return 0.0;
+    }
+    
+    lengths.iter().map(|&len| {
+        let p_h = prob_healthy(len).max(1e-15);  // Prevent log(0)
+        let p_t = prob_tumor(len).max(1e-15);
+        p_t.ln() - p_h.ln()  // Positive = tumor-like
+    }).sum()
+}
+
 /// Calculate mean of a vector, returns 0.0 if empty
 fn calc_mean(v: &[f64]) -> f64 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
@@ -758,7 +900,7 @@ pub fn calculate_mfsd(
                 };
                 
                 // Compute GC correction weight
-                let weight = if let Some(ref factors_arc) = factors {
+                let gc_weight = if let Some(ref factors_arc) = factors {
                     // Get fragment coordinates for GC lookup
                     let frag_start = record.pos() as u64;
                     let frag_end = if record.insert_size() > 0 {
@@ -778,10 +920,17 @@ pub fn calculate_mfsd(
                     
                     factors_arc.get_factor(frag_len as u64, gc_pct)
                 } else {
-                    1.0 // No correction
+                    1.0 // No GC correction
                 };
                 
-                // Classify and add with weight
+                // Compute duplex consensus weight (for fgbio/Marianas duplex BAMs)
+                // High-confidence duplex families get higher weight
+                let duplex_weight = get_duplex_weight(&record);
+                
+                // Combined weight: GC correction * duplex confidence
+                let weight = gc_weight * duplex_weight;
+                
+                // Classify and add with combined weight
                 let class = if has_n {
                     FragmentClass::N
                 } else {
@@ -855,8 +1004,10 @@ pub fn calculate_mfsd(
         "Chrom", "Pos", "Ref", "Alt", "VarType",
         // Counts (5)
         "REF_Count", "ALT_Count", "NonREF_Count", "N_Count", "Total_Count",
-        // GC-Weighted Counts (5) - NEW
+        // GC-Weighted Counts (5)
         "REF_Weighted", "ALT_Weighted", "NonREF_Weighted", "N_Weighted", "VAF_GC_Corrected",
+        // Log-Likelihood Ratio (2) - for duplex/panel with low N
+        "ALT_LLR", "REF_LLR",
         // Mean sizes (4)
         "REF_MeanSize", "ALT_MeanSize", "NonREF_MeanSize", "N_MeanSize",
         // Primary: ALT vs REF (3)
@@ -933,23 +1084,29 @@ pub fn calculate_mfsd(
         let alt_confidence = confidence_level(n_alt);
         let ks_valid = n_alt >= MIN_FOR_KS && n_ref >= MIN_FOR_KS;
         
-        // GC-weighted counts and VAF
         let w_ref = res.ref_weighted;
         let w_alt = res.alt_weighted;
         let w_nonref = res.nonref_weighted;
         let w_n = res.n_weighted;
         let vaf_gc_corrected = if w_alt + w_ref > 0.0 { w_alt / (w_alt + w_ref) } else { 0.0 };
         
+        // LLR scores - for low-N duplex/panel mode
+        // Positive = tumor-like, Negative = healthy-like
+        let alt_llr = calc_log_likelihood_ratio(&res.alt_lengths);
+        let ref_llr = calc_log_likelihood_ratio(&res.ref_lengths);
+        
         // Format NaN as "NA"
         let fmt = |v: f64| if v.is_nan() { "NA".to_string() } else { format!("{:.4}", v) };
         
-        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             // Variant info (5)
             var.chrom, var.pos + 1, var.ref_allele, var.alt_allele, var.var_type.as_str(),
             // Raw Counts (5)
             n_ref, n_alt, n_nonref, n_n, n_total,
-            // GC-Weighted Counts (5) - NEW
+            // GC-Weighted Counts (5)
             fmt(w_ref), fmt(w_alt), fmt(w_nonref), fmt(w_n), fmt(vaf_gc_corrected),
+            // LLR scores (2)
+            fmt(alt_llr), fmt(ref_llr),
             // Mean sizes (4)
             fmt(mean_ref), fmt(mean_alt), fmt(mean_nonref), fmt(mean_n),
             // Primary: ALT vs REF (3)
