@@ -21,10 +21,6 @@ import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import pysam
-import json
-import os
-from datetime import datetime
 
 from rich.console import Console
 from rich.logging import RichHandler

@@ -7,7 +7,6 @@ Used by both standalone fsr.py and run-all wrapper.py.
 """
 
 from pathlib import Path
-from typing import Optional
 import pandas as pd
 import numpy as np
 import logging

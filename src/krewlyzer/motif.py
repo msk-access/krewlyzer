@@ -20,8 +20,6 @@ import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import numpy as np
-import itertools
 
 from rich.console import Console
 from rich.logging import RichHandler

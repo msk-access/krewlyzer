@@ -10,7 +10,6 @@ NO z-scores - the plan specifies GC-weighting (Rust) + PoN log-ratios (Python).
 """
 
 from pathlib import Path
-from typing import Optional, List
 import pandas as pd
 import numpy as np
 import logging

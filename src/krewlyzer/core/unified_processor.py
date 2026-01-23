@@ -28,12 +28,12 @@ Usage:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import resolve_gc_assets, GcAssets
+from .gc_assets import resolve_gc_assets
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
