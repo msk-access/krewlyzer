@@ -797,7 +797,7 @@ pub fn calculate_mfsd(
         snv_count, mnv_count, ins_count, del_count, complex_count);
     
     // Log filter settings
-    info!("Fragment filters: length {}-{}bp, proper_pair={}", min_frag_len, max_frag_len, require_proper_pair);
+    info!("Fragment filters: length {}-{}bp, proper_pair={}, duplex_mode={}", min_frag_len, max_frag_len, require_proper_pair, duplex_mode);
 
     // Progress Bar (hidden when called from wrapper)
     let pb = if silent {
