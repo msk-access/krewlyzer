@@ -71,6 +71,7 @@ class FeatureOutputs:
     ocf: Optional[Path] = None              # OCF scores
     ocf_sync: Optional[Path] = None         # OCF sync data
     ocf_ontarget: Optional[Path] = None     # On-target OCF (panel)
+    ocf_panel: Optional[Path] = None        # Panel-filtered OCF (targets + promoters)
     gc_factors: Optional[Path] = None       # GC correction factors
 
 
@@ -518,6 +519,20 @@ def run_features(
                 outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
                 shutil.move(str(rust_ocf_on), str(outputs.ocf_ontarget))
                 logger.info(f"✓ OCF on-target: {outputs.ocf_ontarget.name}")
+            
+            # Panel-filtered OCF: intersect genome-wide OCF with panel targets
+            # This creates a focused view for downstream analysis
+            if outputs.ocf and outputs.ocf.exists() and resolved_target_regions:
+                from .ocf_processor import filter_ocf_to_panel
+                outputs.ocf_panel = output_dir / f"{sample_name}.OCF.panel.tsv"
+                n_panel = filter_ocf_to_panel(
+                    genome_ocf_path=outputs.ocf,
+                    target_regions=resolved_target_regions,
+                    output_path=outputs.ocf_panel,
+                    promoter_extension=2000,  # 2kb upstream for promoter capture
+                )
+                if n_panel > 0:
+                    logger.info(f"✓ OCF panel: {outputs.ocf_panel.name} ({n_panel} regions)")
         
         # Cleanup temp dir
         try:
