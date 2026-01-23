@@ -89,12 +89,143 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--reference` | `-r` | PATH | | Reference FASTA for GC correction |
 | `--correction-factors` | `-F` | PATH | | Pre-computed correction factors CSV |
+| `--duplex` | `-D` | FLAG | | Enable duplex consensus weighting (fgbio/Marianas) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--output-distributions` | `-d` | FLAG | | Output per-variant size distributions |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 
 ---
+
+## Duplex Sequencing Support
+
+mFSD supports **duplex consensus sequencing** for ultra-sensitive variant detection. When `--duplex` is enabled, fragments from high-confidence duplex families receive higher weight in statistical calculations.
+
+### Supported Duplex Formats
+
+#### XS2: fgbio/Picard
+
+Uses SAM auxiliary tags set by [fgbio CallDuplexConsensusReads](https://fulcrumgenomics.github.io/fgbio/tools/latest/CallDuplexConsensusReads.html):
+
+| Tag | Meaning | Use in mFSD |
+|-----|---------|-------------|
+| `aD` | Max depth of strand A single-strand consensus | SS-A depth |
+| `bD` | Max depth of strand B single-strand consensus | SS-B depth |
+| `cD` | **Max depth of duplex consensus** | **Primary weight source** |
+| `aM/bM/cM` | Min depth at any point | Quality check |
+| `aE/bE/cE` | Error rate | Quality filter |
+
+**Example SAM record:**
+```
+read1   0   chr1   1000   60   100M   *   0   150   ACGT...   IIII...   cD:i:5   aD:i:8   bD:i:7
+```
+
+#### XS1: Marianas
+
+Encodes family size in the read name per [Marianas documentation](https://cmo-ci.gitbook.io/marianas/read-name-information):
+
+```
+Marianas:UMI1+UMI2:contig:start:posCount:negCount:contig2:start2:pos2:neg2
+```
+
+| Position | Field | Example |
+|----------|-------|---------|
+| 0 | `Marianas` | Marianas |
+| 1 | UMI | ACT+TTA |
+| 2 | Read1 contig | 2 |
+| 3 | Read1 start | 48033828 |
+| 4 | Read1 (+) count | 4 |
+| 5 | Read1 (-) count | 3 |
+
+**Family size = posCount + negCount** (e.g., 4 + 3 = 7)
+
+### Duplex Weighting Formula
+
+When `--duplex` is enabled, each fragment receives a weight based on its duplex family size:
+
+$$
+\text{weight} = \max(\ln(\text{family\_size}), 1.0)
+$$
+
+| Family Size | Weight | Interpretation |
+|-------------|--------|----------------|
+| 1 | 1.0 | Single read (no UMI collapse) |
+| 2 | 1.0 | Minimum duplex (capped) |
+| 3 | 1.1 | Low-confidence duplex |
+| 5 | 1.6 | Moderate confidence |
+| 10 | 2.3 | High confidence |
+| 50 | 3.9 | Very high confidence |
+
+### Interpretation in Duplex Mode
+
+> [!IMPORTANT]
+> When `--duplex` is enabled, `ALT_Weighted` and `REF_Weighted` will exceed raw counts.
+> A ratio of **~1.6x** indicates typical duplex family sizes of 3-5.
+
+| Column | Without Duplex | With Duplex |
+|--------|----------------|-------------|
+| `ALT_Count` | Raw fragment count | Raw fragment count |
+| `ALT_Weighted` | = ALT_Count | = Σ(weight × fragment) |
+| `VAF_GC_Corrected` | Based on raw | Based on weighted counts |
+
+**Example:**
+```
+Variant at chr1:156845927
+  ALT_Count    = 393
+  ALT_Weighted = 691  (ratio = 1.76)
+  → Indicates high-confidence duplex families
+```
+
+---
+
+## Log-Likelihood Ratio (LLR) Scoring
+
+For **low fragment count scenarios** (common in duplex/panel sequencing), traditional KS tests are unreliable. mFSD provides LLR scoring as a probabilistic alternative.
+
+### LLR Formula
+
+$$
+\text{LLR} = \sum_{i=1}^{n} \left[ \log P(\text{size}_i | \text{Tumor}) - \log P(\text{size}_i | \text{Healthy}) \right]
+$$
+
+Using Gaussian models:
+- **Healthy**: μ = 167bp, σ = 35bp (nucleosomal periodicity)
+- **Tumor**: μ = 145bp, σ = 25bp (sub-nucleosomal fragments)
+
+### LLR Output Columns
+
+| Column | Range | Interpretation |
+|--------|-------|----------------|
+| `ALT_LLR` | any | Log-likelihood ratio for ALT fragments |
+| `REF_LLR` | any | Log-likelihood ratio for REF fragments |
+
+### LLR Interpretation Guide
+
+| LLR Value | Interpretation | Action |
+|-----------|----------------|--------|
+| **> 5** | Strong tumor signal | High confidence in tumor-derived fragments |
+| **0 to 5** | Weak tumor signal | Possible tumor, verify with other evidence |
+| **-5 to 0** | Weak healthy signal | Likely healthy, low tumor content |
+| **< -5** | Strong healthy signal | Consistent with healthy cfDNA |
+
+> [!TIP]
+> For low-N variants (ALT_Count < 5), use `ALT_LLR` instead of `KS_Pval_ALT_REF`.
+> The LLR is robust with even 1-2 fragments, while KS tests require ≥5.
+
+### Clinical Example: MRD Detection
+
+```
+Variant at TP53:chr17:7577539
+  ALT_Count = 3           # Too few for KS test
+  KS_Valid  = FALSE       # KS test unreliable
+  ALT_LLR   = 4.2         # Positive = tumor-like fragments
+  REF_LLR   = -89.5       # Negative = healthy-like REF population
+  
+  → Interpretation: ALT fragments show tumor signature despite low count
+```
+
+---
+
 
 ## Fragment Classification
 
