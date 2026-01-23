@@ -22,8 +22,6 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any
 import logging
 import time
-import math
-import itertools
 import shutil
 import json
 from datetime import datetime
@@ -32,6 +30,7 @@ import pandas as pd
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
+from .motif_processor import compute_mds
 from ..assets import AssetManager
 
 logger = logging.getLogger("krewlyzer.core.sample_processor")
@@ -179,56 +178,7 @@ class SampleOutputs:
 # HELPER FUNCTIONS
 # =============================================================================
 
-def _generate_kmers(k: int) -> List[str]:
-    """Generate all possible k-mers of length k in lexicographic order."""
-    bases = ['A', 'C', 'G', 'T']
-    return [''.join(p) for p in itertools.product(bases, repeat=k)]
-
-
-def _compute_kmer_frequencies(em_counts: List[int], kmer: int) -> Dict[str, float]:
-    """
-    Convert raw k-mer counts to frequency dictionary.
-    
-    Args:
-        em_counts: List of k-mer counts (must match k-mer order)
-        kmer: K-mer size
-        
-    Returns:
-        Dict mapping k-mer string to frequency (0.0-1.0)
-    """
-    kmers = _generate_kmers(kmer)
-    total = sum(em_counts) if em_counts else 1
-    if total == 0:
-        total = 1
-    return {k: c / total for k, c in zip(kmers, em_counts)}
-
-
-def _compute_mds_from_counts(em_counts: List[int]) -> float:
-    """
-    Compute Motif Diversity Score from k-mer counts.
-    
-    MDS is the Shannon entropy of the k-mer distribution, measuring
-    diversity of fragment end sequences. Higher values indicate more
-    diverse (healthy) samples; lower values may indicate tumor-derived
-    cell-free DNA with altered fragmentation patterns.
-    
-    Args:
-        em_counts: List of k-mer counts
-        
-    Returns:
-        Shannon entropy in bits (0.0 to log2(len(em_counts)))
-    """
-    total = sum(em_counts) if em_counts else 0
-    if total == 0:
-        return 0.0
-    
-    entropy = 0.0
-    for count in em_counts:
-        if count > 0:
-            p = count / total
-            entropy -= p * math.log2(p)
-    
-    return entropy
+# Note: MDS and k-mer frequency computation now use compute_mds() from motif_processor
 
 
 # =============================================================================
@@ -409,7 +359,7 @@ def extract_sample(
         total_em = sum(em_counts.values())
         if total_em > 0:
             kmer_frequencies = {k: v / total_em for k, v in em_counts.items()}
-        mds_score = _compute_mds_from_counts(list(em_counts.values()))
+        mds_score = compute_mds(em_counts)
     
     elapsed = time.time() - start_time
     

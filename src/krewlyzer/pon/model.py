@@ -474,31 +474,23 @@ class PonModel:
             size_bins = sorted(fsd_df["size_bin"].unique().tolist())
             fsd_baseline = FsdBaseline(size_bins=size_bins, arms=arms_dict)
         
-        # Parse WPS baseline
+        # Parse WPS baseline (new format: wps_nuc_*, wps_tf_*)
         wps_baseline = None
         if not wps_df.empty:
-            # Handle both legacy (wps_long_*) and new (wps_nuc_*) column names
             if "wps_nuc_mean" in wps_df.columns:
-                # New format: wps_nuc_mean, wps_tf_mean (nuc=nucleosome, tf=transcription factor)
+                # Standard columns: wps_nuc_mean/std, wps_tf_mean/std
                 regions_df = wps_df[["region_id", "wps_nuc_mean", "wps_nuc_std", 
                                     "wps_tf_mean", "wps_tf_std"]].copy()
-                # Rename to expected format for WpsBaseline
+                # Rename to WpsBaseline expected format
                 regions_df = regions_df.rename(columns={
                     "wps_nuc_mean": "wps_long_mean",
                     "wps_nuc_std": "wps_long_std",
                     "wps_tf_mean": "wps_short_mean",
                     "wps_tf_std": "wps_short_std",
                 })
-            elif "wps_long_mean" in wps_df.columns:
-                # Legacy format
-                regions_df = wps_df[["region_id", "wps_long_mean", "wps_long_std", 
-                                    "wps_short_mean", "wps_short_std"]].copy()
-            else:
-                logger.warning("WPS baseline has unexpected columns, skipping")
-                regions_df = None
-            
-            if regions_df is not None:
                 wps_baseline = WpsBaseline(regions=regions_df)
+            else:
+                logger.warning("WPS baseline missing expected columns (wps_nuc_*), skipping")
         
         # Parse OCF baseline
         ocf_df = df_all[df_all["table"] == "ocf_baseline"]

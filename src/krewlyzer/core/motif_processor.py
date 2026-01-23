@@ -98,6 +98,47 @@ def write_breakpoint_motif(
     return total
 
 
+def compute_mds(em_counts: Dict[str, int], kmer: int = 4) -> float:
+    """
+    Compute Motif Diversity Score from k-mer counts.
+    
+    MDS is the normalized Shannon entropy of the k-mer distribution,
+    measuring diversity of fragment end sequences. Higher values indicate
+    more diverse (healthy) samples; lower values may indicate tumor-derived
+    cell-free DNA with altered fragmentation patterns.
+    
+    Only valid ACGT k-mers are used (256 for k=4).
+    
+    Args:
+        em_counts: Dictionary of k-mer -> count
+        kmer: K-mer size (default 4)
+        
+    Returns:
+        MDS value normalized to [0.0, 1.0]
+    """
+    bases = ['A', 'C', 'T', 'G']
+    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
+    
+    # Filter to valid ACGT k-mers only
+    all_kmers = {k: 0 for k in valid_kmers}
+    for k, v in em_counts.items():
+        if k in valid_kmers:
+            all_kmers[k] = v
+    
+    total = sum(all_kmers.values())
+    n_kmers = len(all_kmers)  # 256 for k=4
+    
+    if total == 0:
+        return 0.0
+    
+    freq = np.array(list(all_kmers.values())) / total
+    
+    # MDS = -sum(p * log2(p)) / log2(N) where N = 4^k
+    entropy = -np.sum(freq * np.log2(freq + 1e-12))
+    mds = entropy / np.log2(n_kmers)
+    
+    return mds
+
 def write_mds(
     em_counts: Dict[str, int],
     output_path: Path,
@@ -121,29 +162,8 @@ def write_mds(
     Returns:
         MDS value (0.0 to 1.0, normalized by log2(4^k))
     """
-    bases = ['A', 'C', 'T', 'G']
-    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
-    
-    # Initialize all valid k-mers to 0, then update with counts
-    # Only include counts for valid ACGT k-mers
-    all_kmers = {k: 0 for k in valid_kmers}
-    for k, v in em_counts.items():
-        if k in valid_kmers:
-            all_kmers[k] = v
-    
-    total = sum(all_kmers.values())
-    n_kmers = len(all_kmers)  # Should be 256 for k=4
-    
-    # Calculate normalized Shannon entropy
-    if total > 0:
-        freq = np.array(list(all_kmers.values())) / total
-    else:
-        freq = np.zeros(n_kmers)
-    
-    # MDS = -sum(p * log2(p)) / log2(N) where N = 4^k = 256 for k=4
-    # Add small epsilon to avoid log(0)
-    entropy = -np.sum(freq * np.log2(freq + 1e-12))
-    mds = entropy / np.log2(n_kmers)
+    # Use the canonical compute_mds function
+    mds = compute_mds(em_counts, kmer)
     
     logger.info(f"Writing MDS: {output_path} (MDS={mds:.6f})")
     
