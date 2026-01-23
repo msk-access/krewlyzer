@@ -191,3 +191,145 @@ def process_motif_outputs(
     mds = write_mds(em_counts, mds_output, sample_name, kmer, include_headers)
     
     return total_em, total_bpm, mds
+
+
+# =============================================================================
+# 1-MER MOTIF ANALYSIS (Jagged Index / C-end Fraction)
+# =============================================================================
+
+def compute_1mer_from_kmer(em_counts: Dict[str, int]) -> Dict[str, int]:
+    """
+    Compute 1-mer (single base) counts from k-mer counts.
+    
+    Aggregates k-mer counts by their first base, which represents
+    the fragment end base. This avoids needing Rust changes.
+    
+    Args:
+        em_counts: Dictionary of k-mer -> count (e.g., 4-mers)
+        
+    Returns:
+        Dictionary of 1-mer (A/C/G/T) -> count
+        
+    Example:
+        >>> em_counts = {'ACGT': 100, 'ATTT': 50, 'CGAT': 75, 'GGGG': 25}
+        >>> compute_1mer_from_kmer(em_counts)
+        {'A': 150, 'C': 75, 'G': 25, 'T': 0}
+    """
+    counts_1mer: Dict[str, int] = {'A': 0, 'C': 0, 'G': 0, 'T': 0}
+    
+    for kmer, count in em_counts.items():
+        if len(kmer) >= 1:
+            first_base = kmer[0].upper()
+            if first_base in counts_1mer:
+                counts_1mer[first_base] += count
+    
+    return counts_1mer
+
+
+def compute_c_end_fraction(em_counts: Dict[str, int]) -> Dict[str, float]:
+    """
+    Compute C-end fraction and related metrics for jagged end analysis.
+    
+    The C-end fraction is elevated in healthy cfDNA due to apoptotic
+    nuclease preferences. Lower C-fraction may indicate tumor-derived DNA
+    with altered fragmentation patterns.
+    
+    Reference: Cristiano et al., Nature 2019 - DELFI approach
+    
+    Args:
+        em_counts: Dictionary of k-mer -> count (4-mers from End Motif)
+        
+    Returns:
+        Dictionary with:
+        - 'a_fraction': A-end fraction
+        - 'c_fraction': C-end fraction (key signal for jagged ends)
+        - 'g_fraction': G-end fraction
+        - 't_fraction': T-end fraction
+        - 'entropy': Shannon entropy of 1-mer distribution
+        - 'c_bias': C-fraction relative to expected 0.25
+        
+    Note:
+        Healthy cfDNA typically has C-fraction of 0.28-0.32.
+        Tumor-derived DNA may show reduced C-fraction.
+    """
+    counts_1mer = compute_1mer_from_kmer(em_counts)
+    
+    total = sum(counts_1mer.values())
+    if total == 0:
+        return {
+            'a_fraction': 0.0,
+            'c_fraction': 0.0,
+            'g_fraction': 0.0,
+            't_fraction': 0.0,
+            'entropy': 0.0,
+            'c_bias': 0.0,
+        }
+    
+    fractions = {
+        'a_fraction': counts_1mer['A'] / total,
+        'c_fraction': counts_1mer['C'] / total,
+        'g_fraction': counts_1mer['G'] / total,
+        't_fraction': counts_1mer['T'] / total,
+    }
+    
+    # Shannon entropy of 1-mer distribution
+    freqs = np.array([counts_1mer[b] for b in 'ACGT']) / total
+    entropy = -np.sum(freqs * np.log2(freqs + 1e-12))
+    fractions['entropy'] = entropy
+    
+    # C-bias relative to expected 0.25
+    fractions['c_bias'] = fractions['c_fraction'] - 0.25
+    
+    return fractions
+
+
+def write_end_motif_1mer(
+    em_counts: Dict[str, int],
+    output_path: Path,
+    sample_name: str = None,
+    include_header: bool = True,
+) -> Dict[str, float]:
+    """
+    Write 1-mer end motif frequencies and C-end metrics to TSV file.
+    
+    Creates {sample}.EndMotif1mer.tsv with single base frequencies
+    and derived jagged end metrics.
+    
+    Args:
+        em_counts: Dictionary of k-mer -> count (4-mers)
+        output_path: Path to write output TSV
+        sample_name: Optional sample name
+        include_header: Whether to include header line
+        
+    Returns:
+        Dictionary of C-end fraction and related metrics
+        
+    Output columns:
+        base, count, fraction
+        + summary row with c_fraction, entropy, c_bias
+    """
+    counts_1mer = compute_1mer_from_kmer(em_counts)
+    metrics = compute_c_end_fraction(em_counts)
+    
+    total = sum(counts_1mer.values())
+    logger.info(f"Writing 1-mer End Motif: {output_path} ({total:,} fragments)")
+    
+    with open(output_path, 'w') as f:
+        if include_header:
+            f.write("base\tcount\tfraction\n")
+        
+        for base in 'ACGT':
+            count = counts_1mer[base]
+            frac = count / total if total > 0 else 0.0
+            f.write(f"{base}\t{count}\t{frac:.6f}\n")
+        
+        # Summary metrics
+        f.write(f"# c_fraction\t{metrics['c_fraction']:.6f}\n")
+        f.write(f"# entropy\t{metrics['entropy']:.6f}\n")
+        f.write(f"# c_bias\t{metrics['c_bias']:.6f}\n")
+        if sample_name:
+            f.write(f"# sample\t{sample_name}\n")
+    
+    logger.debug(f"  C-end fraction: {metrics['c_fraction']:.4f} (bias: {metrics['c_bias']:+.4f})")
+    
+    return metrics

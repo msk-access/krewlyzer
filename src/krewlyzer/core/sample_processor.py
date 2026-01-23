@@ -503,6 +503,18 @@ def write_motif_outputs(
         
         logger.debug(f"  On-target: {total_em_on:,} EM, {total_bpm_on:,} BPM, MDS={mds_on_val:.4f}")
     
+    # Write 1-mer End Motif (Jagged Index / C-end fraction)
+    from .motif_processor import write_end_motif_1mer
+    edm_1mer_output = output_dir / f"{sample}.EndMotif1mer.tsv"
+    c_end_metrics = write_end_motif_1mer(
+        em_counts=result.em_counts,
+        output_path=edm_1mer_output,
+        sample_name=sample,
+        include_header=True
+    )
+    outputs['edm_1mer'] = edm_1mer_output
+    logger.debug(f"  C-end fraction: {c_end_metrics['c_fraction']:.4f}")
+    
     logger.info(f"  Wrote {len(outputs)} motif files")
     return outputs
 
