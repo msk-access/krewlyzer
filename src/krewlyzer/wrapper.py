@@ -318,6 +318,24 @@ def run_all(
                         compute_gc_factors=True,
                     )
                     bedgz_file = extraction_result.bed_path
+                    
+                    # Compute on-target GC factors for panel mode
+                    # These are used by mFSD and gene-level FSC for accurate panel analysis
+                    if is_panel_mode and len(extraction_result.gc_observations_ontarget) > 0:
+                        try:
+                            gc_ref = assets.resolve("gc_reference")
+                            valid_regions = assets.resolve("valid_regions")
+                            factors_ontarget = output / f"{sample}.correction_factors.ontarget.csv"
+                            logger.info(f"Computing on-target GC factors from {len(extraction_result.gc_observations_ontarget)} obs...")
+                            n_factors_on = _core.gc.compute_and_write_gc_factors(
+                                extraction_result.gc_observations_ontarget,
+                                str(gc_ref),
+                                str(valid_regions),
+                                str(factors_ontarget)
+                            )
+                            logger.info(f"Wrote {n_factors_on} on-target GC factors: {factors_ontarget.name}")
+                        except Exception as e:
+                            logger.warning(f"On-target GC factor computation failed: {e}")
                 
                 # Write motif outputs (EDM, BPM, MDS with z-score)
                 write_motif_outputs(
