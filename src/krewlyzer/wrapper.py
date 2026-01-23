@@ -66,6 +66,7 @@ def run_all(
     # Optional inputs for specific tools
     bisulfite_bam: Optional[Path] = typer.Option(None, "--bisulfite-bam", help="Bisulfite BAM for UXM (optional)"),
     variants: Optional[Path] = typer.Option(None, "--variants", "-v", help="VCF/MAF file for mFSD (optional)"),
+    duplex: bool = typer.Option(False, "--duplex", "-D", help="Enable duplex weighting for mFSD (fgbio cD tag or Marianas read names)"),
     
     # Other options
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files (default: derived from BAM filename)"),
@@ -463,6 +464,7 @@ def run_all(
                     minlen=minlen,
                     maxlen=maxlen,
                     require_proper_pair=require_proper_pair,
+                    duplex=duplex,
                     output_distributions=False,
                     verbose=debug,
                     threads=threads
