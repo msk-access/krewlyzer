@@ -440,7 +440,7 @@ def run_features(
             # On-target factors match the capture bias of gene regions
             gene_fsc_factors = None
             if is_panel_mode:
-                ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.csv"
+                ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
                 if ontarget_path.exists():
                     gene_fsc_factors = load_correction_factors(ontarget_path)
                     if gene_fsc_factors:
