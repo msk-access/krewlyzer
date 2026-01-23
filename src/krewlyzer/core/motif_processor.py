@@ -23,6 +23,8 @@ def write_end_motif(
     """
     Write End Motif frequencies to TSV file.
     
+    Only valid ACGT k-mers are included (256 for k=4).
+    
     Args:
         em_counts: Dictionary of k-mer -> count
         output_path: Path to write output TSV
@@ -33,8 +35,13 @@ def write_end_motif(
         Total fragment count
     """
     bases = ['A', 'C', 'T', 'G']
-    all_kmers = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-    all_kmers.update(em_counts)
+    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
+    
+    # Initialize all valid k-mers to 0, then update with counts
+    all_kmers = {k: 0 for k in sorted(valid_kmers)}
+    for k, v in em_counts.items():
+        if k in valid_kmers:
+            all_kmers[k] = v
     
     total = sum(all_kmers.values())
     logger.info(f"Writing End Motif: {output_path} ({len(all_kmers)} k-mers, {total:,} total)")
@@ -58,6 +65,8 @@ def write_breakpoint_motif(
     """
     Write Breakpoint Motif frequencies to TSV file.
     
+    Only valid ACGT k-mers are included (256 for k=4).
+    
     Args:
         bpm_counts: Dictionary of k-mer -> count
         output_path: Path to write output TSV
@@ -68,8 +77,13 @@ def write_breakpoint_motif(
         Total fragment count
     """
     bases = ['A', 'C', 'T', 'G']
-    all_kmers = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-    all_kmers.update(bpm_counts)
+    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
+    
+    # Initialize all valid k-mers to 0, then update with counts
+    all_kmers = {k: 0 for k in sorted(valid_kmers)}
+    for k, v in bpm_counts.items():
+        if k in valid_kmers:
+            all_kmers[k] = v
     
     total = sum(all_kmers.values())
     logger.info(f"Writing Breakpoint Motif: {output_path} ({len(all_kmers)} k-mers, {total:,} total)")
@@ -95,6 +109,7 @@ def write_mds(
     Calculate and write Motif Diversity Score to TSV file.
     
     MDS is calculated as normalized Shannon entropy of end motif frequencies.
+    Only valid ACGT k-mers are used (256 for k=4).
     
     Args:
         em_counts: Dictionary of k-mer -> count (End Motif)
@@ -104,23 +119,31 @@ def write_mds(
         include_header: Whether to include header line
         
     Returns:
-        MDS value
+        MDS value (0.0 to 1.0, normalized by log2(4^k))
     """
     bases = ['A', 'C', 'T', 'G']
-    all_kmers = {''.join(i): 0 for i in itertools.product(bases, repeat=kmer)}
-    all_kmers.update(em_counts)
+    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
+    
+    # Initialize all valid k-mers to 0, then update with counts
+    # Only include counts for valid ACGT k-mers
+    all_kmers = {k: 0 for k in valid_kmers}
+    for k, v in em_counts.items():
+        if k in valid_kmers:
+            all_kmers[k] = v
     
     total = sum(all_kmers.values())
+    n_kmers = len(all_kmers)  # Should be 256 for k=4
     
     # Calculate normalized Shannon entropy
     if total > 0:
         freq = np.array(list(all_kmers.values())) / total
     else:
-        freq = np.zeros(len(all_kmers))
+        freq = np.zeros(n_kmers)
     
-    # MDS = -sum(p * log2(p)) / log2(N)
+    # MDS = -sum(p * log2(p)) / log2(N) where N = 4^k = 256 for k=4
     # Add small epsilon to avoid log(0)
-    mds = -np.sum(freq * np.log2(freq + 1e-12)) / np.log2(len(freq))
+    entropy = -np.sum(freq * np.log2(freq + 1e-12))
+    mds = entropy / np.log2(n_kmers)
     
     logger.info(f"Writing MDS: {output_path} (MDS={mds:.6f})")
     

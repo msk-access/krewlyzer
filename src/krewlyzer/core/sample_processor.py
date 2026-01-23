@@ -79,15 +79,15 @@ class ExtractionResult:
     fragment_count: int = 0
     bed_path: Optional[Path] = None
     
-    # Off-target data (primary, unbiased) - dicts map k-mer -> count
+    # Off-target data (primary, unbiased) - dicts map k-mer -> count or (len_bin, gc) -> count
     em_counts: Dict[str, int] = field(default_factory=dict)
     bpm_counts: Dict[str, int] = field(default_factory=dict)
-    gc_observations: List[Any] = field(default_factory=list)
+    gc_observations: Dict[Any, Any] = field(default_factory=dict)
     
-    # On-target data (panel mode only) - dicts map k-mer -> count
+    # On-target data (panel mode only) - dicts map k-mer -> count or (len_bin, gc) -> count
     em_counts_ontarget: Dict[str, int] = field(default_factory=dict)
     bpm_counts_ontarget: Dict[str, int] = field(default_factory=dict)
-    gc_observations_ontarget: List[Any] = field(default_factory=list)
+    gc_observations_ontarget: Dict[Any, Any] = field(default_factory=dict)
     
     # Derived data
     mds_score: float = 0.0
@@ -392,12 +392,14 @@ def extract_sample(
     # Keep as dicts for compatibility with motif_processor
     em_counts = dict(em_counts_raw) if em_counts_raw else {}
     bpm_counts = dict(bpm_counts_raw) if bpm_counts_raw else {}
-    gc_observations = list(gc_obs) if gc_obs else []
+    # gc_observations is a dict from Rust: (length_bin, gc_pct) -> count
+    # Keep as-is for Rust GC factor computation compatibility
+    gc_observations = gc_obs if gc_obs else {}
     
     # On-target counts (also keep as dicts)
     em_counts_ontarget = dict(em_counts_on_raw) if em_counts_on_raw else {}
     bpm_counts_ontarget = dict(bpm_counts_on_raw) if bpm_counts_on_raw else {}
-    gc_observations_ontarget = list(gc_obs_on) if gc_obs_on else []
+    gc_observations_ontarget = gc_obs_on if gc_obs_on else {}
     
     # Compute derived data
     kmer_frequencies = {}
