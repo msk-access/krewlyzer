@@ -28,12 +28,12 @@ Usage:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional
 import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import resolve_gc_assets, GcAssets
+from .gc_assets import resolve_gc_assets
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
@@ -440,7 +440,7 @@ def run_features(
             # On-target factors match the capture bias of gene regions
             gene_fsc_factors = None
             if is_panel_mode:
-                ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.csv"
+                ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
                 if ontarget_path.exists():
                     gene_fsc_factors = load_correction_factors(ontarget_path)
                     if gene_fsc_factors:

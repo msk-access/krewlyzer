@@ -9,13 +9,11 @@ from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 import logging
-import json
 
 import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from .model import PonModel, GcBiasModel, FsdBaseline, WpsBaseline
 

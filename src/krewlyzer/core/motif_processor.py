@@ -14,22 +14,24 @@ import logging
 logger = logging.getLogger("core.motif_processor")
 
 
-def write_end_motif(
-    em_counts: Dict[str, int],
+def _write_motif_helper(
+    counts: Dict[str, int],
     output_path: Path,
+    motif_type: str,
     kmer: int = 4,
     include_header: bool = True
 ) -> int:
     """
-    Write End Motif frequencies to TSV file.
+    Write motif frequencies to TSV file (shared helper).
     
     Only valid ACGT k-mers are included (256 for k=4).
     
     Args:
-        em_counts: Dictionary of k-mer -> count
+        counts: Dictionary of k-mer -> count
         output_path: Path to write output TSV
+        motif_type: Type name for logging (e.g., "End Motif", "Breakpoint Motif")
         kmer: K-mer size for initializing all possible k-mers
-        include_header: Whether to include header line (default True for consistency)
+        include_header: Whether to include header line
         
     Returns:
         Total fragment count
@@ -39,12 +41,12 @@ def write_end_motif(
     
     # Initialize all valid k-mers to 0, then update with counts
     all_kmers = {k: 0 for k in sorted(valid_kmers)}
-    for k, v in em_counts.items():
+    for k, v in counts.items():
         if k in valid_kmers:
             all_kmers[k] = v
     
     total = sum(all_kmers.values())
-    logger.info(f"Writing End Motif: {output_path} ({len(all_kmers)} k-mers, {total:,} total)")
+    logger.info(f"Writing {motif_type}: {output_path} ({len(all_kmers)} k-mers, {total:,} total)")
     
     with open(output_path, 'w') as f:
         if include_header:
@@ -54,6 +56,16 @@ def write_end_motif(
             f.write(f"{k}\t{freq:.6f}\n")
     
     return total
+
+
+def write_end_motif(
+    em_counts: Dict[str, int],
+    output_path: Path,
+    kmer: int = 4,
+    include_header: bool = True
+) -> int:
+    """Write End Motif frequencies to TSV file."""
+    return _write_motif_helper(em_counts, output_path, "End Motif", kmer, include_header)
 
 
 def write_breakpoint_motif(
@@ -62,40 +74,8 @@ def write_breakpoint_motif(
     kmer: int = 4,
     include_header: bool = True
 ) -> int:
-    """
-    Write Breakpoint Motif frequencies to TSV file.
-    
-    Only valid ACGT k-mers are included (256 for k=4).
-    
-    Args:
-        bpm_counts: Dictionary of k-mer -> count
-        output_path: Path to write output TSV
-        kmer: K-mer size for initializing all possible k-mers
-        include_header: Whether to include header line (default True for consistency)
-        
-    Returns:
-        Total fragment count
-    """
-    bases = ['A', 'C', 'T', 'G']
-    valid_kmers = set(''.join(i) for i in itertools.product(bases, repeat=kmer))
-    
-    # Initialize all valid k-mers to 0, then update with counts
-    all_kmers = {k: 0 for k in sorted(valid_kmers)}
-    for k, v in bpm_counts.items():
-        if k in valid_kmers:
-            all_kmers[k] = v
-    
-    total = sum(all_kmers.values())
-    logger.info(f"Writing Breakpoint Motif: {output_path} ({len(all_kmers)} k-mers, {total:,} total)")
-    
-    with open(output_path, 'w') as f:
-        if include_header:
-            f.write("Motif\tFrequency\n")
-        for k, v in all_kmers.items():
-            freq = v / total if total else 0
-            f.write(f"{k}\t{freq:.6f}\n")
-    
-    return total
+    """Write Breakpoint Motif frequencies to TSV file."""
+    return _write_motif_helper(bpm_counts, output_path, "Breakpoint Motif", kmer, include_header)
 
 
 def compute_mds(em_counts: Dict[str, int], kmer: int = 4) -> float:

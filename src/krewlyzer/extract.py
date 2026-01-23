@@ -21,10 +21,6 @@ import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import pysam
-import json
-import os
-from datetime import datetime
 
 from rich.console import Console
 from rich.logging import RichHandler
@@ -226,7 +222,7 @@ def extract(
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                factors_ontarget = output / f"{sample_name}.correction_factors.ontarget.csv"
+                factors_ontarget = output / f"{sample_name}.correction_factors.ontarget.tsv"
                 logger.info(f"Computing ON-TARGET GC correction factors from {len(result.gc_observations_ontarget)} observation bins...")
                 n_factors_on = _core.gc.compute_and_write_gc_factors(
                     result.gc_observations_ontarget,
