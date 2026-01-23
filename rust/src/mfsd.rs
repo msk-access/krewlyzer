@@ -560,31 +560,106 @@ const MIN_FOR_KS: usize = 2;
 // approach that answers: "Are these fragments more likely tumor or healthy?"
 //
 // Model: Gaussian size distributions for tumor vs healthy cfDNA
-// - Healthy: Peak at 167bp (mono-nucleosome), SD=30bp (tight)
-// - Tumor: Peak at 145bp (shifted), SD=35bp (wider tails)
+// Default (Human): Healthy=167bp, Tumor=145bp
+// Canine (Favaro et al.): Healthy=153bp, Tumor=130bp
+// ssDNA library prep: Shift both by -10bp
 //
 // LLR > 0 → fragments are tumor-like
 // LLR < 0 → fragments are healthy-like
 // ============================================================================
 
-/// Probability density function for healthy cfDNA fragment sizes
-/// Peak at 167bp (classic cfDNA mono-nucleosome), tight distribution
-fn prob_healthy(length: f64) -> f64 {
-    const MU: f64 = 167.0;
-    const SIGMA: f64 = 30.0;
-    let z = (length - MU) / SIGMA;
-    let norm_const = SIGMA * (2.0 * std::f64::consts::PI).sqrt();
+/// LLR Model parameters for cross-species/assay support
+/// 
+/// Default: Human cfDNA (167bp healthy, 145bp tumor)
+/// 
+/// # Use Cases
+/// - Human cfDNA: LLRModelParams::default() or ::human()
+/// - Canine cfDNA: LLRModelParams::canine() - peaks at 153bp (Favaro et al.)
+/// - ssDNA library: LLRModelParams::ssdna() - 10bp shorter due to ligation
+/// - FFPE samples: Consider wider sigma values
+#[derive(Clone, Debug)]
+pub struct LLRModelParams {
+    pub healthy_mu: f64,
+    pub healthy_sigma: f64,
+    pub tumor_mu: f64,
+    pub tumor_sigma: f64,
+}
+
+impl Default for LLRModelParams {
+    fn default() -> Self {
+        Self::human()
+    }
+}
+
+impl LLRModelParams {
+    /// Human cfDNA defaults (most common use case)
+    /// Peak at 167bp for healthy mono-nucleosome, 145bp for tumor-derived
+    pub fn human() -> Self {
+        Self {
+            healthy_mu: 167.0,
+            healthy_sigma: 30.0,
+            tumor_mu: 145.0,
+            tumor_sigma: 35.0,
+        }
+    }
+    
+    /// Canine cfDNA model (Favaro et al.)
+    /// Dog cfDNA peaks at 153bp (shorter than human due to smaller nucleosomes)
+    pub fn canine() -> Self {
+        Self {
+            healthy_mu: 153.0,
+            healthy_sigma: 25.0,
+            tumor_mu: 130.0,
+            tumor_sigma: 30.0,
+        }
+    }
+    
+    /// ssDNA ligation library prep (peaks shifted -10bp)
+    /// Single-strand library preps produce shorter fragments
+    pub fn ssdna() -> Self {
+        Self {
+            healthy_mu: 157.0,
+            healthy_sigma: 30.0,
+            tumor_mu: 135.0,
+            tumor_sigma: 35.0,
+        }
+    }
+    
+    /// Custom model from explicit parameters
+    pub fn custom(healthy_mu: f64, healthy_sigma: f64, tumor_mu: f64, tumor_sigma: f64) -> Self {
+        Self { healthy_mu, healthy_sigma, tumor_mu, tumor_sigma }
+    }
+}
+
+/// Probability density function for healthy cfDNA fragment sizes (parameterized)
+fn prob_healthy_param(length: f64, model: &LLRModelParams) -> f64 {
+    let z = (length - model.healthy_mu) / model.healthy_sigma;
+    let norm_const = model.healthy_sigma * (2.0 * std::f64::consts::PI).sqrt();
     (-0.5 * z * z).exp() / norm_const
 }
 
-/// Probability density function for tumor-derived cfDNA fragment sizes
-/// Peak at 145bp (left-shifted), wider distribution
-fn prob_tumor(length: f64) -> f64 {
-    const MU: f64 = 145.0;
-    const SIGMA: f64 = 35.0;
-    let z = (length - MU) / SIGMA;
-    let norm_const = SIGMA * (2.0 * std::f64::consts::PI).sqrt();
+/// Probability density function for tumor-derived cfDNA fragment sizes (parameterized)
+fn prob_tumor_param(length: f64, model: &LLRModelParams) -> f64 {
+    let z = (length - model.tumor_mu) / model.tumor_sigma;
+    let norm_const = model.tumor_sigma * (2.0 * std::f64::consts::PI).sqrt();
     (-0.5 * z * z).exp() / norm_const
+}
+
+/// Calculate Log-Likelihood Ratio for a set of fragment lengths (parameterized)
+/// 
+/// Uses configurable model parameters for cross-species/assay support.
+/// 
+/// Returns: sum of log(P_tumor / P_healthy) for each fragment
+fn calc_log_likelihood_ratio_param(lengths: &[f64], model: &LLRModelParams) -> f64 {
+    if lengths.is_empty() {
+        return 0.0;
+    }
+    
+    lengths.iter().map(|&len| {
+        let p_h = prob_healthy_param(len, model).max(1e-15);
+        let p_t = prob_tumor_param(len, model).max(1e-15);
+        p_t.ln() - p_h.ln()  // Positive = tumor-like
+    }).sum()
 }
 
 /// Calculate Log-Likelihood Ratio for a set of fragment lengths
@@ -598,16 +673,9 @@ fn prob_tumor(length: f64) -> f64 {
 /// - LLR < -0.5: Healthy-like
 /// 
 /// Works well even with N=1-5 fragments (unlike KS test)
+/// Uses default human model (167bp healthy, 145bp tumor)
 fn calc_log_likelihood_ratio(lengths: &[f64]) -> f64 {
-    if lengths.is_empty() {
-        return 0.0;
-    }
-    
-    lengths.iter().map(|&len| {
-        let p_h = prob_healthy(len).max(1e-15);  // Prevent log(0)
-        let p_t = prob_tumor(len).max(1e-15);
-        p_t.ln() - p_h.ln()  // Positive = tumor-like
-    }).sum()
+    calc_log_likelihood_ratio_param(lengths, &LLRModelParams::human())
 }
 
 /// Calculate mean of a vector, returns 0.0 if empty
