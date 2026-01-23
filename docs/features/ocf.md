@@ -162,10 +162,26 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
 |------|----------|----------|
 | `{sample}.OCF.tsv` | **Off-target** fragments | Unbiased tissue signal |
 | `{sample}.OCF.ontarget.tsv` | **On-target** fragments | Local OCF context |
+| `{sample}.OCF.sync.tsv` | Detailed sync scores | Debugging/visualization |
 
 > [!IMPORTANT]
 > **Off-target = unbiased** – preferred for tissue-of-origin analysis.  
 > **On-target = capture-biased** – may reflect panel design artifacts.
+
+### Example: MSK-ACCESS Panel
+
+| Tissue | Off-Target OCF | On-Target OCF |
+|--------|---------------|---------------|
+| Liver | 265.3 | 52.8 |
+| Intestine | 224.4 | -20.9 |
+| Lung | 173.0 | -9.6 |
+| Breast | 108.5 | 19.0 |
+| Ovary | 123.1 | 88.9 |
+| Placenta | -25.1 | -51.6 |
+| T-cell | 8.9 | 86.7 |
+
+> [!NOTE]
+> Panel targets often overlap specific chromatin regions, causing on-target OCF to diverge significantly from off-target (global) values.
 
 ---
 

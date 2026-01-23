@@ -103,9 +103,9 @@ def test_mfsd_integration_snv(tmp_path):
     output_file = output_dir / "test.mFSD.tsv"
     assert output_file.exists()
     
-    # Validate output format (39 columns)
+    # Validate output format (46 columns: 44 original + ALT_LLR + REF_LLR)
     df = pd.read_csv(output_file, sep='\t')
-    assert len(df.columns) == 44, f"Expected 44 columns, got {len(df.columns)}"
+    assert len(df.columns) == 46, f"Expected 46 columns, got {len(df.columns)}: {list(df.columns)}"
     
     # Check expected columns exist
     expected_cols = [
@@ -114,7 +114,8 @@ def test_mfsd_integration_snv(tmp_path):
         'REF_MeanSize', 'ALT_MeanSize',
         'Delta_ALT_REF', 'KS_ALT_REF', 'KS_Pval_ALT_REF',
         'VAF_Proxy', 'Error_Rate', 'Quality_Score',
-        'ALT_Confidence', 'KS_Valid'
+        'ALT_Confidence', 'KS_Valid',
+        'ALT_LLR', 'REF_LLR',  # New LLR columns for duplex/panel mode
     ]
     for col in expected_cols:
         assert col in df.columns, f"Missing column: {col}"
@@ -321,3 +322,58 @@ def test_mfsd_verbose_logging(tmp_path):
     
     assert result.exit_code == 0
     # Verbose mode should work without errors
+
+
+def test_mfsd_llr_scoring(tmp_path):
+    """Test LLR scoring for low-N scenarios (duplex/panel mode).
+    
+    LLR = Log-Likelihood Ratio comparing tumor vs healthy fragment size models.
+    Positive values indicate tumor-like distribution (shorter fragments ~145bp).
+    Negative values indicate healthy-like distribution (nucleosomal ~167bp).
+    """
+    bam_file = tmp_path / "test.bam"
+    # Create reads with typical tumor-like fragment sizes (~145bp)
+    create_mock_bam(bam_file, [
+        {'query_sequence': 'T' * 50, 'reference_start': 1000, 'template_length': 140, 'name': 'tumor1'},
+        {'query_sequence': 'T' * 50, 'reference_start': 1000, 'template_length': 145, 'name': 'tumor2'},
+        {'query_sequence': 'T' * 50, 'reference_start': 1000, 'template_length': 150, 'name': 'tumor3'},
+        # Ref reads with healthy-like sizes (~167bp)
+        {'query_sequence': 'A' * 50, 'reference_start': 1000, 'template_length': 165, 'name': 'healthy1'},
+        {'query_sequence': 'A' * 50, 'reference_start': 1000, 'template_length': 170, 'name': 'healthy2'},
+    ])
+    
+    vcf_file = tmp_path / "variants.vcf"
+    create_mock_vcf(vcf_file)  # SNV at chr1:1001 A>T
+    
+    output_dir = tmp_path / "output"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(vcf_file), 
+        "-o", str(output_dir),
+        "-s", "test"
+    ])
+    
+    assert result.exit_code == 0
+    
+    df = pd.read_csv(output_dir / "test.mFSD.tsv", sep='\t')
+    
+    # LLR columns should exist
+    assert 'ALT_LLR' in df.columns
+    assert 'REF_LLR' in df.columns
+    
+    alt_llr = df.iloc[0]['ALT_LLR']
+    ref_llr = df.iloc[0]['REF_LLR']
+    
+    # ALT fragments (tumor-like, ~145bp) should have positive LLR
+    # REF fragments (healthy-like, ~167bp) should have negative LLR
+    assert alt_llr != 'NA', "ALT_LLR should not be NA when ALT fragments exist"
+    assert ref_llr != 'NA', "REF_LLR should not be NA when REF fragments exist"
+    
+    # Convert to float for comparison
+    alt_llr_f = float(alt_llr)
+    ref_llr_f = float(ref_llr)
+    
+    # Tumor-like ALT should have higher LLR than healthy-like REF
+    assert alt_llr_f > ref_llr_f, f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
