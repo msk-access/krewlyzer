@@ -66,6 +66,52 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `{sample}.EndMotif.tsv` | K-mer frequencies at fragment 5' ends |
 | `{sample}.BreakPointMotif.tsv` | K-mer frequencies flanking breakpoints |
 | `{sample}.MDS.tsv` | Motif Diversity Score |
+| `{sample}.EndMotif1mer.tsv` | **NEW** 1-mer frequencies with C-end fraction (Jagged Index) |
+
+---
+
+## Jagged Index (1-mer End Motifs)
+
+The Jagged Index captures the fraction of fragment ends terminating with Cytosine (C), which is elevated in tumor-derived cfDNA with "jagged" single-stranded overhangs.
+
+### Output: EndMotif1mer.tsv
+
+```tsv
+base    count     fraction
+A       661428    0.188214
+C       1261449   0.358953    # ← C-end fraction
+G       849433    0.241712
+T       741931    0.211121
+# c_fraction    0.358953
+# entropy       1.952998
+# c_bias        0.108953
+```
+
+### Metrics
+
+| Metric | Formula | Interpretation |
+|--------|---------|----------------|
+| `c_fraction` | C_count / total_count | Fraction of C-ending fragments |
+| `entropy` | Shannon entropy (0-2 bits) | Randomness of 1-mer distribution |
+| `c_bias` | c_fraction - 0.25 | Deviation from expected 25% |
+
+### C-End Fraction Interpretation
+
+| c_fraction | c_bias | Interpretation |
+|------------|--------|----------------|
+| 0.25-0.30 | 0 to +0.05 | Normal / healthy-like |
+| 0.30-0.35 | +0.05 to +0.10 | Mildly elevated (possible tumor) |
+| >0.35 | >0.10 | **Elevated** (tumor signal) |
+
+### Biological Basis
+
+cfDNA fragmentation by DNASE1L3 produces fragments with single-stranded 5' overhangs ("jagged ends"). Tumor-derived cfDNA shows:
+- **~87.8% jagged ends** (vs lower in healthy)
+- **Higher C-end fraction** due to preferential C-terminal cutting
+
+> [!TIP]
+> The C-end fraction complements MDS for detecting tumor-derived cfDNA.
+> Use both metrics together for improved sensitivity.
 
 ---
 

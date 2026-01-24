@@ -10,7 +10,7 @@
 ---
 
 ## Purpose
-Computes GC-corrected coverage of cfDNA fragments in 5 biologically-meaningful size channels per genomic bin. Designed for ML feature extraction in cancer detection.
+Computes GC-corrected coverage of cfDNA fragments in 6 biologically-meaningful size channels per genomic bin. Designed for ML feature extraction in cancer detection.
 
 ---
 
@@ -32,7 +32,7 @@ cfDNA fragments are not random—their sizes reflect the chromatin state of thei
 - Different apoptotic pathways
 - Chromatin accessibility changes
 
-### 5-Channel ML Features
+### 6-Channel ML Features
 
 FSC partitions fragments into **non-overlapping** channels optimized for ML:
 
@@ -43,6 +43,7 @@ FSC partitions fragments into **non-overlapping** channels optimized for ML:
 | **mono_nucl** | 150-220bp | Mono-nucleosomal | Classic cfDNA (reference) |
 | **di_nucl** | 221-260bp | Di-nucleosomal | Transitional |
 | **long** | 261-400bp | Multi-nucleosomal | Necrosis-associated |
+| **ultra_long** | 401-1000bp | Extended fragments | Necrosis, fetal cfDNA, late apoptosis |
 
 > **Non-overlapping**: Each fragment is counted in exactly one channel. This prevents multicollinearity in ML models.
 
@@ -60,12 +61,13 @@ flowchart LR
     
     RUST --> FSC["FSC.tsv"]
     
-    subgraph "5 Channels"
+    subgraph "6 Channels"
         FSC --> US["ultra_short (65-100bp)"]
         FSC --> CS["core_short (101-149bp)"]
         FSC --> MN["mono_nucl (150-220bp)"]
         FSC --> DN["di_nucl (221-260bp)"]
         FSC --> LG["long (261-400bp)"]
+        FSC --> UL["ultra_long (401-1000bp)"]
     end
     
     subgraph "With --pon-model"
@@ -89,7 +91,7 @@ flowchart TB
     subgraph "Rust Backend"
         UP --> RUST["_core.run_unified_pipeline()"]
         RUST --> GC["GC correction"]
-        GC --> COUNT["5-channel counting"]
+        GC --> COUNT["6-channel counting (65-1000bp)"]
     end
     
     subgraph "Python (Post-processing)"

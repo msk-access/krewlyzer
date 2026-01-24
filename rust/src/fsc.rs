@@ -1,13 +1,14 @@
 //! Fragment Size Coverage (FSC) and Ratio (FSR) calculation
 //!
-//! Counts fragments in genomic bins by 5 biologically-meaningful size categories:
+//! Counts fragments in genomic bins by 6 biologically-meaningful size categories:
 //! - Ultra-short: 65-100bp (di-nucleosomal debris, early apoptosis markers)
 //! - Core-short: 101-149bp (sub-nucleosomal, associated with specific chromatin states)
 //! - Mono-nucleosomal: 150-220bp (classic cfDNA peak, nucleosome-protected)
 //! - Di-nucleosomal: 221-260bp (two nucleosomes, transitional)
 //! - Long: 261-400bp (multi-nucleosomal, associated with necrosis)
+//! - Ultra-long: 401-1000bp (necrosis, fetal cfDNA, apoptosis late-stage)
 //!
-//! These 5 channels are non-overlapping for ML feature generation.
+//! These 6 channels are non-overlapping for ML feature generation.
 
 use std::path::Path;
 use std::io::BufRead;
@@ -27,19 +28,20 @@ use crate::gc_correction::CorrectionFactors;
 
 /// Result of FSC/FSR calculation for a single bin
 /// 
-/// Contains 5 non-overlapping fragment size channels optimized for ML features.
+/// Contains 6 non-overlapping fragment size channels optimized for ML features.
 #[derive(Debug, Clone, Default)]
 pub struct BinResult {
     pub chrom: String,
     pub start: u64,
     pub end: u64,
-    // 5 biologically-meaningful channels (non-overlapping, weighted counts)
+    // 6 biologically-meaningful channels (non-overlapping, weighted counts)
     pub ultra_short_count: f64,  // 65-100bp: di-nucleosomal debris
     pub core_short_count: f64,   // 101-149bp: sub-nucleosomal
     pub mono_nucl_count: f64,    // 150-220bp: mono-nucleosomal (classic cfDNA peak)
     pub di_nucl_count: f64,      // 221-260bp: di-nucleosomal
     pub long_count: f64,         // 261-400bp: multi-nucleosomal
-    pub total_count: f64,        // All fragments 65-400bp
+    pub ultra_long_count: f64,   // 401-1000bp: necrosis, fetal, apoptosis late-stage
+    pub total_count: f64,        // All fragments 65-1000bp
     pub mean_gc: f64,
     // Internal use for mean calc
     pub gc_sum: f64,
@@ -182,14 +184,14 @@ impl FscConsumer {
         let file = File::create(path)?;
         let mut writer = std::io::BufWriter::new(file);
         
-        writeln!(writer, "chrom\tstart\tend\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\ttotal\tmean_gc")?;
+        writeln!(writer, "chrom\tstart\tend\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\tultra_long\ttotal\tmean_gc")?;
         
         for bin in counts {
             let mean_gc = if bin.gc_count > 0.0 { bin.gc_sum / bin.gc_count } else { 0.0 };
-            writeln!(writer, "{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}",
+            writeln!(writer, "{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}",
                 bin.chrom, bin.start, bin.end,
                 bin.ultra_short_count, bin.core_short_count, bin.mono_nucl_count, 
-                bin.di_nucl_count, bin.long_count, bin.total_count, mean_gc
+                bin.di_nucl_count, bin.long_count, bin.ultra_long_count, bin.total_count, mean_gc
             )?;
         }
         Ok(())
@@ -240,8 +242,8 @@ impl FragmentConsumer for FscConsumer {
             tree.query(start as i32, end_closed as i32, |node| {
                 let bin_idx = node.metadata.to_owned();
                 
-                // Accept fragments in 65-400bp range
-                if fragment.length >= 65 && fragment.length <= 400 {
+                // Accept fragments in 65-1000bp range (extended for ultra-long analysis)
+                if fragment.length >= 65 && fragment.length <= 1000 {
                     let gc_pct = (fragment.gc * 100.0).round() as u8;
                     let weight = if let Some(ref factors) = self.factors {
                          factors.get_factor(fragment.length, gc_pct)
@@ -262,7 +264,7 @@ impl FragmentConsumer for FscConsumer {
                         res.gc_sum += fragment.gc as f64 * weight;
                         res.gc_count += weight;
                         
-                        // 5 non-overlapping channels for ML features
+                        // 6 non-overlapping channels for ML features
                         if fragment.length <= 100 {
                             res.ultra_short_count += weight;
                         } else if fragment.length <= 149 {
@@ -271,8 +273,10 @@ impl FragmentConsumer for FscConsumer {
                             res.mono_nucl_count += weight;
                         } else if fragment.length <= 260 {
                             res.di_nucl_count += weight;
-                        } else {
+                        } else if fragment.length <= 400 {
                             res.long_count += weight;
+                        } else {
+                            res.ultra_long_count += weight;
                         }
                     }
                 }
@@ -289,6 +293,7 @@ impl FragmentConsumer for FscConsumer {
             my_bin.mono_nucl_count += other_bin.mono_nucl_count;
             my_bin.di_nucl_count += other_bin.di_nucl_count;
             my_bin.long_count += other_bin.long_count;
+            my_bin.ultra_long_count += other_bin.ultra_long_count;
             my_bin.total_count += other_bin.total_count;
             my_bin.gc_sum += other_bin.gc_sum;
             my_bin.gc_count += other_bin.gc_count;
@@ -302,6 +307,7 @@ impl FragmentConsumer for FscConsumer {
             my_bin.mono_nucl_count += other_bin.mono_nucl_count;
             my_bin.di_nucl_count += other_bin.di_nucl_count;
             my_bin.long_count += other_bin.long_count;
+            my_bin.ultra_long_count += other_bin.ultra_long_count;
             my_bin.total_count += other_bin.total_count;
             my_bin.gc_sum += other_bin.gc_sum;
             my_bin.gc_count += other_bin.gc_count;

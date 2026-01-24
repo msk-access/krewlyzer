@@ -30,26 +30,31 @@ impl Default for GcCorrectionConfig {
     }
 }
 
-/// Fragment length bin definition for GC correction (68 bins, 5bp width)
-/// Range: 60bp to 400bp
+/// Fragment length bin definition for GC correction (188 bins, 5bp width)
+/// Range: 60bp to 1000bp (extended for ultra-long fragment analysis)
 /// 
 /// 5bp granularity provides finer-grained GC bias modeling for ML features.
-/// Bin 0 = 60-64bp, Bin 1 = 65-69bp, ..., Bin 67 = 395-399bp
+/// Bin 0 = 60-64bp, Bin 1 = 65-69bp, ..., Bin 187 = 995-999bp
+/// 
+/// Extended range captures ultra-long fragments associated with:
+/// - Necrosis-derived cfDNA
+/// - Fetal cfDNA (placental origin)  
+/// - Apoptosis late-stage markers
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LengthBin(pub u8);
 
 impl LengthBin {
-    /// Number of bins (68 = 340bp range / 5bp width)
-    pub const NUM_BINS: u8 = 68;
+    /// Number of bins (188 = 940bp range / 5bp width, covering 60-1000bp)
+    pub const NUM_BINS: u8 = 188;
     
     /// Get LengthBin from fragment length
-    /// Returns None if length is outside tracked range (60-400)
+    /// Returns None if length is outside tracked range (60-1000)
     pub fn from_len(len: u64) -> Option<Self> {
-        if len < 60 || len >= 400 {
+        if len < 60 || len >= 1000 {
             return None;
         }
-        // (len - 60) / 5 -> 0..67
-        // E.g. 60 -> 0, 64 -> 0, 65 -> 1, 399 -> 67
+        // (len - 60) / 5 -> 0..187
+        // E.g. 60 -> 0, 64 -> 0, 65 -> 1, 999 -> 187
         let bin = ((len - 60) / 5) as u8;
         if bin < Self::NUM_BINS {
             Some(LengthBin(bin))

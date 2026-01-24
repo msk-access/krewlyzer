@@ -16,8 +16,9 @@ import logging
 
 logger = logging.getLogger("core.fsc_processor")
 
-# 5 biologically-meaningful channels matching Rust backend
-CHANNELS = ['ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long']
+# 6 biologically-meaningful channels matching Rust backend
+# Extended to include ultra_long for fragments 401-1000bp
+CHANNELS = ['ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long', 'ultra_long']
 
 # Regularization constant for reliability calculation
 RELIABILITY_K = 0.01

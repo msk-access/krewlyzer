@@ -21,8 +21,8 @@ import logging
 
 logger = logging.getLogger("core.fsd_processor")
 
-# 67 bins: 65-69, 70-74, ..., 395-399
-BIN_COLUMNS = [f"{s}-{s+4}" for s in range(65, 400, 5)]
+# 187 bins: 65-69, 70-74, ..., 995-999 (extended range for ultra-long fragments)
+BIN_COLUMNS = [f"{s}-{s+4}" for s in range(65, 1000, 5)]
 
 
 def process_fsd(

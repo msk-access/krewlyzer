@@ -40,6 +40,7 @@ from .fsd_processor import process_fsd
 from .wps_processor import post_process_wps
 from .pon_integration import load_pon_model
 from .gene_bed import load_gene_bed
+from .ocf_processor import create_panel_ocf_atlas
 
 # Rust backend
 from krewlyzer import _core
@@ -68,10 +69,11 @@ class FeatureOutputs:
     wps: Optional[Path] = None              # WPS parquet
     wps_background: Optional[Path] = None   # WPS Alu stacking
     wps_panel: Optional[Path] = None        # Panel WPS (assay-specific)
-    ocf: Optional[Path] = None              # OCF scores
+    ocf: Optional[Path] = None              # OCF scores (genome-wide, all fragments)
     ocf_sync: Optional[Path] = None         # OCF sync data
-    ocf_ontarget: Optional[Path] = None     # On-target OCF (panel)
-    ocf_panel: Optional[Path] = None        # Panel-filtered OCF (targets + promoters)
+    ocf_ontarget: Optional[Path] = None     # On-target OCF (on-target frags + panel OCRs)
+    ocf_ontarget_sync: Optional[Path] = None  # On-target OCF sync data
+    panel_ocf_regions: Optional[Path] = None  # Filtered OCF regions BED for panel
     gc_factors: Optional[Path] = None       # GC correction factors
 
 
@@ -297,6 +299,7 @@ def run_features(
         res_wps_bg = None
     
     # OCF regions
+    res_ocf_panel = None  # Panel-filtered OCF regions (for second OCF run)
     if enable_ocf:
         if resolved_ocf_regions and resolved_ocf_regions.exists():
             res_ocf = resolved_ocf_regions
@@ -306,6 +309,22 @@ def run_features(
             logger.warning(f"OCF regions not available for {genome}, skipping OCF")
             enable_ocf = False
             res_ocf = None
+        
+        # In panel mode, also create filtered OCF regions for focused analysis
+        # We run OCF twice: once with full regions, once with panel-filtered
+        if res_ocf and is_panel_mode and resolved_target_regions:
+            panel_ocf_regions_path = output_dir / f"{sample_name}.panel_ocf_regions.bed"
+            n_regions = create_panel_ocf_atlas(
+                ocf_atlas_path=res_ocf,
+                target_regions=resolved_target_regions,
+                output_path=panel_ocf_regions_path,
+                promoter_extension=2000,
+            )
+            if n_regions > 0:
+                logger.info(f"Created panel OCF regions ({n_regions} entries)")
+                res_ocf_panel = panel_ocf_regions_path
+            else:
+                logger.warning("Panel OCF regions empty, skipping panel OCF")
         
         if res_ocf:
             logger.debug(f"OCF regions: {res_ocf}")
@@ -339,11 +358,18 @@ def run_features(
             outputs.wps_background = output_dir / f"{sample_name}.WPS_background.parquet"
     
     # OCF outputs (uses temp subdir due to Rust hardcoded names)
+    ocf_panel_tmp_dir = None
     if enable_ocf:
         ocf_tmp_dir = output_dir / f"{sample_name}_ocf_tmp"
         ocf_tmp_dir.mkdir(parents=True, exist_ok=True)
         outputs.ocf = output_dir / f"{sample_name}.OCF.tsv"
         outputs.ocf_sync = output_dir / f"{sample_name}.OCF.sync.tsv"
+        
+        # Panel OCF regions for ontarget output (on-target frags + panel OCRs)
+        if res_ocf_panel:
+            outputs.panel_ocf_regions = res_ocf_panel
+            ocf_panel_tmp_dir = output_dir / f"{sample_name}_ocf_ontarget_tmp"
+            ocf_panel_tmp_dir.mkdir(parents=True, exist_ok=True)
     else:
         ocf_tmp_dir = None
     
@@ -512,33 +538,59 @@ def run_features(
         if rust_sync.exists():
             shutil.move(str(rust_sync), str(outputs.ocf_sync))
         
-        # On-target OCF
-        if is_panel_mode:
-            rust_ocf_on = ocf_tmp_dir / "all.ocf.ontarget.tsv"
-            if rust_ocf_on.exists():
-                outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
-                shutil.move(str(rust_ocf_on), str(outputs.ocf_ontarget))
-                logger.info(f"✓ OCF on-target: {outputs.ocf_ontarget.name}")
-            
-            # Panel-filtered OCF: intersect genome-wide OCF with panel targets
-            # This creates a focused view for downstream analysis
-            if outputs.ocf and outputs.ocf.exists() and resolved_target_regions:
-                from .ocf_processor import filter_ocf_to_panel
-                outputs.ocf_panel = output_dir / f"{sample_name}.OCF.panel.tsv"
-                n_panel = filter_ocf_to_panel(
-                    genome_ocf_path=outputs.ocf,
-                    target_regions=resolved_target_regions,
-                    output_path=outputs.ocf_panel,
-                    promoter_extension=2000,  # 2kb upstream for promoter capture
-                )
-                if n_panel > 0:
-                    logger.info(f"✓ OCF panel: {outputs.ocf_panel.name} ({n_panel} regions)")
-        
-        # Cleanup temp dir
+        # Cleanup first temp dir (we don't use the ontarget from full OCRs)
         try:
+            # Remove any remaining files and the dir
+            for f in ocf_tmp_dir.glob("*"):
+                f.unlink()
             ocf_tmp_dir.rmdir()
         except OSError:
             pass
+        
+        # Panel OCF: Run OCF with panel-filtered regions + target filtering
+        # OCF.ontarget = on-target fragments + panel-filtered OCR regions
+        # This is consistent with other features (FSD.ontarget, FSC.ontarget)
+        if res_ocf_panel and ocf_panel_tmp_dir:
+            logger.info("Running OCF ontarget (panel regions + on-target fragments)...")
+            try:
+                _core.run_unified_pipeline(
+                    str(bed_path),
+                    # No GC correction needed (already computed)
+                    None, None, None, None,
+                    # No FSC/FSD/WPS (already done)
+                    None, None,
+                    None, None,
+                    None, None,
+                    False,
+                    None, None,
+                    # OCF with panel-filtered regions
+                    str(res_ocf_panel), str(ocf_panel_tmp_dir),
+                    # WITH target filtering to get on-target fragments
+                    str(resolved_target_regions), 0,
+                    True  # silent
+                )
+                
+                # Take the ONTARGET output (on-target frags + panel OCRs)
+                rust_ocf_ontarget = ocf_panel_tmp_dir / "all.ocf.ontarget.tsv"
+                rust_sync_ontarget = ocf_panel_tmp_dir / "all.sync.ontarget.tsv"
+                
+                if rust_ocf_ontarget.exists():
+                    outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
+                    shutil.move(str(rust_ocf_ontarget), str(outputs.ocf_ontarget))
+                    logger.info(f"✓ OCF ontarget: {outputs.ocf_ontarget.name}")
+                if rust_sync_ontarget.exists():
+                    outputs.ocf_ontarget_sync = output_dir / f"{sample_name}.OCF.ontarget.sync.tsv"
+                    shutil.move(str(rust_sync_ontarget), str(outputs.ocf_ontarget_sync))
+                
+                # Cleanup
+                try:
+                    for f in ocf_panel_tmp_dir.glob("*"):
+                        f.unlink()
+                    ocf_panel_tmp_dir.rmdir()
+                except OSError:
+                    pass
+            except Exception as e:
+                logger.warning(f"OCF ontarget failed: {e}")
     
     # =========================================================================
     # 6. SUMMARY

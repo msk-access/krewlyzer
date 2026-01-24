@@ -226,6 +226,68 @@ Variant at TP53:chr17:7577539
 
 ---
 
+## Cross-Species and Assay Support
+
+The LLR model uses Gaussian distributions for healthy and tumor fragment length peaks. These parameters can be customized for different species or library preparations.
+
+### Built-in Presets
+
+| Preset | Healthy μ | Healthy σ | Tumor μ | Tumor σ | Use Case |
+|--------|-----------|-----------|---------|---------|----------|
+| **human** (default) | 167bp | 35bp | 145bp | 25bp | Human cfDNA |
+| **canine** | 153bp | 30bp | 135bp | 22bp | Canine cfDNA |
+| **ssdna** | 160bp | 40bp | 140bp | 30bp | Single-stranded library prep |
+
+### Biological Rationale
+
+Fragment length peaks vary across species due to:
+- **Nucleosome spacing differences** - Canine nucleosomes are more tightly packed
+- **Chromatin structure** - Different histone modifications
+- **Library preparation** - ssDNA preps capture shorter fragments
+
+```mermaid
+flowchart LR
+    subgraph "Human cfDNA"
+        H_HEALTHY["Healthy: ~167bp"] 
+        H_TUMOR["Tumor: ~145bp"]
+    end
+    
+    subgraph "Canine cfDNA"
+        C_HEALTHY["Healthy: ~153bp"]
+        C_TUMOR["Tumor: ~135bp"]
+    end
+    
+    H_HEALTHY --> DELTA1["Δ = -22bp"]
+    H_TUMOR --> DELTA1
+    C_HEALTHY --> DELTA2["Δ = -18bp"]
+    C_TUMOR --> DELTA2
+```
+
+### Python API Access
+
+```python
+from krewlyzer._core import LLRModelParams
+
+# Use built-in presets
+human_params = LLRModelParams.human()
+canine_params = LLRModelParams.canine()
+ssdna_params = LLRModelParams.ssdna()
+
+# Custom parameters
+custom = LLRModelParams(
+    healthy_mu=160.0,
+    healthy_sigma=32.0,
+    tumor_mu=140.0,
+    tumor_sigma=20.0
+)
+```
+
+> [!NOTE]
+> CLI support for preset selection is planned for a future release.
+> Currently, the Rust backend defaults to human parameters.
+
+---
+
 
 ## Fragment Classification
 

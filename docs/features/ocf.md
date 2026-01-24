@@ -156,22 +156,75 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
     --target-regions MSK-ACCESS_targets.bed
 ```
 
+### How Panel OCF Works
+
+In panel mode, OCF produces two complementary outputs using a sophisticated two-pass approach:
+
+```mermaid
+flowchart TB
+    subgraph "Pass 1: Genome-Wide"
+        OCR1["All 50K OCR regions"] --> RUN1["OCF analysis"]
+        FRAGS1["All fragments"] --> RUN1
+        RUN1 --> OCF["OCF.tsv"]
+        RUN1 --> SYNC["OCF.sync.tsv"]
+    end
+    
+    subgraph "Pass 2: Panel-Focused"
+        OCR2["Panel OCRs (~500)"] --> RUN2["OCF analysis"]
+        TARGET["Target regions"] --> FILTER["Filter OCRs"]
+        OCR1 --> FILTER
+        FILTER --> OCR2
+        FRAGS2["On-target frags"] --> RUN2
+        RUN2 --> OCFON["OCF.ontarget.tsv"]
+    end
+```
+
+### Panel OCF Regions
+
+Before the ontarget OCF run, the genome-wide OCR atlas (~50,000 regions) is filtered to keep only regions that overlap with panel targets (+2kb promoter extension). For a typical panel like MSK-ACCESS:
+
+| | Genome-Wide | Panel-Filtered |
+|--|------------|----------------|
+| **OCR regions** | ~50,000 | ~500 |
+| **Noise reduction** | - | ~99% |
+
 ### Output Files
 
-| File | Contents | Use Case |
-|------|----------|----------|
-| `{sample}.OCF.tsv` | **Off-target** fragments | Unbiased tissue signal |
-| `{sample}.OCF.ontarget.tsv` | **On-target** fragments | Local OCF context |
-| `{sample}.OCF.sync.tsv` | Detailed sync scores | Debugging/visualization |
+| File | Fragment Source | OCR Regions | Use Case |
+|------|-----------------|-------------|----------|
+| `{sample}.OCF.tsv` | All fragments | All ~50K | Unbiased genome-wide tissue signal |
+| `{sample}.OCF.ontarget.tsv` | **On-target only** | **Panel ~500** | Panel-focused tissue signal |
+| `{sample}.OCF.sync.tsv` | All fragments | All ~50K | Debugging/visualization |
+| `{sample}.OCF.ontarget.sync.tsv` | On-target only | Panel ~500 | Panel OCF detail |
+| `{sample}.panel_ocf_regions.bed` | - | - | Filtered OCR regions used |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for tissue-of-origin analysis.  
-> **On-target = capture-biased** – may reflect panel design artifacts.
+> [!NOTE]
+> The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).
+> For OCF, ontarget means **both** on-target fragments **AND** panel-filtered OCR regions.
+
+### Why Both Filters?
+
+```mermaid
+flowchart LR
+    subgraph "On-Target Fragments"
+        CAP["Captured near panel genes"]
+    end
+    
+    subgraph "Panel OCR Regions"
+        POCR["OCRs near panel genes"]
+    end
+    
+    CAP --> BOTH["Same genomic space"]
+    POCR --> BOTH
+    BOTH --> SIGNAL["Maximum signal-to-noise"]
+```
+
+On-target fragments and panel OCR regions both focus on the same genomic space (near panel target genes), so combining both filters maximizes the signal-to-noise ratio for tissue-of-origin detection.
 
 ### Example: MSK-ACCESS Panel
 
-| Tissue | Off-Target OCF | On-Target OCF |
-|--------|---------------|---------------|
+| Tissue | OCF.tsv (Genome-Wide) | OCF.ontarget.tsv (Panel) |
+|--------|----------------------|--------------------------|
 | Liver | 265.3 | 52.8 |
 | Intestine | 224.4 | -20.9 |
 | Lung | 173.0 | -9.6 |
@@ -180,8 +233,9 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
 | Placenta | -25.1 | -51.6 |
 | T-cell | 8.9 | 86.7 |
 
-> [!NOTE]
-> Panel targets often overlap specific chromatin regions, causing on-target OCF to diverge significantly from off-target (global) values.
+> [!TIP]
+> **Genome-wide OCF** provides the unbiased baseline for tissue-of-origin analysis.
+> **Panel OCF** provides a focused view specific to your assay's target regions.
 
 ---
 

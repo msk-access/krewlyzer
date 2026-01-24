@@ -46,7 +46,7 @@ flowchart TB
     subgraph "Rust Backend"
         UP --> RUST["_core.run_unified_pipeline()"]
         RUST --> GC["GC correction"]
-        GC --> HIST["67-bin histogram per arm"]
+        GC --> HIST["187-bin histogram per arm (65-999bp)"]
     end
     
     subgraph "Python (Post-processing)"
@@ -122,7 +122,7 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 | Column | Type | Description |
 |--------|------|-------------|
 | `region` | str | Chromosome arm (e.g., "chr1:0-125000000") |
-| `65-69`, `70-74`, ... | float | GC-weighted counts in 67 bins (5bp steps) |
+| `65-69`, `70-74`, ..., `995-999` | float | GC-weighted counts in 187 bins (5bp steps, 65-999bp) |
 | `total` | float | Sum of all bins |
 | `65-69_logR`, ... | float | log2(sample / PoN_expected) *(with -P)* |
 | `pon_stability` | float | 1 / (variance + k) *(with -P)* |

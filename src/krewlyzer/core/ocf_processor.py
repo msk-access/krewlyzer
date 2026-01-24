@@ -74,127 +74,128 @@ def process_ocf_with_pon(
     return df
 
 
-def filter_ocf_to_panel(
-    genome_ocf_path: Path,
+def create_panel_ocf_atlas(
+    ocf_atlas_path: Path,
     target_regions: Path,
     output_path: Path,
     promoter_extension: int = 2000,
 ) -> int:
     """
-    Filter genome-wide OCF results to panel-relevant regions.
+    Create a panel-filtered OCF atlas by intersecting with panel targets.
     
-    Creates a focused OCF output containing only regions that overlap
-    with panel targets (extended by promoter region). The genome-wide
-    output is PRESERVED; this creates an ADDITIONAL panel-focused output.
+    Pre-filters the genome-wide OCF atlas BED file to only include 
+    open chromatin regions that overlap with panel targets (extended 
+    by promoter region). This filtered atlas is used as INPUT to the 
+    OCF analysis, reducing noise by focusing on relevant tissue-specific 
+    OCRs for the panel.
+    
+    For a panel with ~600 gene targets, this typically reduces the atlas
+    from ~50,000 genome-wide OCRs to ~500-2000 panel-relevant OCRs.
     
     Args:
-        genome_ocf_path: Full genome OCF.tsv from Rust pipeline
-        target_regions: Panel targets BED file
-        output_path: Path for filtered output
+        ocf_atlas_path: Path to genome-wide OCF atlas BED (e.g., 7specificTissue.all.OC.bed.gz)
+        target_regions: Panel targets BED file  
+        output_path: Path for filtered atlas output (typically .bed.gz)
         promoter_extension: bp to extend targets upstream (default: 2kb)
         
     Returns:
-        Number of filtered regions
+        Number of filtered OCF regions
         
     Example:
-        >>> n = filter_ocf_to_panel(
-        ...     Path("sample.OCF.tsv"),
+        >>> n = create_panel_ocf_atlas(
+        ...     Path("data/OpenChromatinRegion/GRCh37/7specificTissue.all.OC.bed.gz"),
         ...     Path("panel_targets.bed"),
-        ...     Path("sample.OCF.panel.tsv")
+        ...     Path("output/panel_ocf_atlas.bed.gz")
         ... )
-        >>> print(f"Filtered to {n} panel-relevant regions")
+        >>> print(f"Created panel atlas with {n} regions")
     """
-    logger.info(f"Filtering OCF to panel targets (+{promoter_extension}bp promoter)...")
+    import gzip
+    import tempfile
     
-    if not genome_ocf_path.exists():
-        logger.warning(f"Genome OCF file not found: {genome_ocf_path}")
+    logger.info(f"Creating panel OCF atlas (+{promoter_extension}bp promoter extension)...")
+    
+    if not ocf_atlas_path.exists():
+        logger.warning(f"OCF atlas file not found: {ocf_atlas_path}")
         return 0
     
     if not target_regions.exists():
         logger.warning(f"Target regions file not found: {target_regions}")
         return 0
     
-    # Load genome-wide OCF results
-    ocf_df = pd.read_csv(genome_ocf_path, sep='\t')
-    
-    if ocf_df.empty:
-        logger.warning("Genome OCF file is empty")
-        return 0
-    
     # Load panel targets
     targets_df = pd.read_csv(
-        target_regions, sep='\t', header=None,
+        target_regions, sep='\t', header=None, comment='#',
         usecols=[0, 1, 2], names=['chrom', 'start', 'end']
     )
+    
+    if targets_df.empty:
+        logger.warning("Target regions file is empty")
+        return 0
+    
+    # Normalize chromosome names (handle chr1 vs 1)
+    def normalize_chrom(chrom: str) -> str:
+        """Normalize chromosome to 'chr' format for consistency."""
+        chrom = str(chrom)
+        if not chrom.startswith('chr'):
+            return f'chr{chrom}'
+        return chrom
+    
+    targets_df['chrom'] = targets_df['chrom'].apply(normalize_chrom)
     
     # Extend targets for promoter capture
     targets_df['start'] = (targets_df['start'] - promoter_extension).clip(lower=0)
     
-    # Parse region from OCF (format: "chr1:1000-2000" or similar)
-    # Check for various column naming conventions
-    region_col = None
-    for col_name in ['region', 'region_id', 'name']:
-        if col_name in ocf_df.columns:
-            region_col = col_name
-            break
-    
-    if region_col is None:
-        logger.warning("No region column found in OCF file")
-        return 0
-    
-    # Parse coordinates from region string
-    def parse_region(region_str):
-        """Parse 'chr1:1000-2000' format."""
-        try:
-            if ':' in str(region_str) and '-' in str(region_str):
-                chrom, coords = str(region_str).split(':')
-                start, end = coords.split('-')
-                return chrom, int(start), int(end)
-        except (ValueError, AttributeError):
-            pass
-        return None, None, None
-    
-    parsed = ocf_df[region_col].apply(parse_region)
-    ocf_df['ocf_chrom'] = [p[0] for p in parsed]
-    ocf_df['ocf_start'] = [p[1] for p in parsed]
-    ocf_df['ocf_end'] = [p[2] for p in parsed]
-    
-    # Filter to valid parsed regions
-    ocf_df = ocf_df.dropna(subset=['ocf_chrom'])
-    
-    if ocf_df.empty:
-        logger.warning("No valid regions parsed from OCF file")
-        return 0
-    
-    # Perform intersection
-    logger.debug(f"Intersecting {len(ocf_df)} OCF regions with {len(targets_df)} targets...")
-    
-    filtered_indices = set()
+    # Build interval lookup by chromosome for fast intersection
+    target_intervals = {}
     for chrom in targets_df['chrom'].unique():
-        target_chr = targets_df[targets_df['chrom'] == chrom]
-        ocf_chr = ocf_df[ocf_df['ocf_chrom'] == chrom]
-        
-        for _, target in target_chr.iterrows():
-            # Find overlapping OCF regions
-            overlaps = ocf_chr[
-                (ocf_chr['ocf_end'] > target['start']) & 
-                (ocf_chr['ocf_start'] < target['end'])
-            ]
-            filtered_indices.update(overlaps.index.tolist())
+        chrom_df = targets_df[targets_df['chrom'] == chrom]
+        intervals = list(zip(chrom_df['start'], chrom_df['end']))
+        target_intervals[chrom] = sorted(intervals)
     
-    if not filtered_indices:
-        logger.info("No OCF regions overlap with panel targets")
-        # Write empty file with header
-        pd.DataFrame(columns=ocf_df.columns).to_csv(output_path, sep='\t', index=False)
-        return 0
+    def overlaps_any_target(chrom: str, start: int, end: int) -> bool:
+        """Check if OCR overlaps any target interval on chromosome."""
+        # Normalize chromosome for comparison
+        chrom_norm = normalize_chrom(chrom)
+        if chrom_norm not in target_intervals:
+            return False
+        for t_start, t_end in target_intervals[chrom_norm]:
+            if end > t_start and start < t_end:
+                return True
+        return False
     
-    # Get filtered dataframe, drop temp columns
-    result_df = ocf_df.loc[list(filtered_indices)].copy()
-    result_df = result_df.drop(columns=['ocf_chrom', 'ocf_start', 'ocf_end'], errors='ignore')
+    # Process OCF atlas BED (may be gzipped)
+    n_total = 0
+    n_kept = 0
     
-    # Write output
-    result_df.to_csv(output_path, sep='\t', index=False)
+    is_gzipped = str(ocf_atlas_path).endswith('.gz')
+    opener = gzip.open if is_gzipped else open
     
-    logger.info(f"Panel OCF: {len(ocf_df)} → {len(result_df)} regions ({output_path.name})")
+    output_is_gzipped = str(output_path).endswith('.gz')
+    out_opener = gzip.open if output_is_gzipped else open
     
-    return len(result_df)
+    with opener(ocf_atlas_path, 'rt') as fin, out_opener(output_path, 'wt') as fout:
+        for line in fin:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            n_total += 1
+            parts = line.split('\t')
+            if len(parts) < 3:
+                continue
+            
+            chrom = parts[0]
+            try:
+                start = int(parts[1])
+                end = int(parts[2])
+            except ValueError:
+                continue
+            
+            # Check if this OCR overlaps any panel target (+promoter)
+            if overlaps_any_target(chrom, start, end):
+                fout.write(line + '\n')
+                n_kept += 1
+    
+    logger.info(f"Panel OCF atlas: {n_total:,} → {n_kept:,} regions ({output_path.name})")
+    
+    return n_kept

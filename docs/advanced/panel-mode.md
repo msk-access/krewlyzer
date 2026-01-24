@@ -111,6 +111,9 @@ In panel mode, each feature outputs two files:
 | FSC | `.FSC.tsv` | `.FSC.ontarget.tsv` |
 | FSR | `.FSR.tsv` | `.FSR.ontarget.tsv` |
 | FSD | `.FSD.tsv` | `.FSD.ontarget.tsv` |
+| OCF | `.OCF.tsv` | `.OCF.ontarget.tsv` |
+
+**Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/ocf.md#panel-mode---target-regions) for details.
 
 **Off-target files** are used for:
 - Fragment-based biomarkers
@@ -120,6 +123,7 @@ In panel mode, each feature outputs two files:
 **On-target files** are used for:
 - Copy number analysis
 - Integration with variant calling
+- Panel-specific tissue signals (OCF)
 
 ## Target Regions File
 
