@@ -29,6 +29,7 @@ from krewlyzer.wps import wps
 from krewlyzer.ocf import ocf
 from krewlyzer.uxm import uxm
 from krewlyzer.mfsd import mfsd
+from krewlyzer.region_entropy import region_entropy
 from krewlyzer.wrapper import run_all
 from krewlyzer.pon.build import build_pon
 from krewlyzer.build_gc_reference import build_gc_reference
@@ -43,6 +44,7 @@ app.command()(wps)
 app.command()(ocf)
 app.command()(uxm)
 app.command()(mfsd)
+app.command(name="region-entropy")(region_entropy)
 app.command()(run_all)
 app.command(name="build-pon")(build_pon)
 app.command(name="build-gc-reference")(build_gc_reference)

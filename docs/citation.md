@@ -131,9 +131,29 @@ WPS(k) = N_spanning(k) - N_ends(k)
 
 ---
 
+### Region Entropy — TFBS/ATAC Size Entropy {#region-entropy}
+
+> **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). [DOI](https://doi.org/10.1038/s41467-025-64153-z)
+
+**Key Concept:** Shannon entropy of fragment size distributions at transcription factor binding sites (TFBS) and open chromatin regions enables cancer phenotyping.
+
+**Data Sources:**
+- **TFBS:** [GTRD v19.10](https://gtrd.biouml.org/) — 808 transcription factors, top 5000 experimentally-supported sites per TF
+- **ATAC:** [TCGA ATAC-seq](https://gdc.cancer.gov/about-data/publications/ATACseq-AWG) — 23 cancer-type-specific open chromatin regions
+
+**Methodology:**
+From Helzer et al.: "Shannon entropy was calculated on the frequency of the fragment lengths... This yielded a single entropy value for each TF [or cancer type] in each sample."
+
+**Key Findings:**
+- TFBS/ATAC entropy works well for **cancer detection and subtyping**
+- Can be applied to **commercial targeted sequencing panels** without WGS
+- Diversity metrics measure the **spread of fragment sizes** at regulatory regions
+
+**GitHub Data:** [Zhao-Lab-UW-DHO/fragmentomics_metrics](https://github.com/Zhao-Lab-UW-DHO/fragmentomics_metrics/)
+
 ## Acknowledgements
 
-Krewlyzer was developed by the **MSK-ACCESS** team at Memorial Sloan Kettering Cancer Center.
+Krewlyzer was developed by **Ronak Shah** at Memorial Sloan Kettering Cancer Center.
 
 The fragmentomics methods implemented here build upon foundational work from laboratories worldwide including Dennis Lo (CUHK), Jay Shendure (UW), Victor Velculescu (JHU), and others.
 

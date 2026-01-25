@@ -73,6 +73,28 @@ class AssetManager:
     def ocf_available(self) -> bool:
         """Check if OCF regions are available for this genome"""
         return self.ocf_regions.exists()
+    
+    @property
+    def tfbs_regions(self) -> Path:
+        """GTRD Top 5k TFBS metaclusters for size entropy analysis"""
+        filename = f"Homo_sapiens_meta_clusters_{self.file_prefix}_midpoint_top5k_sorted.bed.gz"
+        return self._get_path("TFBS", filename)
+    
+    @property
+    def tfbs_available(self) -> bool:
+        """Check if TFBS regions are available for this genome"""
+        return self.tfbs_regions.exists()
+    
+    @property
+    def atac_regions(self) -> Path:
+        """TCGA ATAC-seq cancer peak atlas for size entropy analysis"""
+        filename = f"TCGA_ATAC_peak.{self.file_prefix}.bed.gz"
+        return self._get_path("ATAC", filename)
+    
+    @property
+    def atac_available(self) -> bool:
+        """Check if ATAC regions are available for this genome"""
+        return self.atac_regions.exists()
 
     @property
     def wps_anchors(self) -> Path:
@@ -194,6 +216,8 @@ class AssetManager:
             "methylation_markers": self.methylation_markers,
             "wps_anchors": self.wps_anchors,
             "wps_background": self.wps_background,
+            "tfbs_regions": self.tfbs_regions,
+            "atac_regions": self.atac_regions,
         }
         
         if asset_name not in asset_map:

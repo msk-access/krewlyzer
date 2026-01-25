@@ -110,3 +110,78 @@ def test_fsc_empty_bin(tmp_path):
     
     assert totals[0] == 0  # Empty bin
     assert totals[1] == 1  # Bin with fragment
+
+
+@pytest.mark.unit
+def test_aggregate_by_gene_gene_mode(tmp_path):
+    """Test aggregate_by_gene with aggregate_by='gene' mode."""
+    from krewlyzer.core.fsc_processor import aggregate_by_gene
+    from types import SimpleNamespace
+    
+    # Create test fragments
+    bed_file = tmp_path / "test.bed.gz"
+    import gzip
+    with gzip.open(bed_file, 'wt') as f:
+        # 170bp fragments → mono_nucl (150-260bp)
+        f.write("chr1\t100\t270\t0.5\n")  # Gene1 region
+        f.write("chr1\t100\t270\t0.5\n")  # Gene1 region
+        f.write("chr2\t500\t670\t0.5\n")  # Gene2 region
+    
+    # Create mock genes dict with regions
+    genes = {
+        'Gene1': [SimpleNamespace(chrom='chr1', start=0, end=500, name='Gene1_target_01')],
+        'Gene2': [SimpleNamespace(chrom='chr2', start=400, end=800, name='Gene2_target_01')]
+    }
+    
+    # Test gene mode
+    output = tmp_path / "test.FSC.gene.tsv"
+    aggregate_by_gene(bed_file, genes, output, aggregate_by='gene')
+    
+    import pandas as pd
+    df = pd.read_csv(output, sep='\t')
+    
+    assert len(df) == 2  # 2 genes
+    assert 'gene' in df.columns
+    assert 'normalized_depth' in df.columns
+    assert 'n_regions' in df.columns
+    
+    gene1 = df[df['gene'] == 'Gene1'].iloc[0]
+    assert gene1['total'] == 2  # 2 fragments
+    assert gene1['mono_nucl'] == 2
+
+
+@pytest.mark.unit
+def test_aggregate_by_gene_region_mode(tmp_path):
+    """Test aggregate_by_gene with aggregate_by='region' mode."""
+    from krewlyzer.core.fsc_processor import aggregate_by_gene
+    from types import SimpleNamespace
+    
+    # Create test fragments
+    bed_file = tmp_path / "test.bed.gz"
+    import gzip
+    with gzip.open(bed_file, 'wt') as f:
+        f.write("chr1\t100\t270\t0.5\n")  # Gene1 region1
+        f.write("chr1\t600\t770\t0.5\n")  # Gene1 region2
+    
+    # Create mock genes dict with multiple regions per gene
+    genes = {
+        'Gene1': [
+            SimpleNamespace(chrom='chr1', start=0, end=500, name='Gene1_target_01'),
+            SimpleNamespace(chrom='chr1', start=550, end=900, name='Gene1_target_02')
+        ]
+    }
+    
+    # Test region mode
+    output = tmp_path / "test.FSC.regions.tsv"
+    aggregate_by_gene(bed_file, genes, output, aggregate_by='region')
+    
+    import pandas as pd
+    df = pd.read_csv(output, sep='\t')
+    
+    assert len(df) == 2  # 2 regions
+    assert 'region_name' in df.columns
+    assert 'chrom' in df.columns
+    assert 'normalized_depth' in df.columns
+    
+    # Each region should have 1 fragment
+    assert df['total'].tolist() == [1, 1]

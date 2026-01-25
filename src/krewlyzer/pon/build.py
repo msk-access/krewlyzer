@@ -227,6 +227,8 @@ def build_pon(
         all_wps_data = []
         all_ocf_data = []
         all_mds_data = []
+        all_tfbs_data = []
+        all_atac_data = []
         all_fsd_data_ontarget = []
         all_gc_data_ontarget = []
         
@@ -297,12 +299,22 @@ def build_pon(
                     "kmers": outputs.mds_counts,
                     "mds": outputs.mds_score
                 })
+            
+            # Collect TFBS entropy data
+            if outputs.tfbs_data:
+                all_tfbs_data.append(outputs.tfbs_data)
+            
+            # Collect ATAC entropy data
+            if outputs.atac_data:
+                all_atac_data.append(outputs.atac_data)
         
         logger.info(f"  GC samples: {len(all_gc_data)}")
         logger.info(f"  FSD samples: {len(all_fsd_data)}")
         logger.info(f"  WPS samples: {len(all_wps_data)}")
         logger.info(f"  OCF samples: {len(all_ocf_data)}")
         logger.info(f"  MDS samples: {len(all_mds_data)}")
+        logger.info(f"  TFBS samples: {len(all_tfbs_data)}")
+        logger.info(f"  ATAC samples: {len(all_atac_data)}")
         if is_panel_mode:
             logger.info(f"  FSD on-target samples: {len(all_fsd_data_ontarget)}")
     
@@ -347,6 +359,18 @@ def build_pon(
         logger.info("  Computing MDS baseline...")
         mds_baseline = _compute_mds_baseline(all_mds_data)
     
+    # Build TFBS baseline
+    tfbs_baseline = None
+    if all_tfbs_data:
+        logger.info("  Computing TFBS baseline...")
+        tfbs_baseline = _compute_tfbs_baseline(all_tfbs_data)
+    
+    # Build ATAC baseline
+    atac_baseline = None
+    if all_atac_data:
+        logger.info("  Computing ATAC baseline...")
+        atac_baseline = _compute_atac_baseline(all_atac_data)
+    
     # Build on-target FSD baseline (panel mode only)
     fsd_baseline_ontarget = None
     if is_panel_mode and all_fsd_data_ontarget:
@@ -378,6 +402,8 @@ def build_pon(
         wps_baseline=wps_baseline,
         ocf_baseline=ocf_baseline,
         mds_baseline=mds_baseline,
+        tfbs_baseline=tfbs_baseline,
+        atac_baseline=atac_baseline,
         fsd_baseline_ontarget=fsd_baseline_ontarget,
         gc_bias_ontarget=gc_bias_ontarget,
     )
@@ -758,6 +784,57 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
     )
 
 
+def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
+    """
+    Compute TFBS entropy baseline from sample data.
+    
+    Aggregates entropy values per TF label across samples.
+    
+    Args:
+        all_tfbs_data: List of dicts, each {label: entropy_value}
+        
+    Returns:
+        TfbsBaseline with per-label mean/std entropy
+    """
+    from .model import TfbsBaseline
+    from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+    
+    if not all_tfbs_data:
+        return None
+    
+    # Build baseline using RegionEntropyBaseline.from_samples()
+    baseline = RegionEntropyBaseline.from_samples(all_tfbs_data)
+    
+    logger.info(f"TFBS baseline: {len(baseline.data)} labels, {len(all_tfbs_data)} samples")
+    
+    return TfbsBaseline(baseline=baseline)
+
+
+def _compute_atac_baseline(all_atac_data: List[dict]) -> "AtacBaseline":
+    """
+    Compute ATAC entropy baseline from sample data.
+    
+    Aggregates entropy values per cancer type label across samples.
+    
+    Args:
+        all_atac_data: List of dicts, each {label: entropy_value}
+        
+    Returns:
+        AtacBaseline with per-label mean/std entropy
+    """
+    from .model import AtacBaseline
+    from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+    
+    if not all_atac_data:
+        return None
+    
+    # Build baseline using RegionEntropyBaseline.from_samples()
+    baseline = RegionEntropyBaseline.from_samples(all_atac_data)
+    
+    logger.info(f"ATAC baseline: {len(baseline.data)} labels, {len(all_atac_data)} samples")
+    
+    return AtacBaseline(baseline=baseline)
+
 def _save_pon_model(model: PonModel, output: Path) -> None:
     """Save PON model to Parquet file."""
     output = Path(output)
@@ -864,6 +941,30 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     
     gc_bias_ontarget_df = pd.DataFrame(gc_bias_ontarget_rows) if gc_bias_ontarget_rows else pd.DataFrame()
     
+    # Build TFBS baseline DataFrame
+    tfbs_rows = []
+    if model.tfbs_baseline and model.tfbs_baseline.baseline:
+        for label, (mean, std) in model.tfbs_baseline.baseline.data.items():
+            tfbs_rows.append({
+                "table": "tfbs_baseline",
+                "label": label,
+                "entropy_mean": mean,
+                "entropy_std": std,
+            })
+    tfbs_df = pd.DataFrame(tfbs_rows) if tfbs_rows else pd.DataFrame()
+    
+    # Build ATAC baseline DataFrame
+    atac_rows = []
+    if model.atac_baseline and model.atac_baseline.baseline:
+        for label, (mean, std) in model.atac_baseline.baseline.data.items():
+            atac_rows.append({
+                "table": "atac_baseline",
+                "label": label,
+                "entropy_mean": mean,
+                "entropy_std": std,
+            })
+    atac_df = pd.DataFrame(atac_rows) if atac_rows else pd.DataFrame()
+    
     # Combine and save
     all_dfs = [metadata_df]
     if not gc_bias_df.empty:
@@ -880,6 +981,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(fsd_ontarget_df)
     if not gc_bias_ontarget_df.empty:
         all_dfs.append(gc_bias_ontarget_df)
+    if not tfbs_df.empty:
+        all_dfs.append(tfbs_df)
+    if not atac_df.empty:
+        all_dfs.append(atac_df)
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
     combined_df.to_parquet(output, index=False)

@@ -37,6 +37,7 @@ pub mod gc_correction;
 pub mod pon_model;
 pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
+pub mod region_entropy;  // TFBS/ATAC size entropy
 
 /// Read filtering configuration
 #[pyclass]
@@ -138,6 +139,11 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_fsd_baseline, &pon_builder_mod)?)?;
     pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_wps_baseline, &pon_builder_mod)?)?;
     m.add_submodule(&pon_builder_mod)?;
+    
+    // Region Entropy submodule (TFBS/ATAC size entropy)
+    let region_entropy_mod = PyModule::new(m.py(), "region_entropy")?;
+    region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::run_region_entropy, &region_entropy_mod)?)?;
+    m.add_submodule(&region_entropy_mod)?;
     
     // Version
     #[pyfn(m)]

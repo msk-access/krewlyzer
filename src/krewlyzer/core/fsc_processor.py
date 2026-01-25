@@ -274,62 +274,68 @@ def aggregate_by_gene(
     genes: dict,
     output_path: Path,
     pon=None,
-    correction_factors: dict = None
+    correction_factors: dict = None,
+    aggregate_by: str = 'gene'
 ) -> Path:
     """
-    Aggregate fragment counts by gene for panel-specific FSC.
+    Aggregate fragment counts for panel-specific FSC.
     
-    Instead of genomic windows, this function sums fragment counts
-    per gene target regions, producing gene-level FSC features.
+    This function sums fragment counts per gene or per region, producing
+    gene-level or region-level FSC features depending on aggregate_by.
     
     When correction_factors is provided, fragments are weighted by their
-    GC correction factor to account for capture and PCR bias. This is
-    critical for accurate copy number analysis in panel mode.
+    GC correction factor to account for capture and PCR bias.
     
     Args:
         fragments_bed: Path to fragment BED file from extract step
-                       Format: chrom, start, end, gc_fraction
         genes: Dict[gene_name, List[Region]] from gene_bed.load_gene_bed()
-        output_path: Path to write gene FSC output
+        output_path: Path to write FSC output
         pon: Optional PON model for normalization
         correction_factors: Optional dict[(len_bin, gc_pct) -> factor]
-                           Loaded via load_correction_factors()
+        aggregate_by: 'gene' (sum by gene) or 'region' (one row per exon/region)
         
     Returns:
         Path to output file
         
-    Output columns:
-        - gene: Gene name
-        - n_regions: Number of target regions for this gene
-        - total_bp: Total basepairs covered
-        - ultra_short, core_short, mono_nucl, di_nucl, long: Weighted channel counts
-        - total: Total weighted fragments
-        - *_ratio: Channel / total ratio
+    Output columns (gene mode):
+        - gene, n_regions, total_bp, channels, *_ratio, normalized_depth
+    Output columns (region mode):
+        - chrom, start, end, gene, region_name, region_bp, channels, *_ratio, normalized_depth
     """
     import gzip
     
     # Log GC correction mode
     gc_mode = "ON (weighted counting)" if correction_factors else "OFF (raw counting)"
-    logger.info(f"Aggregating FSC by gene: {len(genes)} genes, GC correction: {gc_mode}")
+    logger.info(f"Aggregating FSC by {aggregate_by}: {len(genes)} genes, GC correction: {gc_mode}")
     
     # Build interval tree for fast region lookup
-    # Structure: chrom -> [(start, end, gene), ...]
+    # For region mode, we track each region individually
+    # For gene mode, we aggregate by gene name
     gene_intervals = {}
+    region_list = []  # For region mode: list of all regions with metadata
+    
     for gene, regions in genes.items():
         for region in regions:
             chrom = region.chrom
             if chrom not in gene_intervals:
                 gene_intervals[chrom] = []
-            gene_intervals[chrom].append((region.start, region.end, gene))
+            region_idx = len(region_list)
+            region_list.append({
+                'chrom': chrom, 'start': region.start, 'end': region.end,
+                'gene': gene, 'region_name': getattr(region, 'name', f"{gene}_{region_idx}"),
+                'region_bp': region.end - region.start
+            })
+            gene_intervals[chrom].append((region.start, region.end, gene, region_idx))
     
     # Sort intervals per chromosome
     for chrom in gene_intervals:
         gene_intervals[chrom].sort(key=lambda x: x[0])
     
-    # Initialize gene counts as floats for weighted counting
+    # Initialize counts: gene mode uses gene_counts dict, region mode uses region_counts list
     gene_counts = {gene: {ch: 0.0 for ch in CHANNELS + ['total']} for gene in genes}
     gene_meta = {gene: {'n_regions': len(regions), 'total_bp': sum(r.end - r.start for r in regions)} 
                  for gene, regions in genes.items()}
+    region_counts = [{ch: 0.0 for ch in CHANNELS + ['total']} for _ in region_list] if aggregate_by == 'region' else None
     
     # Tracking statistics for monitoring
     total_fragments = 0
@@ -387,39 +393,75 @@ def aggregate_by_gene(
                 continue
             
             frag_mid = (start + end) // 2
-            for reg_start, reg_end, gene in gene_intervals[chrom]:
+            for reg_start, reg_end, gene, region_idx in gene_intervals[chrom]:
                 if reg_start > frag_mid:
                     break  # Past this fragment
                 if reg_start <= frag_mid < reg_end:
                     # Apply weighted counting (key fix for GC bias)
                     gene_counts[gene][size_bin] += weight
                     gene_counts[gene]['total'] += weight
+                    if region_counts is not None:
+                        region_counts[region_idx][size_bin] += weight
+                        region_counts[region_idx]['total'] += weight
                     assigned_fragments += 1
                     total_weight += weight
-                    break  # Assign to first matching gene only
+                    break  # Assign to first matching gene/region only
     
     # Log processing statistics with GC correction info
-    logger.info(f"Processed {total_fragments} fragments, {assigned_fragments} assigned to genes")
+    entity = 'regions' if aggregate_by == 'region' else 'genes'
+    logger.info(f"Processed {total_fragments} fragments, {assigned_fragments} assigned to {entity}")
     if correction_factors:
         avg_weight = total_weight / assigned_fragments if assigned_fragments > 0 else 1.0
         logger.info(f"  GC correction: avg_weight={avg_weight:.3f}, missing_gc={gc_missing_count}")
         if avg_weight < 0.5 or avg_weight > 2.0:
             logger.warning(f"  Unusual average weight {avg_weight:.3f} - check correction factors")
     
-    # Build output DataFrame
+    # Build output DataFrame based on aggregation mode
     rows = []
-    for gene in sorted(genes.keys()):
-        row = {
-            'gene': gene,
-            'n_regions': gene_meta[gene]['n_regions'],
-            'total_bp': gene_meta[gene]['total_bp'],
-            **gene_counts[gene]
-        }
-        # Calculate channel ratios
-        total = gene_counts[gene]['total']
-        for ch in CHANNELS:
-            row[f'{ch}_ratio'] = gene_counts[gene][ch] / total if total > 0 else 0.0
-        rows.append(row)
+    if aggregate_by == 'region':
+        # Per-region output
+        for idx, region in enumerate(region_list):
+            counts = region_counts[idx]
+            row = {
+                'chrom': region['chrom'], 'start': region['start'], 'end': region['end'],
+                'gene': region['gene'], 'region_name': region['region_name'],
+                'region_bp': region['region_bp'], **counts
+            }
+            total = counts['total']
+            for ch in CHANNELS:
+                row[f'{ch}_ratio'] = counts[ch] / total if total > 0 else 0.0
+            
+            region_size = region['region_bp']
+            if region_size > 0 and total_fragments > 0:
+                row['normalized_depth'] = (counts['total'] * 1e9) / (region_size * total_fragments)
+            else:
+                row['normalized_depth'] = 0.0
+            rows.append(row)
+    else:
+        # Per-gene output (default)
+        for gene in sorted(genes.keys()):
+            row = {
+                'gene': gene,
+                'n_regions': gene_meta[gene]['n_regions'],
+                'total_bp': gene_meta[gene]['total_bp'],
+                **gene_counts[gene]
+            }
+            # Calculate channel ratios
+            total = gene_counts[gene]['total']
+            for ch in CHANNELS:
+                row[f'{ch}_ratio'] = gene_counts[gene][ch] / total if total > 0 else 0.0
+            
+            # Calculate Normalized Depth (RPKM-like)
+            region_size = gene_meta[gene]['total_bp']
+            weighted_count = gene_counts[gene]['total']
+            
+            if region_size > 0 and total_fragments > 0:
+                norm_depth = (weighted_count * 1e9) / (region_size * total_fragments)
+            else:
+                norm_depth = 0.0
+            
+            row['normalized_depth'] = norm_depth
+            rows.append(row)
     
     df = pd.DataFrame(rows)
     
@@ -435,7 +477,9 @@ def aggregate_by_gene(
     
     # Write output
     df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
-    logger.info(f"Gene FSC complete: {output_path} ({len(df)} genes)")
+    if aggregate_by == 'region':
+        logger.info(f"Region FSC complete: {output_path} ({len(df)} regions)")
+    else:
+        logger.info(f"Gene FSC complete: {output_path} ({len(df)} genes)")
     
     return output_path
-

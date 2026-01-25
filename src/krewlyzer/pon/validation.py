@@ -90,6 +90,38 @@ def validate_panel_config(
     )
 
 
+def validate_skip_pon(
+    skip_pon: bool,
+    pon_model: Optional[Path],
+) -> ValidationResult:
+    """
+    Validate --skip-pon and -P/--pon-model mutual exclusivity.
+    
+    Args:
+        skip_pon: True if --skip-pon flag was provided
+        pon_model: Path to PON model if -P/--pon-model was provided
+        
+    Returns:
+        ValidationResult with error if both flags are provided
+    """
+    warnings = []
+    errors = []
+    
+    if skip_pon and pon_model is not None:
+        errors.append(
+            "--skip-pon and -P/--pon-model are mutually exclusive. "
+            "Use --skip-pon for raw output, or -P for z-score normalization, but not both."
+        )
+    
+    valid = len(errors) == 0
+    
+    return ValidationResult(
+        valid=valid,
+        warnings=warnings,
+        errors=errors
+    )
+
+
 def calculate_on_target_rate(
     fragment_bed: Path,
     target_regions: Path,

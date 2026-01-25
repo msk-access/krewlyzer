@@ -1,0 +1,145 @@
+"""
+Region Entropy (TFBS/ATAC Size Entropy) calculation.
+
+Calculates Shannon entropy of fragment size distributions at regulatory regions:
+- TFBS: Transcription factor binding sites (808 factors from GTRD)
+- ATAC: Cancer-specific ATAC-seq peaks (23 cancer types from TCGA)
+
+Output Files:
+    - {sample}.TFBS.tsv: Per-TF entropy scores
+    - {sample}.ATAC.tsv: Per-cancer-type entropy scores
+    - Panel mode: {sample}.TFBS.ontarget.tsv and {sample}.ATAC.ontarget.tsv
+"""
+
+import typer
+from pathlib import Path
+from typing import Optional
+import logging
+
+from rich.console import Console
+from rich.logging import RichHandler
+
+console = Console(stderr=True)
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
+logger = logging.getLogger("region_entropy")
+
+
+def region_entropy(
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
+    output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output files"),
+    
+    # Feature toggles
+    tfbs: bool = typer.Option(True, "--tfbs/--no-tfbs", help="Enable TFBS entropy"),
+    atac: bool = typer.Option(True, "--atac/--no-atac", help="Enable ATAC entropy"),
+    
+    # Region overrides
+    tfbs_regions: Optional[Path] = typer.Option(None, "--tfbs-regions", help="Custom TFBS regions BED.gz"),
+    atac_regions: Optional[Path] = typer.Option(None, "--atac-regions", help="Custom ATAC regions BED.gz"),
+    
+    # Optional settings
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
+    gc_factors: Optional[Path] = typer.Option(None, "--gc-factors", "-F", help="GC correction factors TSV"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
+    skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
+):
+    """
+    Calculate Region Entropy features (TFBS/ATAC size entropy) for a single sample.
+    
+    Input: .bed.gz file from extract step
+    Output: {sample}.TFBS.tsv and/or {sample}.ATAC.tsv
+    """
+    from . import _core
+    from .assets import AssetManager
+    from .core.region_entropy_processor import process_region_entropy
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("krewlyzer.core.region_entropy_processor").setLevel(logging.DEBUG)
+    
+    # Input validation
+    if not bedgz_input.exists():
+        logger.error(f"Input file not found: {bedgz_input}")
+        raise typer.Exit(1)
+    
+    # Derive sample name
+    if sample_name is None:
+        sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
+    
+    # Create output directory
+    output.mkdir(parents=True, exist_ok=True)
+    
+    # Load assets
+    assets = AssetManager(genome)
+    
+    # Resolve GC correction factors
+    gc_str = str(gc_factors) if gc_factors and gc_factors.exists() else None
+    
+    # Validate: -P and --skip-pon are contradictory
+    if pon_model and skip_pon:
+        logger.error("--pon-model (-P) and --skip-pon are contradictory")
+        raise typer.Exit(1)
+    
+    # Load PON model for Z-score normalization (if provided and not skipped)
+    tfbs_baseline = None
+    atac_baseline = None
+    if pon_model and pon_model.exists() and not skip_pon:
+        from .core.pon_integration import load_pon_model
+        pon = load_pon_model(pon_model)
+        if pon:
+            tfbs_baseline = pon.tfbs_baseline.baseline if pon.tfbs_baseline else None
+            atac_baseline = pon.atac_baseline.baseline if pon.atac_baseline else None
+            if tfbs_baseline:
+                logger.info(f"Loaded TFBS baseline: {len(tfbs_baseline.data)} labels")
+            if atac_baseline:
+                logger.info(f"Loaded ATAC baseline: {len(atac_baseline.data)} labels")
+    elif skip_pon:
+        logger.info("--skip-pon: skipping PON z-score normalization")
+    
+    try:
+        # TFBS
+        if tfbs:
+            tfbs_path = tfbs_regions if tfbs_regions else (assets.tfbs_regions if assets.tfbs_available else None)
+            if tfbs_path and Path(tfbs_path).exists():
+                logger.info(f"Computing TFBS entropy...")
+                out_raw = output / f"{sample_name}.TFBS.raw.tsv"
+                out_final = output / f"{sample_name}.TFBS.tsv"
+                
+                _core.region_entropy.run_region_entropy(
+                    str(bedgz_input), str(tfbs_path), str(out_raw), gc_str, not verbose
+                )
+                process_region_entropy(out_raw, out_final, tfbs_baseline)
+                out_raw.unlink(missing_ok=True)
+                logger.info(f"✅ TFBS: {out_final}")
+            else:
+                logger.warning("TFBS regions not available for this genome")
+        
+        # ATAC
+        if atac:
+            atac_path = atac_regions if atac_regions else (assets.atac_regions if assets.atac_available else None)
+            if atac_path and Path(atac_path).exists():
+                logger.info(f"Computing ATAC entropy...")
+                out_raw = output / f"{sample_name}.ATAC.raw.tsv"
+                out_final = output / f"{sample_name}.ATAC.tsv"
+                
+                _core.region_entropy.run_region_entropy(
+                    str(bedgz_input), str(atac_path), str(out_raw), gc_str, not verbose
+                )
+                process_region_entropy(out_raw, out_final, atac_baseline)
+                out_raw.unlink(missing_ok=True)
+                logger.info(f"✅ ATAC: {out_final}")
+            else:
+                logger.warning("ATAC regions not available for this genome")
+                
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
+    except RuntimeError as e:
+        logger.error(f"Region entropy calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        raise typer.Exit(1)

@@ -16,6 +16,34 @@ krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -P pon.parquet
 ```
 
+## Auto-PON Loading
+
+When you specify an assay with `-A`, krewlyzer automatically loads the bundled PON:
+
+```bash
+# Auto-loads bundled PON for xs2 assay
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 -G hg19
+```
+
+This is equivalent to explicitly passing `-P` with the bundled PON path.
+
+## Skipping Z-Score Normalization (`--skip-pon`)
+
+For **ML training workflows** where PON samples are used as true negatives, use `--skip-pon` to output raw features without z-score normalization:
+
+```bash
+# Process PON samples as ML negatives (no z-scores)
+krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
+```
+
+> [!WARNING]
+> `-P` and `--skip-pon` are **mutually exclusive**. If you specify an explicit PON model, you want z-scores applied. Use `--skip-pon` only with `-A` (assay) for the ML negatives workflow.
+
+The `--skip-pon` flag:
+- Works with `-A/--assay` (auto-loads bundled PON but skips z-scores)
+- Available on all tools: `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `region-entropy`, `motif`
+- Logs which tools are skipping normalization
+
 ## PON Components
 
 | Component | Description | Used By |

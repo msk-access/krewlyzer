@@ -172,6 +172,13 @@ class SampleOutputs:
     em_counts_ontarget: List[int] = field(default_factory=list)
     bpm_counts_ontarget: List[int] = field(default_factory=list)
     gc_observations_ontarget: List[Any] = field(default_factory=list)
+    
+    # Region Entropy data (in-memory for PON building)
+    # Dict[label, (count, mean_size, entropy)]
+    tfbs_data: Optional[Dict[str, Any]] = None
+    tfbs_data_ontarget: Optional[Dict[str, Any]] = None
+    atac_data: Optional[Dict[str, Any]] = None
+    atac_data_ontarget: Optional[Dict[str, Any]] = None
 
 
 # =============================================================================
@@ -646,6 +653,8 @@ def process_sample(
     enable_fsd: bool = True,
     enable_wps: bool = True,
     enable_ocf: bool = True,
+    enable_tfbs: bool = True,
+    enable_atac: bool = True,
     # PON mode (skip normalization, return raw data)
     pon_mode: bool = False,
     pon_model: Optional[Path] = None,
@@ -753,6 +762,8 @@ def process_sample(
         enable_fsd=enable_fsd,
         enable_wps=enable_wps,
         enable_ocf=enable_ocf,
+        enable_tfbs=enable_tfbs,
+        enable_atac=enable_atac,
         target_regions=target_regions,
         assay=assay,
         pon_model=None if pon_mode else pon_model,
@@ -765,6 +776,42 @@ def process_sample(
     )
     
     outputs.feature_outputs = feature_outputs
+    
+    # === Phase 3: Extract TFBS/ATAC entropy data for PON building ===
+    if pon_mode:
+        from .region_entropy_processor import load_entropy_tsv, extract_entropy_data
+        
+        # TFBS entropy data
+        if feature_outputs.tfbs and feature_outputs.tfbs.exists():
+            try:
+                df = load_entropy_tsv(feature_outputs.tfbs)
+                outputs.tfbs_data = extract_entropy_data(df)
+                logger.debug(f"  Extracted {len(outputs.tfbs_data)} TFBS labels")
+            except Exception as e:
+                logger.warning(f"Failed to extract TFBS data: {e}")
+        
+        if feature_outputs.tfbs_ontarget and feature_outputs.tfbs_ontarget.exists():
+            try:
+                df = load_entropy_tsv(feature_outputs.tfbs_ontarget)
+                outputs.tfbs_data_ontarget = extract_entropy_data(df)
+            except Exception:
+                pass
+        
+        # ATAC entropy data
+        if feature_outputs.atac and feature_outputs.atac.exists():
+            try:
+                df = load_entropy_tsv(feature_outputs.atac)
+                outputs.atac_data = extract_entropy_data(df)
+                logger.debug(f"  Extracted {len(outputs.atac_data)} ATAC labels")
+            except Exception as e:
+                logger.warning(f"Failed to extract ATAC data: {e}")
+        
+        if feature_outputs.atac_ontarget and feature_outputs.atac_ontarget.exists():
+            try:
+                df = load_entropy_tsv(feature_outputs.atac_ontarget)
+                outputs.atac_data_ontarget = extract_entropy_data(df)
+            except Exception:
+                pass
     
     logger.info(f"Sample processing complete: {sample_name}")
     return outputs

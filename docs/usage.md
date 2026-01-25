@@ -63,6 +63,29 @@ krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_d
 
 > **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
 
+## PON and Z-Score Normalization
+
+### Auto-PON with Assay Flag
+When you specify an assay with `-A`, the bundled PON is automatically loaded:
+
+```bash
+# Auto-loads bundled PON for xs2 assay and applies z-scores
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 -G hg19
+```
+
+### Skip Z-Score Normalization (`--skip-pon`)
+For ML training workflows where PON samples are used as true negatives:
+
+```bash
+# Process PON samples as ML negatives (auto-loads PON but skips z-scores)
+krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
+
+# Individual tools also support --skip-pon
+krewlyzer fsd -i sample.bed.gz -o out/ --skip-pon
+```
+
+> **Warning:** `-P/--pon-model` and `--skip-pon` are mutually exclusive.
+
 ## Output Formats
 
 Krewlyzer outputs support multiple formats for different use cases.

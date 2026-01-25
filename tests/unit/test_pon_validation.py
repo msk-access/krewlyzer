@@ -151,3 +151,50 @@ class TestCalculateOnTargetRate:
         
         rate = calculate_on_target_rate(frags, targets, sample_size=100)
         assert rate == 1.0
+
+
+# =============================================================================
+# --skip-pon flag tests
+# =============================================================================
+
+class TestSkipPonValidation:
+    """Tests for --skip-pon flag handling and mutual exclusivity."""
+    
+    def test_skip_pon_flag_valid_alone(self):
+        """--skip-pon without -P is valid."""
+        from krewlyzer.pon.validation import validate_skip_pon
+        
+        result = validate_skip_pon(skip_pon=True, pon_model=None)
+        assert result.valid
+        assert len(result.errors) == 0
+    
+    def test_pon_model_valid_alone(self, tmp_path):
+        """-P without --skip-pon is valid."""
+        from krewlyzer.pon.validation import validate_skip_pon
+        
+        pon_path = tmp_path / "test.pon.parquet"
+        pon_path.touch()
+        
+        result = validate_skip_pon(skip_pon=False, pon_model=pon_path)
+        assert result.valid
+        assert len(result.errors) == 0
+    
+    def test_skip_pon_and_pon_model_mutually_exclusive(self, tmp_path):
+        """-P and --skip-pon together should raise error."""
+        from krewlyzer.pon.validation import validate_skip_pon
+        
+        pon_path = tmp_path / "test.pon.parquet"
+        pon_path.touch()
+        
+        result = validate_skip_pon(skip_pon=True, pon_model=pon_path)
+        assert not result.valid
+        assert len(result.errors) > 0
+        assert "mutually exclusive" in result.errors[0].lower()
+    
+    def test_neither_skip_pon_nor_pon_model_valid(self):
+        """Neither -P nor --skip-pon is valid (normal mode)."""
+        from krewlyzer.pon.validation import validate_skip_pon
+        
+        result = validate_skip_pon(skip_pon=False, pon_model=None)
+        assert result.valid
+        assert len(result.errors) == 0

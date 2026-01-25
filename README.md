@@ -88,6 +88,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 | `fsd` | Size distribution by arm | `.FSD.tsv` |
 | `wps` | Windowed protection score | `.WPS.parquet` |
 | `ocf` | Orientation-aware fragmentation | `.OCF.tsv` |
+| `region-entropy` | TFBS/ATAC size entropy | `.TFBS.tsv`, `.ATAC.tsv` |
 | `uxm` | Fragment-level methylation | `.UXM.tsv` |
 | `mfsd` | Mutant vs wild-type sizes | `.mFSD.tsv` |
 | `build-pon` | Build Panel of Normals | `.pon.parquet` |
@@ -105,7 +106,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 
 - **GC model**: Trained on off-target fragments (unbiased)
 - **Outputs**: Split into `.tsv` (off-target) and `.ontarget.tsv`
-- **PON normalization**: Use `--pon-model` for z-score outputs
+- **Auto-PON**: Use `-A xs2` to auto-load bundled PON for z-scores
+- **ML negatives**: Use `-A xs2 --skip-pon` to output raw features (no z-scores)
 
 ---
 

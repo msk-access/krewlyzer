@@ -1,6 +1,6 @@
 # Features Overview
 
-Krewlyzer provides 10 standalone feature extraction commands plus a unified `run-all` pipeline.
+Krewlyzer provides 11 standalone feature extraction commands plus a unified `run-all` pipeline.
 
 ## Quick Comparison
 
@@ -13,6 +13,7 @@ Krewlyzer provides 10 standalone feature extraction commands plus a unified `run
 | [`fsd`](fsd.md) | BED.gz | `.FSD.tsv` | Size distribution analysis |
 | [`wps`](wps.md) | BED.gz | `.WPS.tsv.gz` | Nucleosome positioning |
 | [`ocf`](ocf.md) | BED.gz | `.OCF.tsv` | Tissue of origin |
+| [`region-entropy`](region-entropy.md) | BED.gz | `.TFBS.tsv`, `.ATAC.tsv` | Regulatory region analysis |
 | [`uxm`](uxm.md) | Bisulfite BAM | `.UXM.tsv` | Methylation deconvolution |
 | [`mfsd`](mfsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
 | `run-all` | BAM | All outputs | Complete analysis |
@@ -48,6 +49,9 @@ flowchart LR
         mfsd --> MFSD[.mFSD.tsv]
         uxm --> UXM[.UXM.tsv]
     end
+    
+    BED --> tfbs[region-entropy]
+    tfbs --> TFBS[.TFBS.tsv / .ATAC.tsv]
 ```
 
 ---
@@ -69,6 +73,7 @@ flowchart LR
 | **WPS** | Nucleosome protection scores | Tissue of origin, gene regulation |
 | **OCF** | Open chromatin fragmentation | Tissue-specific cfDNA detection |
 | **Motif** | End motif diversity (MDS) | Fragmentation patterns, cancer detection |
+| **Region Entropy** | TFBS/ATAC size distribution | Regulatory element alterations, cancer detection |
 
 ### Specialized
 

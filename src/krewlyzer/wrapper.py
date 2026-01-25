@@ -44,6 +44,7 @@ logger = logging.getLogger("krewlyzer")
 # Import shared resolver functions
 from .core.utils import resolve_path as _resolve_path
 from .core.utils import resolve_int as _resolve_int
+from .core.utils import resolve_str as _resolve_str
 
 def run_all(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
@@ -80,6 +81,7 @@ def run_all(
     wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
+    skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization for all tools (for PON samples used as ML negatives)"),
     
     # Output format options
     output_format: str = typer.Option("auto", "--output-format", "-F", help="Output format: auto (smart defaults), tsv, parquet, json"),
@@ -107,6 +109,7 @@ def run_all(
     resolved_ocr_file = _resolve_path(ocr_file)
     resolved_pon_model = _resolve_path(pon_model)
     resolved_bait_padding = _resolve_int(bait_padding, 50)
+    resolved_assay = _resolve_str(assay)
     
     # Configure Logging
     if debug:
@@ -155,11 +158,31 @@ def run_all(
     is_panel_mode = resolved_target_regions and resolved_target_regions.exists()
     
     # === Centralized PON Model Loading ===
-    # Load once here and pass to all processors (FSC, FSR, FSD, WPS, OCF)
+    # Load once here and pass to all processors (FSC, FSR, FSD, WPS, OCF, TFBS, ATAC)
+    # Priority: 1. Explicit -P flag, 2. Bundled PON for assay, 3. None
+    
+    # Validate: -P and --skip-pon are contradictory
+    if resolved_pon_model and skip_pon:
+        console.print("[bold red]❌ ERROR:[/bold red] --pon-model (-P) and --skip-pon are contradictory.")
+        console.print("  • Use -P to apply PON z-score normalization")
+        console.print("  • Use --skip-pon with -A assay to auto-load PON but skip z-scores")
+        raise typer.Exit(1)
     pon = None
-    if resolved_pon_model:
+    actual_pon_path = resolved_pon_model
+    
+    # Auto-load bundled PON when -A assay is specified and -P is not provided
+    if not resolved_pon_model and resolved_assay:
+        try:
+            bundled_pon = assets.get_pon(resolved_assay)
+            if bundled_pon and bundled_pon.exists():
+                actual_pon_path = bundled_pon
+                logger.info(f"Auto-loaded bundled PON for assay '{resolved_assay}'")
+        except FileNotFoundError:
+            logger.debug(f"No bundled PON found for assay '{resolved_assay}'")
+    
+    if actual_pon_path:
         from .core.pon_integration import load_pon_model
-        pon = load_pon_model(resolved_pon_model)
+        pon = load_pon_model(actual_pon_path)
         if pon:
             logger.info(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
             # Log component availability
@@ -384,9 +407,12 @@ def run_all(
                 enable_fsd=True,
                 enable_wps=True,
                 enable_ocf=assets.ocf_available,  # Skip OCF if not available for genome
+                enable_tfbs=assets.tfbs_available,  # TFBS size entropy
+                enable_atac=assets.atac_available,  # ATAC size entropy
                 target_regions=resolved_target_regions,
                 assay=resolved_assay,
-                pon_model=resolved_pon_model,
+                pon_model=actual_pon_path,
+                skip_pon_zscore=skip_pon,  # --skip-pon: skip PON z-score normalization
                 fsc_bins=bin_input,
                 fsc_windows=fsc_windows,
                 fsc_continue_n=fsc_continue_n,

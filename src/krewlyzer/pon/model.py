@@ -383,6 +383,54 @@ class MdsBaseline:
 
 
 @dataclass
+class TfbsBaseline:
+    """
+    TFBS (Transcription Factor Binding Site) size entropy baseline.
+    
+    Stores per-TF mean/std entropy from healthy plasma samples.
+    Used for z-score normalization of TFBS entropy values.
+    """
+    # Wraps RegionEntropyBaseline from region_entropy_processor
+    baseline: 'RegionEntropyBaseline' = None
+    
+    def get_zscore(self, label: str, observed_entropy: float) -> float:
+        """Compute z-score for observed entropy value."""
+        if self.baseline is None:
+            return 0.0
+        return self.baseline.get_zscore(label, observed_entropy)
+    
+    def get_stats(self, label: str) -> Optional[tuple]:
+        """Get (mean, std) for a TF label."""
+        if self.baseline is None or label not in self.baseline.data:
+            return None
+        return self.baseline.data[label]
+
+
+@dataclass
+class AtacBaseline:
+    """
+    ATAC (Cancer ATAC-seq Peak) size entropy baseline.
+    
+    Stores per-cancer-type mean/std entropy from healthy plasma samples.
+    Used for z-score normalization of ATAC entropy values.
+    """
+    # Wraps RegionEntropyBaseline from region_entropy_processor
+    baseline: 'RegionEntropyBaseline' = None
+    
+    def get_zscore(self, label: str, observed_entropy: float) -> float:
+        """Compute z-score for observed entropy value."""
+        if self.baseline is None:
+            return 0.0
+        return self.baseline.get_zscore(label, observed_entropy)
+    
+    def get_stats(self, label: str) -> Optional[tuple]:
+        """Get (mean, std) for a cancer type label."""
+        if self.baseline is None or label not in self.baseline.data:
+            return None
+        return self.baseline.data[label]
+
+
+@dataclass
 class PonModel:
     """
     Unified Panel of Normals model for Krewlyzer.
@@ -413,6 +461,8 @@ class PonModel:
     wps_background_baseline: Optional[WpsBackgroundBaseline] = None  # Alu periodicity
     ocf_baseline: Optional[OcfBaseline] = None
     mds_baseline: Optional[MdsBaseline] = None
+    tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
+    atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
     
     # On-target baselines (panel mode only)
     gc_bias_ontarget: Optional[GcBiasModel] = None
@@ -554,6 +604,34 @@ class PonModel:
                 long_std=gc_on_df["long_std"].tolist()
             )
         
+        # Parse TFBS baseline
+        tfbs_df = df_all[df_all["table"] == "tfbs_baseline"]
+        tfbs_baseline = None
+        if not tfbs_df.empty:
+            from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+            tfbs_data = {}
+            for _, row in tfbs_df.iterrows():
+                label = row["label"]
+                mean = float(row["entropy_mean"])
+                std = float(row["entropy_std"])
+                tfbs_data[label] = (mean, std)
+            tfbs_baseline = TfbsBaseline(baseline=RegionEntropyBaseline(tfbs_data))
+            logger.debug(f"Loaded TFBS baseline: {len(tfbs_data)} labels")
+        
+        # Parse ATAC baseline
+        atac_df = df_all[df_all["table"] == "atac_baseline"]
+        atac_baseline = None
+        if not atac_df.empty:
+            from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+            atac_data = {}
+            for _, row in atac_df.iterrows():
+                label = row["label"]
+                mean = float(row["entropy_mean"])
+                std = float(row["entropy_std"])
+                atac_data[label] = (mean, std)
+            atac_baseline = AtacBaseline(baseline=RegionEntropyBaseline(atac_data))
+            logger.debug(f"Loaded ATAC baseline: {len(atac_data)} labels")
+        
         # Build model
         model = cls(
             schema_version=str(meta.get("schema_version", "1.0")),
@@ -570,6 +648,8 @@ class PonModel:
             mds_baseline=mds_baseline,
             fsd_baseline_ontarget=fsd_baseline_ontarget,
             gc_bias_ontarget=gc_bias_ontarget,
+            tfbs_baseline=tfbs_baseline,
+            atac_baseline=atac_baseline,
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")

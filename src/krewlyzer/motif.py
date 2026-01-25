@@ -38,6 +38,7 @@ def motif(
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
     target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: generates on/off-target motifs)"),
     pon_model: Optional[Path] = typer.Option(None, '-P', '--pon-model', help="PON model for MDS z-score computation"),
+    skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
     sample_name: Optional[str] = typer.Option(None, '--sample-name', '-s', help="Sample name for output files (default: derived from BAM filename)"),
@@ -138,9 +139,11 @@ def motif(
         
         logger.info(f"Processed {result.fragment_count:,} fragments")
         
-        # Load PON model if provided
+        # Load PON model if provided and not skipped
         pon = None
-        if pon_model and pon_model.exists():
+        if skip_pon:
+            logger.info("--skip-pon: skipping PON z-score normalization")
+        elif pon_model and pon_model.exists():
             try:
                 from .pon.model import PonModel
                 pon = PonModel.load(pon_model)

@@ -180,3 +180,47 @@ def compute_wps_zscore(
         return (value - mean) / std
     else:
         return 0.0
+
+
+def compute_tfbs_zscore(
+    label: str,
+    entropy: float,
+    pon
+) -> Optional[float]:
+    """
+    Compute TFBS entropy z-score for a single TF label.
+    
+    Args:
+        label: TF label (e.g., "CTCF", "FOXA1")
+        entropy: Observed entropy value
+        pon: Loaded PonModel with tfbs_baseline
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.tfbs_baseline is None:
+        return None
+    
+    return pon.tfbs_baseline.get_zscore(label, entropy)
+
+
+def compute_atac_zscore(
+    label: str,
+    entropy: float,
+    pon
+) -> Optional[float]:
+    """
+    Compute ATAC entropy z-score for a single cancer type label.
+    
+    Args:
+        label: Cancer type label (e.g., "BRCA", "LUAD")
+        entropy: Observed entropy value
+        pon: Loaded PonModel with atac_baseline
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.atac_baseline is None:
+        return None
+    
+    return pon.atac_baseline.get_zscore(label, entropy)

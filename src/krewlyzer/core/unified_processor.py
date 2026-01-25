@@ -62,6 +62,7 @@ class FeatureOutputs:
     fsc: Optional[Path] = None              # Processed FSC
     fsc_ontarget: Optional[Path] = None     # On-target FSC (panel)
     fsc_gene: Optional[Path] = None         # Gene-centric FSC
+    fsc_region: Optional[Path] = None        # Per-region FSC (exon/probe level)
     fsr: Optional[Path] = None              # FSR ratios
     fsr_ontarget: Optional[Path] = None     # On-target FSR (panel)
     fsd: Optional[Path] = None              # FSD per arm
@@ -75,6 +76,11 @@ class FeatureOutputs:
     ocf_ontarget_sync: Optional[Path] = None  # On-target OCF sync data
     panel_ocf_regions: Optional[Path] = None  # Filtered OCF regions BED for panel
     gc_factors: Optional[Path] = None       # GC correction factors
+    # Region Entropy (TFBS/ATAC size entropy)
+    tfbs: Optional[Path] = None             # TFBS entropy (off-target)
+    tfbs_ontarget: Optional[Path] = None    # TFBS entropy (on-target, panel mode)
+    atac: Optional[Path] = None             # ATAC entropy (off-target)
+    atac_ontarget: Optional[Path] = None    # ATAC entropy (on-target, panel mode)
 
 
 def run_features(
@@ -91,6 +97,8 @@ def run_features(
     enable_fsd: bool = False,
     enable_wps: bool = False,
     enable_ocf: bool = False,
+    enable_tfbs: bool = False,
+    enable_atac: bool = False,
     
     # Panel mode
     target_regions: Optional[Path] = None,
@@ -98,6 +106,7 @@ def run_features(
     
     # PON normalization
     pon_model: Optional[Path] = None,
+    skip_pon_zscore: bool = False,  # Output raw features without z-score normalization
     
     # FSC/FSR-specific options
     fsc_bins: Optional[Path] = None,
@@ -425,17 +434,25 @@ def run_features(
     # Load PON model if provided
     pon = None
     pon_parquet = None
+    pon_for_zscore = None  # Separate variable for z-score normalization
     if resolved_pon_model:
         pon = load_pon_model(resolved_pon_model)
         pon_parquet = resolved_pon_model
         if pon:
             logger.info(f"PON loaded: {pon.assay} (n={pon.n_samples})")
+            # When skip_pon_zscore is True (--skip-pon mode), don't pass PON for z-scores
+            if not skip_pon_zscore:
+                pon_for_zscore = pon
+            else:
+                logger.info("  ⚠️ --skip-pon: skipping PON z-score normalization for all tools")
     
     # Process FSC
     if enable_fsc and out_fsc_counts and out_fsc_counts.exists():
         import pandas as pd
         df_counts = pd.read_csv(out_fsc_counts, sep='\t')
-        process_fsc(df_counts, outputs.fsc, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
+        if skip_pon_zscore and pon:
+            logger.info("  FSC: --skip-pon active, outputting raw values (no z-scores)")
+        process_fsc(df_counts, outputs.fsc, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon_for_zscore)
         logger.info(f"✓ FSC: {outputs.fsc.name}")
         
         # On-target FSC (panel mode)
@@ -443,14 +460,16 @@ def run_features(
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
             df_counts_on = pd.read_csv(out_fsc_counts_on, sep='\t')
-            process_fsc(df_counts_on, outputs.fsc_ontarget, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
+            process_fsc(df_counts_on, outputs.fsc_ontarget, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon_for_zscore)
             logger.info(f"✓ FSC on-target: {outputs.fsc_ontarget.name}")
     
     # Process FSR (same counts, different output)
     if enable_fsr and out_fsc_counts and out_fsc_counts.exists():
         import pandas as pd
         df_counts = pd.read_csv(out_fsc_counts, sep='\t')
-        process_fsr(df_counts, outputs.fsr, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon)
+        if skip_pon_zscore and pon:
+            logger.info("  FSR: --skip-pon active, outputting raw values (no z-scores)")
+        process_fsr(df_counts, outputs.fsr, resolved_fsc_windows, resolved_fsc_continue_n, pon=pon_for_zscore)
         logger.info(f"✓ FSR: {outputs.fsr.name}")
     
     # Gene-centric FSC (if assay provided)
@@ -475,30 +494,42 @@ def run_features(
                 else:
                     logger.debug("Gene FSC: No on-target factors found, using raw counting")
             
-            aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon, 
-                            correction_factors=gene_fsc_factors)
+            aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon_for_zscore, 
+                            correction_factors=gene_fsc_factors, aggregate_by='gene')
             logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
+            
+            # Also generate per-region FSC (exon/probe level)
+            outputs.fsc_region = output_dir / f"{sample_name}.FSC.regions.tsv"
+            aggregate_by_gene(bed_path, genes, outputs.fsc_region, pon=pon_for_zscore, 
+                            correction_factors=gene_fsc_factors, aggregate_by='region')
+            logger.info(f"✓ FSC regions: {outputs.fsc_region.name}")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
     
     # Process FSD
     if enable_fsd and outputs.fsd and outputs.fsd.exists():
-        process_fsd(outputs.fsd, pon=pon, pon_parquet_path=pon_parquet)
+        if skip_pon_zscore and pon:
+            logger.info("  FSD: --skip-pon active, outputting raw values (no z-scores)")
+        process_fsd(outputs.fsd, pon=pon_for_zscore, pon_parquet_path=pon_parquet)
         logger.info(f"✓ FSD: {outputs.fsd.name}")
         
         # On-target FSD
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
         if is_panel_mode and out_fsd_on.exists():
             outputs.fsd_ontarget = out_fsd_on
-            process_fsd(out_fsd_on, pon=pon, pon_parquet_path=pon_parquet)
+            process_fsd(out_fsd_on, pon=pon_for_zscore, pon_parquet_path=pon_parquet)
             logger.info(f"✓ FSD on-target: {outputs.fsd_ontarget.name}")
     
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
+        # Use None for pon_parquet when --skip-pon is set
+        wps_pon_parquet = pon_parquet if not skip_pon_zscore else None
+        if skip_pon_zscore and pon:
+            logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(
             outputs.wps,
             outputs.wps_background,
-            pon_parquet_path=pon_parquet
+            pon_parquet_path=wps_pon_parquet
         )
         logger.info(f"✓ WPS: {outputs.wps.name}")
     
@@ -535,6 +566,16 @@ def run_features(
         if rust_ocf.exists():
             shutil.move(str(rust_ocf), str(outputs.ocf))
             logger.info(f"✓ OCF: {outputs.ocf.name}")
+            
+            # Apply OCF PON normalization (z-scores) if PON is available and not skipped
+            if pon_for_zscore and hasattr(pon_for_zscore, 'ocf_baseline') and pon_for_zscore.ocf_baseline:
+                from .ocf_processor import process_ocf_with_pon
+                if skip_pon_zscore:
+                    logger.info("  OCF: --skip-pon active, outputting raw values (no z-scores)")
+                else:
+                    process_ocf_with_pon(outputs.ocf, pon_for_zscore.ocf_baseline)
+                    logger.info(f"  OCF PON z-scores applied ({outputs.ocf.name})")
+            
         if rust_sync.exists():
             shutil.move(str(rust_sync), str(outputs.ocf_sync))
         
@@ -593,14 +634,123 @@ def run_features(
                 logger.warning(f"OCF ontarget failed: {e}")
     
     # =========================================================================
-    # 6. SUMMARY
+    # 6. TFBS/ATAC REGION ENTROPY
+    # =========================================================================
+    
+    if enable_tfbs or enable_atac:
+        from .region_entropy_processor import process_region_entropy
+        # Note: load_pon_model is imported at module level (line 41)
+        
+        # Load GC correction factors (prefer off-target for genome-wide)
+        gc_factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
+        gc_factors_ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
+        
+        gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
+        gc_ontarget_str = str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
+        
+        # Load PON model for Z-score normalization (if provided and not in skip-pon mode)
+        pon = None
+        tfbs_pon_baseline = None
+        atac_pon_baseline = None
+        if pon_model and Path(pon_model).exists() and not skip_pon_zscore:
+            pon = load_pon_model(Path(pon_model))
+            if pon:
+                tfbs_pon_baseline = pon.tfbs_baseline.baseline if pon.tfbs_baseline else None
+                atac_pon_baseline = pon.atac_baseline.baseline if pon.atac_baseline else None
+        elif skip_pon_zscore and pon_model:
+            if enable_tfbs:
+                logger.info("  TFBS: --skip-pon active, outputting raw values (no z-scores)")
+            if enable_atac:
+                logger.info("  ATAC: --skip-pon active, outputting raw values (no z-scores)")
+        
+        # TFBS Entropy
+        if enable_tfbs and assets.tfbs_available:
+            try:
+                tfbs_regions = str(assets.tfbs_regions)
+                
+                # Off-target (genome-wide)
+                out_tfbs_raw = output_dir / f"{sample_name}.TFBS.raw.tsv"
+                _core.region_entropy.run_region_entropy(
+                    str(bed_path), tfbs_regions, str(out_tfbs_raw), gc_str, True
+                )
+                outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
+                process_region_entropy(out_tfbs_raw, outputs.tfbs, tfbs_pon_baseline)
+                out_tfbs_raw.unlink(missing_ok=True)
+                logger.info(f"✓ TFBS entropy: {outputs.tfbs.name}")
+                
+                # On-target (if panel mode and there are on-target factors)
+                if is_panel_mode and gc_ontarget_str:
+                    from .region_entropy_processor import filter_regions_by_targets
+                    
+                    # Filter TFBS regions to those overlapping panel targets
+                    tfbs_ontarget_regions = output_dir / f"{sample_name}.TFBS.ontarget.regions.bed"
+                    filtered = filter_regions_by_targets(
+                        Path(tfbs_regions), resolved_target_regions, tfbs_ontarget_regions
+                    )
+                    
+                    if filtered:
+                        out_tfbs_on_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
+                        _core.region_entropy.run_region_entropy(
+                            str(bed_path), str(filtered), str(out_tfbs_on_raw), gc_ontarget_str, True
+                        )
+                        outputs.tfbs_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.tsv"
+                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, tfbs_pon_baseline)
+                        out_tfbs_on_raw.unlink(missing_ok=True)
+                        tfbs_ontarget_regions.unlink(missing_ok=True)
+                        logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name}")
+                    
+            except Exception as e:
+                logger.warning(f"TFBS entropy failed: {e}")
+        
+        # ATAC Entropy
+        if enable_atac and assets.atac_available:
+            try:
+                atac_regions = str(assets.atac_regions)
+                
+                # Off-target (genome-wide)
+                out_atac_raw = output_dir / f"{sample_name}.ATAC.raw.tsv"
+                _core.region_entropy.run_region_entropy(
+                    str(bed_path), atac_regions, str(out_atac_raw), gc_str, True
+                )
+                outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
+                process_region_entropy(out_atac_raw, outputs.atac, atac_pon_baseline)
+                out_atac_raw.unlink(missing_ok=True)
+                logger.info(f"✓ ATAC entropy: {outputs.atac.name}")
+                
+                # On-target (if panel mode)
+                if is_panel_mode and gc_ontarget_str:
+                    from .region_entropy_processor import filter_regions_by_targets
+                    
+                    # Filter ATAC regions to those overlapping panel targets
+                    atac_ontarget_regions = output_dir / f"{sample_name}.ATAC.ontarget.regions.bed"
+                    filtered = filter_regions_by_targets(
+                        Path(atac_regions), resolved_target_regions, atac_ontarget_regions
+                    )
+                    
+                    if filtered:
+                        out_atac_on_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
+                        _core.region_entropy.run_region_entropy(
+                            str(bed_path), str(filtered), str(out_atac_on_raw), gc_ontarget_str, True
+                        )
+                        outputs.atac_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.tsv"
+                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget, atac_pon_baseline)
+                        out_atac_on_raw.unlink(missing_ok=True)
+                        atac_ontarget_regions.unlink(missing_ok=True)
+                        logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name}")
+                    
+            except Exception as e:
+                logger.warning(f"ATAC entropy failed: {e}")
+    
+    # =========================================================================
+    # 7. SUMMARY
     # =========================================================================
     
     total_duration = time.time() - start_time
     
     output_count = sum(1 for p in [
         outputs.fsc, outputs.fsr, outputs.fsd, outputs.wps, outputs.ocf,
-        outputs.fsc_ontarget, outputs.fsd_ontarget, outputs.wps_panel, outputs.ocf_ontarget
+        outputs.fsc_ontarget, outputs.fsd_ontarget, outputs.wps_panel, outputs.ocf_ontarget,
+        outputs.tfbs, outputs.atac, outputs.tfbs_ontarget, outputs.atac_ontarget
     ] if p and p.exists())
     
     logger.info(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

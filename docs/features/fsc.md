@@ -332,18 +332,39 @@ krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
 
 ### Output Files
 
-| File | Description |
-|------|-------------|
-| `{sample}.FSC.tsv` | Standard window-based FSC |
-| `{sample}.FSC.gene.tsv` | Gene-level FSC (146 genes for xs2) |
+| File | Description | Rows |
+|------|-------------|------|
+| `{sample}.FSC.tsv` | Standard window-based FSC | ~28,000 |
+| `{sample}.FSC.gene.tsv` | Gene-level FSC | 146 (xs2) |
+| `{sample}.FSC.regions.tsv` | Per-exon/target FSC | ~1,000 |
 
 ### Gene FSC Output Format
 
 ```
-gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  ultra_short_ratio  ...
-ATM     62         8432      1234         5678        9012       3456     789   20169  0.0612             ...
+gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  *_ratio  normalized_depth
+ATM     62         8432      1234         5678        9012       3456     789   20169  ...      1245.67
 BRCA2   42         5689      ...
 ```
+
+### Region FSC Output Format (NEW)
+
+Per-exon/target output for fine-grained copy number analysis:
+
+```
+chrom  start      end      gene  region_name     region_bp  ultra_short  ...  normalized_depth
+1      11168235  11168345  MTOR  MTOR_target_02  110        8.0          ...  1272.71
+1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
+```
+
+### Normalized Depth (RPKM-like)
+
+Both gene and region outputs include `normalized_depth`:
+
+$$
+\text{normalized\_depth} = \frac{\text{count} \times 10^9}{\text{region\_bp} \times \text{total\_fragments}}
+$$
+
+This enables cross-sample depth comparisons independent of library size and region size.
 
 ### Supported Assays
 
