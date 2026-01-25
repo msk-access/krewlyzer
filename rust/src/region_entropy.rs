@@ -214,7 +214,7 @@ impl FragmentConsumer for RegionEntropyConsumer {
 
             // Query for overlapping regions
             tree.query(start, end, |node| {
-                let label_id = *node.metadata;
+                let label_id = node.metadata.to_owned();
 
                 // Calculate GC weight
                 let gc_pct = (frag.gc * 100.0).round() as u8;
