@@ -76,7 +76,6 @@ def run_all(
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Custom arms file for FSD"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Custom bin file for FSC/FSR"),
     ocr_file: Optional[Path] = typer.Option(None, "--ocr-file", help="Custom OCR file for OCF"),
-    wps_file: Optional[Path] = typer.Option(None, "--wps-file", help="Custom transcript file for WPS (legacy)"),
     wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
     wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
@@ -388,7 +387,6 @@ def run_all(
         
         # Resolve optional paths for unified processor
         resolved_wps_anchors = _resolve_path(wps_anchors)
-        resolved_wps_file = _resolve_path(wps_file)
         resolved_wps_background = _resolve_path(wps_background)
         resolved_assay = assay if isinstance(assay, str) else None
         
@@ -417,7 +415,7 @@ def run_all(
                 fsc_windows=fsc_windows,
                 fsc_continue_n=fsc_continue_n,
                 fsd_arms=resolved_arms_file,
-                wps_anchors=resolved_wps_anchors or resolved_wps_file,
+                wps_anchors=resolved_wps_anchors,
                 wps_background=resolved_wps_background,
                 wps_bait_padding=resolved_bait_padding,
                 ocf_regions=resolved_ocr_file,

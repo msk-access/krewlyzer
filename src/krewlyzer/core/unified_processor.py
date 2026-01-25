@@ -288,7 +288,7 @@ def run_features(
         elif resolved_wps_tsv and resolved_wps_tsv.exists():
             res_wps = resolved_wps_tsv  # Legacy
         else:
-            res_wps = assets.wps_anchors if hasattr(assets, 'wps_anchors') else assets.transcript_anno
+            res_wps = assets.wps_anchors
         if not res_wps.exists():
             raise FileNotFoundError(f"WPS regions not found: {res_wps}")
         logger.debug(f"WPS regions: {res_wps}")

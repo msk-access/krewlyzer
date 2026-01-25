@@ -33,7 +33,6 @@ def build_pon(
     assay: str = typer.Option(..., "--assay", "-a", help="Assay name (e.g., msk-access-v2)"),
     reference: Path = typer.Option(..., "--reference", "-r", help="Reference FASTA file"),
     wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", "-W", help="WPS anchors BED.gz for WPS baseline (default: bundled TSS+CTCF anchors)"),
-    transcript_file: Optional[Path] = typer.Option(None, "--transcript-file", "-t", help="[LEGACY] Transcript TSV for WPS baseline (use --wps-anchors instead)"),
     bin_file: Optional[Path] = typer.Option(None, "--bin-file", "-b", help="Bin file for FSC/FSR (default: hg19_window_100kb.bed)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="BED file with target regions (panel mode - builds dual on/off-target baselines)"),
@@ -124,10 +123,10 @@ def build_pon(
         logger.error(f"Bin file not found: {bin_file}")
         raise typer.Exit(1)
     
-    # Default WPS anchors file (prefer wps_anchors, fallback to transcript_file for legacy)
-    wps_regions = wps_anchors or transcript_file
+    # Default WPS anchors file
+    wps_regions = wps_anchors
     if wps_regions is None:
-        wps_regions = assets.wps_anchors if hasattr(assets, 'wps_anchors') and assets.wps_anchors.exists() else assets.transcript_anno
+        wps_regions = assets.wps_anchors
     
     if not wps_regions.exists():
         logger.warning(f"WPS regions file not found: {wps_regions}")

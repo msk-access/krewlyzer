@@ -178,7 +178,6 @@ print(assets.file_prefix)      # "hg19"
 | `ocf_regions` | `OpenChromatinRegion/{genome}/7specificTissue.all.OC.bed.gz` | OCF |
 | `gc_ref` | `gc/{genome}/ref_genome_GC_{prefix}.parquet` | GC correction |
 | `valid_regions` | `gc/{genome}/valid_regions_{prefix}.bed.gz` | GC correction |
-| `transcript_anno` | `TranscriptAnno/{genome}/transcriptAnno-{prefix}-1kb.tsv` | Legacy WPS |
 | `exclude_regions` | `exclude-regions/{genome}/{prefix}-blacklist.v2.bed.gz` | Extract |
 
 ### Assay-Specific Assets

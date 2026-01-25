@@ -60,11 +60,6 @@ class AssetManager:
         return self._get_path("exclude-regions", f"{self.file_prefix}-blacklist.v2.bed.gz")
         
     @property
-    def transcript_anno(self) -> Path:
-        """Transcript annotation (default 1kb)"""
-        return self._get_path("TranscriptAnno", f"transcriptAnno-{self.file_prefix}-1kb.tsv")
-    
-    @property
     def ocf_regions(self) -> Path:
         """Open Chromatin Regions BED (currently hg19/GRCh37 only)"""
         return self._get_path("OpenChromatinRegion", "7specificTissue.all.OC.bed.gz")
@@ -211,7 +206,7 @@ class AssetManager:
             "gc_reference": self.gc_reference,
             "bins_100kb": self.bins_100kb,
             "exclude_regions": self.exclude_regions,
-            "transcript_anno": self.transcript_anno,
+
             "ocf_regions": self.ocf_regions,
             "methylation_markers": self.methylation_markers,
             "wps_anchors": self.wps_anchors,

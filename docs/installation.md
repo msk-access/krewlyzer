@@ -116,7 +116,7 @@ Krewlyzer includes default annotation files in `src/krewlyzer/data/`:
 |-----------|----------|
 | `ChromosomeBins/` | 100kb genome bins (hg19, hg38) |
 | `ChromosomeArms/` | Chromosome arm definitions |
-| `TranscriptAnno/` | Transcript annotations for WPS |
+| `WpsAnchors/` | WPS anchor regions (TSS + CTCF) |
 | `OpenChromatinRegion/` | Tissue-specific OCR for OCF |
 | `MethMark/` | Methylation markers for UXM |
 | `pon/` | Panel of Normals models |

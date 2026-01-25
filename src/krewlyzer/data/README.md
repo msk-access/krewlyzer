@@ -13,7 +13,6 @@ data/
 ├── ChromosomeArms/      # Chromosome arm definitions (p/q arms)
 ├── ChromosomeBins/      # 100kb genomic windows for FSC/FSR
 ├── OpenChromatinRegion/ # OCF tissue-specific regions
-├── TranscriptAnno/      # TSS annotations for WPS
 ├── WpsAnchors/          # WPS anchor regions (TSS + CTCF)
 │   └── GRCh37/
 │       ├── hg19.wps_anchors.bed.gz     # Genome-wide
@@ -32,7 +31,8 @@ data/
 │       ├── xs1.targets.bed             # MSK-ACCESS v1 targets
 │       └── xs2.targets.bed             # MSK-ACCESS v2 targets
 ├── pon/                 # Panel of Normals models
-└── CNVdependency/       # Mappability and GC wig files
+├── TFBS/                # Transcription factor binding sites for region entropy
+└── ATAC/                # ATAC-seq peaks for region entropy
 ```
 
 ---

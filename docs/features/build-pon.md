@@ -41,7 +41,6 @@ This model is used for bias correction and z-score normalization during sample p
 | `-G, --genome` | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
 | `-T, --target-regions` | None | BED file with target regions (panel mode) |
 | `-W, --wps-anchors` | Built-in | WPS anchors BED.gz (merged TSS+CTCF) |
-| `-t, --transcript-file` | — | [LEGACY] Use `--wps-anchors` instead |
 | `-b, --bin-file` | Built-in | Bin file for FSC/FSR |
 | `--temp-dir` | System temp | Directory for temporary files |
 | `-p, --threads` | 4 | Number of threads |
