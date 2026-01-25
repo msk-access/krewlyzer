@@ -150,7 +150,7 @@ def build_pon(
         genome=genome,
         mapq=20,
         minlen=65,
-        maxlen=400,
+        maxlen=1000,
         skip_duplicates=True,
         require_proper_pair=require_proper_pair,
         kmer=4,

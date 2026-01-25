@@ -28,6 +28,15 @@
     }
   ],
   "properties": {
+    "samplesheet": {
+      "type": "string",
+      "format": "file-path",
+      "description": "CSV with columns: sample, bam, meth_bam, vcf, bed, maf, single_sample_maf, assay, pon, targets"
+    },
+    "help": {
+      "type": "boolean",
+      "description": "Display help message"
+    },
     "ref": {
       "type": "string"
     },
@@ -68,7 +77,8 @@
     },
     "maxlen": {
       "type": "integer",
-      "default": 400
+      "default": 1000,
+      "description": "Maximum fragment length (default: 1000 for extended FSD range)"
     },
     "skip_duplicates": {
       "type": "boolean",
@@ -94,6 +104,18 @@
     "output_format": {
       "type": "string",
       "default": "auto"
+    },
+    "skip_pon": {
+      "type": "boolean",
+      "description": "Skip PON z-score normalization"
+    },
+    "no_tfbs": {
+      "type": "boolean",
+      "description": "Disable TFBS entropy analysis"
+    },
+    "no_atac": {
+      "type": "boolean",
+      "description": "Disable ATAC entropy analysis"
     },
     "monochrome_logs": {
       "type": "boolean"

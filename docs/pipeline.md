@@ -123,6 +123,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 400 | Maximum fragment length |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--no-tfbs` | | FLAG | False | Skip TFBS region entropy analysis |
+| `--no-atac` | | FLAG | False | Skip ATAC region entropy analysis |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 
 ---

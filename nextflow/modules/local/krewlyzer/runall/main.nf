@@ -40,9 +40,13 @@ process KREWLYZER_RUNALL {
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
     def pon_arg = pon ? "--pon-model ${pon}" : ""
+    def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
+    def no_tfbs_arg = params.no_tfbs ? "--no-tfbs" : ""
+    def no_atac_arg = params.no_atac ? "--no-atac" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def json_arg = params.generate_json ? "--generate-json" : ""
     def format_arg = params.output_format != 'auto' ? "--output-format ${params.output_format}" : ""
+    def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
     
     // Construct CLI command
     """
@@ -58,9 +62,13 @@ process KREWLYZER_RUNALL {
         $genome_arg \\
         $gc_arg \\
         $pon_arg \\
+        $skip_pon_arg \\
+        $no_tfbs_arg \\
+        $no_atac_arg \\
         $verbose_arg \\
         $json_arg \\
         $format_arg \\
+        $maxlen_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

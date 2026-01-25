@@ -129,7 +129,7 @@ class SampleParams:
     # Extraction parameters
     mapq: int = 20
     minlen: int = 65
-    maxlen: int = 400
+    maxlen: int = 1000
     skip_duplicates: bool = True
     require_proper_pair: bool = True
     kmer: int = 4
@@ -199,7 +199,7 @@ def extract_sample(
     # Core params
     mapq: int = 20,
     minlen: int = 65,
-    maxlen: int = 400,
+    maxlen: int = 1000,
     kmer: int = 4,
     threads: int = 4,
     skip_duplicates: bool = True,
@@ -595,7 +595,7 @@ def write_extraction_outputs(
         "filters": {
             "mapq": 20,
             "min_length": 65,
-            "max_length": 400,
+            "max_length": 1000,
         },
         "timestamp": datetime.now().isoformat(),
     }

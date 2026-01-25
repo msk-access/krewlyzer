@@ -50,7 +50,7 @@ def extract(
     target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: GC model computed on off-target reads only)"),
     mapq: int = typer.Option(20, '--mapq', '-q', help="Minimum mapping quality"),
     minlen: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
-    maxlen: int = typer.Option(400, '--maxlen', help="Maximum fragment length"),
+    maxlen: int = typer.Option(1000, '--maxlen', help="Maximum fragment length (default: 1000 for extended FSD range)"),
     skip_duplicates: bool = typer.Option(True, '--skip-duplicates/--no-skip-duplicates', help="Skip duplicate reads"),
     require_proper_pair: bool = typer.Option(True, '--require-proper-pair/--no-require-proper-pair', help="Require proper pairs"),
     

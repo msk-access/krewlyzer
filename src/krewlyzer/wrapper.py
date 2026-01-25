@@ -55,7 +55,7 @@ def run_all(
     # Configurable filters (exposed from filters.rs)
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
     minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
-    maxlen: int = typer.Option(400, "--maxlen", help="Maximum fragment length"),
+    maxlen: int = typer.Option(1000, "--maxlen", help="Maximum fragment length (default: 1000 for extended FSD range)"),
     skip_duplicates: bool = typer.Option(True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads"),
     require_proper_pair: bool = typer.Option(True, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs"),
     exclude_regions: Optional[Path] = typer.Option(None, "--exclude-regions", "-x", help="Exclude regions BED file"),
@@ -81,6 +81,8 @@ def run_all(
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization for all tools (for PON samples used as ML negatives)"),
+    no_tfbs: bool = typer.Option(False, "--no-tfbs", help="Skip TFBS region entropy analysis"),
+    no_atac: bool = typer.Option(False, "--no-atac", help="Skip ATAC region entropy analysis"),
     
     # Output format options
     output_format: str = typer.Option("auto", "--output-format", "-F", help="Output format: auto (smart defaults), tsv, parquet, json"),
@@ -405,8 +407,8 @@ def run_all(
                 enable_fsd=True,
                 enable_wps=True,
                 enable_ocf=assets.ocf_available,  # Skip OCF if not available for genome
-                enable_tfbs=assets.tfbs_available,  # TFBS size entropy
-                enable_atac=assets.atac_available,  # ATAC size entropy
+                enable_tfbs=assets.tfbs_available and not no_tfbs,  # TFBS size entropy (--no-tfbs to disable)
+                enable_atac=assets.atac_available and not no_atac,  # ATAC size entropy (--no-atac to disable)
                 target_regions=resolved_target_regions,
                 assay=resolved_assay,
                 pon_model=actual_pon_path,

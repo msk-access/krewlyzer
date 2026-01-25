@@ -3,7 +3,6 @@
 nextflow.enable.dsl = 2
 
 // Import Modules
-include { KREWLYZER_RUNALL } from './modules/local/krewlyzer/runall/main'
 include { KREWLYZER_UXM } from './modules/local/krewlyzer/uxm/main'
 include { KREWLYZER_EXTRACT } from './modules/local/krewlyzer/extract/main'
 include { KREWLYZER_FSC } from './modules/local/krewlyzer/fsc/main'
@@ -13,6 +12,7 @@ include { KREWLYZER_OCF } from './modules/local/krewlyzer/ocf/main'
 include { KREWLYZER_FSD } from './modules/local/krewlyzer/fsd/main'
 include { KREWLYZER_MOTIF } from './modules/local/krewlyzer/motif/main'
 include { KREWLYZER_MFSD } from './modules/local/krewlyzer/mfsd/main'
+include { KREWLYZER_REGION_ENTROPY } from './modules/local/krewlyzer/region_entropy/main'
 include { FILTER_MAF } from './modules/local/krewlyzer/filter_maf/main'
 
 // Function to auto-detect index
@@ -43,8 +43,13 @@ workflow {
          --mapq            Min MAPQ (default: 20)
          --threads         Threads per process (default: 8)
          --minlen          Min fragment length (default: 65)
-         --maxlen          Max fragment length (default: 400)
+         --maxlen          Max fragment length (default: 1000, extended FSD range)
          --skip_duplicates Skip duplicates (default: true)
+         
+         Region Entropy:
+         --no_tfbs         Disable TFBS entropy analysis
+         --no_atac         Disable ATAC entropy analysis
+         --skip_pon        Skip PON z-score normalization
          
          Assay Codes (samplesheet 'assay' column):
          XS1               MSK-ACCESS v1 (128 genes)
@@ -122,7 +127,9 @@ workflow {
         return []
     }
 
-    // 1. Parse Sample Sheet
+    // =====================================================
+    // 1. PARSE SAMPLE SHEET
+    // =====================================================
     Channel.fromPath(params.samplesheet)
         .splitCsv(header:true)
         .map { row ->
@@ -154,45 +161,71 @@ workflow {
             [ meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample, pon, targets ]
         }
         .multiMap { meta, bam, bai, vcf, mbam, mbai, bed, maf, single_sample, pon, targets ->
-            runall: bam  ? [ meta, bam, bai, vcf, pon, targets ] : null
-            methyl: mbam ? [ meta, mbam, mbai ]    : null
-            bedops: bed  ? [ meta, bed, pon, targets ]           : null
-            // Multi-sample MAF: needs filtering
+            // BAM path: needs extraction first
+            extract: bam ? [ meta, bam, bai, pon, targets ] : null
+            // Pre-extracted BED path: skip extraction
+            bedops: bed ? [ meta, bed, pon, targets ] : null
+            // Methylation path
+            methyl: mbam ? [ meta, mbam, mbai ] : null
+            // MFSD paths
             maf_multi:  (bam && maf && !single_sample) ? [ meta, bam, bai, maf ] : null
-            // Single-sample MAF: skip filtering, pass directly
             maf_single: (bam && maf && single_sample)  ? [ meta, bam, bai, maf ] : null
         }
         .set { ch_inputs }
 
     // Filter Channels (Fix multiMap nulls)
-    def ch_runall     = ch_inputs.runall.filter { it }
-    def ch_methyl     = ch_inputs.methyl.filter { it }
-    def ch_bedops     = ch_inputs.bedops.filter { it }
-    def ch_maf_multi  = ch_inputs.maf_multi.filter { it }
-    def ch_maf_single = ch_inputs.maf_single.filter { it }
+    ch_extract    = ch_inputs.extract.filter { it }
+    ch_bedops     = ch_inputs.bedops.filter { it }
+    ch_methyl     = ch_inputs.methyl.filter { it }
+    ch_maf_multi  = ch_inputs.maf_multi.filter { it }
+    ch_maf_single = ch_inputs.maf_single.filter { it }
 
-    // 2. Run-All (Optimal path for WGS BAMs)
-    KREWLYZER_RUNALL(
-        ch_runall,
-        file(params.ref)
-    )
-
-    // 3. Methylation (UXM path)
-    KREWLYZER_UXM(
-        ch_methyl,
-        file(params.ref)
-    )
-
-    // 4. Bed Operations (Lightweight path for pre-extracted BEDs)
-    // Extract bed-only channel (meta, bed) for simpler tools
-    ch_bed_only = ch_bedops.map { meta, bed, pon, targets -> [ meta, bed ] }
+    // =====================================================
+    // 2. EXTRACTION (BAM → BED.gz)
+    // =====================================================
     
-    // FSC/FSR get optional targets from channel
-    ch_bed_targets = ch_bedops.map { meta, bed, pon, targets -> [ meta, bed, targets ?: [] ] }
-    KREWLYZER_FSC(ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, ch_bed_targets.map { it[2] })
-    KREWLYZER_FSR(ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, ch_bed_targets.map { it[2] })
+    // Extract fragments from BAM files
+    ch_extract_input = ch_extract.map { meta, bam, bai, pon, targets -> 
+        [ meta, bam, bai, targets ?: [] ] 
+    }
+    KREWLYZER_EXTRACT(
+        ch_extract_input.map { meta, bam, bai, targets -> [ meta, bam, bai ] },
+        file(params.ref),
+        ch_extract_input.map { it[3] }  // targets
+    )
     
-    // WPS with optional anchors
+    // Combine extracted BEDs with PON/targets for downstream
+    ch_extracted_with_meta = KREWLYZER_EXTRACT.out.bed
+        .join(ch_extract.map { meta, bam, bai, pon, targets -> [ meta, pon, targets ] })
+        .map { meta, bed, pon, targets -> [ meta, bed, pon ?: [], targets ?: [] ] }
+    
+    // Merge extracted BEDs with pre-extracted BEDs
+    ch_all_beds = ch_extracted_with_meta.mix(ch_bedops)
+
+    // =====================================================
+    // 3. PARALLEL FEATURE EXTRACTION (All run in parallel!)
+    // =====================================================
+    
+    // Convenience channels
+    ch_bed_only = ch_all_beds.map { meta, bed, pon, targets -> [ meta, bed ] }
+    ch_bed_targets = ch_all_beds.map { meta, bed, pon, targets -> [ meta, bed, targets ?: [] ] }
+    
+    // FSC - Fragment Size Coverage
+    KREWLYZER_FSC(
+        ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, 
+        ch_bed_targets.map { it[2] }
+    )
+    
+    // FSR - Fragment Size Ratio (depends on FSC conceptually, but runs in parallel)
+    KREWLYZER_FSR(
+        ch_bed_targets.map { meta, bed, targets -> [ meta, bed ] }, 
+        ch_bed_targets.map { it[2] }
+    )
+    
+    // FSD - Fragment Size Distribution
+    KREWLYZER_FSD(ch_bed_only)
+    
+    // WPS - Windowed Protection Score
     KREWLYZER_WPS(
         ch_bed_only,
         file(params.ref),
@@ -200,13 +233,37 @@ workflow {
         params.wps_background ? file(params.wps_background) : []
     )
     
-    // OCF
+    // OCF - Orientation-aware cfDNA Fragmentation
     KREWLYZER_OCF(ch_bed_only, file(params.ref))
     
-    // FSD - only needs bed
-    KREWLYZER_FSD(ch_bed_only)
+    // MOTIF - End motif and MDS
+    KREWLYZER_MOTIF(
+        ch_bed_only,
+        file(params.ref)
+    )
+    
+    // REGION_ENTROPY - TFBS/ATAC size entropy
+    ch_bed_pon_targets = ch_all_beds.map { meta, bed, pon, targets -> 
+        [ meta, bed, pon ?: [], targets ?: [] ] 
+    }
+    KREWLYZER_REGION_ENTROPY(
+        ch_bed_pon_targets.map { meta, bed, pon, targets -> [ meta, bed ] },
+        file(params.ref),
+        ch_bed_pon_targets.map { it[2] },  // pon
+        ch_bed_pon_targets.map { it[3] }   // targets
+    )
 
-    // 5. MFSD (Mutant Fragment Size Distribution)
+    // =====================================================
+    // 4. METHYLATION (UXM) - Parallel path
+    // =====================================================
+    KREWLYZER_UXM(
+        ch_methyl,
+        file(params.ref)
+    )
+
+    // =====================================================
+    // 5. MFSD (Mutant Fragment Size Distribution) - Parallel path
+    // =====================================================
     
     // 5a. Multi-sample MAF: Filter by Tumor_Sample_Barcode, then run mfsd
     ch_maf_to_filter = ch_maf_multi.map { meta, bam, bai, maf -> [ meta, maf ] }
@@ -216,7 +273,6 @@ workflow {
     ch_filtered_valid = FILTER_MAF.out.maf
         .filter { meta, filtered_maf ->
             // Efficiently check for data rows without loading entire file
-            // Stream through file, stop as soon as we find 2+ non-comment lines
             def dataLineCount = 0
             filtered_maf.withReader { reader ->
                 String line

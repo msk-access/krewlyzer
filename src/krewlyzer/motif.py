@@ -124,7 +124,7 @@ def motif(
             reference=genome_reference,
             mapq=20,  # Default mapQ for motif
             minlen=65,
-            maxlen=400,
+            maxlen=1000,
             kmer=kmer,
             threads=threads,
             skip_duplicates=True,

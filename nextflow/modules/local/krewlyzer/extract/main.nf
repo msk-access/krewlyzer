@@ -15,6 +15,7 @@ process KREWLYZER_EXTRACT {
     input:
     tuple val(meta), path(bam), path(bai)
     path fasta
+    path targets            // Optional target regions for panel mode GC correction
 
     output:
     tuple val(meta), path("*.bed.gz"), emit: bed
@@ -27,6 +28,9 @@ process KREWLYZER_EXTRACT {
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def targets_arg = targets ? "--target-regions ${targets}" : ""
+    def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
 
     """
@@ -36,6 +40,10 @@ process KREWLYZER_EXTRACT {
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
+        $genome_arg \\
+        $targets_arg \\
+        $maxlen_arg \\
+        $verbose_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml
