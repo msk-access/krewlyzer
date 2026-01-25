@@ -345,6 +345,13 @@ class FeatureSerializer:
             serializer.features["fsc_gene"] = pd.read_csv(fsc_gene_path, sep="\t").to_dict(orient="records")
         
         # =====================================================================
+        # FSC Regions - Per-Exon/Target Fragment Size Coverage (for panel mode)
+        # =====================================================================
+        fsc_region_path = output_dir / f"{sample_id}.FSC.regions.tsv"
+        if fsc_region_path.exists():
+            serializer.features["fsc_region"] = pd.read_csv(fsc_region_path, sep="\t").to_dict(orient="records")
+        
+        # =====================================================================
         # WPS - Windowed Protection Score
         # =====================================================================
         wps_path = output_dir / f"{sample_id}.WPS.parquet"
@@ -445,6 +452,48 @@ class FeatureSerializer:
                 "variants": mfsd_df.to_dict(orient="records"),
                 "n_variants": len(mfsd_df),
             }
+        
+        # =====================================================================
+        # TFBS - Transcription Factor Binding Site Region Entropy
+        # =====================================================================
+        tfbs_path = output_dir / f"{sample_id}.TFBS.tsv"
+        tfbs_on_path = output_dir / f"{sample_id}.TFBS.ontarget.tsv"
+        
+        if tfbs_path.exists() or tfbs_on_path.exists():
+            tfbs_data = {}
+            if tfbs_path.exists():
+                tfbs_data["off_target"] = pd.read_csv(tfbs_path, sep="\t").to_dict(orient="records")
+            if tfbs_on_path.exists():
+                tfbs_data["on_target"] = pd.read_csv(tfbs_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["tfbs"] = tfbs_data
+        
+        # =====================================================================
+        # ATAC - ATAC-seq Region Entropy
+        # =====================================================================
+        atac_path = output_dir / f"{sample_id}.ATAC.tsv"
+        atac_on_path = output_dir / f"{sample_id}.ATAC.ontarget.tsv"
+        
+        if atac_path.exists() or atac_on_path.exists():
+            atac_data = {}
+            if atac_path.exists():
+                atac_data["off_target"] = pd.read_csv(atac_path, sep="\t").to_dict(orient="records")
+            if atac_on_path.exists():
+                atac_data["on_target"] = pd.read_csv(atac_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["atac"] = atac_data
+        
+        # =====================================================================
+        # GC Correction Factors
+        # =====================================================================
+        gc_factors_path = output_dir / f"{sample_id}.correction_factors.tsv"
+        gc_factors_on_path = output_dir / f"{sample_id}.correction_factors.ontarget.tsv"
+        
+        if gc_factors_path.exists() or gc_factors_on_path.exists():
+            gc_data = {}
+            if gc_factors_path.exists():
+                gc_data["off_target"] = pd.read_csv(gc_factors_path, sep="\t").to_dict(orient="records")
+            if gc_factors_on_path.exists():
+                gc_data["on_target"] = pd.read_csv(gc_factors_on_path, sep="\t").to_dict(orient="records")
+            serializer.features["gc_factors"] = gc_data
         
         # =====================================================================
         # Metadata

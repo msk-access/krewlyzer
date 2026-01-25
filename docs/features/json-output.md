@@ -25,13 +25,17 @@ This generates `{sample}.features.json` alongside the standard TSV/Parquet outpu
   },
   "fsc": { ... },
   "fsc_gene": { ... },
+  "fsc_region": { ... },
   "fsr": { ... },
   "fsd": { ... },
   "wps": { ... },
   "wps_panel": { ... },
   "wps_background": { ... },
   "motif": { ... },
-  "ocf": { ... }
+  "ocf": { ... },
+  "tfbs": { ... },
+  "atac": { ... },
+  "gc_factors": { ... }
 }
 ```
 
@@ -90,12 +94,41 @@ Gene-level fragment size aggregation. Only present with `--assay`.
     "core_short": 5678,
     "mono_nucl": 9012,
     "core_short_ratio": 0.282,
+    "normalized_depth": 1245.67,
     "z_core_short": -0.45
   }
 ]
 ```
 
 ---
+
+### FSC Region (Panel Mode Only)
+
+Per-exon/target fragment size data. More granular than gene-level.
+
+```json
+"fsc_region": [
+  {
+    "chrom": "1",
+    "start": 11168235,
+    "end": 11168345,
+    "gene": "MTOR",
+    "region_name": "MTOR_target_02",
+    "region_bp": 110,
+    "ultra_short": 8.0,
+    "core_short": 229.0,
+    "mono_nucl": 804.0,
+    "di_nucl": 88.0,
+    "total": 1129.0,
+    "normalized_depth": 1272.71
+  }
+]
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `region_name` | string | Unique exon/target identifier |
+| `normalized_depth` | float | RPKM-like depth: (count × 10⁹) / (bp × total_frags) |
 
 ### FSR (Fragment Size Ratios)
 
@@ -256,6 +289,77 @@ Open chromatin footprint scores by tissue type.
   }
 }
 ```
+
+---
+
+### TFBS (Transcription Factor Binding Site Entropy)
+
+Fragment size entropy at TFBS regions.
+
+```json
+"tfbs": {
+  "off_target": [
+    {
+      "region": "CTCF_chr1_12345",
+      "entropy": 3.45,
+      "n_fragments": 234,
+      "mean_size": 167.5
+    }
+  ],
+  "on_target": [ ... ]
+}
+```
+
+---
+
+### ATAC (Chromatin Accessibility Regions)
+
+Fragment size entropy at ATAC-seq accessible regions.
+
+```json
+"atac": {
+  "off_target": [
+    {
+      "region": "peak_chr1_23456",
+      "entropy": 3.21,
+      "n_fragments": 189,
+      "mean_size": 145.2
+    }
+  ],
+  "on_target": [ ... ]
+}
+```
+
+---
+
+### GC Factors (Diagnostic)
+
+GC bias correction factors used internally during processing.
+
+> [!NOTE]
+> **Not recommended for ML features.** These are intermediate diagnostic data, not predictive features.
+> The GC correction is already applied to FSC/FSR/FSD counts. Use those corrected values instead.
+
+```json
+"gc_factors": {
+  "off_target": [
+    {
+      "len_bin": 100,
+      "gc_pct": 45,
+      "correction_factor": 1.12
+    }
+  ],
+  "on_target": [ ... ]
+}
+```
+
+**When to use GC factors:**
+- **QC/Diagnostics**: Visualize library prep bias, capture efficiency
+- **Batch Effect Detection**: Compare correction factors across runs
+- **Panel Development**: Characterize probe GC performance
+
+**When NOT to use:**
+- **ML models**: Skip these—use GC-corrected FSC/FSR/FSD instead
 
 ---
 
