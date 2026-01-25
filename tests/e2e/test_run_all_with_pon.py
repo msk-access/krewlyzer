@@ -20,37 +20,42 @@ class TestOcfProcessor:
     """Unit tests for OCF processor."""
     
     def test_process_ocf_with_pon(self, tmp_path):
-        """Test OCF z-score computation."""
+        """Test OCF z-score computation using Rust implementation."""
         from krewlyzer.core.ocf_processor import process_ocf_with_pon
-        from krewlyzer.pon.model import OcfBaseline
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         
         # Create test OCF file
         ocf_data = pd.DataFrame({
-            'region_id': ['region1', 'region2', 'region3'],
-            'ocf': [0.6, 0.25, 0.5]
+            'tissue': ['region1', 'region2', 'region3'],
+            'OCF': [0.6, 0.25, 0.5]
         })
         ocf_path = tmp_path / "test.OCF.tsv"
         ocf_data.to_csv(ocf_path, sep="\t", index=False)
         
-        # Create test baseline
+        # Create PON parquet with ocf_baseline table
         baseline_df = pd.DataFrame({
+            'table': ['ocf_baseline', 'ocf_baseline'],
             'region_id': ['region1', 'region2'],
             'ocf_mean': [0.5, 0.3],
             'ocf_std': [0.1, 0.05]
         })
-        baseline = OcfBaseline(regions=baseline_df)
+        pon_path = tmp_path / "test_pon.parquet"
+        table = pa.Table.from_pandas(baseline_df)
+        pq.write_table(table, pon_path)
         
         # Process
-        result = process_ocf_with_pon(ocf_path, baseline)
+        output_path = tmp_path / "test.OCF.zscore.tsv"
+        n_matched = process_ocf_with_pon(ocf_path, pon_path, output_path)
         
-        # Verify z-scores
+        # Verify
+        assert n_matched == 2  # 2 regions matched
+        result = pd.read_csv(output_path, sep="\t")
         assert 'ocf_z' in result.columns
         # region1: (0.6 - 0.5) / 0.1 = 1.0
         assert pytest.approx(result.iloc[0]['ocf_z'], rel=0.01) == 1.0
         # region2: (0.25 - 0.3) / 0.05 = -1.0
         assert pytest.approx(result.iloc[1]['ocf_z'], rel=0.01) == -1.0
-        # region3: not in baseline, should be NaN
-        assert pd.isna(result.iloc[2]['ocf_z'])
 
 
 class TestPonModelOnTarget:

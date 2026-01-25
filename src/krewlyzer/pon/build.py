@@ -432,104 +432,27 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
     """
     Compute GC bias curves from sample data.
     
-    Uses high-performance Rust implementation (3-10x faster) with Python fallback.
+    Uses Rust implementation for high performance.
     For each GC bin, compute median expected coverage across samples.
+    
+    Raises:
+        RuntimeError: If computation fails
     """
-    # Try Rust implementation first (3-10x faster)
-    try:
-        from krewlyzer import _core
-        result = _core.pon_builder.compute_gc_bias_model(all_gc_data)
-        if result and "gc_bins" in result:
-            logger.info(f"GC bias model computed (Rust): {len(result['gc_bins'])} bins")
-            return GcBiasModel(
-                short_expected=result["short_expected"],
-                short_std=result["short_std"],
-                intermediate_expected=result["intermediate_expected"],
-                intermediate_std=result["intermediate_std"],
-                long_expected=result["long_expected"],
-                long_std=result["long_std"],
-            )
-    except Exception as e:
-        logger.debug(f"Rust GC bias computation failed, falling back to Python: {e}")
+    from krewlyzer import _core
     
-    # =========================================================================
-    # PYTHON FALLBACK IMPLEMENTATION
-    # NOTE: This is a fallback only. Primary implementation is Rust (3-10x faster).
-    # The Rust implementation is in: rust/src/pon_builder.rs::compute_gc_bias_model()
-    # =========================================================================
+    result = _core.pon_builder.compute_gc_bias_model(all_gc_data)
+    if not result or "gc_bins" not in result:
+        raise RuntimeError("GC bias model computation failed: no data returned from Rust")
     
-    # Define GC bins
-    gc_bins = np.arange(0.25, 0.75, 0.02).tolist()
-    
-    # Aggregate counts per GC bin across all samples
-    short_by_gc = {gc: [] for gc in gc_bins}
-    intermediate_by_gc = {gc: [] for gc in gc_bins}
-    long_by_gc = {gc: [] for gc in gc_bins}
-    
-    for sample in all_gc_data:
-        gc = sample["gc"]
-        short = sample["short"]
-        intermediate = sample["intermediate"]
-        long = sample["long"]
-        
-        # Normalize to relative coverage (mean = 1.0)
-        short_norm = short / np.nanmean(short) if np.nanmean(short) > 0 else short
-        intermediate_norm = intermediate / np.nanmean(intermediate) if np.nanmean(intermediate) > 0 else intermediate
-        long_norm = long / np.nanmean(long) if np.nanmean(long) > 0 else long
-        
-        # Bin by GC
-        for i, gc_val in enumerate(gc):
-            if np.isnan(gc_val) or gc_val <= 0:
-                continue
-            # Find nearest bin
-            bin_idx = int((gc_val - 0.25) / 0.02)
-            if 0 <= bin_idx < len(gc_bins):
-                gc_bin = gc_bins[bin_idx]
-                if not np.isnan(short_norm[i]):
-                    short_by_gc[gc_bin].append(short_norm[i])
-                if not np.isnan(intermediate_norm[i]):
-                    intermediate_by_gc[gc_bin].append(intermediate_norm[i])
-                if not np.isnan(long_norm[i]):
-                    long_by_gc[gc_bin].append(long_norm[i])
-    
-    # Compute median and std per bin
-    short_expected = []
-    short_std = []
-    intermediate_expected = []
-    intermediate_std = []
-    long_expected = []
-    long_std = []
-    
-    for gc_bin in gc_bins:
-        if short_by_gc[gc_bin]:
-            short_expected.append(float(np.median(short_by_gc[gc_bin])))
-            short_std.append(float(np.std(short_by_gc[gc_bin])))
-        else:
-            short_expected.append(1.0)
-            short_std.append(0.0)
-        
-        if intermediate_by_gc[gc_bin]:
-            intermediate_expected.append(float(np.median(intermediate_by_gc[gc_bin])))
-            intermediate_std.append(float(np.std(intermediate_by_gc[gc_bin])))
-        else:
-            intermediate_expected.append(1.0)
-            intermediate_std.append(0.0)
-        
-        if long_by_gc[gc_bin]:
-            long_expected.append(float(np.median(long_by_gc[gc_bin])))
-            long_std.append(float(np.std(long_by_gc[gc_bin])))
-        else:
-            long_expected.append(1.0)
-            long_std.append(0.0)
-    
+    logger.info(f"GC bias model computed: {len(result['gc_bins'])} bins")
     return GcBiasModel(
-        gc_bins=gc_bins,
-        short_expected=short_expected,
-        short_std=short_std,
-        intermediate_expected=intermediate_expected,
-        intermediate_std=intermediate_std,
-        long_expected=long_expected,
-        long_std=long_std,
+        gc_bins=result["gc_bins"],
+        short_expected=result["short_expected"],
+        short_std=result["short_std"],
+        intermediate_expected=result["intermediate_expected"],
+        intermediate_std=result["intermediate_std"],
+        long_expected=result["long_expected"],
+        long_std=result["long_std"],
     )
 
 
@@ -537,73 +460,37 @@ def _compute_fsd_baseline(all_fsd_data: List[pd.DataFrame], fsd_paths: List[str]
     """
     Compute FSD baseline from sample data.
     
-    Uses high-performance Rust implementation (3-10x faster) with Python fallback.
-    FSD output format: DataFrame with 'region' column and size bin columns (e.g., '65-69', '70-74', ...)
+    Uses Rust implementation for high performance.
+    FSD output format: DataFrame with 'region' column and size bin columns.
     
-    Aggregates size distribution proportions per chromosome arm across samples.
+    Args:
+        all_fsd_data: List of FSD DataFrames (unused, kept for API compat)
+        fsd_paths: List of paths to FSD TSV files
+        
+    Returns:
+        FsdBaseline or None if no data
+        
+    Raises:
+        RuntimeError: If computation fails
     """
-    # Try Rust implementation first (3-10x faster)
-    if fsd_paths:
-        try:
-            from krewlyzer import _core
-            result = _core.pon_builder.compute_fsd_baseline(fsd_paths)
-            if result:
-                logger.info(f"FSD baseline computed (Rust): {len(result)} arms")
-                arms = {}
-                for arm, data in result.items():
-                    arms[arm] = FsdArmBaseline(
-                        size_bins=data["size_bins"],
-                        expected=data["expected"],
-                        std=data["std"],
-                    )
-                return FsdBaseline(arms=arms)
-        except Exception as e:
-            logger.debug(f"Rust FSD baseline computation failed, falling back to Python: {e}")
-    
-    # =========================================================================
-    # PYTHON FALLBACK IMPLEMENTATION
-    # NOTE: This is a fallback only. Primary implementation is Rust (3-10x faster).
-    # The Rust implementation is in: rust/src/pon_builder.rs::compute_fsd_baseline()
-    # =========================================================================
-    
-    if not all_fsd_data:
+    if not fsd_paths:
+        logger.warning("No FSD paths provided for baseline computation")
         return None
     
-    # Filter to only DataFrames
-    fsd_dfs = [df for df in all_fsd_data if isinstance(df, pd.DataFrame) and not df.empty]
-    if not fsd_dfs:
-        return None
+    from krewlyzer import _core
     
-    # Get size bin columns (all columns except 'region')
-    sample_df = fsd_dfs[0]
-    size_bin_cols = [col for col in sample_df.columns if col != 'region']
+    result = _core.pon_builder.compute_fsd_baseline(fsd_paths)
+    if not result:
+        raise RuntimeError("FSD baseline computation failed: no data returned from Rust")
     
-    # Convert column names to size bin integers (e.g., '65-69' -> 65)
-    size_bins = []
-    for col in size_bin_cols:
-        try:
-            size_bins.append(int(col.split('-')[0]))
-        except ValueError:
-            continue
-    
-    if not size_bins:
-        return None
-    
-    # Aggregate per region across samples
-    # First, concat all samples and compute mean/std per region
-    all_data = pd.concat(fsd_dfs, ignore_index=True)
-    
-    # Group by region and compute stats
+    logger.info(f"FSD baseline computed: {len(result)} arms")
     arms = {}
-    for region in all_data['region'].unique():
-        region_data = all_data[all_data['region'] == region]
-        expected = []
-        std = []
-        for col in size_bin_cols:
-            values = region_data[col].values
-            expected.append(float(np.mean(values)))
-            std.append(float(np.std(values)) if len(values) > 1 else 0.0)
-        arms[region] = {"expected": expected, "std": std}
+    for arm, data in result.items():
+        arms[arm] = {"expected": data["expected"], "std": data["std"]}
+    
+    # Get size bins from first arm
+    first_arm = next(iter(result.values()))
+    size_bins = first_arm.get("size_bins", list(range(65, 1000, 5)))
     
     return FsdBaseline(size_bins=size_bins, arms=arms)
 
@@ -612,101 +499,43 @@ def _compute_wps_baseline(all_wps_data: List[pd.DataFrame], wps_paths: List[str]
     """
     Compute WPS baseline from Parquet vector format.
     
-    Uses high-performance Rust implementation (3-10x faster) with Python fallback.
+    Uses Rust implementation for high performance.
     For each region, computes mean and std vectors across all samples.
-    This enables PoN subtraction with per-position z-scores.
     
-    Expected columns: region_id, wps_nuc[200], wps_tf[200], etc.
+    Args:
+        all_wps_data: List of WPS DataFrames (unused, kept for API compat)
+        wps_paths: List of paths to WPS Parquet files
+        
+    Returns:
+        WpsBaseline or None if no data
+        
+    Raises:
+        RuntimeError: If computation fails
     """
-    import numpy as np
-    
-    # Try Rust implementation first (3-10x faster)
-    if wps_paths:
-        try:
-            from krewlyzer import _core
-            result = _core.pon_builder.compute_wps_baseline(wps_paths)
-            if result:
-                logger.info(f"WPS baseline computed (Rust): {len(result)} regions")
-                # Convert to DataFrame for WpsBaseline
-                rows = []
-                for region_id, data in result.items():
-                    rows.append({
-                        "region_id": region_id,
-                        "wps_nuc_mean": data.get("wps_long_mean", 0.0),
-                        "wps_nuc_std": data.get("wps_long_std", 1.0),
-                        "wps_tf_mean": data.get("wps_short_mean", 0.0),
-                        "wps_tf_std": data.get("wps_short_std", 1.0),
-                    })
-                return WpsBaseline(regions=pd.DataFrame(rows))
-        except Exception as e:
-            logger.debug(f"Rust WPS baseline computation failed, falling back to Python: {e}")
-    
-    # =========================================================================
-    # PYTHON FALLBACK IMPLEMENTATION
-    # NOTE: This is a fallback only. Primary implementation is Rust (3-10x faster).
-    # The Rust implementation is in: rust/src/pon_builder.rs::compute_wps_baseline()
-    # =========================================================================
-    
-    if not all_wps_data:
+    if not wps_paths:
+        logger.warning("No WPS paths provided for baseline computation")
         return None
     
-    template = all_wps_data[0].copy()
-    region_id_col = "gene_id" if "gene_id" in template.columns else ("region_id" if "region_id" in template.columns else "group_id")
+    from krewlyzer import _core
     
-    # Columns to aggregate - support both naming conventions
-    # Rust WPS uses: wps_long, wps_short
-    # Legacy naming: wps_nuc, wps_tf
-    vector_cols = [c for c in ["wps_nuc", "wps_tf", "wps_long", "wps_short", "prot_frac_nuc", "prot_frac_tf"] 
-                   if c in template.columns]
+    result = _core.pon_builder.compute_wps_baseline(wps_paths)
+    if not result:
+        raise RuntimeError("WPS baseline computation failed: no data returned from Rust")
     
-    if not vector_cols:
-        logger.warning(f"No WPS vector columns found in columns: {list(template.columns)}")
-        return None
+    logger.info(f"WPS baseline computed: {len(result)} regions")
     
-    result_data = []
+    # Convert to DataFrame for WpsBaseline
+    rows = []
+    for region_id, data in result.items():
+        rows.append({
+            "region_id": region_id,
+            "wps_nuc_mean": data.get("wps_long_mean", 0.0),
+            "wps_nuc_std": data.get("wps_long_std", 1.0),
+            "wps_tf_mean": data.get("wps_short_mean", 0.0),
+            "wps_tf_std": data.get("wps_short_std", 1.0),
+        })
     
-    for idx, row in template.iterrows():
-        region_id = row[region_id_col]
-        result_row = {region_id_col: region_id}
-        
-        # Copy non-vector metadata
-        for col in ["chrom", "center", "strand", "region_type"]:
-            if col in template.columns:
-                result_row[col] = row[col]
-        
-        for col in vector_cols:
-            # Collect values from all samples for this region
-            values = []
-            for df in all_wps_data:
-                if idx < len(df) and col in df.columns:
-                    val = df.iloc[idx][col]
-                    if val is not None:
-                        # Check if it's a scalar or array
-                        if np.isscalar(val) or isinstance(val, (int, float, np.floating)):
-                            values.append(float(val))
-                        elif hasattr(val, '__len__') and len(val) > 0:
-                            values.append(np.array(val, dtype=np.float32))
-            
-            if values:
-                # Check if we have scalars or vectors
-                if all(np.isscalar(v) or isinstance(v, (int, float, np.floating)) for v in values):
-                    # Scalar values - just compute mean/std across samples
-                    result_row[f"{col}_mean"] = float(np.mean(values))
-                    result_row[f"{col}_std"] = float(np.std(values))
-                else:
-                    # Vector values - stack and compute per-bin stats
-                    stacked = np.stack(values, axis=0)  # (n_samples, n_bins)
-                    mean_vec = np.mean(stacked, axis=0)
-                    std_vec = np.std(stacked, axis=0)
-                    result_row[f"{col}_mean"] = mean_vec.tolist()
-                    result_row[f"{col}_std"] = std_vec.tolist()
-        
-        result_data.append(result_row)
-    
-    result_df = pd.DataFrame(result_data)
-    logger.info(f"WPS baseline: {len(result_df)} regions, {len(all_wps_data)} samples")
-    
-    return WpsBaseline(regions=result_df)
+    return WpsBaseline(regions=pd.DataFrame(rows))
 
 
 def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":

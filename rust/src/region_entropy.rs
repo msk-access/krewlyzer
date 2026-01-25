@@ -299,3 +299,190 @@ pub fn run_region_entropy(
 
     Ok(())
 }
+
+// =============================================================================
+// PON Z-SCORE NORMALIZATION
+// =============================================================================
+
+use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::record::RowAccessor;
+use std::io::BufWriter;
+use std::path::PathBuf;
+
+/// Baseline statistics for a single label.
+#[derive(Debug, Clone)]
+struct EntropyBaselineStats {
+    entropy_mean: f64,
+    entropy_std: f64,
+}
+
+/// Load TFBS or ATAC baseline from PON Parquet file.
+fn load_entropy_baseline_from_parquet(
+    pon_path: &Path,
+    table_name: &str,
+) -> Result<HashMap<String, EntropyBaselineStats>> {
+    let file = File::open(pon_path)
+        .with_context(|| format!("Failed to open PON file: {:?}", pon_path))?;
+    
+    let reader = SerializedFileReader::new(file)
+        .with_context(|| "Failed to create Parquet reader")?;
+    
+    let mut baseline = HashMap::new();
+    
+    for row_result in reader.get_row_iter(None)? {
+        let row = row_result.with_context(|| "Failed to read row")?;
+        
+        // Check if this row belongs to the specified table
+        if let Ok(table) = row.get_string(
+            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
+        ) {
+            if table != table_name {
+                continue;
+            }
+        } else {
+            continue;
+        }
+        
+        // Extract label, entropy_mean, entropy_std
+        let label = row.get_string(
+            row.get_column_iter().position(|(name, _)| name == "label").unwrap_or(0)
+        ).map_or("".to_string(), |v| v.to_string());
+        
+        let entropy_mean = row.get_double(
+            row.get_column_iter().position(|(name, _)| name == "entropy_mean").unwrap_or(0)
+        ).unwrap_or(0.0);
+        
+        let entropy_std = row.get_double(
+            row.get_column_iter().position(|(name, _)| name == "entropy_std").unwrap_or(0)
+        ).unwrap_or(1.0);
+        
+        if !label.is_empty() {
+            baseline.insert(label, EntropyBaselineStats { 
+                entropy_mean, 
+                entropy_std 
+            });
+        }
+    }
+    
+    Ok(baseline)
+}
+
+/// Apply PON z-score normalization to region entropy TSV file.
+/// 
+/// Reads entropy TSV with label, count, mean_size, entropy columns,
+/// joins with PON baseline to compute z-scores.
+/// 
+/// # Arguments
+/// * `entropy_path` - Path to sample entropy TSV
+/// * `pon_parquet_path` - Path to PON Parquet
+/// * `output_path` - Output path (None = overwrite input)
+/// * `baseline_table` - Table name in PON: "tfbs_baseline" or "atac_baseline"
+/// 
+/// # Returns
+/// Number of labels with z-scores computed
+#[pyfunction]
+#[pyo3(signature = (entropy_path, pon_parquet_path, output_path=None, baseline_table="tfbs_baseline"))]
+pub fn apply_pon_zscore(
+    entropy_path: PathBuf,
+    pon_parquet_path: PathBuf,
+    output_path: Option<PathBuf>,
+    baseline_table: &str,
+) -> PyResult<usize> {
+    log::info!("RegionEntropy PON z-score: loading {} from {:?}", baseline_table, pon_parquet_path);
+    
+    // 1. Load baseline from PON
+    let baseline = load_entropy_baseline_from_parquet(&pon_parquet_path, baseline_table)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(
+            format!("Failed to load {} baseline: {}", baseline_table, e)
+        ))?;
+    
+    if baseline.is_empty() {
+        log::info!("RegionEntropy PON: No {} baseline found, skipping normalization", baseline_table);
+        return Ok(0);
+    }
+    
+    log::info!("RegionEntropy PON: Loaded baseline for {} labels", baseline.len());
+    
+    // 2. Read entropy TSV
+    let file = File::open(&entropy_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(
+            format!("Failed to open entropy file: {}", e)
+        ))?;
+    
+    let reader = std::io::BufReader::new(file);
+    let mut lines: Vec<String> = Vec::new();
+    let mut header: Option<String> = None;
+    
+    for line in reader.lines() {
+        let line = line.map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        if header.is_none() {
+            header = Some(line);
+        } else {
+            lines.push(line);
+        }
+    }
+    
+    // 3. Parse header
+    let header_str = header.unwrap_or_default();
+    let header_cols: Vec<&str> = header_str.split('\t').collect();
+    
+    let label_idx = header_cols.iter().position(|&c| c == "label").unwrap_or(0);
+    let entropy_idx = header_cols.iter().position(|&c| c == "entropy").unwrap_or(3);
+    
+    // 4. Compute z-scores
+    let mut output_lines: Vec<String> = Vec::new();
+    let mut n_matched = 0;
+    let mut n_total = 0;
+    
+    for line in &lines {
+        let cols: Vec<&str> = line.split('\t').collect();
+        if cols.len() <= entropy_idx {
+            output_lines.push(format!("{}\tNaN", line));
+            continue;
+        }
+        
+        n_total += 1;
+        let label = cols[label_idx].trim();
+        let entropy_value: f64 = cols[entropy_idx].trim().parse().unwrap_or(0.0);
+        
+        // Compute z-score
+        let z_score = if let Some(stats) = baseline.get(label) {
+            n_matched += 1;
+            if stats.entropy_std > 1e-9 {
+                (entropy_value - stats.entropy_mean) / stats.entropy_std
+            } else {
+                0.0
+            }
+        } else {
+            f64::NAN
+        };
+        
+        output_lines.push(format!("{}\t{:.6}", line, z_score));
+    }
+    
+    // 5. Write output
+    let out_path = output_path.unwrap_or_else(|| entropy_path.clone());
+    let out_file = File::create(&out_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(
+            format!("Failed to create output file: {}", e)
+        ))?;
+    
+    let mut writer = BufWriter::new(out_file);
+    
+    // Write header with new column
+    writeln!(writer, "{}\tz_score", header_str)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    
+    // Write data lines
+    for line in output_lines {
+        writeln!(writer, "{}", line)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    }
+    
+    log::info!(
+        "RegionEntropy PON z-score: {}/{} labels matched ({:?})",
+        n_matched, n_total, out_path.file_name().unwrap_or_default()
+    );
+    
+    Ok(n_matched)
+}

@@ -510,26 +510,24 @@ def run_features(
     if enable_fsd and outputs.fsd and outputs.fsd.exists():
         if skip_pon_zscore and pon:
             logger.info("  FSD: --skip-pon active, outputting raw values (no z-scores)")
-        process_fsd(outputs.fsd, pon=pon_for_zscore, pon_parquet_path=pon_parquet)
+        process_fsd(outputs.fsd, pon_parquet_path=pon_parquet)
         logger.info(f"✓ FSD: {outputs.fsd.name}")
         
         # On-target FSD
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
         if is_panel_mode and out_fsd_on.exists():
             outputs.fsd_ontarget = out_fsd_on
-            process_fsd(out_fsd_on, pon=pon_for_zscore, pon_parquet_path=pon_parquet)
+            process_fsd(out_fsd_on, pon_parquet_path=pon_parquet)
             logger.info(f"✓ FSD on-target: {outputs.fsd_ontarget.name}")
     
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
-        # Use None for pon_parquet when --skip-pon is set
-        wps_pon_parquet = pon_parquet if not skip_pon_zscore else None
         if skip_pon_zscore and pon:
             logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(
             outputs.wps,
             outputs.wps_background,
-            pon_parquet_path=wps_pon_parquet
+            pon=pon_for_zscore
         )
         logger.info(f"✓ WPS: {outputs.wps.name}")
     
@@ -568,13 +566,12 @@ def run_features(
             logger.info(f"✓ OCF: {outputs.ocf.name}")
             
             # Apply OCF PON normalization (z-scores) if PON is available and not skipped
-            if pon_for_zscore and hasattr(pon_for_zscore, 'ocf_baseline') and pon_for_zscore.ocf_baseline:
+            if pon_parquet and not skip_pon_zscore:
                 from .ocf_processor import process_ocf_with_pon
-                if skip_pon_zscore:
-                    logger.info("  OCF: --skip-pon active, outputting raw values (no z-scores)")
-                else:
-                    process_ocf_with_pon(outputs.ocf, pon_for_zscore.ocf_baseline)
-                    logger.info(f"  OCF PON z-scores applied ({outputs.ocf.name})")
+                process_ocf_with_pon(outputs.ocf, pon_parquet)
+                logger.info(f"  OCF PON z-scores applied ({outputs.ocf.name})")
+            elif skip_pon_zscore and pon_parquet:
+                logger.info("  OCF: --skip-pon active, outputting raw values (no z-scores)")
             
         if rust_sync.exists():
             shutil.move(str(rust_sync), str(outputs.ocf_sync))
@@ -648,16 +645,10 @@ def run_features(
         gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
         gc_ontarget_str = str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
         
-        # Load PON model for Z-score normalization (if provided and not in skip-pon mode)
-        pon = None
-        tfbs_pon_baseline = None
-        atac_pon_baseline = None
-        if pon_model and Path(pon_model).exists() and not skip_pon_zscore:
-            pon = load_pon_model(Path(pon_model))
-            if pon:
-                tfbs_pon_baseline = pon.tfbs_baseline.baseline if pon.tfbs_baseline else None
-                atac_pon_baseline = pon.atac_baseline.baseline if pon.atac_baseline else None
-        elif skip_pon_zscore and pon_model:
+        # Use pon_parquet directly for Z-score normalization (Rust implementation)
+        entropy_pon_parquet = pon_parquet if (pon_parquet and not skip_pon_zscore) else None
+        
+        if skip_pon_zscore and pon_parquet:
             if enable_tfbs:
                 logger.info("  TFBS: --skip-pon active, outputting raw values (no z-scores)")
             if enable_atac:
@@ -674,7 +665,7 @@ def run_features(
                     str(bed_path), tfbs_regions, str(out_tfbs_raw), gc_str, True
                 )
                 outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
-                process_region_entropy(out_tfbs_raw, outputs.tfbs, tfbs_pon_baseline)
+                process_region_entropy(out_tfbs_raw, outputs.tfbs, entropy_pon_parquet, "tfbs_baseline")
                 out_tfbs_raw.unlink(missing_ok=True)
                 logger.info(f"✓ TFBS entropy: {outputs.tfbs.name}")
                 
@@ -694,7 +685,7 @@ def run_features(
                             str(bed_path), str(filtered), str(out_tfbs_on_raw), gc_ontarget_str, True
                         )
                         outputs.tfbs_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.tsv"
-                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, tfbs_pon_baseline)
+                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, entropy_pon_parquet, "tfbs_baseline")
                         out_tfbs_on_raw.unlink(missing_ok=True)
                         tfbs_ontarget_regions.unlink(missing_ok=True)
                         logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name}")
@@ -713,7 +704,7 @@ def run_features(
                     str(bed_path), atac_regions, str(out_atac_raw), gc_str, True
                 )
                 outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
-                process_region_entropy(out_atac_raw, outputs.atac, atac_pon_baseline)
+                process_region_entropy(out_atac_raw, outputs.atac, entropy_pon_parquet, "atac_baseline")
                 out_atac_raw.unlink(missing_ok=True)
                 logger.info(f"✓ ATAC entropy: {outputs.atac.name}")
                 
@@ -733,7 +724,7 @@ def run_features(
                             str(bed_path), str(filtered), str(out_atac_on_raw), gc_ontarget_str, True
                         )
                         outputs.atac_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.tsv"
-                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget, atac_pon_baseline)
+                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget, entropy_pon_parquet, "atac_baseline")
                         out_atac_on_raw.unlink(missing_ok=True)
                         atac_ontarget_regions.unlink(missing_ok=True)
                         logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name}")

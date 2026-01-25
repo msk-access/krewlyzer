@@ -105,39 +105,46 @@ def load_entropy_tsv(path: Path) -> pd.DataFrame:
 def process_region_entropy(
     raw_path: Path,
     output_path: Path,
-    pon_baseline: Optional[RegionEntropyBaseline] = None,
-) -> Path:
+    pon_parquet_path: Optional[Path] = None,
+    baseline_table: str = "tfbs_baseline",
+) -> int:
     """
-    Apply PON normalization to region entropy output.
+    Apply PON normalization to region entropy output using Rust implementation.
     
     Adds 'z_score' column: (raw_entropy - pon_mean) / pon_std
     
     Args:
         raw_path: Path to raw entropy TSV from Rust
         output_path: Path to write normalized output
-        pon_baseline: Optional PON baseline for Z-score calculation
+        pon_parquet_path: Path to PON Parquet file
+        baseline_table: "tfbs_baseline" or "atac_baseline"
         
     Returns:
-        Path to output file
+        Number of labels with z-scores computed
     """
-    df = load_entropy_tsv(raw_path)
+    from krewlyzer import _core
     
-    if pon_baseline:
-        logger.info(f"Applying PON normalization to {raw_path.name}...")
-        z_scores = []
-        for _, row in df.iterrows():
-            z = pon_baseline.get_zscore(row['label'], row['entropy'])
-            z_scores.append(z)
-        df['z_score'] = z_scores
-    else:
-        logger.debug(f"No PON baseline, skipping Z-score for {raw_path.name}")
+    if not raw_path.exists():
+        logger.warning(f"Entropy file not found: {raw_path}")
+        return 0
+    
+    if pon_parquet_path is None:
+        # No PON - just copy file and add z_score=0 column
+        df = load_entropy_tsv(raw_path)
         df['z_score'] = 0.0
+        df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
+        logger.debug(f"No PON baseline, wrote {len(df)} labels with z_score=0")
+        return 0
     
-    # Write output
-    df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
-    logger.info(f"Wrote {len(df)} labels to {output_path.name}")
+    n_matched = _core.region_entropy.apply_pon_zscore(
+        str(raw_path),
+        str(pon_parquet_path),
+        str(output_path),
+        baseline_table
+    )
     
-    return output_path
+    logger.info(f"Region entropy z-scores: {n_matched} labels matched ({output_path.name})")
+    return n_matched
 
 
 def extract_entropy_data(df: pd.DataFrame) -> Dict[str, float]:

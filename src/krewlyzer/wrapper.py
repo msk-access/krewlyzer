@@ -432,7 +432,6 @@ def run_all(
                 wps_result = post_process_wps(
                     wps_parquet=feature_outputs.wps,
                     wps_background_parquet=feature_outputs.wps_background if feature_outputs.wps_background and feature_outputs.wps_background.exists() else None,
-                    smooth=True,
                     extract_periodicity=True
                 )
                 if wps_result.get("periodicity_score"):

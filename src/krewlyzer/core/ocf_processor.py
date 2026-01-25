@@ -18,60 +18,41 @@ logger = logging.getLogger("core.ocf_processor")
 
 def process_ocf_with_pon(
     ocf_path: Path,
-    ocf_baseline: "OcfBaseline",
+    pon_parquet_path: Path,
     output_path: Optional[Path] = None
-) -> pd.DataFrame:
+) -> int:
     """
-    Add PON z-scores to OCF output.
+    Add PON z-scores to OCF output using Rust implementation.
+    
+    Uses high-performance Rust implementation for z-score computation.
     
     Args:
         ocf_path: Path to sample OCF TSV
-        ocf_baseline: OcfBaseline from PON model
+        pon_parquet_path: Path to PON Parquet file
         output_path: Output path (default: overwrite input)
     
     Returns:
-        DataFrame with added ocf_z column
+        Number of regions with z-scores computed
+        
+    Raises:
+        RuntimeError: If Rust implementation fails
     """
+    from krewlyzer import _core
+    
     if not ocf_path.exists():
         logger.warning(f"OCF file not found: {ocf_path}")
-        return pd.DataFrame()
+        return 0
     
-    df = pd.read_csv(ocf_path, sep="\t")
+    out_str = str(output_path) if output_path else None
     
-    if df.empty:
-        logger.warning(f"OCF file is empty: {ocf_path}")
-        return df
+    n_matched = _core.ocf.apply_pon_zscore(
+        str(ocf_path),
+        str(pon_parquet_path),
+        out_str
+    )
     
-    z_scores = []
-    n_matched = 0
-    
-    for _, row in df.iterrows():
-        # Try multiple column names for region ID
-        region_id = row.get("region_id", row.get("name", row.get("region", "")))
-        
-        # Try multiple column names for OCF value
-        ocf_value = row.get("ocf", row.get("ocf_score", row.get("score", 0)))
-        
-        stats = ocf_baseline.get_stats(str(region_id))
-        if stats:
-            mean, std = stats
-            if std > 0:
-                z = (ocf_value - mean) / std
-            else:
-                z = 0.0
-            n_matched += 1
-        else:
-            z = np.nan
-        z_scores.append(z)
-    
-    df["ocf_z"] = z_scores
-    
-    out = output_path or ocf_path
-    df.to_csv(out, sep="\t", index=False)
-    
-    logger.info(f"OCF PON z-scores: {n_matched}/{len(df)} regions matched ({out.name})")
-    
-    return df
+    logger.info(f"OCF PON z-scores: {n_matched} regions matched ({ocf_path.name})")
+    return n_matched
 
 
 def create_panel_ocf_atlas(

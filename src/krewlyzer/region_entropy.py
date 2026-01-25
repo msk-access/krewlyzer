@@ -83,19 +83,11 @@ def region_entropy(
         logger.error("--pon-model (-P) and --skip-pon are contradictory")
         raise typer.Exit(1)
     
-    # Load PON model for Z-score normalization (if provided and not skipped)
-    tfbs_baseline = None
-    atac_baseline = None
-    if pon_model and pon_model.exists() and not skip_pon:
-        from .core.pon_integration import load_pon_model
-        pon = load_pon_model(pon_model)
-        if pon:
-            tfbs_baseline = pon.tfbs_baseline.baseline if pon.tfbs_baseline else None
-            atac_baseline = pon.atac_baseline.baseline if pon.atac_baseline else None
-            if tfbs_baseline:
-                logger.info(f"Loaded TFBS baseline: {len(tfbs_baseline.data)} labels")
-            if atac_baseline:
-                logger.info(f"Loaded ATAC baseline: {len(atac_baseline.data)} labels")
+    # Use PON parquet directly for Z-score normalization (Rust implementation)
+    entropy_pon_parquet = pon_model if (pon_model and pon_model.exists() and not skip_pon) else None
+    
+    if entropy_pon_parquet:
+        logger.info(f"Using PON for z-score normalization: {pon_model.name}")
     elif skip_pon:
         logger.info("--skip-pon: skipping PON z-score normalization")
     
@@ -111,7 +103,7 @@ def region_entropy(
                 _core.region_entropy.run_region_entropy(
                     str(bedgz_input), str(tfbs_path), str(out_raw), gc_str, not verbose
                 )
-                process_region_entropy(out_raw, out_final, tfbs_baseline)
+                process_region_entropy(out_raw, out_final, entropy_pon_parquet, "tfbs_baseline")
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ TFBS: {out_final}")
             else:
@@ -128,7 +120,7 @@ def region_entropy(
                 _core.region_entropy.run_region_entropy(
                     str(bedgz_input), str(atac_path), str(out_raw), gc_str, not verbose
                 )
-                process_region_entropy(out_raw, out_final, atac_baseline)
+                process_region_entropy(out_raw, out_final, entropy_pon_parquet, "atac_baseline")
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ ATAC: {out_final}")
             else:

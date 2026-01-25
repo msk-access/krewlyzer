@@ -224,3 +224,88 @@ def compute_atac_zscore(
         return None
     
     return pon.atac_baseline.get_zscore(label, entropy)
+
+
+def compute_ocf_zscore(
+    region_id: str,
+    ocf_value: float,
+    pon
+) -> Optional[float]:
+    """
+    Compute OCF z-score for a single region.
+    
+    Centralized function for OCF z-score computation.
+    Can be used by ocf_processor.py or directly.
+    
+    Args:
+        region_id: Region identifier
+        ocf_value: Observed OCF value
+        pon: Loaded PonModel with ocf_baseline
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.ocf_baseline is None:
+        return None
+    
+    return pon.ocf_baseline.compute_zscore(region_id, ocf_value)
+
+
+def compute_nrl_zscore(
+    observed_nrl: float,
+    pon,
+    group_id: str = "all"
+) -> Optional[float]:
+    """
+    Compute NRL (Nucleosome Repeat Length) z-score.
+    
+    Compares sample NRL (from Rust FFT) against healthy reference
+    from WPS background baseline.
+    
+    NRL ~180-200bp in healthy plasma; deviations indicate
+    altered nucleosome spacing (cancer signature).
+    
+    Args:
+        observed_nrl: NRL in bp from FFT analysis (nrl_bp column)
+        pon: Loaded PonModel with wps_background_baseline
+        group_id: Group identifier (default: "all" for global)
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.wps_background_baseline is None:
+        return None
+    
+    return pon.wps_background_baseline.compute_nrl_zscore(observed_nrl, group_id)
+
+
+def compute_periodicity_zscore(
+    observed_periodicity: float,
+    pon,
+    group_id: str = "all"
+) -> Optional[float]:
+    """
+    Compute periodicity z-score.
+    
+    Periodicity measures the strength of nucleosome signal from FFT.
+    Higher values indicate more regular nucleosome positioning.
+    
+    Args:
+        observed_periodicity: Periodicity score from FFT
+        pon: Loaded PonModel with wps_background_baseline
+        group_id: Group identifier (default: "all" for global)
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.wps_background_baseline is None:
+        return None
+    
+    stats = pon.wps_background_baseline.get_periodicity_stats(group_id)
+    if stats is None:
+        return None
+    
+    mean, std = stats
+    if std > 0:
+        return (observed_periodicity - mean) / std
+    return 0.0

@@ -275,211 +275,79 @@ def aggregate_by_gene(
     output_path: Path,
     pon=None,
     correction_factors: dict = None,
-    aggregate_by: str = 'gene'
+    aggregate_by: str = 'gene',
+    gene_bed_path: Path = None,
 ) -> Path:
     """
-    Aggregate fragment counts for panel-specific FSC.
+    Aggregate fragment counts for panel-specific FSC using Rust implementation.
     
-    This function sums fragment counts per gene or per region, producing
-    gene-level or region-level FSC features depending on aggregate_by.
-    
-    When correction_factors is provided, fragments are weighted by their
-    GC correction factor to account for capture and PCR bias.
+    This function counts fragments per gene using the high-performance Rust engine,
+    applying GC correction if factors are available.
     
     Args:
         fragments_bed: Path to fragment BED file from extract step
-        genes: Dict[gene_name, List[Region]] from gene_bed.load_gene_bed()
+        genes: Dict[gene_name, List[Region]] from gene_bed.load_gene_bed() (used only if gene_bed_path not provided)
         output_path: Path to write FSC output
-        pon: Optional PON model for normalization
-        correction_factors: Optional dict[(len_bin, gc_pct) -> factor]
+        pon: Optional PON model for normalization (legacy, not used in Rust)
+        correction_factors: Optional dict or Path to GC correction factors
         aggregate_by: 'gene' (sum by gene) or 'region' (one row per exon/region)
+        gene_bed_path: Path to gene BED file (if provided, used directly by Rust)
         
     Returns:
         Path to output file
         
     Output columns (gene mode):
         - gene, n_regions, total_bp, channels, *_ratio, normalized_depth
-    Output columns (region mode):
-        - chrom, start, end, gene, region_name, region_bp, channels, *_ratio, normalized_depth
     """
-    import gzip
+    from krewlyzer import _core
+    import tempfile
     
-    # Log GC correction mode
-    gc_mode = "ON (weighted counting)" if correction_factors else "OFF (raw counting)"
-    logger.info(f"Aggregating FSC by {aggregate_by}: {len(genes)} genes, GC correction: {gc_mode}")
+    logger.info(f"Aggregating FSC by {aggregate_by}: {len(genes)} genes")
     
-    # Build interval tree for fast region lookup
-    # For region mode, we track each region individually
-    # For gene mode, we aggregate by gene name
-    gene_intervals = {}
-    region_list = []  # For region mode: list of all regions with metadata
+    # Prepare gene BED for Rust
+    if gene_bed_path and Path(gene_bed_path).exists():
+        # Use provided gene BED directly
+        use_gene_bed = Path(gene_bed_path)
+    else:
+        # Write genes dict to temp BED for Rust
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.bed', delete=False) as f:
+            for gene, regions in genes.items():
+                for region in regions:
+                    name = getattr(region, 'name', gene)
+                    f.write(f"{region.chrom}\t{region.start}\t{region.end}\t{gene}\t{name}\n")
+            use_gene_bed = Path(f.name)
     
-    for gene, regions in genes.items():
-        for region in regions:
-            chrom = region.chrom
-            if chrom not in gene_intervals:
-                gene_intervals[chrom] = []
-            region_idx = len(region_list)
-            region_list.append({
-                'chrom': chrom, 'start': region.start, 'end': region.end,
-                'gene': gene, 'region_name': getattr(region, 'name', f"{gene}_{region_idx}"),
-                'region_bp': region.end - region.start
-            })
-            gene_intervals[chrom].append((region.start, region.end, gene, region_idx))
-    
-    # Sort intervals per chromosome
-    for chrom in gene_intervals:
-        gene_intervals[chrom].sort(key=lambda x: x[0])
-    
-    # Initialize counts: gene mode uses gene_counts dict, region mode uses region_counts list
-    gene_counts = {gene: {ch: 0.0 for ch in CHANNELS + ['total']} for gene in genes}
-    gene_meta = {gene: {'n_regions': len(regions), 'total_bp': sum(r.end - r.start for r in regions)} 
-                 for gene, regions in genes.items()}
-    region_counts = [{ch: 0.0 for ch in CHANNELS + ['total']} for _ in region_list] if aggregate_by == 'region' else None
-    
-    # Tracking statistics for monitoring
-    total_fragments = 0
-    assigned_fragments = 0
-    gc_missing_count = 0
-    total_weight = 0.0
-    
-    open_func = gzip.open if str(fragments_bed).endswith('.gz') else open
-    with open_func(fragments_bed, 'rt') as f:
-        for line in f:
-            if line.startswith('#'):
-                continue
-            
-            fields = line.strip().split('\t')
-            if len(fields) < 3:
-                continue
-            
-            total_fragments += 1
-            chrom = fields[0]
-            try:
-                start = int(fields[1])
-                end = int(fields[2])
-            except ValueError:
-                continue
-            
-            # Parse GC fraction from column 4 (if available)
-            # BED format: chrom, start, end, gc_fraction
-            gc_frac = 0.5  # Default to neutral GC
-            if len(fields) >= 4 and correction_factors:
-                try:
-                    gc_frac = float(fields[3])
-                except ValueError:
-                    gc_missing_count += 1
-            
-            # Determine size bin
-            frag_len = end - start
-            if frag_len < 65:
-                continue  # Too short
-            elif frag_len < 100:
-                size_bin = 'ultra_short'
-            elif frag_len < 150:
-                size_bin = 'core_short'
-            elif frag_len < 260:
-                size_bin = 'mono_nucl'
-            elif frag_len < 400:
-                size_bin = 'di_nucl'
-            else:
-                size_bin = 'long'
-            
-            # Calculate weight using GC correction factors
-            weight = _get_gc_weight(frag_len, gc_frac, correction_factors)
-            
-            # Find overlapping gene regions
-            if chrom not in gene_intervals:
-                continue
-            
-            frag_mid = (start + end) // 2
-            for reg_start, reg_end, gene, region_idx in gene_intervals[chrom]:
-                if reg_start > frag_mid:
-                    break  # Past this fragment
-                if reg_start <= frag_mid < reg_end:
-                    # Apply weighted counting (key fix for GC bias)
-                    gene_counts[gene][size_bin] += weight
-                    gene_counts[gene]['total'] += weight
-                    if region_counts is not None:
-                        region_counts[region_idx][size_bin] += weight
-                        region_counts[region_idx]['total'] += weight
-                    assigned_fragments += 1
-                    total_weight += weight
-                    break  # Assign to first matching gene/region only
-    
-    # Log processing statistics with GC correction info
-    entity = 'regions' if aggregate_by == 'region' else 'genes'
-    logger.info(f"Processed {total_fragments} fragments, {assigned_fragments} assigned to {entity}")
+    # Prepare GC factors path
+    gc_factors_path = None
     if correction_factors:
-        avg_weight = total_weight / assigned_fragments if assigned_fragments > 0 else 1.0
-        logger.info(f"  GC correction: avg_weight={avg_weight:.3f}, missing_gc={gc_missing_count}")
-        if avg_weight < 0.5 or avg_weight > 2.0:
-            logger.warning(f"  Unusual average weight {avg_weight:.3f} - check correction factors")
+        if isinstance(correction_factors, (str, Path)):
+            gc_factors_path = str(correction_factors)
+        elif isinstance(correction_factors, dict):
+            # Write factors dict to temp TSV for Rust
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.tsv', delete=False) as f:
+                f.write("length_bin\tgc_pct\tfactor\n")
+                for (len_bin, gc_pct), factor in correction_factors.items():
+                    f.write(f"{len_bin}\t{gc_pct}\t{factor}\n")
+                gc_factors_path = f.name
     
-    # Build output DataFrame based on aggregation mode
-    rows = []
-    if aggregate_by == 'region':
-        # Per-region output
-        for idx, region in enumerate(region_list):
-            counts = region_counts[idx]
-            row = {
-                'chrom': region['chrom'], 'start': region['start'], 'end': region['end'],
-                'gene': region['gene'], 'region_name': region['region_name'],
-                'region_bp': region['region_bp'], **counts
-            }
-            total = counts['total']
-            for ch in CHANNELS:
-                row[f'{ch}_ratio'] = counts[ch] / total if total > 0 else 0.0
-            
-            region_size = region['region_bp']
-            if region_size > 0 and total_fragments > 0:
-                row['normalized_depth'] = (counts['total'] * 1e9) / (region_size * total_fragments)
-            else:
-                row['normalized_depth'] = 0.0
-            rows.append(row)
-    else:
-        # Per-gene output (default)
-        for gene in sorted(genes.keys()):
-            row = {
-                'gene': gene,
-                'n_regions': gene_meta[gene]['n_regions'],
-                'total_bp': gene_meta[gene]['total_bp'],
-                **gene_counts[gene]
-            }
-            # Calculate channel ratios
-            total = gene_counts[gene]['total']
-            for ch in CHANNELS:
-                row[f'{ch}_ratio'] = gene_counts[gene][ch] / total if total > 0 else 0.0
-            
-            # Calculate Normalized Depth (RPKM-like)
-            region_size = gene_meta[gene]['total_bp']
-            weighted_count = gene_counts[gene]['total']
-            
-            if region_size > 0 and total_fragments > 0:
-                norm_depth = (weighted_count * 1e9) / (region_size * total_fragments)
-            else:
-                norm_depth = 0.0
-            
-            row['normalized_depth'] = norm_depth
-            rows.append(row)
+    # Call Rust implementation
+    n_output = _core.aggregate_by_gene(
+        str(fragments_bed),
+        str(use_gene_bed),
+        str(output_path),
+        gc_factors_path,
+        aggregate_by
+    )
     
-    df = pd.DataFrame(rows)
+    # Cleanup temp file if we created one
+    if not gene_bed_path or not Path(gene_bed_path).exists():
+        try:
+            use_gene_bed.unlink(missing_ok=True)
+        except Exception:
+            pass
     
-    # Add PoN normalization if available
-    if pon is not None:
-        logger.info("Computing PoN log2 ratios for gene FSC...")
-        for ch in CHANNELS:
-            mean = pon.get_mean(f'gene_{ch}') if hasattr(pon, 'get_mean') else None
-            if mean and mean > 0:
-                df[f'{ch}_log2'] = np.log2(df[ch] / mean + 1e-9)
-            else:
-                df[f'{ch}_log2'] = 0.0
-    
-    # Write output
-    df.to_csv(output_path, sep='\t', index=False, float_format='%.4f')
-    if aggregate_by == 'region':
-        logger.info(f"Region FSC complete: {output_path} ({len(df)} regions)")
-    else:
-        logger.info(f"Gene FSC complete: {output_path} ({len(df)} genes)")
-    
+    logger.info(f"FSC {aggregate_by} complete: {output_path} ({n_output} rows)")
     return output_path
+

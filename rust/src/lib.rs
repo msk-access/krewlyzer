@@ -89,6 +89,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     
     // FSC functions
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
+    m.add_function(wrap_pyfunction!(fsc::aggregate_by_gene, m)?)?;
 
     // FSD submodule
     let fsd_mod = PyModule::new(m.py(), "fsd")?;
@@ -105,6 +106,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // OCF submodule
     let ocf_mod = PyModule::new(m.py(), "ocf")?;
     ocf_mod.add_function(wrap_pyfunction!(ocf::calculate_ocf, &ocf_mod)?)?;
+    ocf_mod.add_function(wrap_pyfunction!(ocf::apply_pon_zscore, &ocf_mod)?)?;
     m.add_submodule(&ocf_mod)?;
     
     // mFSD submodule
@@ -143,6 +145,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Region Entropy submodule (TFBS/ATAC size entropy)
     let region_entropy_mod = PyModule::new(m.py(), "region_entropy")?;
     region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::run_region_entropy, &region_entropy_mod)?)?;
+    region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::apply_pon_zscore, &region_entropy_mod)?)?;
     m.add_submodule(&region_entropy_mod)?;
     
     // Version

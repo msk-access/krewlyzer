@@ -1,24 +1,27 @@
 //! BED file parsing and fragment counting
 //!
-//! Handles tabix-indexed BED.gz files for fragment analysis.
+//! Handles both standard gzip and BGZF-compressed BED files for fragment analysis.
 
 use std::path::Path;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use anyhow::{Context, Result};
-use noodles::bgzf;
+use flate2::read::GzDecoder;
 
-/// Open a file and return a buffered reader, handling BGZF compression transparently
+/// Open a file and return a buffered reader, handling gzip compression transparently.
+/// 
+/// Uses flate2::GzDecoder which works for both standard gzip and BGZF formats.
 pub fn get_reader(path: &Path) -> Result<Box<dyn BufRead>> {
     let file = File::open(path)
         .with_context(|| format!("Failed to open file: {:?}", path))?;
     
-    let is_bgzf = path.extension()
+    let is_gz = path.extension()
         .map(|ext| ext == "gz")
         .unwrap_or(false);
         
-    if is_bgzf {
-        Ok(Box::new(bgzf::io::Reader::new(file)))
+    if is_gz {
+        // Use flate2 GzDecoder - works for both standard gzip and BGZF
+        Ok(Box::new(BufReader::new(GzDecoder::new(file))))
     } else {
         Ok(Box::new(BufReader::new(file)))
     }

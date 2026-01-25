@@ -393,3 +393,379 @@ pub fn count_fragments_by_bins(
         gcs.into_pyarray(py).into(),
     ))
 }
+
+// =============================================================================
+// GENE-LEVEL FSC AGGREGATION
+// =============================================================================
+
+use std::io::BufWriter;
+use std::path::PathBuf;
+
+/// Per-gene or per-region aggregated counts
+#[derive(Debug, Clone, Default)]
+struct GeneResult {
+    gene: String,
+    n_regions: usize,
+    total_bp: u64,
+    ultra_short: f64,
+    core_short: f64,
+    mono_nucl: f64,
+    di_nucl: f64,
+    long: f64,
+    total: f64,
+}
+
+impl GeneResult {
+    fn add_fragment(&mut self, len: u64, weight: f64) {
+        self.total += weight;
+        if len < 100 {
+            self.ultra_short += weight;
+        } else if len < 150 {
+            self.core_short += weight;
+        } else if len < 260 {
+            self.mono_nucl += weight;
+        } else if len < 400 {
+            self.di_nucl += weight;
+        } else {
+            self.long += weight;
+        }
+    }
+    
+    fn merge(&mut self, other: &Self) {
+        self.ultra_short += other.ultra_short;
+        self.core_short += other.core_short;
+        self.mono_nucl += other.mono_nucl;
+        self.di_nucl += other.di_nucl;
+        self.long += other.long;
+        self.total += other.total;
+    }
+}
+
+/// Gene region from BED file
+#[derive(Debug, Clone)]
+struct GeneRegion {
+    chrom: String,
+    start: u64,
+    end: u64,
+    gene: String,
+    name: String,
+}
+
+/// Parse gene BED file: chrom, start, end, gene, [name]
+fn parse_gene_bed(path: &Path) -> Result<Vec<GeneRegion>> {
+    let reader = crate::bed::get_reader(path)?;
+    let mut regions = Vec::new();
+    
+    for line in reader.lines() {
+        let line = line?;
+        if line.starts_with('#') || line.trim().is_empty() {
+            continue;
+        }
+        
+        let fields: Vec<&str> = line.split('\t').collect();
+        if fields.len() < 4 {
+            continue;
+        }
+        
+        let chrom = fields[0].to_string();
+        let start: u64 = fields[1].parse().unwrap_or(0);
+        let end: u64 = fields[2].parse().unwrap_or(0);
+        let gene = fields[3].to_string();
+        let name = if fields.len() > 4 { fields[4].to_string() } else { gene.clone() };
+        
+        regions.push(GeneRegion { chrom, start, end, gene, name });
+    }
+    
+    log::info!("Parsed {} gene regions from {:?}", regions.len(), path);
+    Ok(regions)
+}
+
+/// Gene FSC Consumer for fragment aggregation
+#[derive(Clone)]
+pub struct GeneFscConsumer {
+    // Interval tree: ChromID -> (start, end) -> region_idx
+    trees: Arc<HashMap<u32, COITree<usize, u32>>>,
+    // All regions
+    regions: Arc<Vec<GeneRegion>>,
+    // GC correction factors
+    factors: Option<Arc<CorrectionFactors>>,
+    // Per-region counts (thread-local, merged after)
+    region_counts: Vec<GeneResult>,
+    // Total fragments for normalization
+    total_fragments: u64,
+}
+
+impl GeneFscConsumer {
+    pub fn new(
+        regions: Vec<GeneRegion>,
+        chrom_map: &mut ChromosomeMap,
+        factors: Option<Arc<CorrectionFactors>>,
+    ) -> Self {
+        let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
+        let mut region_counts = Vec::with_capacity(regions.len());
+        
+        for (i, region) in regions.iter().enumerate() {
+            region_counts.push(GeneResult {
+                gene: region.gene.clone(),
+                n_regions: 1,
+                total_bp: region.end - region.start,
+                ..Default::default()
+            });
+            // Normalize chromosome (strip chr prefix) consistent with engine.rs
+            let chrom_norm = region.chrom.trim_start_matches("chr");
+            let chrom_id = chrom_map.get_id(chrom_norm);
+            let start = region.start as i32;
+            let end = (region.end.saturating_sub(1)) as i32;
+            
+            nodes_by_chrom.entry(chrom_id).or_default().push(
+                IntervalNode::new(start, end, i)
+            );
+        }
+        
+        let mut trees = HashMap::new();
+        for (chrom_id, nodes) in nodes_by_chrom {
+            trees.insert(chrom_id, COITree::new(&nodes));
+        }
+        
+        log::info!("GeneFSC: Built trees for {} regions", regions.len());
+        
+        Self {
+            trees: Arc::new(trees),
+            regions: Arc::new(regions),
+            factors,
+            region_counts,
+            total_fragments: 0,
+        }
+    }
+    
+    /// Aggregate per-region counts to per-gene
+    fn aggregate_to_genes(&self) -> HashMap<String, GeneResult> {
+        let mut gene_results: HashMap<String, GeneResult> = HashMap::new();
+        
+        for (idx, region) in self.regions.iter().enumerate() {
+            let rc = &self.region_counts[idx];
+            
+            gene_results.entry(region.gene.clone())
+                .and_modify(|g| {
+                    g.n_regions += 1;
+                    g.total_bp += region.end - region.start;
+                    g.merge(rc);
+                })
+                .or_insert_with(|| GeneResult {
+                    gene: region.gene.clone(),
+                    n_regions: 1,
+                    total_bp: region.end - region.start,
+                    ultra_short: rc.ultra_short,
+                    core_short: rc.core_short,
+                    mono_nucl: rc.mono_nucl,
+                    di_nucl: rc.di_nucl,
+                    long: rc.long,
+                    total: rc.total,
+                });
+        }
+        
+        gene_results
+    }
+    
+    /// Write gene-level output to TSV
+    pub fn write_gene_output(&self, path: &Path) -> Result<()> {
+        let gene_results = self.aggregate_to_genes();
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        
+        // Header
+        writeln!(writer, "gene\tn_regions\ttotal_bp\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\ttotal\tultra_short_ratio\tcore_short_ratio\tmono_nucl_ratio\tdi_nucl_ratio\tlong_ratio\tnormalized_depth")?;
+        
+        // Sort by gene name
+        let mut genes: Vec<_> = gene_results.keys().collect();
+        genes.sort();
+        
+        for gene in genes {
+            let g = &gene_results[gene];
+            let total = g.total.max(1e-9);
+            
+            // Ratios
+            let us_r = g.ultra_short / total;
+            let cs_r = g.core_short / total;
+            let mn_r = g.mono_nucl / total;
+            let dn_r = g.di_nucl / total;
+            let lg_r = g.long / total;
+            
+            // Normalized depth (RPKM-like)
+            let total_frags = self.total_fragments.max(1) as f64;
+            let norm_depth = if g.total_bp > 0 && total_frags > 0.0 {
+                (g.total * 1e9) / (g.total_bp as f64 * total_frags)
+            } else {
+                0.0
+            };
+            
+            writeln!(writer, "{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
+                g.gene, g.n_regions, g.total_bp,
+                g.ultra_short, g.core_short, g.mono_nucl, g.di_nucl, g.long, g.total,
+                us_r, cs_r, mn_r, dn_r, lg_r, norm_depth
+            )?;
+        }
+        
+        log::info!("GeneFSC: Wrote {} genes to {:?}", gene_results.len(), path);
+        Ok(())
+    }
+    /// Write region-level (per-exon) output to TSV
+    pub fn write_region_output(&self, path: &Path) -> Result<()> {
+        let file = File::create(path)?;
+        let mut writer = BufWriter::new(file);
+        
+        // Header
+        writeln!(writer, "chrom\tstart\tend\tgene\tregion_name\tregion_bp\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\ttotal\tultra_short_ratio\tcore_short_ratio\tmono_nucl_ratio\tdi_nucl_ratio\tlong_ratio\tnormalized_depth")?;
+        
+        let total_frags = self.total_fragments.max(1) as f64;
+        
+        for (idx, region) in self.regions.iter().enumerate() {
+            let rc = &self.region_counts[idx];
+            let region_bp = region.end - region.start;
+            let total = rc.total.max(1e-9);
+            
+            // Ratios
+            let us_r = rc.ultra_short / total;
+            let cs_r = rc.core_short / total;
+            let mn_r = rc.mono_nucl / total;
+            let dn_r = rc.di_nucl / total;
+            let lg_r = rc.long / total;
+            
+            // Normalized depth (RPKM-like)
+            let norm_depth = if region_bp > 0 && total_frags > 0.0 {
+                (rc.total * 1e9) / (region_bp as f64 * total_frags)
+            } else {
+                0.0
+            };
+            
+            writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
+                region.chrom, region.start, region.end, region.gene, region.name, region_bp,
+                rc.ultra_short, rc.core_short, rc.mono_nucl, rc.di_nucl, rc.long, rc.total,
+                us_r, cs_r, mn_r, dn_r, lg_r, norm_depth
+            )?;
+        }
+        
+        log::info!("GeneFSC: Wrote {} regions to {:?}", self.regions.len(), path);
+        Ok(())
+    }
+}
+
+impl FragmentConsumer for GeneFscConsumer {
+    fn name(&self) -> &str {
+        "GeneFSC"
+    }
+    
+    fn consume(&mut self, fragment: &Fragment) {
+        // Filter by length (65-1000bp)
+        if fragment.length < 65 || fragment.length > 1000 {
+            return;
+        }
+        
+        self.total_fragments += 1;
+        
+        if let Some(tree) = self.trees.get(&fragment.chrom_id) {
+            // Use fragment midpoint for region assignment
+            let mid = ((fragment.start + fragment.end) / 2) as i32;
+            
+            // Query overlapping regions
+            tree.query(mid, mid, |node| {
+                let region_idx = node.metadata.to_owned();
+                
+                // Calculate GC weight
+                let gc_pct = (fragment.gc * 100.0).round() as u8;
+                let weight = self.factors.as_ref()
+                    .map(|f| f.get_factor(fragment.length, gc_pct))
+                    .unwrap_or(1.0);
+                
+                self.region_counts[region_idx].add_fragment(fragment.length, weight);
+            });
+        }
+    }
+    
+    fn merge(&mut self, other: Self) {
+        self.total_fragments += other.total_fragments;
+        for (i, rc) in other.region_counts.iter().enumerate() {
+            self.region_counts[i].merge(rc);
+        }
+    }
+}
+
+/// Aggregate fragment counts by gene from BED.gz file.
+/// 
+/// Reads fragments from BED.gz, assigns to gene regions, counts by size channel,
+/// applies GC correction if provided, and outputs gene-level or region-level FSC.
+/// 
+/// # Arguments
+/// * `bed_path` - Path to fragment BED.gz file
+/// * `gene_bed_path` - Path to gene regions BED (chrom, start, end, gene, [name])
+/// * `output_path` - Path to output TSV
+/// * `gc_factors_path` - Optional path to GC correction factors TSV
+/// * `aggregate_by` - "gene" for gene-level aggregation, "region" for per-exon output
+/// 
+/// # Returns
+/// Number of rows in output (genes or regions)
+#[pyfunction]
+#[pyo3(signature = (bed_path, gene_bed_path, output_path, gc_factors_path=None, aggregate_by="gene"))]
+pub fn aggregate_by_gene(
+    bed_path: PathBuf,
+    gene_bed_path: PathBuf,
+    output_path: PathBuf,
+    gc_factors_path: Option<PathBuf>,
+    aggregate_by: &str,
+) -> PyResult<usize> {
+    log::info!("GeneFSC: Starting {} aggregation - {:?}", aggregate_by, bed_path);
+    
+    // 1. Load gene regions
+    let gene_regions = parse_gene_bed(&gene_bed_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(
+            format!("Failed to parse gene BED: {}", e)
+        ))?;
+    
+    if gene_regions.is_empty() {
+        log::warn!("GeneFSC: No gene regions found");
+        return Ok(0);
+    }
+    
+    let n_regions = gene_regions.len();
+    
+    // 2. Load GC correction factors
+    let factors = if let Some(ref path) = gc_factors_path {
+        match CorrectionFactors::load_csv(path) {
+            Ok(f) => {
+                log::info!("GeneFSC: Loaded GC correction factors");
+                Some(Arc::new(f))
+            }
+            Err(e) => {
+                log::warn!("GeneFSC: Failed to load GC factors: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    
+    // 3. Create consumer and process
+    let mut chrom_map = ChromosomeMap::new();
+    let consumer = GeneFscConsumer::new(gene_regions, &mut chrom_map, factors);
+    
+    let engine = FragmentAnalyzer::new(consumer, 100_000);
+    let final_consumer = engine.process_file(&bed_path, &mut chrom_map, false)
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    
+    // 4. Write output based on aggregate_by mode
+    let output_count = if aggregate_by == "region" {
+        final_consumer.write_region_output(&output_path)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        n_regions
+    } else {
+        let gene_count = final_consumer.aggregate_to_genes().len();
+        final_consumer.write_gene_output(&output_path)
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        gene_count
+    };
+    
+    log::info!("GeneFSC: Complete - {} {}, {} fragments", 
+        output_count, aggregate_by, final_consumer.total_fragments);
+    
+    Ok(output_count)
+}

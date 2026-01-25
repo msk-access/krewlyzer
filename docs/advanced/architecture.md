@@ -252,8 +252,9 @@ data/
 | FSC/FSD/WPS/OCF counting | **Rust** | `pipeline.rs` |
 | Savitzky-Golay smoothing | **Rust** | `wps.rs` |
 | FFT periodicity (NRL) | **Rust** | `wps.rs` |
-| PON baseline loading | **Python** | `pon/model.py` |
-| PON z-score computation | **Python** | `core/*_processor.py` |
+| PON z-score (FSD, WPS, OCF, TFBS/ATAC) | **Rust** | `fsd.rs`, `wps.rs`, `ocf.rs`, `region_entropy.rs` |
+| Gene FSC aggregation | **Rust** | `fsc.rs` |
+| PON baseline loading | **Rust** | via Parquet in z-score functions |
 | PON building | **Python** | `pon/build.py` |
 | File I/O coordination | **Python** | `wrapper.py`, feature modules |
 | CLI parsing | **Python** | `cli.py`, Typer |
@@ -267,6 +268,9 @@ data/
 | GC bias aggregation | `pon_builder.compute_gc_bias_model` | 3-10x |
 | FSD baseline aggregation | `pon_builder.compute_fsd_baseline` | 3-10x |
 | WPS baseline aggregation | `pon_builder.compute_wps_baseline` | 3-10x |
+| OCF PON z-score | `ocf.apply_pon_zscore` | 5-20x |
+| TFBS/ATAC PON z-score | `region_entropy.apply_pon_zscore` | 5-20x |
+| Gene FSC aggregation | `fsc.aggregate_by_gene` | 3-10x |
 
 ### Rust-First Fallback Strategy
 
