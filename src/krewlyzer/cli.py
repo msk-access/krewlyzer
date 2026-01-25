@@ -46,22 +46,32 @@ def validate(
     ocr_file: Path = typer.Option(None, "--ocr-file", help="OCF regions BED file to validate"),
     gc_factors: Path = typer.Option(None, "--gc-factors", help="GC correction factors TSV to validate"),
     bin_file: Path = typer.Option(None, "--bin-file", help="Bin BED3 file to validate (chrom, start, end)"),
+    genome: str = typer.Option(None, "--genome", "-G", help="Validate ALL bundled assets for genome (hg19/hg38)"),
+    assay: str = typer.Option(None, "--assay", "-A", help="Also validate assay-specific bundled assets (requires --genome)"),
 ):
     """
     Validate asset file formats before running analysis.
     
-    Checks that user-provided override files match expected formats.
-    Bundled assets (from data/) are known-good and not validated here.
+    Use with file options to validate user-provided override files.
+    Use with --genome to validate bundled data assets.
     
     Examples:
         krewlyzer validate --gene-bed my_genes.bed
-        krewlyzer validate --arms-bed my_arms.bed --wps-anchors my_anchors.bed
+        krewlyzer validate --genome hg19
+        krewlyzer validate --genome hg19 --assay xs2
     """
     from krewlyzer.core.asset_validation import validate_file, FileSchema
     
     validated_count = 0
     
-    # Validate each provided file
+    # Validate bundled assets if --genome specified
+    if genome:
+        from krewlyzer.assets import AssetManager
+        assets = AssetManager(genome)
+        results = assets.validate(assay=assay)
+        validated_count += sum(1 for v in results.values() if v is True)
+    
+    # Validate each provided user file
     if gene_bed:
         validate_file(gene_bed, FileSchema.GENE_BED)
         validated_count += 1
@@ -85,7 +95,7 @@ def validate(
         validated_count += 1
     
     if validated_count == 0:
-        console.print("[yellow]No files specified. Use --help to see options.[/yellow]")
+        console.print("[yellow]No files specified. Use --genome or file options.[/yellow]")
         raise typer.Exit(1)
     
     console.print(f"[green]✓ All {validated_count} files validated successfully[/green]")

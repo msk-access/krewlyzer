@@ -243,6 +243,7 @@ krewlyzer fsd -i sample.bed.gz -o output/ \
 
 ## See Also
 
+- [Input File Formats](../advanced/input-formats.md#arms-bed) - Arms BED format for `--arms-file`
 - [GC Correction](../advanced/gc-correction.md) - LOESS algorithm details
 - [PON Models](../advanced/pon.md) - Building and using PON
 - [Citation](../citation.md) - DELFI paper references

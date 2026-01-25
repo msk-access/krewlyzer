@@ -60,6 +60,7 @@ nav:
     - Architecture: advanced/architecture.md
     - PON Models: advanced/pon.md
     - GC Correction: advanced/gc-correction.md
+    - Input File Formats: advanced/input-formats.md
     - Panel Mode: advanced/panel-mode.md
     - MSK-ACCESS Quickstart: advanced/msk-access-quickstart.md
     - Developer Guide: advanced/developer-guide.md

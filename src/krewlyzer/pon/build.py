@@ -41,6 +41,7 @@ def build_pon(
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
+    validate_assets: bool = typer.Option(False, "--validate-assets", help="Validate bundled asset file formats before running"),
 ):
     """
     Build a unified PON model from healthy plasma samples.
@@ -123,9 +124,12 @@ def build_pon(
     logger.info(f"Reference: {reference}")
     logger.info(f"Genome: {genome}")
     
-    # Use AssetManager for bundled data files
+    # Initialize AssetManager and optionally validate bundled assets
     from krewlyzer.assets import AssetManager
     assets = AssetManager(genome)
+    if validate_assets:
+        logger.info("Validating bundled assets (--validate-assets)...")
+        assets.validate(assay=assay)
     
     # Default bin file
     if bin_file is None:

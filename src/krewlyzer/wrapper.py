@@ -90,6 +90,7 @@ def run_all(
     
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
+    validate_assets: bool = typer.Option(False, "--validate-assets", help="Validate bundled asset file formats before running (recommended after updates)"),
 ):
     """
     Run all feature extraction tools for a single sample.
@@ -178,6 +179,11 @@ def run_all(
     # Initialize Asset Manager
     try:
         assets = AssetManager(genome)
+        
+        # Optionally validate bundled assets (for debugging after updates)
+        if validate_assets:
+            logger.info("Validating bundled assets (--validate-assets)...")
+            assets.validate(assay=resolved_assay)
         logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
     except ValueError as e:
         logger.error(str(e))

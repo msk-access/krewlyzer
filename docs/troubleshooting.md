@@ -146,6 +146,66 @@ If you see this warning, re-run with `--no-require-proper-pair`.
 
 ---
 
+## Asset Validation {#asset-validation}
+
+### Validating custom files before running
+
+If you're using custom override files (e.g., `--arms-file`, `--wps-anchors`), validate their format first:
+
+```bash
+# Validate specific files
+krewlyzer validate --gene-bed my_genes.bed
+krewlyzer validate --arms-bed my_arms.bed --wps-anchors my_anchors.bed
+```
+
+Validation checks column counts, data types, and format requirements. If a file fails validation, you'll see a detailed error with:
+- Expected format and columns
+- Line number of the first error
+- Example of correct format
+- Link to documentation
+
+See [Input File Formats](advanced/input-formats.md) for complete format specifications.
+
+### Validating bundled assets
+
+After updating krewlyzer or modifying data files, validate bundled assets:
+
+```bash
+# Validate all bundled assets for a genome
+krewlyzer validate --genome hg19
+
+# Also validate assay-specific assets
+krewlyzer validate --genome hg19 --assay xs2
+```
+
+### Validation during analysis
+
+For production pipelines, use `--validate-assets` to verify bundled files before each run:
+
+```bash
+# Recommended: validate once when setting up a new environment
+krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
+    --validate-assets
+
+# Or with build-pon
+krewlyzer build-pon samples.txt -a xs2 -r hg19.fa -o pon.parquet \
+    --validate-assets
+```
+
+> [!TIP]
+> Use `--validate-assets` after krewlyzer updates or when debugging unexpected errors.
+> For routine processing, validation overhead (~100ms) can be skipped.
+
+### Common format errors
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Expected at least N columns" | Missing columns | Ensure file is tab-delimited with all required columns |
+| "Invalid arm format" | Wrong arm name | Use patterns like `1p`, `1q`, `22p` (not `Arm1`) |
+| "Expected numeric" | Non-numeric coordinates | Check start/end columns are integers |
+
+---
+
 ## PON Model Issues {#pon}
 
 ### "Assay mismatch warning"

@@ -269,6 +269,7 @@ On-target fragments and panel OCR regions both focus on the same genomic space (
 
 ## See Also
 
+- [Input File Formats](../advanced/input-formats.md#region-bed) - Region BED format for `--ocr-input`
 - [PON Models](../advanced/pon.md) – Tissue baseline models
 - [Citation](../citation.md#ocf) – Sun et al. paper
 - [Troubleshooting](../troubleshooting.md) – hg38 issues

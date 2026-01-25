@@ -125,21 +125,65 @@ out/sample.features.json
 
 After implementation, output files follow this pattern:
 
+### Core Fragmentomics
+
 ```
 out/
-├── sample.FSD.tsv
-├── sample.FSD.ontarget.tsv      # Panel mode only
-├── sample.FSR.tsv
-├── sample.FSR.ontarget.tsv      # Panel mode only
-├── sample.FSC.tsv
-├── sample.WPS.parquet
-├── sample.EndMotif.tsv
-├── sample.MDS.tsv
-├── sample.OCF.tsv
-├── sample.mFSD.tsv              # With --variants
-├── sample.correction_factors.tsv
-├── sample.metadata.json
-└── sample.features.json         # With --generate-json
+├── sample.FSD.tsv                   # Fragment size distribution (arm-level)
+├── sample.FSD.ontarget.tsv          # Panel mode: on-target FSD
+├── sample.FSR.tsv                   # Fragment size ratio (short/long)
+├── sample.FSR.ontarget.tsv          # Panel mode: on-target FSR
+├── sample.FSC.tsv                   # Fragment size coverage (bin-level)
+├── sample.FSC.ontarget.tsv          # Panel mode: on-target FSC
+├── sample.FSC.gene.tsv              # Gene-level FSC (with --assay)
+├── sample.FSC.region.tsv            # Exon-level FSC (aggregate_by='region')
+└── sample.correction_factors.tsv    # GC correction factors
+```
+
+### WPS (Windowed Protection Score)
+
+```
+out/
+├── sample.WPS.parquet               # Per-region WPS profiles (foreground)
+├── sample.WPS.panel.parquet         # Panel-specific anchors (with --assay)
+└── sample.WPS_background.parquet    # Alu stacking profiles (background)
+```
+
+### Motif & Tissue-of-Origin
+
+```
+out/
+├── sample.EndMotif.tsv              # 4-mer end motif frequencies
+├── sample.MDS.tsv                   # Motif diversity score
+├── sample.OCF.tsv                   # Orientation-aware fragmentation
+├── sample.OCF.ontarget.tsv          # Panel mode: on-target OCF
+└── sample.OCF.sync.tsv              # OCF sync scores
+```
+
+### Region Entropy (TFBS/ATAC)
+
+```
+out/
+├── sample.TFBS.tsv                  # TF binding site entropy (808 factors)
+├── sample.TFBS.ontarget.tsv         # Panel mode: on-target TFBS
+├── sample.ATAC.tsv                  # ATAC-seq peak entropy (23 cancer types)
+└── sample.ATAC.ontarget.tsv         # Panel mode: on-target ATAC
+```
+
+### Methylation & Variant-Specific
+
+```
+out/
+├── sample.UXM.tsv                   # Fragment-level methylation (with --bisulfite-bam)
+└── sample.mFSD.tsv                  # Mutant fragment sizes (with --variants)
+```
+
+### Unified Output
+
+```
+out/
+├── sample.metadata.json             # Run metadata and QC metrics
+└── sample.features.json             # All features (with --generate-json)
 ```
 
 ## Migration Notes
@@ -152,4 +196,13 @@ The `correction_factors.csv` file is now `correction_factors.tsv` for consistenc
 - sample.correction_factors.csv
 + sample.correction_factors.tsv
 ```
+
+---
+
+## See Also
+
+- [Input File Formats](../advanced/input-formats.md) - Custom input file specifications (BED, arms, anchors)
+- [JSON Output](json-output.md) - Unified JSON schema for ML pipelines
+- [Troubleshooting](../troubleshooting.md) - Common format issues
+
 

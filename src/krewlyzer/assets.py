@@ -229,3 +229,71 @@ class AssetManager:
             logger.warning(f"Missing bundled asset for {description}: {path}")
             return False
         return True
+    
+    def validate(self, assay: Optional[str] = None) -> dict:
+        """
+        Validate bundled asset file formats.
+        
+        Validates that bundled data files match expected schemas.
+        Use this to catch issues if someone modifies the data files.
+        
+        Args:
+            assay: Optional assay code to also validate assay-specific assets
+            
+        Returns:
+            Dict mapping asset name to validation result (True/False)
+            
+        Raises:
+            ValueError: If any bundled file has invalid format (with details)
+        """
+        from .core.asset_validation import validate_file, FileSchema
+        
+        results = {}
+        
+        # Define asset-to-schema mapping for bundled files
+        genome_assets = [
+            ("arms", self.arms, FileSchema.ARMS_BED),
+            ("bins_100kb", self.bins_100kb, FileSchema.BED3),
+            ("wps_anchors", self.wps_anchors, FileSchema.WPS_ANCHORS),
+            ("wps_background", self.wps_background, FileSchema.WPS_ANCHORS),
+            ("ocf_regions", self.ocf_regions, FileSchema.REGION_BED),
+            ("tfbs_regions", self.tfbs_regions, FileSchema.REGION_BED),
+            ("atac_regions", self.atac_regions, FileSchema.REGION_BED),
+        ]
+        
+        logger.info(f"Validating bundled assets for genome: {self.genome_dir}")
+        
+        for name, path, schema in genome_assets:
+            if path.exists():
+                try:
+                    validate_file(path, schema)
+                    results[name] = True
+                except ValueError as e:
+                    logger.error(f"Bundled asset validation failed: {name}")
+                    raise ValueError(f"Bundled asset '{name}' has invalid format: {e}")
+            else:
+                results[name] = None  # Not available
+        
+        # Validate assay-specific assets if requested
+        if assay:
+            assay_assets = [
+                (f"gene_bed_{assay}", self.get_gene_bed(assay), FileSchema.GENE_BED),
+                (f"target_bed_{assay}", self.get_target_bed(assay), FileSchema.TARGETS_BED),
+            ]
+            
+            for name, path, schema in assay_assets:
+                try:
+                    if path and path.exists():
+                        validate_file(path, schema)
+                        results[name] = True
+                    else:
+                        results[name] = None
+                except Exception:
+                    results[name] = None
+        
+        passed = sum(1 for v in results.values() if v is True)
+        skipped = sum(1 for v in results.values() if v is None)
+        logger.info(f"Validation complete: {passed} passed, {skipped} not available")
+        
+        return results
+
