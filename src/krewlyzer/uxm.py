@@ -67,6 +67,12 @@ def uxm(
         logger.error(f"Input must be a .bam file: {bam_input}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if mark_input and mark_input.exists():
+        logger.debug(f"Validating user-provided marker file: {mark_input}")
+        validate_file(mark_input, FileSchema.BED3)
+    
     # Initialize Asset Manager
     try:
         assets = AssetManager(genome)

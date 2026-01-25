@@ -61,6 +61,15 @@ def fsd(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if arms_file and arms_file.exists():
+        logger.debug(f"Validating user-provided arms file: {arms_file}")
+        validate_file(arms_file, FileSchema.ARMS_BED)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
+    
     # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')

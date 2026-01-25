@@ -68,6 +68,18 @@ def wps(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if wps_anchors and wps_anchors.exists():
+        logger.debug(f"Validating user-provided WPS anchors: {wps_anchors}")
+        validate_file(wps_anchors, FileSchema.WPS_ANCHORS)
+    if background and background.exists():
+        logger.debug(f"Validating user-provided WPS background: {background}")
+        validate_file(background, FileSchema.WPS_ANCHORS)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
+    
     # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')

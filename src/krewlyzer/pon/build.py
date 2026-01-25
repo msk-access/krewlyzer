@@ -86,6 +86,18 @@ def build_pon(
         logger.error(f"Reference FASTA not found: {reference}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from krewlyzer.core.asset_validation import validate_file, FileSchema
+    if wps_anchors and wps_anchors.exists():
+        logger.debug(f"Validating user-provided WPS anchors: {wps_anchors}")
+        validate_file(wps_anchors, FileSchema.WPS_ANCHORS)
+    if bin_file and bin_file.exists():
+        logger.debug(f"Validating user-provided bin file: {bin_file}")
+        validate_file(bin_file, FileSchema.BED3)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
+    
     # Read sample list
     with open(sample_list) as f:
         samples = [Path(line.strip()) for line in f if line.strip() and not line.startswith("#")]

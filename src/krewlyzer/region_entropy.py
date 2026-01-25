@@ -65,6 +65,21 @@ def region_entropy(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if tfbs_regions and tfbs_regions.exists():
+        logger.debug(f"Validating user-provided TFBS regions: {tfbs_regions}")
+        validate_file(tfbs_regions, FileSchema.REGION_BED)
+    if atac_regions and atac_regions.exists():
+        logger.debug(f"Validating user-provided ATAC regions: {atac_regions}")
+        validate_file(atac_regions, FileSchema.REGION_BED)
+    if gc_factors and gc_factors.exists():
+        logger.debug(f"Validating user-provided GC factors: {gc_factors}")
+        validate_file(gc_factors, FileSchema.GC_FACTORS_TSV)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
+    
     # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')

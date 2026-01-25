@@ -138,6 +138,37 @@ def run_all(
         logger.error(f"Reference not found: {reference}")
         raise typer.Exit(1)
     
+    # ═══════════════════════════════════════════════════════════════════
+    # VALIDATE USER-PROVIDED OVERRIDE FILES
+    # ═══════════════════════════════════════════════════════════════════
+    # Validate format of any user-provided files before processing.
+    # Bundled assets (from data/) are NOT validated - they are known-good.
+    from .core.asset_validation import validate_file, FileSchema
+    
+    if resolved_arms_file and resolved_arms_file.exists():
+        logger.debug(f"Validating user-provided arms file: {resolved_arms_file}")
+        validate_file(resolved_arms_file, FileSchema.ARMS_BED)
+    
+    if bin_input and Path(bin_input).exists():
+        logger.debug(f"Validating user-provided bin file: {bin_input}")
+        validate_file(Path(bin_input), FileSchema.BED3)
+    
+    if resolved_ocr_file and resolved_ocr_file.exists():
+        logger.debug(f"Validating user-provided OCR file: {resolved_ocr_file}")
+        validate_file(resolved_ocr_file, FileSchema.REGION_BED)
+    
+    if wps_anchors and Path(wps_anchors).exists():
+        logger.debug(f"Validating user-provided WPS anchors: {wps_anchors}")
+        validate_file(Path(wps_anchors), FileSchema.WPS_ANCHORS)
+    
+    if wps_background and Path(wps_background).exists():
+        logger.debug(f"Validating user-provided WPS background: {wps_background}")
+        validate_file(Path(wps_background), FileSchema.WPS_ANCHORS)
+    
+    if resolved_target_regions and resolved_target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {resolved_target_regions}")
+        validate_file(resolved_target_regions, FileSchema.BED3)
+    
     # Derive sample name (use provided or derive from BAM filename)
     if sample_name is None:
         sample = bam_input.stem.replace('.bam', '')

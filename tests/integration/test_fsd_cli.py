@@ -34,7 +34,7 @@ def sample_bedgz(tmp_path):
 def sample_arms(tmp_path):
     """Create arms file for FSD."""
     arms = tmp_path / "arms.bed"
-    arms.write_text("chr1\t0\t10000\tArm1\n")
+    arms.write_text("chr1\t0\t10000\t1p\n")
     return arms
 
 

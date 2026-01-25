@@ -59,17 +59,17 @@ def create_dummy_data(temp_dir):
     # FSD Arms
     arms = temp_path / "arms.bed"
     with open(arms, "w") as f:
-        f.write("chr1\t0\t10000\tArm1\n")
+        f.write("chr1\t0\t10000\t1p\n")
 
     # OCF Regions
     ocr = temp_path / "ocr.bed"
     with open(ocr, "w") as f:
         f.write("chr1\t100\t200\tTissueA\n")
 
-    # WPS Genes (TranscriptAnno) - TSV
-    wps = temp_path / "wps.tsv"
+    # WPS anchors - BED6 format (chrom, start, end, name, score, strand)
+    wps = temp_path / "wps.bed"
     with open(wps, "w") as f:
-        f.write("Gene1\tchr1\t1000\t2000\t+\n")
+        f.write("chr1\t1000\t2000\tGene1_TSS\t0\t+\n")
         
     return bam, ref, out_dir, bins, arms, ocr, wps
     # The wrapper uses default path resolved relative to package.

@@ -66,6 +66,15 @@ def fsc(
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if bin_input and bin_input.exists():
+        logger.debug(f"Validating user-provided bin file: {bin_input}")
+        validate_file(bin_input, FileSchema.BED3)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
+    
     # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
