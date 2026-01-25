@@ -121,8 +121,9 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
-| `--maxlen` | | INT | 400 | Maximum fragment length |
+| `--maxlen` | | INT | 1000 | Maximum fragment length (extended FSD range) |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--skip-pon` | | FLAG | False | Skip PON z-score normalization |
 | `--no-tfbs` | | FLAG | False | Skip TFBS region entropy analysis |
 | `--no-atac` | | FLAG | False | Skip ATAC region entropy analysis |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
@@ -144,6 +145,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.WPS_background.parquet` | wps | Alu element stacking |
 | `{sample}.OCF.tsv` | ocf | Tissue-of-origin OCF |
 | `{sample}.mFSD.tsv` | mfsd | Mutant vs WT sizes (with -v) |
+| `{sample}.TFBS.tsv` | region_entropy | TFBS size entropy (808 TFs) |
+| `{sample}.ATAC.tsv` | region_entropy | ATAC size entropy (23 types) |
 | `{sample}.features.json` | run-all | Unified JSON (with --generate-json) |
 
 ---
@@ -200,6 +203,40 @@ nextflow run main.nf \
     --outdir results/
 ```
 
+### Workflow Architecture
+
+The pipeline uses a Nextflow-native parallel pattern:
+
+```
+BAM → EXTRACT → BED.gz
+              ↓
+    ┌───┬───┬───┼───┬───┬───────────┐
+    ↓   ↓   ↓   ↓   ↓   ↓           ↓
+  MOTIF FSC FSD WPS OCF REGION_ENTROPY
+         ↓
+        FSR
+
+Meth BAM → UXM         (parallel path)
+BAM + MAF → MFSD       (parallel path)
+```
+
+**Available Modules (13 total):**
+| Module | Description |
+|--------|-------------|
+| `KREWLYZER_EXTRACT` | Fragment extraction from BAM |
+| `KREWLYZER_FSC` | Fragment Size Coverage |
+| `KREWLYZER_FSR` | Fragment Size Ratio |
+| `KREWLYZER_FSD` | Fragment Size Distribution |
+| `KREWLYZER_WPS` | Windowed Protection Score |
+| `KREWLYZER_OCF` | Orientation cfDNA Fragmentation |
+| `KREWLYZER_MOTIF` | End Motif & MDS |
+| `KREWLYZER_REGION_ENTROPY` | TFBS/ATAC size entropy |
+| `KREWLYZER_UXM` | Methylation deconvolution |
+| `KREWLYZER_MFSD` | Mutant Fragment Size |
+| `KREWLYZER_RUNALL` | Full pipeline (single process) |
+| `KREWLYZER_BUILD_PON` | Build PON model |
+| `FILTER_MAF` | MAF filtering |
+
 ### Parameters
 
 | Parameter | Default | Description |
@@ -212,6 +249,10 @@ nextflow run main.nf \
 | `--genome` | `hg19` | Genome build |
 | `--pon_model` | | Global PON model (fallback) |
 | `--bait_padding` | `50` | Bait edge padding for WPS |
+| `--skip_pon` | `false` | Skip PON z-score normalization |
+| `--no_tfbs` | `false` | Disable TFBS region entropy |
+| `--no_atac` | `false` | Disable ATAC region entropy |
+| `--maxlen` | `1000` | Maximum fragment length (extended range) |
 | `--verbose` | `false` | Enable verbose logging |
 | `--threads` | `8` | Threads per process |
 

@@ -102,20 +102,30 @@ def test_run_all_unified():
                 bin_input=bins,
                 arms_file=arms,
                 ocr_file=ocr,
-                wps_file=wps,
+                wps_anchors=wps,  # Fixed: was wps_file
+                wps_background=None,
                 sample_name="test_sample",
                 mapq=20,
                 minlen=65,
-                maxlen=400,
+                maxlen=1000,  # Updated to match new default
                 skip_duplicates=True,
                 require_proper_pair=True,
                 threads=0,
                 exclude_regions=None,
+                target_regions=None,
+                assay=None,
                 bisulfite_bam=None,
                 variants=None,
+                duplex=False,
                 chromosomes=None,
-                debug=False,
+                bait_padding=50,
                 pon_model=None,
+                skip_pon=False,
+                no_tfbs=True,  # Skip for test speed
+                no_atac=True,  # Skip for test speed
+                output_format="auto",
+                generate_json=False,
+                debug=False,
             )
         except SystemExit as e:
             if e.code != 0:

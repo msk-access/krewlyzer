@@ -62,7 +62,7 @@ def test_wps_help():
     output = strip_ansi(result.output)
     assert result.exit_code == 0
     assert "windowed protection score" in output.lower() or "wps" in output.lower()
-    assert "--tsv-input" in output
+    assert "--wps-anchors" in output or "--bedgz-input" in output
     assert "--output" in output
 
 def test_ocf_help():
