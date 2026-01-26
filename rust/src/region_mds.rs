@@ -445,8 +445,8 @@ pub fn run_region_mds(
 
             // Find overlapping regions
             tree.query(frag_start, frag_end, |node| {
-                let region_idx = node.metadata;
-                result.stats[*region_idx].add_motif(motif_idx, 1.0);
+                let region_idx = node.metadata.to_owned();
+                result.stats[region_idx].add_motif(motif_idx, 1.0);
             });
         }
 
