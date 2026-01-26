@@ -115,7 +115,7 @@ class AssetManager:
         Get bundled gene BED file for a specific assay.
         
         Args:
-            assay: Assay code (xs1, xs2)
+            assay: Assay code (xs1, xs2, wgs)
             
         Returns:
             Path to gene BED file
@@ -127,6 +127,42 @@ class AssetManager:
         if not path.exists():
             raise FileNotFoundError(f"Gene BED not found for assay '{assay}': {path}")
         return path
+    
+    @property
+    def wgs_gene_bed(self) -> Path:
+        """
+        Get bundled WGS gene BED file (UCSC canonical exons).
+        Falls back to wgs.genes.bed.gz in the genes directory.
+        """
+        return self._get_path("genes", "wgs.genes.bed.gz")
+    
+    @property
+    def wgs_gene_bed_available(self) -> bool:
+        """Check if WGS gene BED is available for this genome."""
+        return self.wgs_gene_bed.exists()
+    
+    def get_gene_bed_for_mode(self, assay: str = None) -> Optional[Path]:
+        """
+        Get gene BED file for the appropriate mode (panel or WGS).
+        
+        Args:
+            assay: Optional assay code (xs1, xs2). If None, returns WGS gene BED.
+            
+        Returns:
+            Path to gene BED file, or None if not available
+        """
+        if assay:
+            try:
+                return self.get_gene_bed(assay)
+            except FileNotFoundError:
+                logger.warning(f"Gene BED not found for assay '{assay}'")
+                return None
+        else:
+            # WGS mode: use canonical exons
+            if self.wgs_gene_bed_available:
+                return self.wgs_gene_bed
+            logger.warning(f"WGS gene BED not available for {self.genome_dir}")
+            return None
     
     def get_target_bed(self, assay: str) -> Path:
         """

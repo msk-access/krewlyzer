@@ -496,6 +496,7 @@ pub struct GeneFscConsumer {
 }
 
 impl GeneFscConsumer {
+    #[allow(private_interfaces)]
     pub fn new(
         regions: Vec<GeneRegion>,
         chrom_map: &mut ChromosomeMap,

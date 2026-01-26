@@ -53,6 +53,9 @@ The `--skip-pon` flag:
 | **WPS Baseline** | WPS mean/std per transcript region | WPS |
 | **OCF Baseline** | Open chromatin scores per region | OCF |
 | **MDS Baseline** | k-mer frequencies and motif diversity | Motif |
+| **TFBS Baseline** | Per-TF entropy mean/std | Region Entropy |
+| **ATAC Baseline** | Per-cancer-type entropy mean/std | Region Entropy |
+| **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
 
 ## Panel Mode
 
@@ -89,12 +92,16 @@ When `--pon-model` is provided to `run-all`:
 
 With PON, additional columns are added to outputs:
 
-| Feature | PON Column | Description |
-|---------|------------|-------------|
+| Feature | PON Column(s) | Description |
+|---------|--------------|-------------|
 | FSC | `*_log2` | Log2 ratio vs PON expected |
 | FSD | `ratio_log2` | Size distribution log ratio |
 | WPS | `wps_zscore` | Z-score vs region baseline |
 | OCF | `ocf_zscore` | Z-score vs OCF baseline |
+| Motif | `mds_z` | Z-score for MDS |
+| TFBS | `entropy_z` | Z-score per TF |
+| ATAC | `entropy_z` | Z-score per cancer type |
+| Region MDS | `mds_z`, `mds_e1_z` | Gene-level and E1 z-scores |
 
 ## API Reference
 
@@ -155,6 +162,25 @@ Motif diversity expectations:
 - `kmer_std`: Variability per k-mer
 - `mds_mean/std`: Expected Motif Diversity Score
 
+### TFBS Baseline (`tfbs_baseline`)
+
+Per-TF size entropy:
+- `label_stats`: Mean/std entropy per TF (808 transcription factors)
+- Enables z-score per TF for detailed regulatory analysis
+
+### ATAC Baseline (`atac_baseline`)
+
+Per-cancer-type size entropy:
+- `label_stats`: Mean/std entropy per cancer type (23 types)
+- Enables tissue-of-origin scoring
+
+### Region MDS Baseline (`region_mds`)
+
+Per-gene MDS expectations:
+- `gene_baseline`: Dict of gene → {mds_mean, mds_std, mds_e1_mean, mds_e1_std}
+- Enables gene-level anomaly detection
+- E1 (first exon) tracked separately for promoter-proximal sensitivity
+
 ---
 
 ## Interpreting Z-Scores
@@ -183,6 +209,9 @@ $$
 | **WPS** | `wps_nuc_z` | Stronger nucleosome signal | Disrupted nucleosomes |
 | **OCF** | `ocf_z` | More open chromatin | Less accessible |
 | **MDS** | `mds_z` | More diverse motifs | Less diverse |
+| **TFBS** | `entropy_z` | Higher entropy (diverse sizes) | Lower entropy (restricted) |
+| **ATAC** | `entropy_z` | Higher entropy | Lower entropy |
+| **Region MDS** | `mds_z`, `mds_e1_z` | More diverse at gene | Restricted motifs (aberrant) |
 
 ### ML Feature Usage
 

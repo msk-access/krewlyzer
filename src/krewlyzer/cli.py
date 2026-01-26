@@ -33,6 +33,7 @@ from krewlyzer.region_entropy import region_entropy
 from krewlyzer.wrapper import run_all
 from krewlyzer.pon.build import build_pon
 from krewlyzer.build_gc_reference import build_gc_reference
+from krewlyzer.tools.region_mds import region_mds
 from krewlyzer import __version__
 
 # -------------------------------------------------------------------
@@ -110,6 +111,7 @@ app.command()(ocf)
 app.command()(uxm)
 app.command()(mfsd)
 app.command(name="region-entropy")(region_entropy)
+app.command(name="region-mds")(region_mds)
 app.command()(run_all)
 app.command(name="build-pon")(build_pon)
 app.command(name="build-gc-reference")(build_gc_reference)

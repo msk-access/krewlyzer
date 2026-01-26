@@ -383,6 +383,82 @@ class MdsBaseline:
 
 
 @dataclass
+class RegionMdsBaseline:
+    """
+    Per-Gene Region MDS baseline from healthy plasma samples.
+    
+    Stores expected MDS scores per gene/target for z-score normalization.
+    Based on Helzer et al. (2025) methodology.
+    
+    Fields:
+        gene_baseline: Dict mapping gene -> {mds_mean, mds_std, mds_e1_mean, mds_e1_std, n_samples}
+    """
+    # Per-gene baseline: gene -> {mds_mean, mds_std, mds_e1_mean, mds_e1_std, n_samples}
+    gene_baseline: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    
+    def get_stats(self, gene: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a gene's MDS score.
+        
+        Args:
+            gene: Gene symbol
+            
+        Returns:
+            Tuple (mds_mean, mds_std) or None if not found
+        """
+        if gene in self.gene_baseline:
+            data = self.gene_baseline[gene]
+            return (data.get("mds_mean", 0.0), data.get("mds_std", 1.0))
+        return None
+    
+    def get_e1_stats(self, gene: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a gene's E1 (first exon) MDS score.
+        
+        Args:
+            gene: Gene symbol
+            
+        Returns:
+            Tuple (mds_e1_mean, mds_e1_std) or None if not found
+        """
+        if gene in self.gene_baseline:
+            data = self.gene_baseline[gene]
+            return (data.get("mds_e1_mean", 0.0), data.get("mds_e1_std", 1.0))
+        return None
+    
+    def compute_zscore(self, gene: str, observed_mds: float) -> Optional[float]:
+        """
+        Compute z-score for observed MDS value.
+        
+        Args:
+            gene: Gene symbol
+            observed_mds: Observed MDS value
+            
+        Returns:
+            Z-score or None if gene not in baseline
+        """
+        stats = self.get_stats(gene)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_mds - mean) / std
+        return 0.0
+    
+    def compute_e1_zscore(self, gene: str, observed_mds_e1: float) -> Optional[float]:
+        """
+        Compute z-score for observed E1 MDS value.
+        """
+        stats = self.get_e1_stats(gene)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_mds_e1 - mean) / std
+        return 0.0
+
+
+@dataclass
 class TfbsBaseline:
     """
     TFBS (Transcription Factor Binding Site) size entropy baseline.
@@ -463,6 +539,7 @@ class PonModel:
     mds_baseline: Optional[MdsBaseline] = None
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
     atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
+    region_mds: Optional[RegionMdsBaseline] = None  # Per-gene MDS baseline
     
     # On-target baselines (panel mode only)
     gc_bias_ontarget: Optional[GcBiasModel] = None
