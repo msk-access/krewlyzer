@@ -12,18 +12,19 @@
 | Interval tree lookups | |
 | Fragment counting/aggregation | |
 
-## Key Rust Modules
-
 | Module | Purpose |
 |--------|---------|
 | `extract_motif.rs` | BAM parsing, fragment extraction |
+| `motif_utils.rs` | Shared 4-mer encoding, MDS calculation, GC content |
+| `region_mds.rs` | Per-region MDS at exon/gene level |
+| `region_entropy.rs` | TFBS/ATAC entropy + PON z-score |
 | `pipeline.rs` | Single-pass FSC/FSD/WPS/OCF |
 | `gc_correction.rs` | LOESS GC bias correction |
+| `gc_reference.rs` | Pre-computed GC reference generation |
 | `fsc.rs` | Fragment size coverage + gene aggregation |
 | `fsd.rs` | Size distribution + PON log-ratio |
 | `wps.rs` | Windowed protection score + PON z-score |
 | `ocf.rs` | Orientation-aware fragmentation + PON z-score |
-| `region_entropy.rs` | TFBS/ATAC entropy + PON z-score |
 
 ## PON Z-Score Pattern
 

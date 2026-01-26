@@ -50,14 +50,17 @@ lib.rs
 ### Key Rust Modules
 
 | Module | Lines | Purpose |
-|--------|------:|---------|
-| `wps.rs` | 2000+ | Dual-stream WPS, FFT, smoothing |
+|--------|------:|---------|\n| `wps.rs` | 2000+ | Dual-stream WPS, FFT, smoothing |
 | `gc_correction.rs` | 590 | LOESS GC bias correction |
 | `gc_reference.rs` | 658 | Asset generation (once per genome) |
 | `fsc.rs` | 500+ | 5-bin fragment counting |
 | `fsd.rs` | 600+ | Per-arm size distribution |
 | `pipeline.rs` | 400+ | Unified pipeline coordination |
 | `extract_motif.rs` | 1200+ | BAM reading, motif extraction |
+| `motif_utils.rs` | 176 | Shared 4-mer encoding, MDS, GC utils |
+| `region_mds.rs` | 800+ | Per-gene MDS at exon boundaries |
+| `region_entropy.rs` | 600+ | TFBS/ATAC size entropy |
+
 
 ### Unified Pipeline
 

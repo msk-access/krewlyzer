@@ -20,11 +20,14 @@ flowchart TB
         ocf[ocf.py]
         mfsd[mfsd.py]
         uxm[uxm.py]
+        region_mds[tools/region_mds.py]
     end
     
     subgraph Rust["Rust Core (_core)"]
         lib[lib.rs]
         extract_motif[extract_motif.rs]
+        motif_utils[motif_utils.rs]
+        region_mds_rs[region_mds.rs]
         pipeline[pipeline.rs]
         gc[gc_correction.rs]
         pon[pon_model.rs]
@@ -48,6 +51,8 @@ The performance-critical functions are implemented in Rust and exposed to Python
 |--------|------|---------|
 | `lib.rs` | 4KB | PyO3 module definition, thread config |
 | `extract_motif.rs` | 17KB | BAM parsing, fragment extraction, motif counting |
+| `motif_utils.rs` | 4KB | Shared 4-mer encoding and MDS calculation |
+| `region_mds.rs` | 18KB | Per-region MDS analysis (Helzer et al.) |
 | `pipeline.rs` | 10KB | Unified FSC/FSD/WPS/OCF pipeline |
 | `fsc.rs` | 11KB | Fragment size coverage by bins |
 | `fsd.rs` | 7KB | Size distribution per arm |
@@ -57,6 +62,35 @@ The performance-critical functions are implemented in Rust and exposed to Python
 | `gc_correction.rs` | 20KB | LOESS-based GC bias correction |
 | `pon_model.rs` | 7KB | PON model loading and hybrid correction |
 | `gc_reference.rs` | 20KB | Pre-computed GC reference generation |
+
+### Shared Utilities: `motif_utils.rs`
+
+The `motif_utils.rs` module provides shared DNA sequence manipulation functions used across multiple feature modules:
+
+| Function | Signature | Description |
+|----------|-----------|-------------|
+| `reverse_complement` | `fn(seq: &[u8]) -> Vec<u8>` | Reverses and complements DNA sequence (A↔T, G↔C) |
+| `kmer4_to_index` | `fn(kmer: &[u8]) -> Option<usize>` | Converts 4-mer to index 0-255 using 2-bit encoding |
+| `calculate_mds` | `fn(counts: &[u64; 256]) -> f64` | Shannon entropy of 4-mer histogram, normalized to [0,1] |
+| `calculate_gc` | `fn(seq: &[u8]) -> f64` | GC content as fraction of valid ACGT bases |
+
+**Used by:**
+- `extract_motif.rs` - Global MDS calculation from BAM
+- `region_mds.rs` - Per-gene MDS at exon boundaries
+
+**Example usage (Rust):**
+```rust
+use crate::motif_utils::{kmer4_to_index, calculate_mds};
+
+// Count 4-mers
+let mut counts = [0u64; 256];
+if let Some(idx) = kmer4_to_index(b"ACGT") {
+    counts[idx] += 1;
+}
+
+// Calculate MDS
+let mds = calculate_mds(&counts);  // Range: 0.0 (uniform) to 1.0 (max diversity)
+```
 
 ### Key Functions Exposed
 
