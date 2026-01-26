@@ -11,7 +11,8 @@ use std::time::Duration;
 use log::{info, debug};
 use noodles::bgzf;
 
-// Config struct moved to avoid duplication
+// Use shared utilities to avoid code duplication
+use crate::motif_utils::{reverse_complement, calculate_gc};
 
 struct Chunk {
     tid: u32,
@@ -77,30 +78,7 @@ fn overlaps_exclude(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String
     false
 }
 
-/// Calculate GC content
-fn calculate_gc(seq: &[u8]) -> f64 {
-    let mut gc = 0;
-    let mut valid = 0;
-    for &b in seq {
-        match b {
-            b'G' | b'g' | b'C' | b'c' => { gc += 1; valid += 1; },
-            b'A' | b'a' | b'T' | b't' => { valid += 1; },
-            _ => {}
-        }
-    }
-    if valid == 0 { 0.0 } else { gc as f64 / valid as f64 }
-}
-
-/// Reverse complement
-fn reverse_complement(seq: &[u8]) -> Vec<u8> {
-    seq.iter().rev().map(|b| match b {
-        b'A' => b'T', b'a' => b'T',
-        b'T' => b'A', b't' => b'A',
-        b'G' => b'C', b'g' => b'C',
-        b'C' => b'G', b'c' => b'G',
-        x => *x,
-    }).collect()
-}
+// NOTE: reverse_complement and calculate_gc moved to motif_utils.rs
 
 #[derive(Clone)]
 pub struct UnifiedConfig {

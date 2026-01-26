@@ -13,6 +13,7 @@ include { KREWLYZER_FSD } from './modules/local/krewlyzer/fsd/main'
 include { KREWLYZER_MOTIF } from './modules/local/krewlyzer/motif/main'
 include { KREWLYZER_MFSD } from './modules/local/krewlyzer/mfsd/main'
 include { KREWLYZER_REGION_ENTROPY } from './modules/local/krewlyzer/region_entropy/main'
+include { KREWLYZER_REGION_MDS } from './modules/local/krewlyzer/region_mds/main'
 include { FILTER_MAF } from './modules/local/krewlyzer/filter_maf/main'
 
 // Function to auto-detect index
@@ -50,6 +51,10 @@ workflow {
          --no_tfbs         Disable TFBS entropy analysis
          --no_atac         Disable ATAC entropy analysis
          --skip_pon        Skip PON z-score normalization
+         
+         Region MDS (Per-Gene Motif Diversity):
+         Enabled automatically when 'assay' column in samplesheet is set (XS1, XS2, WGS).
+         Uses bundled gene BED files for each assay.
          
          Assay Codes (samplesheet 'assay' column):
          XS1               MSK-ACCESS v1 (128 genes)
@@ -251,6 +256,17 @@ workflow {
         file(params.ref),
         ch_bed_pon_targets.map { it[2] },  // pon
         ch_bed_pon_targets.map { it[3] }   // targets
+    )
+
+    // REGION_MDS - Per-gene/exon Motif Diversity Score (BAM-based, needs assay)
+    ch_bam_for_mds = ch_extract.map { meta, bam, bai, pon, targets -> 
+        [ meta, bam, bai, pon ?: [], meta.assay ?: '' ] 
+    }
+    KREWLYZER_REGION_MDS(
+        ch_bam_for_mds.map { meta, bam, bai, pon, assay -> [ meta, bam, bai ] },
+        file(params.ref),
+        ch_bam_for_mds.map { it[3] },  // pon
+        ch_bam_for_mds.map { it[4] }   // assay
     )
 
     // =====================================================

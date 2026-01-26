@@ -397,3 +397,124 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
     
     Ok(result.into())
 }
+
+/// Compute Region MDS baseline from sample TSV files.
+/// 
+/// Reads MDS.gene.tsv files, aggregates per-gene MDS values across samples,
+/// computes mean and std for each gene.
+/// 
+/// # Arguments
+/// * `mds_paths` - List of paths to MDS.gene.tsv files
+/// 
+/// # Returns
+/// * Dict mapping gene -> {mds_mean, mds_std, mds_e1_mean, mds_e1_std, n_samples}
+/// 
+/// # Performance
+/// Optimized for aggregating MDS across hundreds of samples
+#[pyfunction]
+pub fn compute_region_mds_baseline(py: Python<'_>, mds_paths: Vec<String>) -> PyResult<PyObject> {
+    use std::fs::File;
+    use std::io::{BufRead, BufReader};
+    
+    info!("PON Builder: Computing Region MDS baseline from {} samples", mds_paths.len());
+    
+    // Aggregation: gene -> (mds_values, mds_e1_values)
+    let mut gene_mds: HashMap<String, Vec<f64>> = HashMap::new();
+    let mut gene_mds_e1: HashMap<String, Vec<f64>> = HashMap::new();
+    
+    for path in &mds_paths {
+        let file = match File::open(path) {
+            Ok(f) => f,
+            Err(e) => {
+                info!("PON Builder: Skipping {}: {}", path, e);
+                continue;
+            }
+        };
+        let reader = BufReader::new(file);
+        let mut lines = reader.lines();
+        
+        // Parse header to find column indices
+        let header_line = match lines.next() {
+            Some(Ok(line)) => line,
+            _ => continue,
+        };
+        let headers: Vec<&str> = header_line.split('\t').collect();
+        
+        // Find column indices
+        let gene_idx = headers.iter().position(|&h| h == "gene").unwrap_or(0);
+        let mds_mean_idx = headers.iter().position(|&h| h == "mds_mean");
+        let mds_e1_idx = headers.iter().position(|&h| h == "mds_e1");
+        
+        // Process data rows
+        for line_result in lines {
+            let line = match line_result {
+                Ok(l) => l,
+                Err(_) => continue,
+            };
+            
+            let fields: Vec<&str> = line.split('\t').collect();
+            if fields.is_empty() {
+                continue;
+            }
+            
+            let gene = fields.get(gene_idx).unwrap_or(&"").to_string();
+            if gene.is_empty() {
+                continue;
+            }
+            
+            // mds_mean
+            if let Some(idx) = mds_mean_idx {
+                if let Some(val_str) = fields.get(idx) {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        if !val.is_nan() && val > 0.0 {
+                            gene_mds.entry(gene.clone()).or_insert_with(Vec::new).push(val);
+                        }
+                    }
+                }
+            }
+            
+            // mds_e1
+            if let Some(idx) = mds_e1_idx {
+                if let Some(val_str) = fields.get(idx) {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        if !val.is_nan() && val > 0.0 {
+                            gene_mds_e1.entry(gene).or_insert_with(Vec::new).push(val);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Compute mean and std per gene
+    let result = PyDict::new(py);
+    
+    for (gene, mds_values) in &gene_mds {
+        let gene_dict = PyDict::new(py);
+        
+        // MDS mean stats
+        let mds_mean = mds_values.iter().sum::<f64>() / mds_values.len().max(1) as f64;
+        let mds_std = std_dev(mds_values);
+        gene_dict.set_item("mds_mean", mds_mean)?;
+        gene_dict.set_item("mds_std", mds_std)?;
+        
+        // MDS E1 stats
+        if let Some(e1_values) = gene_mds_e1.get(gene) {
+            let e1_mean = e1_values.iter().sum::<f64>() / e1_values.len().max(1) as f64;
+            let e1_std = std_dev(e1_values);
+            gene_dict.set_item("mds_e1_mean", e1_mean)?;
+            gene_dict.set_item("mds_e1_std", e1_std)?;
+        } else {
+            gene_dict.set_item("mds_e1_mean", mds_mean)?;
+            gene_dict.set_item("mds_e1_std", mds_std)?;
+        }
+        
+        gene_dict.set_item("n_samples", mds_values.len())?;
+        
+        result.set_item(gene, gene_dict)?;
+    }
+    
+    info!("PON Builder: Region MDS baseline computed: {} genes", gene_mds.len());
+    
+    Ok(result.into())
+}

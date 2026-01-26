@@ -147,6 +147,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.mFSD.tsv` | mfsd | Mutant vs WT sizes (with -v) |
 | `{sample}.TFBS.tsv` | region_entropy | TFBS size entropy (808 TFs) |
 | `{sample}.ATAC.tsv` | region_entropy | ATAC size entropy (23 types) |
+| `{sample}.MDS.exon.tsv` | region_mds | Per-exon MDS (with --assay) |
+| `{sample}.MDS.gene.tsv` | region_mds | Gene-level MDS (with --assay) |
 | `{sample}.features.json` | run-all | Unified JSON (with --generate-json) |
 
 ---
@@ -210,9 +212,9 @@ The pipeline uses a Nextflow-native parallel pattern:
 ```
 BAM → EXTRACT → BED.gz
               ↓
-    ┌───┬───┬───┼───┬───┬───────────┐
-    ↓   ↓   ↓   ↓   ↓   ↓           ↓
-  MOTIF FSC FSD WPS OCF REGION_ENTROPY
+    ┌───┬───┬───┼───┬───┬───────────┬────────────┐
+    ↓   ↓   ↓   ↓   ↓   ↓           ↓            ↓
+  MOTIF FSC FSD WPS OCF REGION_ENTROPY      REGION_MDS
          ↓
         FSR
 
@@ -220,7 +222,7 @@ Meth BAM → UXM         (parallel path)
 BAM + MAF → MFSD       (parallel path)
 ```
 
-**Available Modules (13 total):**
+**Available Modules (14 total):**
 | Module | Description |
 |--------|-------------|
 | `KREWLYZER_EXTRACT` | Fragment extraction from BAM |
@@ -231,6 +233,7 @@ BAM + MAF → MFSD       (parallel path)
 | `KREWLYZER_OCF` | Orientation cfDNA Fragmentation |
 | `KREWLYZER_MOTIF` | End Motif & MDS |
 | `KREWLYZER_REGION_ENTROPY` | TFBS/ATAC size entropy |
+| `KREWLYZER_REGION_MDS` | Per-gene/exon Motif Diversity |
 | `KREWLYZER_UXM` | Methylation deconvolution |
 | `KREWLYZER_MFSD` | Mutant Fragment Size |
 | `KREWLYZER_RUNALL` | Full pipeline (single process) |

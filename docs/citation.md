@@ -151,6 +151,37 @@ From Helzer et al.: "Shannon entropy was calculated on the frequency of the frag
 
 **GitHub Data:** [Zhao-Lab-UW-DHO/fragmentomics_metrics](https://github.com/Zhao-Lab-UW-DHO/fragmentomics_metrics/)
 
+---
+
+### Region MDS — Per-Gene Motif Diversity Score {#region-mds}
+
+> **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). [DOI](https://doi.org/10.1038/s41467-025-64153-z)
+
+**Key Concept:** Region MDS applies Motif Diversity Score (Shannon entropy of 4-mer end motifs) at the gene/exon level rather than globally, enabling detection of localized aberrant fragmentation patterns.
+
+**Methodology:**
+- Calculate MDS independently for each exon/target region
+- Identify E1 (first exon) of each gene by genomic position
+- Aggregate to gene-level statistics (mean, E1, std)
+
+**Key Findings (from Helzer et al.):**
+- Per-region fragmentomics metrics work effectively on commercial panels
+- E1 (first exon) closest to promoter shows most pronounced cancer-associated changes
+- MDS changes correlate with aberrant gene regulation in cancer
+
+**Interpretation:**
+| MDS Value | Meaning |
+|-----------|---------|
+| Higher (~7.5-8.0) | Diverse motif usage (healthy) |
+| Lower (~6.0-7.0) | Restricted motifs (potentially aberrant) |
+
+**Clinical Application:**
+- Detect genes with aberrant fragmentation patterns
+- Z-score normalization against PON enables per-gene anomaly detection
+- E1 focus for promoter-proximal signal
+
+---
+
 ## Acknowledgements
 
 Krewlyzer was developed by **Ronak Shah** at Memorial Sloan Kettering Cancer Center.

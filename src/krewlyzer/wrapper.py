@@ -553,6 +553,40 @@ def run_all(
                 logger.warning(f"mFSD failed: {e}")
     
     # ═══════════════════════════════════════════════════════════════════
+    # REGION MDS (Per-exon/target Motif Diversity Score)
+    # Only runs when assay is specified (implies gene annotations available)
+    # ═══════════════════════════════════════════════════════════════════
+    if resolved_assay:
+        try:
+            from .tools.region_mds import region_mds as _region_mds
+            
+            # Resolve gene BED for the assay
+            gene_bed = assets.get_gene_bed_for_mode(resolved_assay)
+            if gene_bed and gene_bed.exists():
+                logger.info(f"Running region-MDS for assay '{resolved_assay}'...")
+                n_regions, n_genes = _region_mds(
+                    bam_input=bam_input,
+                    reference=reference,
+                    output=output,
+                    gene_bed=gene_bed,
+                    genome=genome,
+                    assay=resolved_assay,
+                    e1_only=False,
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=400,  # Use standard cfDNA range for motifs
+                    silent=not debug,
+                )
+                logger.info(f"Region-MDS complete: {n_regions} regions, {n_genes} genes")
+            else:
+                logger.debug(f"Skipping region-MDS: gene BED not available for assay '{resolved_assay}'")
+        except Exception as e:
+            logger.warning(f"Region-MDS failed: {e}")
+            if debug:
+                import traceback
+                traceback.print_exc()
+    
+    # ═══════════════════════════════════════════════════════════════════
     # UNIFIED JSON OUTPUT (if requested)
     # ═══════════════════════════════════════════════════════════════════
     if generate_json:

@@ -496,6 +496,36 @@ class FeatureSerializer:
             serializer.features["gc_factors"] = gc_data
         
         # =====================================================================
+        # Region MDS - Per-Exon/Target Motif Diversity Score (Helzer et al.)
+        # =====================================================================
+        mds_exon_path = output_dir / f"{sample_id}.MDS.exon.tsv"
+        mds_gene_path = output_dir / f"{sample_id}.MDS.gene.tsv"
+        
+        if mds_exon_path.exists() or mds_gene_path.exists():
+            region_mds_data = {}
+            
+            if mds_exon_path.exists():
+                exon_df = pd.read_csv(mds_exon_path, sep="\t")
+                region_mds_data["exon"] = exon_df.to_dict(orient="records")
+                region_mds_data["n_exons"] = len(exon_df)
+                
+                # Summary statistics
+                if "mds" in exon_df.columns:
+                    region_mds_data["mds_exon_mean"] = float(exon_df["mds"].mean())
+                    region_mds_data["mds_exon_std"] = float(exon_df["mds"].std())
+            
+            if mds_gene_path.exists():
+                gene_df = pd.read_csv(mds_gene_path, sep="\t")
+                region_mds_data["gene"] = gene_df.to_dict(orient="records")
+                region_mds_data["n_genes"] = len(gene_df)
+                
+                # E1 summary
+                if "mds_e1" in gene_df.columns:
+                    region_mds_data["mds_e1_mean"] = float(gene_df["mds_e1"].mean())
+            
+            serializer.features["region_mds"] = region_mds_data
+        
+        # =====================================================================
         # Metadata
         # =====================================================================
         meta_path = output_dir / f"{sample_id}.metadata.json"

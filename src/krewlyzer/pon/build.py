@@ -628,6 +628,62 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
     )
 
 
+def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaseline":
+    """
+    Compute Region MDS baseline from sample MDS.gene.tsv files.
+    
+    Uses Rust implementation for high performance.
+    Aggregates per-gene MDS values across all samples.
+    
+    Args:
+        mds_gene_paths: List of paths to MDS.gene.tsv files
+        
+    Returns:
+        RegionMdsBaseline with per-gene mean/std MDS values
+        
+    Raises:
+        RuntimeError: If computation fails
+    """
+    from .model import RegionMdsBaseline
+    
+    if not mds_gene_paths:
+        return None
+    
+    # Filter to existing paths
+    valid_paths = [p for p in mds_gene_paths if Path(p).exists()]
+    if not valid_paths:
+        logger.warning("No valid MDS.gene.tsv files found for region-MDS baseline")
+        return None
+    
+    logger.info(f"Computing region-MDS baseline from {len(valid_paths)} samples...")
+    
+    try:
+        # Use Rust-accelerated aggregation
+        result = _core.pon_builder.compute_region_mds_baseline(valid_paths)
+        
+        if not result:
+            logger.warning("Region-MDS baseline computation returned empty result")
+            return None
+        
+        # Convert to RegionMdsBaseline
+        gene_baseline = {}
+        for gene, data in result.items():
+            gene_baseline[gene] = {
+                "mds_mean": data.get("mds_mean", 0.0),
+                "mds_std": data.get("mds_std", 1.0),
+                "mds_e1_mean": data.get("mds_e1_mean", 0.0),
+                "mds_e1_std": data.get("mds_e1_std", 1.0),
+                "n_samples": data.get("n_samples", 0),
+            }
+        
+        logger.info(f"Region-MDS baseline: {len(gene_baseline)} genes")
+        
+        return RegionMdsBaseline(gene_baseline=gene_baseline)
+        
+    except Exception as e:
+        logger.error(f"Region-MDS baseline computation failed: {e}")
+        raise RuntimeError(f"Region-MDS baseline computation failed: {e}")
+
 def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
     """
     Compute TFBS entropy baseline from sample data.

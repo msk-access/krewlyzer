@@ -38,6 +38,8 @@ pub mod pon_model;
 pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
 pub mod region_entropy;  // TFBS/ATAC size entropy
+pub mod motif_utils;     // Shared motif/sequence utilities
+pub mod region_mds;      // Per-region MDS (Helzer et al.)
 
 /// Read filtering configuration
 #[pyclass]
@@ -140,6 +142,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_gc_bias_model, &pon_builder_mod)?)?;
     pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_fsd_baseline, &pon_builder_mod)?)?;
     pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_wps_baseline, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_region_mds_baseline, &pon_builder_mod)?)?;
     m.add_submodule(&pon_builder_mod)?;
     
     // Region Entropy submodule (TFBS/ATAC size entropy)
@@ -147,6 +150,11 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::run_region_entropy, &region_entropy_mod)?)?;
     region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::apply_pon_zscore, &region_entropy_mod)?)?;
     m.add_submodule(&region_entropy_mod)?;
+    
+    // Region MDS submodule (per-region motif diversity, Helzer et al.)
+    let region_mds_mod = PyModule::new(m.py(), "region_mds")?;
+    region_mds_mod.add_function(wrap_pyfunction!(region_mds::run_region_mds, &region_mds_mod)?)?;
+    m.add_submodule(&region_mds_mod)?;
     
     // Version
     #[pyfn(m)]

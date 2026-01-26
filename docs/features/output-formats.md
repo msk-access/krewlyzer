@@ -111,6 +111,7 @@ out/sample.features.json
 | **WPS** | ✅ | - | Always |
 | **mFSD** | ✅ | - | `--variants` |
 | **UXM** | ✅ | - | `--bisulfite-bam` |
+| **Region MDS** | ✅ | - | `--assay` |
 
 ## Smart Defaults
 
