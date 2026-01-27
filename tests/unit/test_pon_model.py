@@ -78,6 +78,102 @@ class TestWpsBaseline:
         assert sample_wps_v1.get_baseline_vector('gene1') is None
 
 
+class TestWpsBaselineV2:
+    """Tests for WpsBaseline v2.0 vector format."""
+    
+    @pytest.fixture
+    def sample_wps_v2(self):
+        """Create v2.0 baseline with 200-element vectors."""
+        # Create simple 200-element vectors for testing
+        mean_vec = [float(i) for i in range(200)]  # 0, 1, 2, ..., 199
+        std_vec = [0.1] * 200  # Constant std for easy z-score calculation
+        
+        df = pd.DataFrame({
+            'region_id': ['gene1', 'gene2'],
+            'wps_nuc_mean': [mean_vec, [x + 10 for x in mean_vec]],
+            'wps_nuc_std': [std_vec, std_vec],
+            'wps_tf_mean': [[x * 0.5 for x in mean_vec], [x * 0.5 for x in mean_vec]],
+            'wps_tf_std': [std_vec, std_vec],
+            'n_samples': [5, 5]
+        })
+        return WpsBaseline(regions=df, schema_version='2.0')
+    
+    def test_schema_version(self, sample_wps_v2):
+        """Test schema_version is correctly set."""
+        assert sample_wps_v2.schema_version == '2.0'
+    
+    def test_get_baseline_vector(self, sample_wps_v2):
+        """Test get_baseline_vector returns 200-element array."""
+        vec = sample_wps_v2.get_baseline_vector('gene1', 'wps_nuc')
+        assert vec is not None
+        assert len(vec) == 200
+        assert vec[0] == 0.0
+        assert vec[100] == 100.0
+    
+    def test_get_std_vector(self, sample_wps_v2):
+        """Test get_std_vector returns 200-element array."""
+        std = sample_wps_v2.get_std_vector('gene1', 'wps_nuc')
+        assert std is not None
+        assert len(std) == 200
+        assert all(s == 0.1 for s in std)
+    
+    def test_get_baseline_vector_missing(self, sample_wps_v2):
+        """Test get_baseline_vector returns None for missing region."""
+        vec = sample_wps_v2.get_baseline_vector('unknown', 'wps_nuc')
+        assert vec is None
+    
+    def test_compute_z_vector(self, sample_wps_v2):
+        """Test compute_z_vector returns position-wise z-scores."""
+        # Sample vector with +1 offset from mean
+        sample = np.array([float(i) + 1 for i in range(200)])  # 1, 2, 3, ..., 200
+        z_vec = sample_wps_v2.compute_z_vector('gene1', sample, 'wps_nuc')
+        
+        assert z_vec is not None
+        assert len(z_vec) == 200
+        # z = (sample - mean) / std = 1 / 0.1 = 10 for all positions
+        assert all(pytest.approx(z, abs=0.01) == 10.0 for z in z_vec)
+    
+    def test_compute_z_vector_missing(self, sample_wps_v2):
+        """Test compute_z_vector returns None for missing region."""
+        sample = np.array([1.0] * 200)
+        z_vec = sample_wps_v2.compute_z_vector('unknown', sample, 'wps_nuc')
+        assert z_vec is None
+    
+    def test_compute_shape_score_perfect(self, sample_wps_v2):
+        """Test compute_shape_score returns 1.0 for identical shape."""
+        # Use exact same shape as PON mean (should have correlation = 1.0)
+        sample = np.array([float(i) for i in range(200)])
+        score = sample_wps_v2.compute_shape_score('gene1', sample, 'wps_nuc')
+        
+        assert score is not None
+        assert pytest.approx(score, abs=0.01) == 1.0
+    
+    def test_compute_shape_score_offset(self, sample_wps_v2):
+        """Test compute_shape_score ~1.0 for offset but same shape."""
+        # Offset doesn't affect correlation - still same shape
+        sample = np.array([float(i) + 100 for i in range(200)])
+        score = sample_wps_v2.compute_shape_score('gene1', sample, 'wps_nuc')
+        
+        assert score is not None
+        # Correlation should still be very high (same trend, just shifted)
+        assert pytest.approx(score, abs=0.01) == 1.0
+    
+    def test_compute_shape_score_inverted(self, sample_wps_v2):
+        """Test compute_shape_score returns -1.0 for inverted shape."""
+        # Inverted shape (negatively correlated)
+        sample = np.array([float(199 - i) for i in range(200)])
+        score = sample_wps_v2.compute_shape_score('gene1', sample, 'wps_nuc')
+        
+        assert score is not None
+        assert pytest.approx(score, abs=0.01) == -1.0
+    
+    def test_compute_shape_score_missing(self, sample_wps_v2):
+        """Test compute_shape_score returns None for missing region."""
+        sample = np.array([1.0] * 200)
+        score = sample_wps_v2.compute_shape_score('unknown', sample, 'wps_nuc')
+        assert score is None
+
+
 class TestOcfBaseline:
     """Tests for OcfBaseline class."""
     

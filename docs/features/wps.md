@@ -289,6 +289,24 @@ Per-region profiles centered on TSS/CTCF anchors (±1kb, 200 bins × 10bp).
 > - Genes on `-` strand are **reversed** so they are also 5' → 3'
 > - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
 
+#### PON-Normalized Columns (v2.0)
+
+When using a v2.0 vector PON, these additional columns are computed:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `z_vector` | float32[200] | Position-wise z-scores vs healthy baseline |
+| `shape_score` | float32 | Pearson correlation with healthy shape [-1, 1] |
+| `z_amplitude` | float32 | Mean of abs(z_vector) for backward compat |
+
+> [!TIP]
+> **Shape Score Interpretation:**
+> - **0.9-1.0**: Healthy nucleosome positioning
+> - **0.5-0.9**: Mild chromatin disorganization
+> - **<0.5**: Significant disruption (cancer signal)
+
+See [PON v2.0](../advanced/pon.md#wps-baseline-wps_baseline) for baseline details.
+
 ### Background: `sample.WPS_background.parquet`
 
 Hierarchical stacking of ~770K Alu elements into 29 groups.

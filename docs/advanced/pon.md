@@ -148,10 +148,28 @@ Size distribution per chromosome arm (46 arms):
 
 ### WPS Baseline (`wps_baseline`)
 
-Per-region nucleosome metrics:
-- `wps_long_mean/std`: Nucleosomal WPS baseline
-- `wps_short_mean/std`: TF footprint baseline
-- Schema v2.0: Full 200-bin vectors for position-specific z-scores
+Per-region nucleosome positioning metrics.
+
+**Schema v1.0 (Scalar):**
+- `wps_long_mean/std`: Single nucleosomal WPS value per region
+- `wps_short_mean/std`: Single TF footprint value per region
+
+**Schema v2.0 (Vector):**
+- `wps_nuc_mean/std`: 200-element vector (nucleosomal footprint)
+- `wps_tf_mean/std`: 200-element vector (TF footprint)
+
+> [!TIP]
+> v2.0 enables position-specific z-scores and **Shape Correlation Score** for cancer detection.
+
+#### Shape Score Interpretation
+
+| Score | Interpretation |
+|-------|---------------|
+| 0.9-1.0 | Healthy nucleosome positioning |
+| 0.5-0.9 | Mild chromatin disorganization |
+| <0.5 | Significant disruption (cancer signal) |
+
+See [WPS Features](../features/wps.md) for output column details.
 
 ### OCF Baseline (`ocf_baseline`)
 

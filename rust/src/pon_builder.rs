@@ -278,31 +278,93 @@ pub fn compute_fsd_baseline(py: Python<'_>, fsd_paths: Vec<String>) -> PyResult<
     Ok(result.into())
 }
 
-/// Compute WPS baseline from sample parquet files.
+/// Extract 200-element WPS vector from a ListArray column.
+/// Returns None if the column is not a List type or extraction fails.
+fn extract_wps_vector(col: &dyn arrow::array::Array, row: usize) -> Option<Vec<f32>> {
+    use arrow::array::{Float32Array, ListArray, Array};
+    
+    if let Some(list_arr) = col.as_any().downcast_ref::<ListArray>() {
+        if row < list_arr.len() && !list_arr.is_null(row) {
+            let inner = list_arr.value(row);
+            if let Some(f32_arr) = inner.as_any().downcast_ref::<Float32Array>() {
+                // Extract all values from the list
+                let vec: Vec<f32> = (0..f32_arr.len())
+                    .map(|i| if f32_arr.is_null(i) { 0.0 } else { f32_arr.value(i) })
+                    .collect();
+                return Some(vec);
+            }
+        }
+    }
+    None
+}
+
+/// Compute element-wise mean of multiple vectors.
+/// All vectors must have the same length.
+fn element_wise_mean(vectors: &[Vec<f32>]) -> Vec<f32> {
+    if vectors.is_empty() {
+        return Vec::new();
+    }
+    let len = vectors[0].len();
+    let n = vectors.len() as f32;
+    
+    (0..len)
+        .map(|i| {
+            let sum: f32 = vectors.iter().map(|v| v.get(i).copied().unwrap_or(0.0)).sum();
+            sum / n
+        })
+        .collect()
+}
+
+/// Compute element-wise standard deviation of multiple vectors.
+fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
+    if vectors.len() < 2 || means.is_empty() {
+        return means.iter().map(|_| 0.1_f32).collect();
+    }
+    let n = vectors.len() as f32;
+    
+    means.iter().enumerate()
+        .map(|(i, &mean)| {
+            let variance: f32 = vectors.iter()
+                .map(|v| {
+                    let val = v.get(i).copied().unwrap_or(0.0);
+                    (val - mean).powi(2)
+                })
+                .sum::<f32>() / (n - 1.0);
+            variance.sqrt().max(0.01) // Minimum std to avoid divide by zero
+        })
+        .collect()
+}
+
+/// Compute WPS baseline from sample parquet files (Vector v2.0 format).
 /// 
-/// Reads WPS parquet files, aggregates wps_nuc and wps_tf vectors per region,
-/// computes mean and std vectors across all samples.
+/// Reads WPS parquet files, aggregates wps_nuc and wps_tf 200-bin vectors per region,
+/// computes element-wise mean and std vectors across all samples.
 /// 
 /// # Arguments
 /// * `wps_paths` - List of paths to WPS.parquet files
 /// 
 /// # Returns
-/// * Dict mapping region_id -> {wps_nuc_mean, wps_nuc_std, wps_tf_mean, wps_tf_std}
+/// * Dict mapping region_id -> {wps_nuc_mean: [200], wps_nuc_std: [200], wps_tf_mean: [200], wps_tf_std: [200]}
+/// 
+/// # Schema
+/// v2.0 vector format enables position-specific z-score computation and shape correlation analysis.
 /// 
 /// # Performance
 /// 3-10x faster than Python pandas concat + groupby
 #[pyfunction]
 pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<PyObject> {
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-    use arrow::array::{StringArray, Float64Array, Array};
+    use arrow::array::{StringArray, Array};
     use std::fs::File;
     
-    info!("PON Builder: Computing WPS baseline from {} samples", wps_paths.len());
+    info!("PON Builder: Computing WPS vector baseline from {} samples", wps_paths.len());
     
-    // Aggregation: region_id -> (nuc_sums, tf_sums, count)
-    // For simplicity, we aggregate mean values rather than full vectors
-    let mut region_nuc: HashMap<String, Vec<f64>> = HashMap::new();
-    let mut region_tf: HashMap<String, Vec<f64>> = HashMap::new();
+    // Aggregation: region_id -> list of 200-element vectors
+    let mut region_nuc_vectors: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
+    let mut region_tf_vectors: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
+    
+    let mut files_processed = 0;
+    let mut regions_found = 0;
     
     for path in &wps_paths {
         let file = match File::open(path) {
@@ -316,10 +378,18 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
         let reader = match ParquetRecordBatchReaderBuilder::try_new(file) {
             Ok(builder) => match builder.build() {
                 Ok(r) => r,
-                Err(_) => continue,
+                Err(e) => {
+                    info!("PON Builder: Failed to read parquet {}: {}", path, e);
+                    continue;
+                }
             },
-            Err(_) => continue,
+            Err(e) => {
+                info!("PON Builder: Failed to open parquet {}: {}", path, e);
+                continue;
+            }
         };
+        
+        files_processed += 1;
         
         for batch_result in reader {
             let batch = match batch_result {
@@ -328,9 +398,13 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
             };
             
             let schema = batch.schema();
-            let region_idx = schema.index_of("region_id").or_else(|_| schema.index_of("group_id")).ok();
-            let nuc_idx = schema.index_of("wps_nuc_mean").or_else(|_| schema.index_of("wps_nuc")).ok();
-            let tf_idx = schema.index_of("wps_tf_mean").or_else(|_| schema.index_of("wps_tf")).ok();
+            
+            // Find required columns
+            let region_idx = schema.index_of("region_id")
+                .or_else(|_| schema.index_of("group_id"))
+                .ok();
+            let nuc_idx = schema.index_of("wps_nuc").ok();
+            let tf_idx = schema.index_of("wps_tf").ok();
             
             if region_idx.is_none() {
                 continue;
@@ -347,53 +421,63 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
             
             for i in 0..region_array.len() {
                 let region_id = region_array.value(i).to_string();
+                regions_found += 1;
                 
-                // Get wps_nuc value
+                // Extract wps_nuc vector (expecting List<Float32>[200])
                 if let Some(idx) = nuc_idx {
-                    if let Some(arr) = batch.column(idx).as_any().downcast_ref::<Float64Array>() {
-                        let val = arr.value(i);
-                        region_nuc.entry(region_id.clone()).or_insert_with(Vec::new).push(val);
+                    if let Some(vec) = extract_wps_vector(batch.column(idx).as_ref(), i) {
+                        region_nuc_vectors.entry(region_id.clone())
+                            .or_insert_with(Vec::new)
+                            .push(vec);
                     }
                 }
                 
-                // Get wps_tf value
+                // Extract wps_tf vector
                 if let Some(idx) = tf_idx {
-                    if let Some(arr) = batch.column(idx).as_any().downcast_ref::<Float64Array>() {
-                        let val = arr.value(i);
-                        region_tf.entry(region_id).or_insert_with(Vec::new).push(val);
+                    if let Some(vec) = extract_wps_vector(batch.column(idx).as_ref(), i) {
+                        region_tf_vectors.entry(region_id)
+                            .or_insert_with(Vec::new)
+                            .push(vec);
                     }
                 }
             }
         }
     }
     
-    // Compute mean and std per region
+    info!("PON Builder: Processed {} files, found {} region entries", files_processed, regions_found);
+    info!("PON Builder: Unique regions: {} nuc, {} tf", region_nuc_vectors.len(), region_tf_vectors.len());
+    
+    // Compute element-wise mean and std per region
     let result = PyDict::new(py);
     
-    for (region_id, nuc_values) in &region_nuc {
+    for (region_id, nuc_vectors) in &region_nuc_vectors {
         let region_dict = PyDict::new(py);
         
-        // WPS-Nuc stats
-        let nuc_mean = nuc_values.iter().sum::<f64>() / nuc_values.len().max(1) as f64;
-        let nuc_std = std_dev(nuc_values);
-        region_dict.set_item("wps_long_mean", nuc_mean)?;
-        region_dict.set_item("wps_long_std", nuc_std)?;
+        // Compute WPS-Nuc mean/std vectors
+        let nuc_mean = element_wise_mean(nuc_vectors);
+        let nuc_std = element_wise_std(nuc_vectors, &nuc_mean);
+        region_dict.set_item("wps_nuc_mean", nuc_mean.iter().map(|&x| x as f64).collect::<Vec<f64>>())?;
+        region_dict.set_item("wps_nuc_std", nuc_std.iter().map(|&x| x as f64).collect::<Vec<f64>>())?;
         
-        // WPS-TF stats
-        if let Some(tf_values) = region_tf.get(region_id) {
-            let tf_mean = tf_values.iter().sum::<f64>() / tf_values.len().max(1) as f64;
-            let tf_std = std_dev(tf_values);
-            region_dict.set_item("wps_short_mean", tf_mean)?;
-            region_dict.set_item("wps_short_std", tf_std)?;
+        // Compute WPS-TF mean/std vectors
+        if let Some(tf_vectors) = region_tf_vectors.get(region_id) {
+            let tf_mean = element_wise_mean(tf_vectors);
+            let tf_std = element_wise_std(tf_vectors, &tf_mean);
+            region_dict.set_item("wps_tf_mean", tf_mean.iter().map(|&x| x as f64).collect::<Vec<f64>>())?;
+            region_dict.set_item("wps_tf_std", tf_std.iter().map(|&x| x as f64).collect::<Vec<f64>>())?;
         } else {
-            region_dict.set_item("wps_short_mean", 0.0)?;
-            region_dict.set_item("wps_short_std", 1.0)?;
+            // Empty vectors if no TF data
+            region_dict.set_item("wps_tf_mean", Vec::<f64>::new())?;
+            region_dict.set_item("wps_tf_std", Vec::<f64>::new())?;
         }
+        
+        // Add sample count for diagnostics
+        region_dict.set_item("n_samples", nuc_vectors.len())?;
         
         result.set_item(region_id, region_dict)?;
     }
     
-    info!("PON Builder: WPS baseline computed: {} regions", region_nuc.len());
+    info!("PON Builder: WPS vector baseline computed: {} regions", region_nuc_vectors.len());
     
     Ok(result.into())
 }

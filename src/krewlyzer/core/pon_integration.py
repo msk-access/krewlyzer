@@ -158,7 +158,7 @@ def compute_wps_zscore(
     pon
 ) -> Optional[float]:
     """
-    Compute WPS z-score for a single gene entry.
+    Compute WPS z-score for a single gene entry (v1.0 scalar format).
     
     Args:
         value: The observed WPS value
@@ -180,6 +180,74 @@ def compute_wps_zscore(
         return (value - mean) / std
     else:
         return 0.0
+
+
+def compute_wps_z_vector(
+    sample_vector,
+    region_id: str,
+    pon,
+    column: str = "wps_nuc"
+):
+    """
+    Compute 200-element position-wise z-score vector (v2.0 format).
+    
+    Args:
+        sample_vector: 200-element sample WPS vector (numpy array or list)
+        region_id: Region identifier
+        pon: Loaded PonModel with wps_baseline (v2.0)
+        column: Vector column prefix ('wps_nuc' or 'wps_tf')
+        
+    Returns:
+        200-element numpy array of z-scores or None if not computable
+    """
+    import numpy as np
+    
+    if pon is None or pon.wps_baseline is None:
+        return None
+    
+    if pon.wps_baseline.schema_version != "2.0":
+        logger.warning("compute_wps_z_vector requires v2.0 PON (vector format)")
+        return None
+    
+    return pon.wps_baseline.compute_z_vector(region_id, np.asarray(sample_vector), column)
+
+
+def compute_wps_shape_score(
+    sample_vector,
+    region_id: str,
+    pon,
+    column: str = "wps_nuc"
+) -> Optional[float]:
+    """
+    Compute shape correlation score for cancer detection (v2.0 format).
+    
+    Returns Pearson correlation between sample WPS vector and PON mean shape.
+    Healthy samples show correlation ~1.0, cancer samples show lower values.
+    
+    Args:
+        sample_vector: 200-element sample WPS vector
+        region_id: Region identifier
+        pon: Loaded PonModel with wps_baseline (v2.0)
+        column: Vector column prefix ('wps_nuc' or 'wps_tf')
+        
+    Returns:
+        Correlation coefficient [-1, 1] or None if not computable
+        
+    Clinical interpretation:
+        - 0.9-1.0: Healthy nucleosome positioning
+        - 0.5-0.9: Mild chromatin disorganization
+        - <0.5: Significant disruption (cancer signal)
+    """
+    import numpy as np
+    
+    if pon is None or pon.wps_baseline is None:
+        return None
+    
+    if pon.wps_baseline.schema_version != "2.0":
+        logger.warning("compute_wps_shape_score requires v2.0 PON (vector format)")
+        return None
+    
+    return pon.wps_baseline.compute_shape_score(region_id, np.asarray(sample_vector), column)
 
 
 def compute_tfbs_zscore(

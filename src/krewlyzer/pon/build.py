@@ -256,7 +256,7 @@ def build_pon(
                     sample_name=sample_name,
                     reference=reference,
                     params=sample_params,
-                    target_regions=target_regions if is_panel_mode else None,
+                    target_regions=resolved_target_path if is_panel_mode else None,
                     enable_fsc=True,
                     enable_fsr=False,  # Not needed for PON
                     enable_fsd=True,
@@ -319,7 +319,7 @@ def build_pon(
         
         all_gc_data = []
         all_fsd_data = []
-        all_wps_data = []
+
         all_ocf_data = []
         all_mds_data = []
         all_tfbs_data = []
@@ -378,22 +378,9 @@ def build_pon(
                 except Exception as e:
                     logger.debug(f"  Could not read on-target FSD for {sample_name}: {e}")
             
-            # Collect WPS data
+            # Collect WPS paths for Rust v2.0 vector baseline
             if feat and feat.wps and feat.wps.exists():
-                wps_paths.append(str(feat.wps))  # Collect path for Rust baseline
-                try:
-                    wps_df = pd.read_parquet(feat.wps)
-                    # Aggregate by region for baseline
-                    if 'gene_id' in wps_df.columns:
-                        region_stats = wps_df.groupby('gene_id').agg({
-                            'wps_long': 'mean',
-                            'wps_short': 'mean'
-                        }).reset_index()
-                        all_wps_data.append(region_stats)
-                    elif 'region_id' in wps_df.columns:
-                        all_wps_data.append(wps_df)
-                except Exception as e:
-                    logger.debug(f"  Could not read WPS for {sample_name}: {e}")
+                wps_paths.append(str(feat.wps))
             
             # Collect OCF data
             if feat and feat.ocf and feat.ocf.exists():
@@ -459,7 +446,7 @@ def build_pon(
         
         logger.info(f"  GC samples: {len(all_gc_data)}")
         logger.info(f"  FSD samples: {len(all_fsd_data)}")
-        logger.info(f"  WPS samples: {len(all_wps_data)}")
+        logger.info(f"  WPS sample parquets: {len(wps_paths)}")
         logger.info(f"  OCF samples: {len(all_ocf_data)}")
         logger.info(f"  MDS samples: {len(all_mds_data)}")
         logger.info(f"  TFBS samples: {len(all_tfbs_data)}")
@@ -497,7 +484,7 @@ def build_pon(
     
     # Build WPS baseline
     logger.info("  Computing WPS baseline...")
-    wps_baseline = _compute_wps_baseline(all_wps_data, wps_paths)
+    wps_baseline = _compute_wps_baseline(wps_paths)
     
     # Build OCF baseline
     ocf_baseline = None
@@ -580,7 +567,7 @@ def build_pon(
         n_samples=len(all_gc_data),
         reference=reference.name.replace(".fa", "").replace(".fasta", ""),
         panel_mode=is_panel_mode,
-        target_regions_file=target_regions.name if is_panel_mode else "",
+        target_regions_file=resolved_target_path.name if is_panel_mode else "",
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
@@ -737,19 +724,18 @@ def _compute_fsd_baseline(all_fsd_data: List[pd.DataFrame], fsd_paths: List[str]
     return FsdBaseline(size_bins=size_bins, arms=arms)
 
 
-def _compute_wps_baseline(all_wps_data: List[pd.DataFrame], wps_paths: List[str] = None) -> Optional[WpsBaseline]:
+def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
     """
-    Compute WPS baseline from Parquet vector format.
+    Compute WPS baseline from Parquet vector format (v2.0).
     
     Uses Rust implementation for high performance.
-    For each region, computes mean and std vectors across all samples.
+    For each region, computes element-wise mean and std vectors across all samples.
     
     Args:
-        all_wps_data: List of WPS DataFrames (unused, kept for API compat)
         wps_paths: List of paths to WPS Parquet files
         
     Returns:
-        WpsBaseline or None if no data
+        WpsBaseline with 200-element vectors or None if no data
         
     Raises:
         RuntimeError: If computation fails
@@ -760,24 +746,27 @@ def _compute_wps_baseline(all_wps_data: List[pd.DataFrame], wps_paths: List[str]
     
     from krewlyzer import _core
     
+    logger.info(f"Computing WPS vector baseline from {len(wps_paths)} samples")
     result = _core.pon_builder.compute_wps_baseline(wps_paths)
+    
     if not result:
         raise RuntimeError("WPS baseline computation failed: no data returned from Rust")
     
-    logger.info(f"WPS baseline computed: {len(result)} regions")
+    logger.info(f"WPS vector baseline computed: {len(result)} regions")
     
-    # Convert to DataFrame for WpsBaseline
+    # Convert to DataFrame for WpsBaseline (v2.0 vector format)
     rows = []
     for region_id, data in result.items():
         rows.append({
             "region_id": region_id,
-            "wps_nuc_mean": data.get("wps_long_mean", 0.0),
-            "wps_nuc_std": data.get("wps_long_std", 1.0),
-            "wps_tf_mean": data.get("wps_short_mean", 0.0),
-            "wps_tf_std": data.get("wps_short_std", 1.0),
+            "wps_nuc_mean": data.get("wps_nuc_mean", []),  # 200-element vector
+            "wps_nuc_std": data.get("wps_nuc_std", []),    # 200-element vector
+            "wps_tf_mean": data.get("wps_tf_mean", []),    # 200-element vector
+            "wps_tf_std": data.get("wps_tf_std", []),      # 200-element vector
+            "n_samples": data.get("n_samples", 0),
         })
     
-    return WpsBaseline(regions=pd.DataFrame(rows))
+    return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0")
 
 
 def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":

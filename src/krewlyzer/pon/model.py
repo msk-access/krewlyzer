@@ -211,6 +211,46 @@ class WpsBaseline:
         # Avoid division by zero
         std_safe = np.where(std > 0, std, 1.0)
         return (sample_vector - mean) / std_safe
+    
+    def compute_shape_score(self, region_id: str, sample_vector: np.ndarray,
+                             column: str = "wps_nuc") -> Optional[float]:
+        """
+        Compute shape correlation score for sample vs PoN (v2.0 format).
+        
+        Returns Pearson correlation coefficient between sample vector and PON mean.
+        Used for cancer detection - healthy samples have correlation ~1.0.
+        
+        Args:
+            region_id: Region identifier
+            sample_vector: 200-element sample WPS vector
+            column: Vector column prefix ('wps_nuc' or 'wps_tf')
+            
+        Returns:
+            Correlation coefficient [-1, 1] or None if baseline not found
+            
+        Clinical interpretation:
+            - 0.9-1.0: Healthy nucleosome positioning
+            - 0.5-0.9: Mild chromatin disorganization
+            - <0.5: Significant disruption (cancer signal)
+        """
+        mean = self.get_baseline_vector(region_id, column)
+        if mean is None or len(mean) == 0:
+            return None
+        
+        if len(sample_vector) != len(mean):
+            return None
+        
+        # Compute Pearson correlation
+        # Handle edge cases where std is 0
+        sample_std = np.std(sample_vector)
+        mean_std = np.std(mean)
+        
+        if sample_std < 1e-6 or mean_std < 1e-6:
+            # If either is constant, correlation is undefined
+            return 0.0
+        
+        correlation = np.corrcoef(sample_vector, mean)[0, 1]
+        return float(correlation) if not np.isnan(correlation) else 0.0
 
 
 @dataclass
@@ -730,21 +770,33 @@ class PonModel:
             size_bins = sorted(fsd_df["size_bin"].unique().tolist())
             fsd_baseline = FsdBaseline(size_bins=size_bins, arms=arms_dict)
         
-        # Parse WPS baseline (new format: wps_nuc_*, wps_tf_*)
+        # Parse WPS baseline - detect v2.0 vector or v1.0 scalar format
         wps_baseline = None
         if not wps_df.empty:
             if "wps_nuc_mean" in wps_df.columns:
-                # Standard columns: wps_nuc_mean/std, wps_tf_mean/std
-                regions_df = wps_df[["region_id", "wps_nuc_mean", "wps_nuc_std", 
-                                    "wps_tf_mean", "wps_tf_std"]].copy()
-                # Rename to WpsBaseline expected format
-                regions_df = regions_df.rename(columns={
-                    "wps_nuc_mean": "wps_long_mean",
-                    "wps_nuc_std": "wps_long_std",
-                    "wps_tf_mean": "wps_short_mean",
-                    "wps_tf_std": "wps_short_std",
-                })
-                wps_baseline = WpsBaseline(regions=regions_df)
+                # Check if it's vector format (list columns) or scalar format
+                first_val = wps_df["wps_nuc_mean"].iloc[0] if len(wps_df) > 0 else None
+                is_vector = isinstance(first_val, (list, np.ndarray)) if first_val is not None else False
+                
+                if is_vector:
+                    # v2.0 vector format - keep original column names
+                    cols = ["region_id", "wps_nuc_mean", "wps_nuc_std", "wps_tf_mean", "wps_tf_std"]
+                    if "n_samples" in wps_df.columns:
+                        cols.append("n_samples")
+                    regions_df = wps_df[cols].copy()
+                    wps_baseline = WpsBaseline(regions=regions_df, schema_version="2.0")
+                    logger.info(f"Loaded WPS baseline v2.0 (vector format): {len(regions_df)} regions")
+                else:
+                    # v1.0 scalar format - rename to legacy column names
+                    regions_df = wps_df[["region_id", "wps_nuc_mean", "wps_nuc_std", 
+                                        "wps_tf_mean", "wps_tf_std"]].copy()
+                    regions_df = regions_df.rename(columns={
+                        "wps_nuc_mean": "wps_long_mean",
+                        "wps_nuc_std": "wps_long_std",
+                        "wps_tf_mean": "wps_short_mean",
+                        "wps_tf_std": "wps_short_std",
+                    })
+                    wps_baseline = WpsBaseline(regions=regions_df, schema_version="1.0")
             else:
                 logger.warning("WPS baseline missing expected columns (wps_nuc_*), skipping")
         
