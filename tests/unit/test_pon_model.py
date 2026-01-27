@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 from krewlyzer.pon.model import (
     PonModel, GcBiasModel, FsdBaseline, WpsBaseline,
-    OcfBaseline, MdsBaseline, WpsBackgroundBaseline, RegionMdsBaseline
+    OcfBaseline, MdsBaseline, WpsBackgroundBaseline, RegionMdsBaseline,
+    FscGeneBaseline, FscRegionBaseline
 )
 
 
@@ -219,6 +220,78 @@ class TestRegionMdsBaseline:
         # observed=5.0, mean=4.2, std=0.4 -> z=(5.0-4.2)/0.4=2.0
         zscore = sample_region_mds.compute_e1_zscore('TP53', 5.0)
         assert pytest.approx(zscore) == 2.0
+
+
+class TestFscGeneBaseline:
+    """Tests for FscGeneBaseline class."""
+    
+    @pytest.fixture
+    def sample_fsc_gene(self):
+        return FscGeneBaseline(data={
+            'TP53': (1.0, 0.1, 5),    # mean=1.0, std=0.1, n_samples=5
+            'EGFR': (0.8, 0.15, 4),   # mean=0.8, std=0.15, n_samples=4
+            'KRAS': (1.2, 0.05, 6),   # mean=1.2, std=0.05, n_samples=6
+        })
+    
+    def test_get_stats(self, sample_fsc_gene):
+        """Test get_stats returns (mean, std) tuple."""
+        stats = sample_fsc_gene.get_stats('TP53')
+        assert stats == (1.0, 0.1)
+    
+    def test_get_stats_missing(self, sample_fsc_gene):
+        """Test get_stats returns None for missing gene."""
+        assert sample_fsc_gene.get_stats('UNKNOWN') is None
+    
+    def test_compute_zscore(self, sample_fsc_gene):
+        """Test z-score computation."""
+        # observed=1.2, mean=1.0, std=0.1 -> z=(1.2-1.0)/0.1=2.0
+        zscore = sample_fsc_gene.compute_zscore('TP53', 1.2)
+        assert pytest.approx(zscore) == 2.0
+    
+    def test_compute_zscore_missing(self, sample_fsc_gene):
+        """Test z-score returns None for missing gene."""
+        zscore = sample_fsc_gene.compute_zscore('UNKNOWN', 1.0)
+        assert zscore is None
+    
+    def test_len(self, sample_fsc_gene):
+        """Test __len__ returns gene count."""
+        assert len(sample_fsc_gene) == 3
+
+
+class TestFscRegionBaseline:
+    """Tests for FscRegionBaseline class."""
+    
+    @pytest.fixture
+    def sample_fsc_region(self):
+        return FscRegionBaseline(data={
+            'chr17:7571720-7573008': (1.0, 0.1, 5),
+            'chr7:55086725-55086925': (0.9, 0.12, 4),
+            'chr12:25398284-25398490': (1.1, 0.08, 6),
+        })
+    
+    def test_get_stats(self, sample_fsc_region):
+        """Test get_stats returns (mean, std) tuple."""
+        stats = sample_fsc_region.get_stats('chr17:7571720-7573008')
+        assert stats == (1.0, 0.1)
+    
+    def test_get_stats_missing(self, sample_fsc_region):
+        """Test get_stats returns None for missing region."""
+        assert sample_fsc_region.get_stats('chr1:1-100') is None
+    
+    def test_compute_zscore(self, sample_fsc_region):
+        """Test z-score computation."""
+        # observed=1.2, mean=1.0, std=0.1 -> z=(1.2-1.0)/0.1=2.0
+        zscore = sample_fsc_region.compute_zscore('chr17:7571720-7573008', 1.2)
+        assert pytest.approx(zscore) == 2.0
+    
+    def test_compute_zscore_missing(self, sample_fsc_region):
+        """Test z-score returns None for missing region."""
+        zscore = sample_fsc_region.compute_zscore('chr1:1-100', 1.0)
+        assert zscore is None
+    
+    def test_len(self, sample_fsc_region):
+        """Test __len__ returns region count."""
+        assert len(sample_fsc_region) == 3
 
 
 class TestPonModel:

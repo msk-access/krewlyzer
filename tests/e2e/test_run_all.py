@@ -123,7 +123,6 @@ def test_run_all_unified():
                 skip_pon=False,
                 no_tfbs=True,  # Skip for test speed
                 no_atac=True,  # Skip for test speed
-                output_format="auto",
                 generate_json=False,
                 debug=False,
             )

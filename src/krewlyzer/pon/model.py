@@ -459,6 +459,133 @@ class RegionMdsBaseline:
 
 
 @dataclass
+class FscGeneBaseline:
+    """
+    Per-Gene Fragment Size Coverage (FSC) depth baseline.
+    
+    Stores normalized depth statistics (mean/std) across PON samples for each gene.
+    Enables detection of copy number variations by comparing sample depth against
+    the healthy baseline.
+    
+    This is panel-mode only - generated when --assay is specified during build-pon.
+    
+    Fields:
+        data: Dict mapping gene -> (mean_depth, std_depth, n_samples)
+        
+    Clinical use:
+        - Gene amplification: z-score >> 0
+        - Gene deletion: z-score << 0
+        - Normal copy number: z-score ≈ 0
+        
+    Note:
+        Requires minimum 3 samples for reliable statistics.
+    """
+    # gene -> (mean_depth, std_depth, n_samples)
+    data: Dict[str, tuple] = field(default_factory=dict)
+    
+    def get_stats(self, gene: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a gene's normalized depth.
+        
+        Args:
+            gene: Gene symbol (e.g., "TP53", "EGFR")
+            
+        Returns:
+            Tuple (mean, std) or None if gene not in baseline
+        """
+        if gene in self.data:
+            return self.data[gene][:2]  # (mean, std), skip n_samples
+        return None
+    
+    def compute_zscore(self, gene: str, observed_depth: float) -> Optional[float]:
+        """
+        Compute z-score for observed normalized depth.
+        
+        Args:
+            gene: Gene symbol
+            observed_depth: Sample's normalized depth for this gene
+            
+        Returns:
+            Z-score or None if gene not in baseline
+        """
+        stats = self.get_stats(gene)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_depth - mean) / std
+        return 0.0
+    
+    def __len__(self) -> int:
+        """Return number of genes in baseline."""
+        return len(self.data)
+
+
+@dataclass
+class FscRegionBaseline:
+    """
+    Per-Region (exon/probe) Fragment Size Coverage depth baseline.
+    
+    Stores normalized depth statistics (mean/std) for each exon/probe region.
+    More granular than FscGeneBaseline - useful for detecting focal copy number
+    changes affecting single exons.
+    
+    Region IDs are formatted as "chrom:start-end" (e.g., "chr17:7571720-7573008").
+    
+    Fields:
+        data: Dict mapping region_id -> (mean_depth, std_depth, n_samples)
+        
+    Clinical use:
+        - Exon deletion: z-score << 0
+        - Exon amplification: z-score >> 0
+        - Normal: z-score ≈ 0
+        
+    Note:
+        Covers all exons (no filtering by variance).
+        Requires minimum 3 samples for reliable statistics.
+    """
+    # region_id -> (mean_depth, std_depth, n_samples)
+    data: Dict[str, tuple] = field(default_factory=dict)
+    
+    def get_stats(self, region_id: str) -> Optional[tuple]:
+        """
+        Get (mean, std) for a region's normalized depth.
+        
+        Args:
+            region_id: Region identifier (chrom:start-end)
+            
+        Returns:
+            Tuple (mean, std) or None if region not in baseline
+        """
+        if region_id in self.data:
+            return self.data[region_id][:2]  # (mean, std), skip n_samples
+        return None
+    
+    def compute_zscore(self, region_id: str, observed_depth: float) -> Optional[float]:
+        """
+        Compute z-score for observed normalized depth.
+        
+        Args:
+            region_id: Region identifier (chrom:start-end)
+            observed_depth: Sample's normalized depth for this region
+            
+        Returns:
+            Z-score or None if region not in baseline
+        """
+        stats = self.get_stats(region_id)
+        if stats is None:
+            return None
+        mean, std = stats
+        if std > 0:
+            return (observed_depth - mean) / std
+        return 0.0
+    
+    def __len__(self) -> int:
+        """Return number of regions in baseline."""
+        return len(self.data)
+
+
+@dataclass
 class TfbsBaseline:
     """
     TFBS (Transcription Factor Binding Site) size entropy baseline.
@@ -540,6 +667,8 @@ class PonModel:
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
     atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
     region_mds: Optional[RegionMdsBaseline] = None  # Per-gene MDS baseline
+    fsc_gene_baseline: Optional[FscGeneBaseline] = None  # Per-gene normalized depth (panel mode)
+    fsc_region_baseline: Optional[FscRegionBaseline] = None  # Per-exon normalized depth (panel mode)
     
     # On-target baselines (panel mode only)
     gc_bias_ontarget: Optional[GcBiasModel] = None
@@ -709,6 +838,34 @@ class PonModel:
             atac_baseline = AtacBaseline(baseline=RegionEntropyBaseline(atac_data))
             logger.debug(f"Loaded ATAC baseline: {len(atac_data)} labels")
         
+        # Parse FSC gene baseline (panel mode)
+        fsc_gene_df = df_all[df_all["table"] == "fsc_gene_baseline"]
+        fsc_gene_baseline = None
+        if not fsc_gene_df.empty:
+            fsc_gene_data = {}
+            for _, row in fsc_gene_df.iterrows():
+                gene = row["gene"]
+                mean = float(row["depth_mean"])
+                std = float(row["depth_std"])
+                n_samples = int(row.get("n_samples", 0))
+                fsc_gene_data[gene] = (mean, std, n_samples)
+            fsc_gene_baseline = FscGeneBaseline(data=fsc_gene_data)
+            logger.debug(f"Loaded FSC gene baseline: {len(fsc_gene_data)} genes")
+        
+        # Parse FSC region baseline (panel mode)
+        fsc_region_df = df_all[df_all["table"] == "fsc_region_baseline"]
+        fsc_region_baseline = None
+        if not fsc_region_df.empty:
+            fsc_region_data = {}
+            for _, row in fsc_region_df.iterrows():
+                region_id = row["region_id"]
+                mean = float(row["depth_mean"])
+                std = float(row["depth_std"])
+                n_samples = int(row.get("n_samples", 0))
+                fsc_region_data[region_id] = (mean, std, n_samples)
+            fsc_region_baseline = FscRegionBaseline(data=fsc_region_data)
+            logger.debug(f"Loaded FSC region baseline: {len(fsc_region_data)} regions")
+        
         # Build model
         model = cls(
             schema_version=str(meta.get("schema_version", "1.0")),
@@ -727,6 +884,8 @@ class PonModel:
             gc_bias_ontarget=gc_bias_ontarget,
             tfbs_baseline=tfbs_baseline,
             atac_baseline=atac_baseline,
+            fsc_gene_baseline=fsc_gene_baseline,
+            fsc_region_baseline=fsc_region_baseline,
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")

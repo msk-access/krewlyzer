@@ -6,7 +6,7 @@ This module provides the CLI and logic for building unified PON models.
 
 import typer
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime
 import logging
 
@@ -280,6 +280,11 @@ def build_pon(
         wps_background_paths = []  # WPS Alu background for NRL baseline
         mds_gene_paths = []  # Region MDS per-gene files
         
+        # FSC gene/region data collectors (panel mode only)
+        # Collect normalized_depth from FSC.gene.tsv and FSC.regions.tsv
+        all_fsc_gene_data = []  # List[Dict[gene, depth]]
+        all_fsc_region_data = []  # List[Dict[region_id, depth]]
+        
         for outputs in all_outputs:
             sample_name = outputs.sample_id
             feat = outputs.feature_outputs
@@ -299,13 +304,16 @@ def build_pon(
                     logger.debug(f"  Could not read GC data for {sample_name}: {e}")
             
             # Collect FSD data
-            if feat and feat.fsd and feat.fsd.exists():
-                fsd_paths.append(str(feat.fsd))  # Collect path for Rust baseline
-                try:
-                    fsd_df = pd.read_csv(feat.fsd, sep='\t')
-                    all_fsd_data.append(fsd_df)
-                except Exception as e:
-                    logger.debug(f"  Could not read FSD for {sample_name}: {e}")
+            if feat and feat.fsd:
+                if feat.fsd.exists():
+                    fsd_paths.append(str(feat.fsd))  # Collect path for Rust baseline
+                    try:
+                        fsd_df = pd.read_csv(feat.fsd, sep='\t')
+                        all_fsd_data.append(fsd_df)
+                    except Exception as e:
+                        logger.debug(f"  Could not read FSD for {sample_name}: {e}")
+                else:
+                    logger.warning(f"  FSD path set but file missing: {feat.fsd}")
             
             # Collect on-target FSD (panel mode)
             if feat and feat.fsd_ontarget and feat.fsd_ontarget.exists():
@@ -367,6 +375,33 @@ def build_pon(
             # Collect ATAC entropy data
             if outputs.atac_data:
                 all_atac_data.append(outputs.atac_data)
+            
+            # Collect FSC gene data (panel mode - normalized depth per gene)
+            if feat and feat.fsc_gene and feat.fsc_gene.exists():
+                try:
+                    fsc_gene_df = pd.read_csv(feat.fsc_gene, sep='\t')
+                    if 'gene' in fsc_gene_df.columns and 'normalized_depth' in fsc_gene_df.columns:
+                        gene_depths = dict(zip(fsc_gene_df['gene'], fsc_gene_df['normalized_depth']))
+                        all_fsc_gene_data.append(gene_depths)
+                        logger.debug(f"  Collected FSC gene: {len(gene_depths)} genes from {sample_name}")
+                except Exception as e:
+                    logger.debug(f"  Could not read FSC gene for {sample_name}: {e}")
+            
+            # Collect FSC region data (panel mode - normalized depth per exon/probe)
+            if feat and feat.fsc_region and feat.fsc_region.exists():
+                try:
+                    fsc_region_df = pd.read_csv(feat.fsc_region, sep='\t')
+                    if all(c in fsc_region_df.columns for c in ['chrom', 'start', 'end', 'normalized_depth']):
+                        fsc_region_df['region_id'] = (
+                            fsc_region_df['chrom'].astype(str) + ':' + 
+                            fsc_region_df['start'].astype(str) + '-' + 
+                            fsc_region_df['end'].astype(str)
+                        )
+                        region_depths = dict(zip(fsc_region_df['region_id'], fsc_region_df['normalized_depth']))
+                        all_fsc_region_data.append(region_depths)
+                        logger.debug(f"  Collected FSC region: {len(region_depths)} regions from {sample_name}")
+                except Exception as e:
+                    logger.debug(f"  Could not read FSC region for {sample_name}: {e}")
         
         logger.info(f"  GC samples: {len(all_gc_data)}")
         logger.info(f"  FSD samples: {len(all_fsd_data)}")
@@ -377,6 +412,8 @@ def build_pon(
         logger.info(f"  ATAC samples: {len(all_atac_data)}")
         if is_panel_mode:
             logger.info(f"  FSD on-target samples: {len(all_fsd_data_ontarget)}")
+            logger.info(f"  FSC gene samples: {len(all_fsc_gene_data)}")
+            logger.info(f"  FSC region samples: {len(all_fsc_region_data)}")
     
     finally:
         # Cleanup temp directory
@@ -463,6 +500,23 @@ def build_pon(
         except Exception as e:
             logger.warning(f"  Region MDS baseline failed: {e}")
     
+    # Compute FSC gene/region baselines (panel mode only)
+    fsc_gene_baseline = None
+    fsc_region_baseline = None
+    if is_panel_mode and all_fsc_gene_data:
+        logger.info("  Computing FSC gene baseline...")
+        try:
+            fsc_gene_baseline = _compute_fsc_gene_baseline(all_fsc_gene_data)
+        except Exception as e:
+            logger.warning(f"  FSC gene baseline failed: {e}")
+    
+    if is_panel_mode and all_fsc_region_data:
+        logger.info("  Computing FSC region baseline...")
+        try:
+            fsc_region_baseline = _compute_fsc_region_baseline(all_fsc_region_data)
+        except Exception as e:
+            logger.warning(f"  FSC region baseline failed: {e}")
+    
     # Create PON model
     model = PonModel(
         schema_version="1.0",
@@ -481,6 +535,8 @@ def build_pon(
         region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
+        fsc_gene_baseline=fsc_gene_baseline,
+        fsc_region_baseline=fsc_region_baseline,
         fsd_baseline_ontarget=fsd_baseline_ontarget,
         gc_bias_ontarget=gc_bias_ontarget,
     )
@@ -544,6 +600,10 @@ def build_pon(
             lambda b: f"{len(b.gc_bins)} bins" if hasattr(b, 'gc_bins') else "OK"))
         logger.info(_baseline_status("fsd_baseline_ontarget", fsd_baseline_ontarget,
             lambda b: f"{len(b.arms)} arms" if hasattr(b, 'arms') else "OK"))
+        logger.info(_baseline_status("fsc_gene_baseline", fsc_gene_baseline,
+            lambda b: f"{len(b)} genes" if b else "OK"))
+        logger.info(_baseline_status("fsc_region_baseline", fsc_region_baseline,
+            lambda b: f"{len(b)} regions" if b else "OK"))
     
     logger.info(f"")
     logger.info(f"=" * 60)
@@ -866,6 +926,119 @@ def _compute_wps_background_baseline(wps_background_paths: List[str]) -> "WpsBac
         logger.error(f"WPS background baseline computation failed: {e}")
         return None
 
+
+def _compute_fsc_gene_baseline(all_fsc_gene_data: List[Dict]) -> "FscGeneBaseline":
+    """
+    Compute FSC gene depth baseline from sample FSC.gene.tsv data.
+    
+    Aggregates normalized_depth values per gene across all samples.
+    Requires minimum 3 samples per gene for reliable statistics.
+    
+    Args:
+        all_fsc_gene_data: List of dicts, each {gene: normalized_depth}
+        
+    Returns:
+        FscGeneBaseline with per-gene mean/std/n_samples
+        
+    Note:
+        Panel mode only - requires --assay parameter during build-pon.
+    """
+    from .model import FscGeneBaseline
+    from collections import defaultdict
+    
+    if not all_fsc_gene_data:
+        logger.debug("No FSC gene data provided for baseline computation")
+        return None
+    
+    logger.info(f"Computing FSC gene baseline from {len(all_fsc_gene_data)} samples...")
+    
+    # Aggregate depths per gene across all samples
+    gene_values = defaultdict(list)
+    for sample_data in all_fsc_gene_data:
+        for gene, depth in sample_data.items():
+            if depth is not None and not np.isnan(depth):
+                gene_values[gene].append(depth)
+    
+    # Compute mean/std for genes with sufficient samples
+    MIN_SAMPLES = 3
+    data = {}
+    skipped = 0
+    
+    for gene, values in gene_values.items():
+        if len(values) >= MIN_SAMPLES:
+            mean_depth = float(np.mean(values))
+            std_depth = float(np.std(values))
+            # Ensure minimum std to avoid division by zero
+            std_depth = max(std_depth, 0.001)
+            data[gene] = (mean_depth, std_depth, len(values))
+        else:
+            skipped += 1
+    
+    if skipped > 0:
+        logger.debug(f"FSC gene: skipped {skipped} genes with <{MIN_SAMPLES} samples")
+    
+    logger.info(f"FSC gene baseline: {len(data)} genes (min {MIN_SAMPLES} samples)")
+    
+    return FscGeneBaseline(data=data) if data else None
+
+
+def _compute_fsc_region_baseline(all_fsc_region_data: List[Dict]) -> "FscRegionBaseline":
+    """
+    Compute FSC region (exon/probe) depth baseline from sample FSC.regions.tsv data.
+    
+    Aggregates normalized_depth values per region across all samples.
+    Covers all exons (no filtering by variance).
+    Requires minimum 3 samples per region for reliable statistics.
+    
+    Args:
+        all_fsc_region_data: List of dicts, each {region_id: normalized_depth}
+        
+    Returns:
+        FscRegionBaseline with per-region mean/std/n_samples
+        
+    Note:
+        Region IDs are formatted as "chrom:start-end".
+        Panel mode only - requires --assay parameter during build-pon.
+    """
+    from .model import FscRegionBaseline
+    from collections import defaultdict
+    
+    if not all_fsc_region_data:
+        logger.debug("No FSC region data provided for baseline computation")
+        return None
+    
+    logger.info(f"Computing FSC region baseline from {len(all_fsc_region_data)} samples...")
+    
+    # Aggregate depths per region across all samples
+    region_values = defaultdict(list)
+    for sample_data in all_fsc_region_data:
+        for region_id, depth in sample_data.items():
+            if depth is not None and not np.isnan(depth):
+                region_values[region_id].append(depth)
+    
+    # Compute mean/std for regions with sufficient samples
+    MIN_SAMPLES = 3
+    data = {}
+    skipped = 0
+    
+    for region_id, values in region_values.items():
+        if len(values) >= MIN_SAMPLES:
+            mean_depth = float(np.mean(values))
+            std_depth = float(np.std(values))
+            # Ensure minimum std to avoid division by zero
+            std_depth = max(std_depth, 0.001)
+            data[region_id] = (mean_depth, std_depth, len(values))
+        else:
+            skipped += 1
+    
+    if skipped > 0:
+        logger.debug(f"FSC region: skipped {skipped} regions with <{MIN_SAMPLES} samples")
+    
+    logger.info(f"FSC region baseline: {len(data)} regions (min {MIN_SAMPLES} samples)")
+    
+    return FscRegionBaseline(data=data) if data else None
+
+
 def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
     """
     Compute TFBS entropy baseline from sample data.
@@ -1047,6 +1220,32 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             })
     atac_df = pd.DataFrame(atac_rows) if atac_rows else pd.DataFrame()
     
+    # Build FSC gene baseline DataFrame (panel mode)
+    fsc_gene_rows = []
+    if model.fsc_gene_baseline:
+        for gene, (mean, std, n_samples) in model.fsc_gene_baseline.data.items():
+            fsc_gene_rows.append({
+                "table": "fsc_gene_baseline",
+                "gene": gene,
+                "depth_mean": mean,
+                "depth_std": std,
+                "n_samples": n_samples,
+            })
+    fsc_gene_df = pd.DataFrame(fsc_gene_rows) if fsc_gene_rows else pd.DataFrame()
+    
+    # Build FSC region baseline DataFrame (panel mode)
+    fsc_region_rows = []
+    if model.fsc_region_baseline:
+        for region_id, (mean, std, n_samples) in model.fsc_region_baseline.data.items():
+            fsc_region_rows.append({
+                "table": "fsc_region_baseline",
+                "region_id": region_id,
+                "depth_mean": mean,
+                "depth_std": std,
+                "n_samples": n_samples,
+            })
+    fsc_region_df = pd.DataFrame(fsc_region_rows) if fsc_region_rows else pd.DataFrame()
+    
     # Combine and save
     all_dfs = [metadata_df]
     if not gc_bias_df.empty:
@@ -1067,6 +1266,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(tfbs_df)
     if not atac_df.empty:
         all_dfs.append(atac_df)
+    if not fsc_gene_df.empty:
+        all_dfs.append(fsc_gene_df)
+    if not fsc_region_df.empty:
+        all_dfs.append(fsc_region_df)
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
     combined_df.to_parquet(output, index=False)
@@ -1079,6 +1282,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     n_mds = len(model.mds_baseline.kmer_expected) if model.mds_baseline else 0
     n_fsd_on = len(fsd_ontarget_rows)
     n_gc_on = len(gc_bias_ontarget_rows)
+    n_fsc_gene = len(fsc_gene_rows)
+    n_fsc_region = len(fsc_region_rows)
     logger.info(f"Saved PON model: {output}")
     if model.panel_mode:
         logger.info(f"   Panel mode: ON (targets: {model.target_regions_file})")
@@ -1086,6 +1291,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             logger.info(f"   FSD on-target: {n_fsd_on} arm×size entries")
         if n_gc_on > 0:
             logger.info(f"   GC on-target: {n_gc_on} bins")
+        if n_fsc_gene > 0:
+            logger.info(f"   FSC gene: {n_fsc_gene} genes")
+        if n_fsc_region > 0:
+            logger.info(f"   FSC region: {n_fsc_region} regions")
     logger.info(f"   GC bias: {n_gc} bins")
     logger.info(f"   FSD baseline: {n_fsd} arm×size entries")
     logger.info(f"   WPS baseline: {n_wps} regions")

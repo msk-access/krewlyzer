@@ -84,8 +84,7 @@ def run_all(
     no_tfbs: bool = typer.Option(False, "--no-tfbs", help="Skip TFBS region entropy analysis"),
     no_atac: bool = typer.Option(False, "--no-atac", help="Skip ATAC region entropy analysis"),
     
-    # Output format options
-    output_format: str = typer.Option("auto", "--output-format", "-F", help="Output format: auto (smart defaults), tsv, parquet, json"),
+    # JSON output option
     generate_json: bool = typer.Option(False, "--generate-json", help="Generate unified sample.features.json with ALL data for ML pipelines"),
     
     # Observability

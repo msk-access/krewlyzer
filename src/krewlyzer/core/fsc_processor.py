@@ -351,3 +351,139 @@ def aggregate_by_gene(
     logger.info(f"FSC {aggregate_by} complete: {output_path} ({n_output} rows)")
     return output_path
 
+
+def apply_fsc_gene_pon(
+    fsc_gene_path: Path,
+    pon,
+    output_path: Path = None,
+) -> Path:
+    """
+    Apply FSC gene PON baseline z-score normalization.
+    
+    Reads FSC.gene.tsv, computes z-score for each gene's normalized_depth
+    against the PON baseline, and adds a depth_zscore column.
+    
+    Args:
+        fsc_gene_path: Path to FSC.gene.tsv file
+        pon: PonModel with fsc_gene_baseline
+        output_path: Output path (defaults to overwriting input)
+        
+    Returns:
+        Path to output file with depth_zscore column
+        
+    Note:
+        Clinical interpretation:
+        - z-score >> 0: Gene amplification
+        - z-score << 0: Gene deletion
+        - z-score ≈ 0: Normal copy number
+    """
+    import pandas as pd
+    
+    if output_path is None:
+        output_path = fsc_gene_path
+    
+    if not Path(fsc_gene_path).exists():
+        logger.warning(f"FSC gene file not found: {fsc_gene_path}")
+        return None
+    
+    if not pon or not pon.fsc_gene_baseline:
+        logger.debug("No FSC gene baseline in PON, skipping z-score")
+        return fsc_gene_path
+    
+    df = pd.read_csv(fsc_gene_path, sep='\t')
+    
+    if 'gene' not in df.columns or 'normalized_depth' not in df.columns:
+        logger.warning(f"FSC gene file missing required columns: {fsc_gene_path}")
+        return fsc_gene_path
+    
+    # Compute z-scores using PON baseline
+    baseline = pon.fsc_gene_baseline
+    z_scores = []
+    for _, row in df.iterrows():
+        gene = row['gene']
+        depth = row['normalized_depth']
+        z = baseline.compute_zscore(gene, depth)
+        z_scores.append(z if z is not None else float('nan'))
+    
+    df['depth_zscore'] = z_scores
+    
+    # Write output
+    df.to_csv(output_path, sep='\t', index=False)
+    n_with_zscore = df['depth_zscore'].notna().sum()
+    logger.debug(f"Applied FSC gene PON: {n_with_zscore}/{len(df)} genes with z-scores")
+    
+    return output_path
+
+
+def apply_fsc_region_pon(
+    fsc_region_path: Path,
+    pon,
+    output_path: Path = None,
+) -> Path:
+    """
+    Apply FSC region (exon/probe) PON baseline z-score normalization.
+    
+    Reads FSC.regions.tsv, computes z-score for each region's normalized_depth
+    against the PON baseline, and adds a depth_zscore column.
+    
+    Args:
+        fsc_region_path: Path to FSC.regions.tsv file
+        pon: PonModel with fsc_region_baseline
+        output_path: Output path (defaults to overwriting input)
+        
+    Returns:
+        Path to output file with depth_zscore column
+        
+    Note:
+        Region IDs are formatted as "chrom:start-end".
+        Clinical interpretation:
+        - z-score << 0: Exon deletion
+        - z-score >> 0: Exon amplification
+    """
+    import pandas as pd
+    
+    if output_path is None:
+        output_path = fsc_region_path
+    
+    if not Path(fsc_region_path).exists():
+        logger.warning(f"FSC region file not found: {fsc_region_path}")
+        return None
+    
+    if not pon or not pon.fsc_region_baseline:
+        logger.debug("No FSC region baseline in PON, skipping z-score")
+        return fsc_region_path
+    
+    df = pd.read_csv(fsc_region_path, sep='\t')
+    
+    required_cols = ['chrom', 'start', 'end', 'normalized_depth']
+    if not all(c in df.columns for c in required_cols):
+        logger.warning(f"FSC region file missing required columns: {fsc_region_path}")
+        return fsc_region_path
+    
+    # Create region_id for lookup
+    df['region_id'] = (
+        df['chrom'].astype(str) + ':' +
+        df['start'].astype(str) + '-' +
+        df['end'].astype(str)
+    )
+    
+    # Compute z-scores using PON baseline
+    baseline = pon.fsc_region_baseline
+    z_scores = []
+    for _, row in df.iterrows():
+        region_id = row['region_id']
+        depth = row['normalized_depth']
+        z = baseline.compute_zscore(region_id, depth)
+        z_scores.append(z if z is not None else float('nan'))
+    
+    df['depth_zscore'] = z_scores
+    
+    # Drop temporary column
+    df = df.drop(columns=['region_id'])
+    
+    # Write output
+    df.to_csv(output_path, sep='\t', index=False)
+    n_with_zscore = df['depth_zscore'].notna().sum()
+    logger.debug(f"Applied FSC region PON: {n_with_zscore}/{len(df)} regions with z-scores")
+    
+    return output_path

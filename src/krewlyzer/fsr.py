@@ -42,9 +42,8 @@ def fsr(
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
-    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """
     Calculate Fragment Size Ratio (FSR) features for a single sample.

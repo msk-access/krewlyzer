@@ -56,6 +56,8 @@ The `--skip-pon` flag:
 | **TFBS Baseline** | Per-TF entropy mean/std | Region Entropy |
 | **ATAC Baseline** | Per-cancer-type entropy mean/std | Region Entropy |
 | **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
+| **FSC Gene Baseline** | Per-gene normalized depth mean/std | FSC Gene |
+| **FSC Region Baseline** | Per-exon normalized depth mean/std | FSC Region |
 
 ## Panel Mode
 
@@ -95,6 +97,8 @@ With PON, additional columns are added to outputs:
 | Feature | PON Column(s) | Description |
 |---------|--------------|-------------|
 | FSC | `*_log2` | Log2 ratio vs PON expected |
+| FSC Gene | `depth_zscore` | Gene-level depth z-score |
+| FSC Region | `depth_zscore` | Exon-level depth z-score |
 | FSD | `ratio_log2` | Size distribution log ratio |
 | WPS | `wps_zscore` | Z-score vs region baseline |
 | OCF | `ocf_zscore` | Z-score vs OCF baseline |
@@ -180,6 +184,21 @@ Per-gene MDS expectations:
 - `gene_baseline`: Dict of gene → {mds_mean, mds_std, mds_e1_mean, mds_e1_std}
 - Enables gene-level anomaly detection
 - E1 (first exon) tracked separately for promoter-proximal sensitivity
+
+### FSC Gene Baseline (`fsc_gene_baseline`)
+
+Per-gene normalized depth baseline (panel mode only):
+- `data`: Dict of gene → (mean_depth, std_depth, n_samples)
+- Requires minimum 3 samples for reliable statistics
+- Clinical use: z-score >> 0 = amplification, z-score << 0 = deletion
+
+### FSC Region Baseline (`fsc_region_baseline`)
+
+Per-exon/probe normalized depth baseline (panel mode only):
+- `data`: Dict of region_id → (mean_depth, std_depth, n_samples)
+- Region IDs formatted as "chrom:start-end"
+- Covers all exons (no filtering by variance)
+- Enables detection of focal copy number changes affecting single exons
 
 ---
 

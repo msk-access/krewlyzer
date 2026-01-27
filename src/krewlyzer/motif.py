@@ -45,7 +45,6 @@ def motif(
     require_proper_pair: bool = typer.Option(True, '--require-proper-pair/--no-require-proper-pair', help="Require proper pairs (disable for duplex/consensus BAMs)"),
     verbose: bool = typer.Option(False, '--verbose', '-v', help="Enable verbose logging"),
     threads: int = typer.Option(0, '--threads', '-t', help="Number of threads (0=all cores)"),
-    format: Optional[str] = typer.Option(None, "--format", "-f", help="Output format override: tsv, parquet, json (default: tsv)")
 ):
     """
     Extract k-mer motif features from a BAM file.

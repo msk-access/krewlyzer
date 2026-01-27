@@ -476,7 +476,7 @@ def run_features(
     # Uses on-target GC correction factors for accurate copy number analysis
     if resolved_assay and enable_fsc:
         try:
-            from .fsc_processor import aggregate_by_gene, load_correction_factors
+            from .fsc_processor import aggregate_by_gene, load_correction_factors, apply_fsc_gene_pon, apply_fsc_region_pon
             genome_map = {'hg19': 'GRCh37', 'grch37': 'GRCh37', 'hg38': 'GRCh38', 'grch38': 'GRCh38'}
             gene_genome = genome_map.get(genome.lower(), 'GRCh37')
             genes = load_gene_bed(assay=resolved_assay, genome=gene_genome)
@@ -496,13 +496,29 @@ def run_features(
             
             aggregate_by_gene(bed_path, genes, outputs.fsc_gene, pon=pon_for_zscore, 
                             correction_factors=gene_fsc_factors, aggregate_by='gene')
-            logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
+            
+            # Apply FSC gene PON z-score normalization (unless --skip-pon)
+            if pon and hasattr(pon, 'fsc_gene_baseline') and pon.fsc_gene_baseline and not skip_pon_zscore:
+                apply_fsc_gene_pon(outputs.fsc_gene, pon)
+                logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, with PON z-scores)")
+            elif skip_pon_zscore and pon:
+                logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, --skip-pon active)")
+            else:
+                logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
             
             # Also generate per-region FSC (exon/probe level)
             outputs.fsc_region = output_dir / f"{sample_name}.FSC.regions.tsv"
             aggregate_by_gene(bed_path, genes, outputs.fsc_region, pon=pon_for_zscore, 
                             correction_factors=gene_fsc_factors, aggregate_by='region')
-            logger.info(f"✓ FSC regions: {outputs.fsc_region.name}")
+            
+            # Apply FSC region PON z-score normalization (unless --skip-pon)
+            if pon and hasattr(pon, 'fsc_region_baseline') and pon.fsc_region_baseline and not skip_pon_zscore:
+                apply_fsc_region_pon(outputs.fsc_region, pon)
+                logger.info(f"✓ FSC regions: {outputs.fsc_region.name} (with PON z-scores)")
+            elif skip_pon_zscore and pon:
+                logger.info(f"✓ FSC regions: {outputs.fsc_region.name} (--skip-pon active)")
+            else:
+                logger.info(f"✓ FSC regions: {outputs.fsc_region.name}")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
     
