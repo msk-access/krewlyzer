@@ -227,17 +227,27 @@ def build_pon(
                 succeeded_count += 1
                 
                 # Run region-mds for per-gene MDS baseline
+                # Note: requires BAM path, not BED - need the original sample_path
                 try:
                     sample_out_dir = Path(temp_output_dir) / sample_name
+                    mds_exon_output = sample_out_dir / f"{sample_name}.MDS.exon.tsv"
                     mds_gene_output = sample_out_dir / f"{sample_name}.MDS.gene.tsv"
                     gene_bed = assets.get_gene_bed_for_mode(assay)
                     
-                    # Call Rust region_mds on the extracted BED
-                    if outputs.bed_path and outputs.bed_path.exists() and gene_bed:
+                    # Only run for BAM/CRAM input (not BED.gz) since we need read sequences
+                    is_bam_input = str(sample_path).endswith(('.bam', '.cram'))
+                    if is_bam_input and gene_bed and gene_bed.exists():
                         _core.region_mds.run_region_mds(
-                            str(outputs.bed_path),
-                            str(gene_bed),  # Bundled gene BED
-                            str(mds_gene_output),
+                            str(sample_path),           # BAM/CRAM path
+                            str(reference),             # Reference FASTA
+                            str(gene_bed),              # Gene BED file
+                            str(mds_exon_output),       # Per-exon output
+                            str(mds_gene_output),       # Per-gene output
+                            e1_only=False,
+                            mapq=sample_params.mapq,
+                            min_len=sample_params.minlen,
+                            max_len=400,  # Standard cfDNA range for motifs
+                            silent=True,
                         )
                         logger.debug(f"    Generated {mds_gene_output.name}")
                 except Exception as e:
