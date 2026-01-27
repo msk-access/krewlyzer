@@ -116,6 +116,13 @@ def region_entropy(
             # Thread pool already configured (can only be set once per process)
             pass
     
+    # Determine panel mode
+    is_panel_mode = target_regions is not None and target_regions.exists()
+    target_regions_str = str(target_regions) if is_panel_mode else None
+    
+    if is_panel_mode:
+        logger.info(f"Panel mode: generating both off-target and on-target entropy")
+    
     try:
         # TFBS
         if tfbs:
@@ -125,12 +132,25 @@ def region_entropy(
                 out_raw = output / f"{sample_name}.TFBS.raw.tsv"
                 out_final = output / f"{sample_name}.TFBS.tsv"
                 
-                _core.region_entropy.run_region_entropy(
-                    str(bedgz_input), str(tfbs_path), str(out_raw), gc_str, not verbose
+                # Call Rust with optional target_regions for dual output
+                n_off, n_on = _core.region_entropy.run_region_entropy(
+                    str(bedgz_input), str(tfbs_path), str(out_raw), gc_str, 
+                    target_regions_str, not verbose
                 )
+                
+                # Process off-target output (primary)
                 process_region_entropy(out_raw, out_final, entropy_pon_parquet, "tfbs_baseline")
                 out_raw.unlink(missing_ok=True)
-                logger.info(f"✅ TFBS: {out_final}")
+                logger.info(f"✅ TFBS: {out_final} ({n_off} TFs)")
+                
+                # Process on-target output (panel mode)
+                if is_panel_mode:
+                    out_raw_on = output / f"{sample_name}.TFBS.ontarget.raw.tsv"
+                    out_final_on = output / f"{sample_name}.TFBS.ontarget.tsv"
+                    if out_raw_on.exists():
+                        process_region_entropy(out_raw_on, out_final_on, entropy_pon_parquet, "tfbs_baseline")
+                        out_raw_on.unlink(missing_ok=True)
+                        logger.info(f"✅ TFBS on-target: {out_final_on} ({n_on} TFs)")
             else:
                 logger.warning("TFBS regions not available for this genome")
         
@@ -142,12 +162,25 @@ def region_entropy(
                 out_raw = output / f"{sample_name}.ATAC.raw.tsv"
                 out_final = output / f"{sample_name}.ATAC.tsv"
                 
-                _core.region_entropy.run_region_entropy(
-                    str(bedgz_input), str(atac_path), str(out_raw), gc_str, not verbose
+                # Call Rust with optional target_regions for dual output
+                n_off, n_on = _core.region_entropy.run_region_entropy(
+                    str(bedgz_input), str(atac_path), str(out_raw), gc_str,
+                    target_regions_str, not verbose
                 )
+                
+                # Process off-target output (primary)
                 process_region_entropy(out_raw, out_final, entropy_pon_parquet, "atac_baseline")
                 out_raw.unlink(missing_ok=True)
-                logger.info(f"✅ ATAC: {out_final}")
+                logger.info(f"✅ ATAC: {out_final} ({n_off} cancer types)")
+                
+                # Process on-target output (panel mode)
+                if is_panel_mode:
+                    out_raw_on = output / f"{sample_name}.ATAC.ontarget.raw.tsv"
+                    out_final_on = output / f"{sample_name}.ATAC.ontarget.tsv"
+                    if out_raw_on.exists():
+                        process_region_entropy(out_raw_on, out_final_on, entropy_pon_parquet, "atac_baseline")
+                        out_raw_on.unlink(missing_ok=True)
+                        logger.info(f"✅ ATAC on-target: {out_final_on} ({n_on} cancer types)")
             else:
                 logger.warning("ATAC regions not available for this genome")
                 

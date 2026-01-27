@@ -175,23 +175,29 @@ chr1  15000  15200  LUAD
 
 ---
 
-## Panel Mode (On-Target)
+## Panel Mode (Dual Output)
 
-For targeted sequencing panels, on-target analysis only includes:
-- TFBS/ATAC regions overlapping panel target regions
-- On-target GC correction factors
+For targeted sequencing panels (like MSK-ACCESS), krewlyzer generates **dual output**:
+
+- **Off-target (WGS-like)**: Uses all off-target reads → provides genome-wide ~800 TF / 23 cancer type coverage
+- **On-target**: Uses only on-target reads → panel-specific signal
+
+This matches the behavior of other tools (FSD, FSC, OCF) which split off-target and on-target reads.
 
 ```bash
-# With target regions → generates .ontarget.tsv files
+# With target regions → generates both .tsv and .ontarget.tsv files
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
     -T msk-access-v1.targets.bed
 ```
 
 **Outputs:**
-- `{sample}.TFBS.tsv` - All genome-wide TFBS regions
-- `{sample}.TFBS.ontarget.tsv` - TFBS regions in panel targets
-- `{sample}.ATAC.tsv` - All genome-wide ATAC regions
-- `{sample}.ATAC.ontarget.tsv` - ATAC regions in panel targets
+
+| File | Source | Coverage |
+|------|--------|----------|
+| `{sample}.TFBS.tsv` | Off-target reads | ~800 TFs (WGS-like) |
+| `{sample}.TFBS.ontarget.tsv` | On-target reads | Panel-overlapping TFs |
+| `{sample}.ATAC.tsv` | Off-target reads | 23 cancer types (WGS-like) |
+| `{sample}.ATAC.ontarget.tsv` | On-target reads | Panel-overlapping peaks |
 
 ---
 

@@ -248,18 +248,27 @@ impl FragmentConsumer for RegionEntropyConsumer {
 /// # Arguments
 /// * `bed_path` - Path to input fragment BED.gz file
 /// * `region_path` - Path to region BED file (chrom, start, end, label)
-/// * `output_path` - Path to output TSV file
+/// * `output_path` - Path to output TSV file (off-target/WGS-style)
 /// * `gc_correction_path` - Optional path to GC correction factors TSV
+/// * `target_regions_path` - Optional path to target regions BED (panel mode)
+/// * `silent` - Suppress progress bar
+///
+/// # Panel Mode Behavior
+/// When `target_regions_path` is provided:
+/// - Writes off-target entropy to `output_path` (WGS-like, uses all off-target reads)
+/// - Writes on-target entropy to `output_path.ontarget` suffix
+/// - This matches the dual-output pattern used by FSD, FSC, OCF
 #[pyfunction]
-#[pyo3(signature = (bed_path, region_path, output_path, gc_correction_path=None, silent=false))]
+#[pyo3(signature = (bed_path, region_path, output_path, gc_correction_path=None, target_regions_path=None, silent=false))]
 pub fn run_region_entropy(
     _py: Python,
     bed_path: String,
     region_path: String,
     output_path: String,
     gc_correction_path: Option<String>,
+    target_regions_path: Option<String>,
     silent: bool,
-) -> PyResult<()> {
+) -> PyResult<(usize, usize)> {
     let mut chrom_map = ChromosomeMap::new();
 
     // Load GC factors if provided
@@ -278,26 +287,143 @@ pub fn run_region_entropy(
         None
     };
 
-    // Create consumer
-    let consumer = RegionEntropyConsumer::new(
+    // Load target regions for panel mode (on/off-target split)
+    let is_panel_mode = target_regions_path.is_some();
+    let target_tree: Option<HashMap<u32, COITree<(), u32>>> = if let Some(ref p) = target_regions_path {
+        let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(), u32>>> = HashMap::new();
+        
+        if let Ok(reader) = crate::bed::get_reader(std::path::Path::new(p)) {
+            for line in reader.lines().flatten() {
+                if line.starts_with('#') { continue; }
+                let cols: Vec<&str> = line.split('\t').collect();
+                if cols.len() >= 3 {
+                    let chrom = cols[0].trim_start_matches("chr");
+                    let start: i32 = cols[1].parse().unwrap_or(0);
+                    let end: i32 = cols[2].parse().unwrap_or(0);
+                    let chrom_id = chrom_map.get_id(chrom);
+                    nodes_by_chrom.entry(chrom_id).or_default()
+                        .push(IntervalNode::new(start, end - 1, ()));
+                }
+            }
+        }
+        
+        let mut trees = HashMap::new();
+        for (k, v) in nodes_by_chrom {
+            trees.insert(k, COITree::new(&v));
+        }
+        
+        let n_regions: usize = trees.values().map(|t| t.len()).sum();
+        log::info!("RegionEntropy: Panel mode enabled - {} target regions loaded", n_regions);
+        Some(trees)
+    } else {
+        None
+    };
+
+    // Create consumers (one for off-target, one for on-target in panel mode)
+    let consumer_off = RegionEntropyConsumer::new(
         std::path::Path::new(&region_path),
         &mut chrom_map,
-        factors,
+        factors.clone(),
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
+    let mut consumer_on = if is_panel_mode {
+        Some(RegionEntropyConsumer::new(
+            std::path::Path::new(&region_path),
+            &mut chrom_map,
+            factors.clone(),
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?)
+    } else {
+        None
+    };
+
+    // Create a dual consumer wrapper for processing
+    let dual_consumer = DualRegionEntropyConsumer {
+        off_target: consumer_off,
+        on_target: consumer_on.take(),
+        target_tree,
+    };
+
     // Process fragments
-    let analyzer = FragmentAnalyzer::new(consumer, 100_000);
+    let analyzer = FragmentAnalyzer::new(dual_consumer, 100_000);
     let final_consumer = analyzer
         .process_file(std::path::Path::new(&bed_path), &mut chrom_map, silent)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
-    // Write output
-    final_consumer
+    // Write off-target output (primary/WGS-style)
+    let n_off = final_consumer.off_target.stats.iter().filter(|s| s.total_count > 0.0).count();
+    final_consumer.off_target
         .write_output(std::path::Path::new(&output_path))
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
-    Ok(())
+    // Write on-target output (panel mode only)
+    let n_on = if let Some(ref on_target) = final_consumer.on_target {
+        // Construct proper ontarget path: foo.TFBS.raw.tsv -> foo.TFBS.ontarget.raw.tsv
+        let ontarget_path = if output_path.contains(".raw.tsv") {
+            output_path.replace(".raw.tsv", ".ontarget.raw.tsv")
+        } else {
+            output_path.replace(".tsv", ".ontarget.tsv")
+        };
+        
+        let n = on_target.stats.iter().filter(|s| s.total_count > 0.0).count();
+        on_target
+            .write_output(std::path::Path::new(&ontarget_path))
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        
+        log::info!("RegionEntropy: Panel mode - {} off-target, {} on-target labels", n_off, n);
+        n
+    } else {
+        0
+    };
+
+    Ok((n_off, n_on))
+}
+
+/// Dual consumer wrapper for on/off-target split processing
+#[derive(Clone)]
+struct DualRegionEntropyConsumer {
+    off_target: RegionEntropyConsumer,
+    on_target: Option<RegionEntropyConsumer>,
+    target_tree: Option<HashMap<u32, COITree<(), u32>>>,
+}
+
+impl FragmentConsumer for DualRegionEntropyConsumer {
+    fn name(&self) -> &str {
+        "DualRegionEntropy"
+    }
+
+    fn consume(&mut self, frag: &Fragment) {
+        // Determine if fragment overlaps target regions (panel mode)
+        let is_on_target = if let Some(ref trees) = self.target_tree {
+            if let Some(tree) = trees.get(&frag.chrom_id) {
+                let start = frag.start as i32;
+                let end = (frag.end - 1) as i32;
+                let mut overlaps = false;
+                tree.query(start, end, |_| { overlaps = true; });
+                overlaps
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        // Route fragment to appropriate consumer
+        if is_on_target {
+            if let Some(ref mut on_target) = self.on_target {
+                on_target.consume(frag);
+            }
+        } else {
+            self.off_target.consume(frag);
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.off_target.merge(other.off_target);
+        if let (Some(ref mut on), Some(other_on)) = (&mut self.on_target, other.on_target) {
+            on.merge(other_on);
+        }
+    }
 }
 
 // =============================================================================

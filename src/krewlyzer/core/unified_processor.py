@@ -670,80 +670,62 @@ def run_features(
             if enable_atac:
                 logger.info("  ATAC: --skip-pon active, outputting raw values (no z-scores)")
         
-        # TFBS Entropy
+        # TFBS Entropy - Uses Rust dual output (off-target + on-target in single pass)
         if enable_tfbs and assets.tfbs_available:
             try:
                 tfbs_regions = str(assets.tfbs_regions)
-                
-                # Off-target (genome-wide)
                 out_tfbs_raw = output_dir / f"{sample_name}.TFBS.raw.tsv"
-                _core.region_entropy.run_region_entropy(
-                    str(bed_path), tfbs_regions, str(out_tfbs_raw), gc_str, True
+                
+                # Call Rust with optional target_regions for dual output
+                target_str = str(resolved_target_regions) if is_panel_mode else None
+                n_off, n_on = _core.region_entropy.run_region_entropy(
+                    str(bed_path), tfbs_regions, str(out_tfbs_raw), gc_str, target_str, True
                 )
+                
+                # Process off-target output (primary/WGS-like)
                 outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
                 process_region_entropy(out_tfbs_raw, outputs.tfbs, entropy_pon_parquet, "tfbs_baseline")
                 out_tfbs_raw.unlink(missing_ok=True)
-                logger.info(f"✓ TFBS entropy: {outputs.tfbs.name}")
+                logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_off} TFs)")
                 
-                # On-target (if panel mode and there are on-target factors)
-                if is_panel_mode and gc_ontarget_str:
-                    from .region_entropy_processor import filter_regions_by_targets
-                    
-                    # Filter TFBS regions to those overlapping panel targets
-                    tfbs_ontarget_regions = output_dir / f"{sample_name}.TFBS.ontarget.regions.bed"
-                    filtered = filter_regions_by_targets(
-                        Path(tfbs_regions), resolved_target_regions, tfbs_ontarget_regions
-                    )
-                    
-                    if filtered:
-                        out_tfbs_on_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
-                        _core.region_entropy.run_region_entropy(
-                            str(bed_path), str(filtered), str(out_tfbs_on_raw), gc_ontarget_str, True
-                        )
+                # Process on-target output (panel mode only)
+                if is_panel_mode:
+                    out_tfbs_on_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
+                    if out_tfbs_on_raw.exists():
                         outputs.tfbs_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.tsv"
                         process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, entropy_pon_parquet, "tfbs_baseline")
                         out_tfbs_on_raw.unlink(missing_ok=True)
-                        tfbs_ontarget_regions.unlink(missing_ok=True)
-                        logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name}")
+                        logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name} ({n_on} TFs)")
                     
             except Exception as e:
                 logger.warning(f"TFBS entropy failed: {e}")
         
-        # ATAC Entropy
+        # ATAC Entropy - Uses Rust dual output (off-target + on-target in single pass)
         if enable_atac and assets.atac_available:
             try:
                 atac_regions = str(assets.atac_regions)
-                
-                # Off-target (genome-wide)
                 out_atac_raw = output_dir / f"{sample_name}.ATAC.raw.tsv"
-                _core.region_entropy.run_region_entropy(
-                    str(bed_path), atac_regions, str(out_atac_raw), gc_str, True
+                
+                # Call Rust with optional target_regions for dual output
+                target_str = str(resolved_target_regions) if is_panel_mode else None
+                n_off, n_on = _core.region_entropy.run_region_entropy(
+                    str(bed_path), atac_regions, str(out_atac_raw), gc_str, target_str, True
                 )
+                
+                # Process off-target output (primary/WGS-like)
                 outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
                 process_region_entropy(out_atac_raw, outputs.atac, entropy_pon_parquet, "atac_baseline")
                 out_atac_raw.unlink(missing_ok=True)
-                logger.info(f"✓ ATAC entropy: {outputs.atac.name}")
+                logger.info(f"✓ ATAC entropy: {outputs.atac.name} ({n_off} cancer types)")
                 
-                # On-target (if panel mode)
-                if is_panel_mode and gc_ontarget_str:
-                    from .region_entropy_processor import filter_regions_by_targets
-                    
-                    # Filter ATAC regions to those overlapping panel targets
-                    atac_ontarget_regions = output_dir / f"{sample_name}.ATAC.ontarget.regions.bed"
-                    filtered = filter_regions_by_targets(
-                        Path(atac_regions), resolved_target_regions, atac_ontarget_regions
-                    )
-                    
-                    if filtered:
-                        out_atac_on_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
-                        _core.region_entropy.run_region_entropy(
-                            str(bed_path), str(filtered), str(out_atac_on_raw), gc_ontarget_str, True
-                        )
+                # Process on-target output (panel mode only)
+                if is_panel_mode:
+                    out_atac_on_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
+                    if out_atac_on_raw.exists():
                         outputs.atac_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.tsv"
                         process_region_entropy(out_atac_on_raw, outputs.atac_ontarget, entropy_pon_parquet, "atac_baseline")
                         out_atac_on_raw.unlink(missing_ok=True)
-                        atac_ontarget_regions.unlink(missing_ok=True)
-                        logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name}")
+                        logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name} ({n_on} cancer types)")
                     
             except Exception as e:
                 logger.warning(f"ATAC entropy failed: {e}")
