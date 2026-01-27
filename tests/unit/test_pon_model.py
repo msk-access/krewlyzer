@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from krewlyzer.pon.model import (
     PonModel, GcBiasModel, FsdBaseline, WpsBaseline,
-    OcfBaseline, MdsBaseline, WpsBackgroundBaseline
+    OcfBaseline, MdsBaseline, WpsBackgroundBaseline, RegionMdsBaseline
 )
 
 
@@ -172,6 +172,53 @@ class TestWpsBackgroundBaseline:
         """Test NRL z-score returns None for missing group."""
         zscore = sample_wps_background.compute_nrl_zscore(200.0, 'chr99')
         assert zscore is None
+
+
+class TestRegionMdsBaseline:
+    """Tests for RegionMdsBaseline class."""
+    
+    @pytest.fixture
+    def sample_region_mds(self):
+        return RegionMdsBaseline(
+            gene_baseline={
+                'TP53': {'mds_mean': 4.5, 'mds_std': 0.3, 'mds_e1_mean': 4.2, 'mds_e1_std': 0.4, 'n_samples': 20},
+                'EGFR': {'mds_mean': 4.8, 'mds_std': 0.5, 'mds_e1_mean': 4.6, 'mds_e1_std': 0.6, 'n_samples': 20},
+            }
+        )
+    
+    def test_get_stats(self, sample_region_mds):
+        """Test get_stats returns (mean, std) tuple."""
+        stats = sample_region_mds.get_stats('TP53')
+        assert stats[0] == 4.5
+        assert stats[1] == 0.3
+    
+    def test_get_stats_missing(self, sample_region_mds):
+        """Test get_stats returns None for missing gene."""
+        stats = sample_region_mds.get_stats('UNKNOWN_GENE')
+        assert stats is None
+    
+    def test_get_e1_stats(self, sample_region_mds):
+        """Test get_e1_stats returns (mean, std) tuple."""
+        stats = sample_region_mds.get_e1_stats('TP53')
+        assert stats[0] == 4.2
+        assert stats[1] == 0.4
+    
+    def test_compute_zscore(self, sample_region_mds):
+        """Test z-score computation."""
+        # observed=5.1, mean=4.5, std=0.3 -> z=(5.1-4.5)/0.3=2.0
+        zscore = sample_region_mds.compute_zscore('TP53', 5.1)
+        assert pytest.approx(zscore) == 2.0
+    
+    def test_compute_zscore_missing(self, sample_region_mds):
+        """Test z-score returns None for missing gene."""
+        zscore = sample_region_mds.compute_zscore('UNKNOWN_GENE', 5.0)
+        assert zscore is None
+    
+    def test_compute_e1_zscore(self, sample_region_mds):
+        """Test E1 z-score computation."""
+        # observed=5.0, mean=4.2, std=0.4 -> z=(5.0-4.2)/0.4=2.0
+        zscore = sample_region_mds.compute_e1_zscore('TP53', 5.0)
+        assert pytest.approx(zscore) == 2.0
 
 
 class TestPonModel:

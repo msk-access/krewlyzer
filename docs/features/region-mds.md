@@ -76,6 +76,7 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `--maxlen` | | INT | 1000 | Maximum fragment length |
 | `--pon-model` | `-P` | PATH | | PON model for z-score computation |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization |
+| `--threads` | `-t` | INT | 0 | Number of threads (0 = all cores) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--silent` | | FLAG | | Suppress progress bar |
 

@@ -127,6 +127,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 | `--pon-model` | `-P` | PATH | | PON model for z-score normalization |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization (for ML negatives) |
 | `--target-regions` | `-T` | PATH | | Target regions BED (panel mode: generates .ontarget.tsv) |
+| `--threads` | `-t` | INT | 0 | Number of threads (0 = all cores) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 
 ---

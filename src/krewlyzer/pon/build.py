@@ -147,6 +147,14 @@ def build_pon(
     if not wps_regions.exists():
         logger.warning(f"WPS regions file not found: {wps_regions}")
     
+    # Default WPS background (Alu) file for NRL baseline
+    wps_bg_file = assets.wps_background
+    if wps_bg_file.exists():
+        logger.debug(f"Using bundled WPS background: {wps_bg_file.name}")
+    else:
+        wps_bg_file = None
+        logger.debug("WPS background file not found - Alu baseline will not be computed")
+    
     import tempfile
     import shutil
     import time
@@ -173,6 +181,7 @@ def build_pon(
         threads=max(1, threads // max(1, min(4, n_samples))),  # Divide threads among samples
         bin_file=bin_file,
         wps_anchors=wps_regions,  # Use resolved WPS anchors (modern) or transcript file (legacy)
+        wps_background=wps_bg_file,  # Bundled Alu regions for NRL baseline
     )
     
     # Use temp directory for sample processing outputs
@@ -217,6 +226,23 @@ def build_pon(
                 logger.info(f"  ✓ Done in {elapsed:.1f}s ({outputs.fragment_count:,} frags)")
                 succeeded_count += 1
                 
+                # Run region-mds for per-gene MDS baseline
+                try:
+                    sample_out_dir = Path(temp_output_dir) / sample_name
+                    mds_gene_output = sample_out_dir / f"{sample_name}.MDS.gene.tsv"
+                    gene_bed = assets.get_gene_bed_for_mode(assay)
+                    
+                    # Call Rust region_mds on the extracted BED
+                    if outputs.bed_path and outputs.bed_path.exists() and gene_bed:
+                        _core.region_mds.run_region_mds(
+                            str(outputs.bed_path),
+                            str(gene_bed),  # Bundled gene BED
+                            str(mds_gene_output),
+                        )
+                        logger.debug(f"    Generated {mds_gene_output.name}")
+                except Exception as e:
+                    logger.debug(f"    Could not run region-mds: {e}")
+                
             except Exception as e:
                 logger.warning(f"  ✗ Failed: {e}")
                 failed_count += 1
@@ -247,6 +273,13 @@ def build_pon(
         all_fsd_data_ontarget = []
         all_gc_data_ontarget = []
         
+        # Collect file paths for Rust-based baseline computation
+        fsd_paths = []
+        wps_paths = []
+        fsd_ontarget_paths = []  # On-target FSD for panel mode
+        wps_background_paths = []  # WPS Alu background for NRL baseline
+        mds_gene_paths = []  # Region MDS per-gene files
+        
         for outputs in all_outputs:
             sample_name = outputs.sample_id
             feat = outputs.feature_outputs
@@ -267,6 +300,7 @@ def build_pon(
             
             # Collect FSD data
             if feat and feat.fsd and feat.fsd.exists():
+                fsd_paths.append(str(feat.fsd))  # Collect path for Rust baseline
                 try:
                     fsd_df = pd.read_csv(feat.fsd, sep='\t')
                     all_fsd_data.append(fsd_df)
@@ -275,6 +309,7 @@ def build_pon(
             
             # Collect on-target FSD (panel mode)
             if feat and feat.fsd_ontarget and feat.fsd_ontarget.exists():
+                fsd_ontarget_paths.append(str(feat.fsd_ontarget))  # Collect path for Rust baseline
                 try:
                     fsd_on_df = pd.read_csv(feat.fsd_ontarget, sep='\t')
                     all_fsd_data_ontarget.append(fsd_on_df)
@@ -283,6 +318,7 @@ def build_pon(
             
             # Collect WPS data
             if feat and feat.wps and feat.wps.exists():
+                wps_paths.append(str(feat.wps))  # Collect path for Rust baseline
                 try:
                     wps_df = pd.read_parquet(feat.wps)
                     # Aggregate by region for baseline
@@ -307,6 +343,15 @@ def build_pon(
                         all_ocf_data.append(ocf_df[['region_id', 'ocf']])
                 except Exception as e:
                     logger.debug(f"  Could not read OCF for {sample_name}: {e}")
+            
+            # Collect WPS background (Alu stacking) data
+            if feat and feat.wps_background and feat.wps_background.exists():
+                wps_background_paths.append(str(feat.wps_background))
+            
+            # Collect region MDS gene paths (generated during processing)
+            sample_mds_gene = Path(temp_output_dir) / sample_name / f"{sample_name}.MDS.gene.tsv"
+            if sample_mds_gene.exists():
+                mds_gene_paths.append(str(sample_mds_gene))
             
             # Collect MDS data (from extraction)
             if outputs.mds_counts:
@@ -356,11 +401,11 @@ def build_pon(
     
     # Build FSD baseline
     logger.info("  Computing FSD baseline...")
-    fsd_baseline = _compute_fsd_baseline(all_fsd_data)
+    fsd_baseline = _compute_fsd_baseline(all_fsd_data, fsd_paths)
     
     # Build WPS baseline
     logger.info("  Computing WPS baseline...")
-    wps_baseline = _compute_wps_baseline(all_wps_data)
+    wps_baseline = _compute_wps_baseline(all_wps_data, wps_paths)
     
     # Build OCF baseline
     ocf_baseline = None
@@ -390,7 +435,7 @@ def build_pon(
     fsd_baseline_ontarget = None
     if is_panel_mode and all_fsd_data_ontarget:
         logger.info("  Computing on-target FSD baseline...")
-        fsd_baseline_ontarget = _compute_fsd_baseline(all_fsd_data_ontarget)
+        fsd_baseline_ontarget = _compute_fsd_baseline(all_fsd_data_ontarget, fsd_ontarget_paths)
         if fsd_baseline_ontarget:
             logger.debug(f"    On-target FSD: {len(fsd_baseline_ontarget.arms)} arms")
     
@@ -402,6 +447,21 @@ def build_pon(
     if is_panel_mode and all_gc_data_ontarget:
         logger.info("  Computing on-target GC bias curves...")
         gc_bias_ontarget = _compute_gc_bias_model(all_gc_data_ontarget)
+    
+    # Build WPS background baseline (Alu NRL/periodicity)
+    wps_background_baseline = None
+    if wps_background_paths:
+        logger.info("  Computing WPS background baseline (Alu NRL)...")
+        wps_background_baseline = _compute_wps_background_baseline(wps_background_paths)
+    
+    # Build Region MDS baseline (per-gene MDS statistics)
+    region_mds_baseline = None
+    if mds_gene_paths:
+        logger.info("  Computing Region MDS baseline...")
+        try:
+            region_mds_baseline = _compute_region_mds_baseline(mds_gene_paths)
+        except Exception as e:
+            logger.warning(f"  Region MDS baseline failed: {e}")
     
     # Create PON model
     model = PonModel(
@@ -415,8 +475,10 @@ def build_pon(
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
+        wps_background_baseline=wps_background_baseline,
         ocf_baseline=ocf_baseline,
         mds_baseline=mds_baseline,
+        region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
         fsd_baseline_ontarget=fsd_baseline_ontarget,
@@ -437,11 +499,55 @@ def build_pon(
     logger.info(f"-" * 60)
     logger.info(f"Model building complete ({model_elapsed:.1f}s)")
     logger.info(f"")
-    logger.info(f"✅ PON model built successfully")
-    logger.info(f"   Assay: {model.assay}")
-    logger.info(f"   Samples: {model.n_samples}")
-    logger.info(f"   Panel mode: {is_panel_mode}")
-    logger.info(f"   Output: {output}")
+    logger.info(f"=" * 60)
+    logger.info(f"PON MODEL SUMMARY")
+    logger.info(f"=" * 60)
+    logger.info(f"  Assay: {model.assay}")
+    logger.info(f"  Samples: {model.n_samples}")
+    logger.info(f"  Panel mode: {is_panel_mode}")
+    logger.info(f"  Output: {output}")
+    logger.info(f"")
+    logger.info(f"BASELINES GENERATED:")
+    logger.info(f"-" * 40)
+    
+    # Off-target baselines
+    def _baseline_status(name, baseline, detail_fn=None):
+        if baseline is None:
+            return f"  {name}: ❌ Not generated"
+        detail = detail_fn(baseline) if detail_fn else ""
+        return f"  {name}: ✅ {detail}"
+    
+    logger.info(_baseline_status("gc_bias", gc_bias, 
+        lambda b: f"{len(b.gc_bins)} bins" if hasattr(b, 'gc_bins') else "OK"))
+    logger.info(_baseline_status("fsd_baseline", fsd_baseline,
+        lambda b: f"{len(b.arms)} arms" if hasattr(b, 'arms') else "OK"))
+    logger.info(_baseline_status("wps_baseline", wps_baseline,
+        lambda b: f"{len(b.regions)} regions" if hasattr(b, 'regions') else "OK"))
+    logger.info(_baseline_status("wps_background", wps_background_baseline,
+        lambda b: f"{len(b.groups)} groups" if hasattr(b, 'groups') else "OK"))
+    logger.info(_baseline_status("ocf_baseline", ocf_baseline,
+        lambda b: f"{len(b.regions)} regions" if hasattr(b, 'regions') else "OK"))
+    logger.info(_baseline_status("mds_baseline", mds_baseline, lambda b: "OK"))
+    logger.info(_baseline_status("region_mds", region_mds_baseline,
+        lambda b: f"{len(b.gene_baseline)} genes" if hasattr(b, 'gene_baseline') else "OK"))
+    logger.info(_baseline_status("tfbs_baseline", tfbs_baseline,
+        lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
+    logger.info(_baseline_status("atac_baseline", atac_baseline,
+        lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
+    
+    # Panel-mode baselines
+    if is_panel_mode:
+        logger.info(f"")
+        logger.info(f"ON-TARGET BASELINES (Panel Mode):")
+        logger.info(f"-" * 40)
+        logger.info(_baseline_status("gc_bias_ontarget", gc_bias_ontarget,
+            lambda b: f"{len(b.gc_bins)} bins" if hasattr(b, 'gc_bins') else "OK"))
+        logger.info(_baseline_status("fsd_baseline_ontarget", fsd_baseline_ontarget,
+            lambda b: f"{len(b.arms)} arms" if hasattr(b, 'arms') else "OK"))
+    
+    logger.info(f"")
+    logger.info(f"=" * 60)
+    logger.info(f"✅ PON model built successfully: {output}")
 
 
 def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
@@ -683,6 +789,82 @@ def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaselin
     except Exception as e:
         logger.error(f"Region-MDS baseline computation failed: {e}")
         raise RuntimeError(f"Region-MDS baseline computation failed: {e}")
+
+
+def _compute_wps_background_baseline(wps_background_paths: List[str]) -> "WpsBackgroundBaseline":
+    """
+    Compute WPS background (Alu) baseline from sample WPS_background.parquet files.
+    
+    Aggregates nucleosome repeat length (NRL) and periodicity values across samples
+    for Alu element stacking analysis.
+    
+    Args:
+        wps_background_paths: List of paths to WPS_background.parquet files
+        
+    Returns:
+        WpsBackgroundBaseline with per-group NRL/periodicity mean/std
+    """
+    from .model import WpsBackgroundBaseline
+    
+    if not wps_background_paths:
+        return None
+    
+    # Filter to existing paths
+    valid_paths = [p for p in wps_background_paths if Path(p).exists()]
+    if not valid_paths:
+        logger.warning("No valid WPS_background.parquet files found")
+        return None
+    
+    logger.info(f"Computing WPS background baseline from {len(valid_paths)} samples...")
+    
+    try:
+        # Load and aggregate WPS background data across samples
+        all_groups = []
+        for path in valid_paths:
+            try:
+                df = pd.read_parquet(path)
+                # Expected columns: group_id, nrl, periodicity (or similar)
+                if 'group_id' in df.columns:
+                    all_groups.append(df)
+            except Exception as e:
+                logger.debug(f"Could not read {path}: {e}")
+        
+        if not all_groups:
+            logger.warning("No valid WPS background data found")
+            return None
+        
+        # Concatenate all samples
+        combined = pd.concat(all_groups, ignore_index=True)
+        
+        # Aggregate by group_id
+        group_stats = []
+        for group_id in combined['group_id'].unique():
+            group_data = combined[combined['group_id'] == group_id]
+            
+            nrl_col = 'nrl' if 'nrl' in group_data.columns else 'nucleosome_repeat_length'
+            periodicity_col = 'periodicity' if 'periodicity' in group_data.columns else 'period_score'
+            
+            nrl_mean = group_data[nrl_col].mean() if nrl_col in group_data.columns else 167.0
+            nrl_std = group_data[nrl_col].std() if nrl_col in group_data.columns else 5.0
+            period_mean = group_data[periodicity_col].mean() if periodicity_col in group_data.columns else 0.0
+            period_std = group_data[periodicity_col].std() if periodicity_col in group_data.columns else 1.0
+            
+            group_stats.append({
+                'group_id': group_id,
+                'nrl_mean': nrl_mean,
+                'nrl_std': max(nrl_std, 0.1),  # Avoid zero std
+                'periodicity_mean': period_mean,
+                'periodicity_std': max(period_std, 0.01),
+            })
+        
+        groups_df = pd.DataFrame(group_stats)
+        logger.info(f"WPS background baseline: {len(groups_df)} groups")
+        
+        return WpsBackgroundBaseline(groups=groups_df)
+        
+    except Exception as e:
+        logger.error(f"WPS background baseline computation failed: {e}")
+        return None
 
 def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
     """
