@@ -112,8 +112,12 @@ In panel mode, each feature outputs two files:
 | FSR | `.FSR.tsv` | `.FSR.ontarget.tsv` |
 | FSD | `.FSD.tsv` | `.FSD.ontarget.tsv` |
 | OCF | `.OCF.tsv` | `.OCF.ontarget.tsv` |
+| TFBS | `.TFBS.tsv` | `.TFBS.ontarget.tsv` |
+| ATAC | `.ATAC.tsv` | `.ATAC.ontarget.tsv` |
 
 **Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/ocf.md#panel-mode---target-regions) for details.
+
+**Note on TFBS/ATAC**: Off-target files use off-target reads across all ~800 TFs / 23 cancer types (WGS-like coverage). On-target files use only on-target reads. See [Region Entropy](../features/region-entropy.md#panel-mode-dual-output) for details.
 
 **Off-target files** are used for:
 - Fragment-based biomarkers

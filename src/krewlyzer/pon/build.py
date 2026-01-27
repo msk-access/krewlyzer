@@ -425,11 +425,12 @@ def build_pon(
             logger.info(f"  FSC gene samples: {len(all_fsc_gene_data)}")
             logger.info(f"  FSC region samples: {len(all_fsc_region_data)}")
     
-    finally:
-        # Cleanup temp directory
+    except Exception as e:
+        # On error, cleanup temp directory before re-raising
         if temp_output_dir and Path(temp_output_dir).exists():
             shutil.rmtree(temp_output_dir)
-            logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
+            logger.debug(f"Cleaned up temp directory after error: {temp_output_dir}")
+        raise
     
     if len(all_gc_data) < 1:
         logger.error("No samples processed successfully")
@@ -618,6 +619,11 @@ def build_pon(
     logger.info(f"")
     logger.info(f"=" * 60)
     logger.info(f"✅ PON model built successfully: {output}")
+    
+    # Cleanup temp directory after successful completion
+    if temp_output_dir and Path(temp_output_dir).exists():
+        shutil.rmtree(temp_output_dir)
+        logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
 
 
 def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
