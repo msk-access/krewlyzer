@@ -52,7 +52,9 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--reference` | `-r` | PATH | *required* | Reference genome FASTA (indexed) |
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--genome` | `-G` | TEXT | hg19 | Genome build for GC assets |
+| `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for auto-loading bundled targets |
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
+| `--skip-target-regions` | | FLAG | | Disable panel mode even when --assay is specified |
 | `--gc-correct` | | FLAG | True | Compute GC correction factors |
 | `--exclude-regions` | `-x` | PATH | | BED file of regions to exclude |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
@@ -87,11 +89,15 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 
 ---
 
-## Panel Mode (--target-regions)
+## Panel Mode (--assay or --target-regions)
 
-For targeted sequencing panels (MSK-ACCESS), use `--target-regions` to ensure **unbiased GC correction**:
+For targeted sequencing panels (MSK-ACCESS), use `--assay` to auto-load bundled targets, or `--target-regions` for a custom target file:
 
 ```bash
+# Recommended: Auto-load bundled targets for xs2 assay
+krewlyzer extract -i sample.bam -r hg19.fa -o output/ --assay xs2
+
+# Alternative: Explicit target file
 krewlyzer extract -i sample.bam -r hg19.fa -o output/ \
     --target-regions MSK-ACCESS_targets.bed
 ```

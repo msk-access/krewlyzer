@@ -29,7 +29,9 @@ process KREWLYZER_EXTRACT {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def assay_arg = params.assay ? "--assay ${params.assay}" : ""
     def targets_arg = targets ? "--target-regions ${targets}" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
     def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
 
@@ -41,7 +43,9 @@ process KREWLYZER_EXTRACT {
         --sample-name $prefix \\
         --threads $task.cpus \\
         $genome_arg \\
+        $assay_arg \\
         $targets_arg \\
+        $skip_targets_arg \\
         $maxlen_arg \\
         $verbose_arg \\
         $args

@@ -35,6 +35,9 @@ from krewlyzer import _core
 # Shared BAM utilities
 from .core.bam_utils import check_bam_compatibility
 
+# Asset resolution for --assay auto-loading
+from .core.asset_resolution import resolve_target_regions
+
 
 def extract(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
@@ -48,6 +51,8 @@ def extract(
     # Configurable filters
     exclude_regions: Optional[Path] = typer.Option(None, '-x', '--exclude-regions', help="Exclude regions BED file"),
     target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: GC model computed on off-target reads only)"),
+    assay: Optional[str] = typer.Option(None, '--assay', '-A', help="Assay code (xs1/xs2) for auto-loading bundled targets"),
+    skip_target_regions: bool = typer.Option(False, '--skip-target-regions', help="Disable panel mode even when --assay has bundled targets"),
     mapq: int = typer.Option(20, '--mapq', '-q', help="Minimum mapping quality"),
     minlen: int = typer.Option(65, '--minlen', help="Minimum fragment length"),
     maxlen: int = typer.Option(1000, '--maxlen', help="Maximum fragment length (default: 1000 for extended FSD range)"),
@@ -120,6 +125,23 @@ def extract(
             logger.warning(f"AssetManager error: {e}. GC correction disabled.")
             gc_correct = False
     
+    # Resolve target regions (auto-load from --assay if not explicit)
+    resolved_target_path = target_regions
+    if assets:
+        try:
+            resolved_target_path, target_source = resolve_target_regions(
+                explicit_path=target_regions,
+                assay=assay,
+                skip_target_regions=skip_target_regions,
+                assets=assets,
+                log=logger
+            )
+            if resolved_target_path and target_source == "bundled":
+                logger.info(f"Auto-loaded target regions for assay '{assay}': {resolved_target_path.name}")
+        except ValueError as e:
+            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+            raise typer.Exit(1)
+    
     # Default exclude regions from assets
     if exclude_regions is None and assets:
         try:
@@ -182,8 +204,8 @@ def extract(
         logger.info(f"Extracting fragments from {bam_input.name}")
         logger.info(f"Filters: mapq>={mapq}, length=[{minlen},{maxlen}], skip_dup={skip_duplicates}, proper_pair={require_proper_pair}")
         
-        if target_regions:
-            logger.info(f"Panel mode: GC model will use off-target reads only (targets: {target_regions.name})")
+        if resolved_target_path:
+            logger.info(f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_path.name})")
         
         # Use unified extract_sample() for extraction
         from .core.sample_processor import extract_sample, write_extraction_outputs
@@ -198,7 +220,7 @@ def extract(
             threads=threads,
             skip_duplicates=skip_duplicates,
             require_proper_pair=require_proper_pair,
-            target_regions=target_regions,
+            target_regions=resolved_target_path,
             exclude_regions=exclude_regions,
             write_bed=True,
             output_dir=output,
@@ -213,12 +235,12 @@ def extract(
             result=result,
             output_dir=output,
             genome=genome,
-            assay=None,
+            assay=assay,
             compute_gc_factors=gc_correct and assets is not None,
         )
         
         # On-target GC correction (panel mode only) - additional to standard outputs
-        if target_regions and gc_correct and assets and len(result.gc_observations_ontarget) > 0:
+        if resolved_target_path and gc_correct and assets and len(result.gc_observations_ontarget) > 0:
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")

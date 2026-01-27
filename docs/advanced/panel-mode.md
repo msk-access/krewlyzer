@@ -94,7 +94,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ --assay xs2
 | `wgs` | None | None (WGS mode) |
 
 This auto-loading applies to **all tools** including:
-- `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `region-entropy`, `motif`, `region-mds`, `build-pon`
+- `extract`, `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `region-entropy`, `motif`, `region-mds`, `build-pon`
 
 ### Forcing WGS Mode with `--skip-target-regions`
 
