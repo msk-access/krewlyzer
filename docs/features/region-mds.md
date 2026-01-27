@@ -228,4 +228,4 @@ See [Panel Mode](../advanced/panel-mode.md) for details on panel-specific proces
 - [Citation & Scientific Background](../citation.md#region-mds) - Helzer et al. (2025)
 - [Motif Extraction](motif.md) - Global MDS analysis
 - [OCF](ocf.md) - Orientation-aware fragmentation
-- [Output Formats](output-formats.md) - File format details
+- [JSON Output](json-output.md) - File format details

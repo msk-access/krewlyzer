@@ -6,12 +6,43 @@ This page documents the expected formats for custom input files used as override
 
 | File Type | Columns | Used By | Example |
 |-----------|---------|---------|---------|
+| [Sample List](#sample-list) | paths | `build-pon` | `/path/to/sample.bam` |
 | [BED3](#bed3) | chrom, start, end | `--bin-input`, `--target-regions` | `chr1\t0\t100000` |
 | [Gene BED](#gene-bed) | chrom, start, end, gene, [name] | `--gene-bed` | `chr1\t100\t5000\tTP53\texon1` |
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
 | [GC Factors TSV](#gc-factors-tsv) | length_bin, gc_pct, factor | `--gc-factors` | `10\t45\t1.05` |
+
+---
+
+## Sample List {#sample-list}
+
+Plain text file with one sample path per line for PON building.
+
+### Format
+
+```
+/path/to/sample1.bam
+/path/to/sample2.bam
+/path/to/sample3.bed.gz
+```
+
+| Input Type | Description |
+|------------|-------------|
+| `.bam` / `.cram` | Full processing including MDS baseline |
+| `.bed.gz` | Pre-extracted fragments (faster, no MDS) |
+
+### Notes
+
+- One path per line
+- No header row
+- Paths can be absolute or relative to working directory
+- Mixing BAM and BED.gz inputs is allowed
+
+### Used By
+
+- `build-pon SAMPLE_LIST` - First positional argument
 
 ---
 

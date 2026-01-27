@@ -16,6 +16,11 @@ import logging
 
 logger = logging.getLogger("krewlyzer.region_mds")
 
+# Import asset resolution and startup banner
+from .core.asset_resolution import resolve_pon_model
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
+
 
 def region_mds(
     bam_input: Path = typer.Argument(..., help="Input BAM file (indexed)"),
@@ -79,28 +84,43 @@ def region_mds(
     # Resolve gene BED
     assets = AssetManager(genome)
     resolved_gene_bed = None
+    gene_bed_source = "none"
     
     if gene_bed:
         # User-provided gene BED
         if not gene_bed.exists():
             raise typer.BadParameter(f"Gene BED not found: {gene_bed}")
         resolved_gene_bed = gene_bed
-        logger.info(f"Using user-provided gene BED: {gene_bed}")
+        gene_bed_source = "explicit"
+        logger.debug(f"Using user-provided gene BED: {gene_bed}")
     elif assay:
         # Bundled gene BED from assay
         resolved_gene_bed = assets.get_gene_bed_for_mode(assay)
         if resolved_gene_bed is None:
             raise typer.BadParameter(f"Gene BED not available for assay '{assay}' and genome '{genome}'")
-        logger.info(f"Using bundled gene BED for assay '{assay}': {resolved_gene_bed}")
+        gene_bed_source = "bundled"
+        logger.debug(f"Using bundled gene BED for assay '{assay}': {resolved_gene_bed}")
     else:
         # Default to WGS if no assay specified
         if assets.wgs_gene_bed_available:
             resolved_gene_bed = assets.wgs_gene_bed
-            logger.info(f"Using WGS gene BED: {resolved_gene_bed}")
+            gene_bed_source = "bundled"
+            logger.debug(f"Using WGS gene BED: {resolved_gene_bed}")
         else:
             raise typer.BadParameter(
                 "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
             )
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION (PON)
+    # ═══════════════════════════════════════════════════════════════════
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
     
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -113,11 +133,19 @@ def region_mds(
     output_exon = output / f"{sample_name}.MDS.exon.tsv"
     output_gene = output / f"{sample_name}.MDS.gene.tsv"
     
-    logger.info(f"Running region-MDS analysis")
-    logger.info(f"  BAM: {bam_input}")
-    logger.info(f"  Gene BED: {resolved_gene_bed}")
-    logger.info(f"  Output: {output_exon}, {output_gene}")
-    logger.info(f"  Filters: mapq>={mapq}, length=[{minlen},{maxlen}]")
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="region-mds", version=__version__,
+        inputs={"BAM": str(bam_input.name), "Reference": str(reference.name), "Output": str(output)},
+        config={"Genome": f"{assets.raw_genome} → {assets.genome_dir}", "Assay": assay or "None", "E1 Only": str(e1_only)},
+        assets=[
+            ResolvedAsset("Gene BED", resolved_gene_bed, gene_bed_source),
+            ResolvedAsset("PON", resolved_pon_path, pon_source),
+        ],
+        logger=logger
+    )
     
     # Configure thread pool for Rayon parallelization
     if threads > 0:
@@ -143,17 +171,15 @@ def region_mds(
     )
     
     logger.info(f"Region-MDS complete: {n_regions} regions, {n_genes} genes")
-    logger.info(f"  Exon output: {output_exon}")
-    logger.info(f"  Gene output: {output_gene}")
     
     # PON z-score normalization
-    if pon_model and not skip_pon:
+    if resolved_pon_path and resolved_pon_path.exists():
         try:
             import pandas as pd
             from krewlyzer.pon.model import PonModel
             
-            logger.info(f"Applying PON z-score normalization: {pon_model}")
-            pon = PonModel.load(pon_model)
+            logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
+            pon = PonModel.load(resolved_pon_path)
             
             if pon.region_mds is None:
                 logger.warning("PON model does not have region_mds baseline - skipping z-scores")
@@ -190,7 +216,5 @@ def region_mds(
                 
         except Exception as e:
             logger.warning(f"PON z-score computation failed: {e}")
-    elif skip_pon:
-        logger.debug("Skipping PON z-score normalization (--skip-pon)")
     
     return n_regions, n_genes

@@ -39,6 +39,7 @@ process KREWLYZER_REGION_ENTROPY {
     def tfbs_arg = params.no_tfbs ? "--no-tfbs" : ""
     def atac_arg = params.no_atac ? "--no-atac" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
     krewlyzer region-entropy \\
@@ -52,6 +53,7 @@ process KREWLYZER_REGION_ENTROPY {
         $tfbs_arg \\
         $atac_arg \\
         $verbose_arg \\
+        $skip_targets_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

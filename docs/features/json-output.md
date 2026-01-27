@@ -406,3 +406,74 @@ This produces JSON with all panel-specific features:
 - `wps_panel`: 1,820 anchors
 - `wps_background`: Alu stacking
 - PON z-scores across all features
+
+---
+
+## Output File Structure
+
+Krewlyzer generates TSV/Parquet files alongside the optional unified JSON:
+
+### Core Fragmentomics
+
+```
+out/
+├── sample.FSD.tsv                   # Fragment size distribution (arm-level)
+├── sample.FSD.ontarget.tsv          # Panel mode: on-target FSD
+├── sample.FSR.tsv                   # Fragment size ratio (short/long)
+├── sample.FSR.ontarget.tsv          # Panel mode: on-target FSR
+├── sample.FSC.tsv                   # Fragment size coverage (bin-level)
+├── sample.FSC.ontarget.tsv          # Panel mode: on-target FSC
+├── sample.FSC.gene.tsv              # Gene-level FSC (with --assay)
+├── sample.FSC.region.tsv            # Exon-level FSC (aggregate_by='region')
+└── sample.correction_factors.tsv    # GC correction factors
+```
+
+### WPS (Windowed Protection Score)
+
+```
+out/
+├── sample.WPS.parquet               # Per-region WPS profiles (foreground)
+├── sample.WPS.panel.parquet         # Panel-specific anchors (with --assay)
+└── sample.WPS_background.parquet    # Alu stacking profiles (background)
+```
+
+### Motif & Tissue-of-Origin
+
+```
+out/
+├── sample.EndMotif.tsv              # 4-mer end motif frequencies
+├── sample.MDS.tsv                   # Motif diversity score
+├── sample.OCF.tsv                   # Orientation-aware fragmentation
+├── sample.OCF.ontarget.tsv          # Panel mode: on-target OCF
+└── sample.OCF.sync.tsv              # OCF sync scores
+```
+
+### Region Entropy (TFBS/ATAC)
+
+```
+out/
+├── sample.TFBS.tsv                  # TF binding site entropy (808 factors)
+├── sample.TFBS.ontarget.tsv         # Panel mode: on-target TFBS
+├── sample.ATAC.tsv                  # ATAC-seq peak entropy (23 cancer types)
+└── sample.ATAC.ontarget.tsv         # Panel mode: on-target ATAC
+```
+
+### Unified Output
+
+```
+out/
+├── sample.metadata.json             # Run metadata and QC metrics
+└── sample.features.json             # All features (with --generate-json)
+```
+
+> [!NOTE]
+> The `--generate-json` flag produces the unified JSON **in addition to** the standard TSV/Parquet outputs.
+
+---
+
+## See Also
+
+- [Pipeline Integration](../pipeline.md) - `run-all` command and `--generate-json` flag
+- [Input File Formats](../advanced/input-formats.md) - Custom input file specifications
+- [Troubleshooting](../troubleshooting.md) - Common format issues
+

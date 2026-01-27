@@ -33,7 +33,7 @@ from krewlyzer.region_entropy import region_entropy
 from krewlyzer.wrapper import run_all
 from krewlyzer.pon.build import build_pon
 from krewlyzer.build_gc_reference import build_gc_reference
-from krewlyzer.tools.region_mds import region_mds
+from krewlyzer.region_mds import region_mds
 from krewlyzer import __version__
 
 # -------------------------------------------------------------------

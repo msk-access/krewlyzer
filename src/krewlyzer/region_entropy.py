@@ -23,6 +23,11 @@ console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("region_entropy")
 
+# Import asset resolution and startup banner
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
+
 
 def region_entropy(
     bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
@@ -43,6 +48,8 @@ def region_entropy(
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1/xs2) for auto-loading bundled assets"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0 = use all available cores)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
@@ -91,21 +98,54 @@ def region_entropy(
     # Load assets
     assets = AssetManager(genome)
     
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions, assay=assay, skip_target_regions=skip_target_regions,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    target_regions_str = str(resolved_target_path) if is_panel_mode else None
+    
     # Resolve GC correction factors
     gc_str = str(gc_factors) if gc_factors and gc_factors.exists() else None
     
-    # Validate: -P and --skip-pon are contradictory
-    if pon_model and skip_pon:
-        logger.error("--pon-model (-P) and --skip-pon are contradictory")
-        raise typer.Exit(1)
-    
     # Use PON parquet directly for Z-score normalization (Rust implementation)
-    entropy_pon_parquet = pon_model if (pon_model and pon_model.exists() and not skip_pon) else None
+    entropy_pon_parquet = resolved_pon_path if (resolved_pon_path and resolved_pon_path.exists()) else None
     
-    if entropy_pon_parquet:
-        logger.info(f"Using PON for z-score normalization: {pon_model.name}")
-    elif skip_pon:
-        logger.info("--skip-pon: skipping PON z-score normalization")
+    # Build list of enabled features
+    features = []
+    if tfbs:
+        features.append("TFBS Entropy")
+    if atac:
+        features.append("ATAC Entropy")
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="region-entropy", version=__version__,
+        inputs={"Fragments": str(bedgz_input.name), "Output": str(output)},
+        config={"Genome": f"{assets.raw_genome} → {assets.genome_dir}", "Assay": assay or "None", "Mode": "Panel" if is_panel_mode else "WGS"},
+        assets=[ResolvedAsset("PON", resolved_pon_path, pon_source), ResolvedAsset("Targets", resolved_target_path, target_source)],
+        features=features,
+        logger=logger
+    )
     
     # Configure thread pool for Rayon parallelization
     if threads > 0:
@@ -115,13 +155,6 @@ def region_entropy(
         except RuntimeError:
             # Thread pool already configured (can only be set once per process)
             pass
-    
-    # Determine panel mode
-    is_panel_mode = target_regions is not None and target_regions.exists()
-    target_regions_str = str(target_regions) if is_panel_mode else None
-    
-    if is_panel_mode:
-        logger.info(f"Panel mode: generating both off-target and on-target entropy")
     
     try:
         # TFBS

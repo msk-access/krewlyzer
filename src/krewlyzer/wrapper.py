@@ -41,10 +41,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("krewlyzer")
 
-# Import shared resolver functions
+# Import shared resolver functions (typer OptionInfo handling)
 from .core.utils import resolve_path as _resolve_path
 from .core.utils import resolve_int as _resolve_int
 from .core.utils import resolve_str as _resolve_str
+from .core.utils import resolve_bool as _resolve_bool
+
+# Import asset resolution functions (PON/target auto-loading)
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+
+# Import startup banner logging
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
 
 def run_all(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file (sorted, indexed)"),
@@ -81,6 +89,7 @@ def run_all(
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization for all tools (for PON samples used as ML negatives)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay is specified (run as WGS)"),
     no_tfbs: bool = typer.Option(False, "--no-tfbs", help="Skip TFBS region entropy analysis"),
     no_atac: bool = typer.Option(False, "--no-atac", help="Skip ATAC region entropy analysis"),
     
@@ -191,37 +200,97 @@ def run_all(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
     
-    # Panel mode detection (affects FSC/FSR aggregation)
-    is_panel_mode = resolved_target_regions and resolved_target_regions.exists()
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION: Unified PON and Target Regions
+    # ═══════════════════════════════════════════════════════════════════
+    # Use shared resolution functions for consistent behavior.
+    # Priority: 1. Explicit CLI path, 2. Skip flag, 3. Bundled for assay, 4. None
     
-    # === Centralized PON Model Loading ===
-    # Load once here and pass to all processors (FSC, FSR, FSD, WPS, OCF, TFBS, ATAC)
-    # Priority: 1. Explicit -P flag, 2. Bundled PON for assay, 3. None
-    
-    # Validate: -P and --skip-pon are contradictory
-    if resolved_pon_model and skip_pon:
-        console.print("[bold red]❌ ERROR:[/bold red] --pon-model (-P) and --skip-pon are contradictory.")
-        console.print("  • Use -P to apply PON z-score normalization")
-        console.print("  • Use --skip-pon with -A assay to auto-load PON but skip z-scores")
+    # Resolve PON model
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=resolved_pon_model,
+            assay=resolved_assay,
+            skip_pon=skip_pon,
+            assets=assets,
+            log=logger
+        )
+    except ValueError as e:
+        # Mutual exclusivity error (--pon-model + --skip-pon)
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
+    
+    # Resolve target regions
+    resolved_skip_target = _resolve_bool(skip_target_regions, False)
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=resolved_target_regions,
+            assay=resolved_assay,
+            skip_target_regions=resolved_skip_target,
+            assets=assets,
+            log=logger
+        )
+    except ValueError as e:
+        # Mutual exclusivity error (--target-regions + --skip-target-regions)
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    # Panel mode detection (based on resolved targets, not raw CLI arg)
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER: Log comprehensive configuration
+    # ═══════════════════════════════════════════════════════════════════
+    # Build list of enabled features
+    enabled_features = ["Extract", "Motif", "FSC", "FSR", "FSD", "WPS", "OCF"]
+    if not no_tfbs:
+        enabled_features.append("TFBS Entropy")
+    if not no_atac:
+        enabled_features.append("ATAC Entropy")
+    if resolved_variants and resolved_variants.exists():
+        enabled_features.append("mFSD")
+    if resolved_bisulfite_bam and resolved_bisulfite_bam.exists():
+        enabled_features.append("UXM")
+    
+    # Count target regions for detail (if available)
+    target_count_detail = ""
+    if resolved_target_path and resolved_target_path.exists():
+        from .core.asset_resolution import get_target_region_count
+        n_regions = get_target_region_count(resolved_target_path)
+        if n_regions:
+            target_count_detail = f"{n_regions} regions"
+    
+    # Log startup banner
+    log_startup_banner(
+        tool_name="run-all",
+        version=__version__,
+        inputs={
+            "BAM/CRAM": str(bam_input),
+            "Reference": str(reference.name),
+            "Output": str(output),
+        },
+        config={
+            "Genome": f"{assets.raw_genome} → {assets.genome_dir}",
+            "Assay": resolved_assay or "None (WGS)",
+            "Mode": "Panel" if is_panel_mode else "WGS",
+        },
+        assets=[
+            ResolvedAsset("PON", resolved_pon_path, pon_source),
+            ResolvedAsset("Targets", resolved_target_path, target_source, target_count_detail),
+        ],
+        features=enabled_features,
+        logger=logger
+    )
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # LOAD PON MODEL (if resolved)
+    # ═══════════════════════════════════════════════════════════════════
     pon = None
-    actual_pon_path = resolved_pon_model
-    
-    # Auto-load bundled PON when -A assay is specified and -P is not provided
-    if not resolved_pon_model and resolved_assay:
-        try:
-            bundled_pon = assets.get_pon(resolved_assay)
-            if bundled_pon and bundled_pon.exists():
-                actual_pon_path = bundled_pon
-                logger.info(f"Auto-loaded bundled PON for assay '{resolved_assay}'")
-        except FileNotFoundError:
-            logger.debug(f"No bundled PON found for assay '{resolved_assay}'")
-    
-    if actual_pon_path:
+    if resolved_pon_path and resolved_pon_path.exists():
         from .core.pon_integration import load_pon_model
-        pon = load_pon_model(actual_pon_path)
+        pon = load_pon_model(resolved_pon_path)
         if pon:
-            logger.info(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
+            logger.debug(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
             # Log component availability
             components = []
             if pon.gc_bias:
@@ -234,18 +303,17 @@ def run_all(
                 components.append("OCF")
             if pon.mds_baseline:
                 components.append("MDS")
-            logger.info(f"  Components: {', '.join(components) if components else 'none'}")
+            logger.debug(f"  Components: {', '.join(components) if components else 'none'}")
             
             # Panel compatibility check
             if hasattr(pon, 'check_panel_compatibility'):
                 pon.check_panel_compatibility(is_panel_mode)
             
             # PON/sample panel mode validation
-            resolved_assay = assay if isinstance(assay, str) else None
             from .pon.validation import validate_panel_config, print_validation_warnings
             validation = validate_panel_config(
                 pon_model=pon,
-                target_regions=resolved_target_regions,
+                target_regions=resolved_target_path,
                 assay=resolved_assay
             )
             if validation.warnings or validation.errors:
@@ -254,7 +322,7 @@ def run_all(
                 logger.error("PON validation failed. Use compatible PON or correct assay flag.")
                 raise typer.Exit(1)
         else:
-            logger.warning(f"Failed to load PON model: {resolved_pon_model}")
+            logger.warning(f"Failed to load PON model: {resolved_pon_path}")
     
     # Window settings for FSC/FSR
     # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
@@ -297,7 +365,7 @@ def run_all(
         console.print()
     
     if is_panel_mode:
-        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_regions.name})")
+        logger.info(f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_path.name})")
     
     # Determine which optional tools will run
     has_uxm = resolved_bisulfite_bam is not None and resolved_bisulfite_bam.exists()
@@ -359,7 +427,7 @@ def run_all(
                     threads=threads,
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=require_proper_pair,
-                    target_regions=resolved_target_regions,
+                    target_regions=resolved_target_path,
                     exclude_regions=resolved_exclude_regions or assets.exclude_regions,
                     write_bed=should_run_extract,
                     output_dir=output if should_run_extract else None,
@@ -445,9 +513,9 @@ def run_all(
                 enable_ocf=assets.ocf_available,  # Skip OCF if not available for genome
                 enable_tfbs=assets.tfbs_available and not no_tfbs,  # TFBS size entropy (--no-tfbs to disable)
                 enable_atac=assets.atac_available and not no_atac,  # ATAC size entropy (--no-atac to disable)
-                target_regions=resolved_target_regions,
+                target_regions=resolved_target_path,
                 assay=resolved_assay,
-                pon_model=actual_pon_path,
+                pon_model=resolved_pon_path,
                 skip_pon_zscore=skip_pon,  # --skip-pon: skip PON z-score normalization
                 fsc_bins=bin_input,
                 fsc_windows=fsc_windows,
@@ -557,7 +625,7 @@ def run_all(
     # ═══════════════════════════════════════════════════════════════════
     if resolved_assay:
         try:
-            from .tools.region_mds import region_mds as _region_mds
+            from .region_mds import region_mds as _region_mds
             
             # Resolve gene BED for the assay
             gene_bed = assets.get_gene_bed_for_mode(resolved_assay)

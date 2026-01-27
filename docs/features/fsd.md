@@ -107,6 +107,7 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 | `--arms-file` | `-a` | Bundled | Chromosome arms BED file |
 | `--pon-model` | `-P` | None | PON model for log-ratio computation |
 | `--target-regions` | `-T` | None | Target BED (enables on/off split) |
+| `--skip-target-regions` | | False | Force WGS mode (ignore bundled targets from --assay) |
 | `--genome` | `-G` | hg19 | Genome build (hg19/hg38) |
 | `--gc-correct` | | True | Apply GC bias correction |
 | `--threads` | `-t` | 0 | Threads (0=all cores) |

@@ -174,6 +174,7 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--sample-name` | `-s` | Override sample name |
 | `--bin-input` | `-b` | Custom bin file (default: 100kb genome-wide) |
 | `--target-regions` | `-T` | Target BED (for on/off-target FSC split) |
+| `--skip-target-regions` | | Force WGS mode (ignore bundled targets from --assay) |
 | `--assay` | `-A` | Assay type (xs1/xs2) for gene-centric FSC |
 | `--pon-model` | `-P` | PoN model for log2 ratio normalization |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |

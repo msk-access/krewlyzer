@@ -27,6 +27,13 @@ from krewlyzer import _core
 # Import unified sample processor
 from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
 
+# Import asset resolution functions
+from krewlyzer.core.asset_resolution import resolve_target_regions
+
+# Import startup banner logging
+from krewlyzer.core.logging import log_startup_banner, ResolvedAsset
+from krewlyzer import __version__
+
 
 def build_pon(
     sample_list: Path = typer.Argument(..., help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline."),
@@ -40,6 +47,7 @@ def build_pon(
     threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets (build as WGS)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Verbose output"),
     validate_assets: bool = typer.Option(False, "--validate-assets", help="Validate bundled asset file formats before running"),
 ):
@@ -108,28 +116,64 @@ def build_pon(
         logger.error("No samples found in sample list")
         raise typer.Exit(1)
     
-    # Panel mode detection
-    is_panel_mode = target_regions is not None and target_regions.exists()
-    target_regions_str = str(target_regions) if is_panel_mode else None
-    if is_panel_mode:
-        logger.info(f"PANEL MODE: Building dual on/off-target baselines")
-        logger.info(f"  Target regions: {target_regions}")
-        logger.info(f"  GC model will use OFF-TARGET fragments only (unbiased)")
-        logger.info(f"  FSD/WPS will have separate on/off-target stats")
-    else:
-        logger.info("WGS MODE: Building single baseline")
-    
-    logger.info(f"Building PON from {n_samples} samples")
-    logger.info(f"Assay: {assay}")
-    logger.info(f"Reference: {reference}")
-    logger.info(f"Genome: {genome}")
-    
-    # Initialize AssetManager and optionally validate bundled assets
+    # Initialize AssetManager for bundled asset access
     from krewlyzer.assets import AssetManager
     assets = AssetManager(genome)
     if validate_assets:
         logger.info("Validating bundled assets (--validate-assets)...")
         assets.validate(assay=assay)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # TARGET REGIONS RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
+    # Use shared resolution function for consistent behavior.
+    # For build-pon, --assay is required for naming but can also auto-load targets.
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions,
+            assay=assay,
+            skip_target_regions=skip_target_regions,
+            assets=assets,
+            log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    # Panel mode detection (based on resolved targets)
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    target_regions_str = str(resolved_target_path) if is_panel_mode else None
+    
+    # Count target regions for detail
+    target_count_detail = ""
+    if is_panel_mode:
+        from krewlyzer.core.asset_resolution import get_target_region_count
+        n_regions = get_target_region_count(resolved_target_path)
+        if n_regions:
+            target_count_detail = f"{n_regions} regions"
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="build-pon",
+        version=__version__,
+        inputs={
+            "Sample list": str(sample_list),
+            "Reference": str(reference.name),
+            "Output": str(output),
+            "Samples": str(n_samples),
+        },
+        config={
+            "Genome": f"{assets.raw_genome} → {assets.genome_dir}",
+            "Assay": assay,
+            "Mode": "Panel" if is_panel_mode else "WGS",
+        },
+        assets=[
+            ResolvedAsset("Targets", resolved_target_path, target_source, target_count_detail),
+        ],
+        logger=logger
+    )
     
     # Default bin file
     if bin_file is None:

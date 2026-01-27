@@ -39,6 +39,7 @@ process KREWLYZER_WPS {
     def bait_arg = params.bait_padding ? "--bait-padding ${params.bait_padding}" : ""
     def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
     krewlyzer wps \\
@@ -55,6 +56,7 @@ process KREWLYZER_WPS {
         $bait_arg \\
         $pon_arg \\
         $verbose_arg \\
+        $skip_targets_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -32,6 +32,7 @@ process KREWLYZER_BUILD_PON {
     def targets_arg = targets ? "--target-regions ${targets}" : ""
     def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
     krewlyzer build-pon \\
@@ -44,6 +45,7 @@ process KREWLYZER_BUILD_PON {
         $targets_arg \\
         $anchors_arg \\
         $verbose_arg \\
+        $skip_targets_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

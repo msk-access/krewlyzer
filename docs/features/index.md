@@ -126,7 +126,7 @@ All feature commands share these core options:
 | `-v, --verbose` | Enable verbose logging |
 | `-f, --format` | Output format: tsv, parquet, json |
 
-See individual feature pages for command-specific options, or [Output Formats](output-formats.md) for format details.
+See individual feature pages for command-specific options, or [JSON Output](json-output.md) for format details.
 
 ---
 

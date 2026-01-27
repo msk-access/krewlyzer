@@ -45,7 +45,7 @@ process KREWLYZER_RUNALL {
     def no_atac_arg = params.no_atac ? "--no-atac" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def json_arg = params.generate_json ? "--generate-json" : ""
-    def format_arg = params.output_format != 'auto' ? "--output-format ${params.output_format}" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
     def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
     
     // Construct CLI command
@@ -67,7 +67,7 @@ process KREWLYZER_RUNALL {
         $no_atac_arg \\
         $verbose_arg \\
         $json_arg \\
-        $format_arg \\
+        $skip_targets_arg \\
         $maxlen_arg \\
         $args
 

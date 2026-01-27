@@ -20,7 +20,7 @@ flowchart TB
         ocf[ocf.py]
         mfsd[mfsd.py]
         uxm[uxm.py]
-        region_mds[tools/region_mds.py]
+        region_mds[region_mds.py]
     end
     
     subgraph Rust["Rust Core (_core)"]
@@ -161,6 +161,8 @@ The Python layer provides:
 |------|---------|
 | `sample_processor.py` | **Unified BAM extraction** - `extract_sample()`, `write_motif_outputs()`, `write_extraction_outputs()` |
 | `unified_processor.py` | **Central feature runner** - single-pass FSC/FSR/FSD/WPS/OCF via `run_features()` |
+| `asset_resolution.py` | **Centralized asset resolution** - `resolve_target_regions()`, `resolve_pon_model()` for auto-loading |
+| `logging.py` | **Logging utilities** - `log_startup_banner()`, `ResolvedAsset` dataclass |
 | `gc_assets.py` | Centralized GC asset resolution |
 | `fsc_processor.py` | FSC z-score computation |
 | `fsr_processor.py` | FSR ratio calculation |
@@ -229,8 +231,23 @@ xs2_targets = assets.get_targets("xs2")
 
 # Get panel PON
 xs2_pon = assets.get_pon("xs2")
-# → pon/GRCh37/xs2.pon.parquet
+# → pon/GRCh37/xs2.all_unique.pon.parquet
 ```
+
+### Auto-Loading with `--assay`
+
+All CLI tools support auto-loading bundled assets via `--assay`:
+
+```bash
+# Auto-loads PON and target regions for xs2
+krewlyzer run-all -i sample.bam -o out/ --assay xs2
+```
+
+Asset resolution follows this priority:
+1. **Explicit path** (`--target-regions`, `--pon-model`) - highest
+2. **Skip flag** (`--skip-target-regions`, `--skip-pon`)
+3. **Bundled asset** (auto-loaded from `--assay`)
+4. **None** - WGS mode
 
 | Assay | WPS Anchors | Target Genes | PON |
 |-------|:-----------:|:------------:|:---:|

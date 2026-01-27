@@ -30,6 +30,13 @@ console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("fsc")
 
+# Import asset resolution functions
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+
+# Import startup banner logging
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
+
 
 def fsc(
     bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
@@ -39,6 +46,7 @@ def fsc(
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSC)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
     assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay type (xs1/xs2) for gene-centric FSC aggregation"),
     windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
     continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
@@ -54,6 +62,7 @@ def fsc(
     Output: {sample}.FSC.tsv file with z-scored fragment size coverage per window
     """
     from .core.unified_processor import run_features
+    from .assets import AssetManager
     
     # Configure verbose logging
     if verbose:
@@ -78,6 +87,62 @@ def fsc(
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
+    # Initialize AssetManager
+    assets = AssetManager(genome)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
+    # Resolve PON model
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model,
+            assay=assay,
+            skip_pon=skip_pon,
+            assets=assets,
+            log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    # Resolve target regions
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions,
+            assay=assay,
+            skip_target_regions=skip_target_regions,
+            assets=assets,
+            log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="fsc",
+        version=__version__,
+        inputs={
+            "Fragments": str(bedgz_input.name),
+            "Output": str(output),
+        },
+        config={
+            "Genome": f"{assets.raw_genome} → {assets.genome_dir}",
+            "Assay": assay or "None",
+            "Mode": "Panel" if is_panel_mode else "WGS",
+        },
+        assets=[
+            ResolvedAsset("PON", resolved_pon_path, pon_source),
+            ResolvedAsset("Targets", resolved_target_path, target_source),
+        ],
+        logger=logger
+    )
+    
     try:
         # Call unified processor with FSC enabled
         outputs = run_features(
@@ -86,9 +151,9 @@ def fsc(
             sample_name=sample_name,
             genome=genome,
             enable_fsc=True,
-            target_regions=target_regions,
+            target_regions=resolved_target_path,
             assay=assay,
-            pon_model=pon_model,
+            pon_model=resolved_pon_path,
             skip_pon_zscore=skip_pon,
             fsc_bins=bin_input,
             fsc_windows=windows,

@@ -78,6 +78,52 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
     --target-regions targets.bed
 ```
 
+### Auto-Loading Assets with `--assay`
+
+When you specify `--assay`, krewlyzer automatically loads bundled assets:
+
+```bash
+# Auto-loads PON and target regions for xs2
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ --assay xs2
+```
+
+| Assay | PON Model | Target Regions |
+|-------|-----------|----------------|
+| `xs1` | `xs1.all_unique.pon.parquet` | `xs1.targets.bed.gz` |
+| `xs2` | `xs2.all_unique.pon.parquet` | `xs2.targets.bed.gz` |
+| `wgs` | None | None (WGS mode) |
+
+This auto-loading applies to **all tools** including:
+- `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `region-entropy`, `motif`, `region-mds`, `build-pon`
+
+### Forcing WGS Mode with `--skip-target-regions`
+
+To force WGS-like behavior even when using a panel assay (e.g., for comparison):
+
+```bash
+# Use xs2 PON but disable panel mode (process as WGS)
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
+    --assay xs2 \
+    --skip-target-regions
+```
+
+This is useful when:
+- Comparing panel samples to WGS baselines
+- Running validation without on/off-target splitting
+- Processing samples where target regions don't apply
+
+> [!NOTE]
+> `--skip-target-regions` only disables target region loading. The PON model is still loaded from `--assay` unless you also add `--skip-pon`.
+
+### Flag Priority
+
+Asset resolution follows this priority order:
+
+1. **Explicit path** (`--target-regions path/to/file.bed`) - highest priority
+2. **Skip flag** (`--skip-target-regions`) - forces WGS mode
+3. **Bundled asset** (auto-loaded from `--assay`)
+4. **None** - WGS mode (no targets)
+
 
 ## How It Works
 

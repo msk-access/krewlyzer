@@ -205,6 +205,7 @@ For targeted panels like MSK-ACCESS, genome-wide WPS anchors include many region
 | `--wps-anchors` | | WPS anchors BED (TSS+CTCF), auto-loaded if not specified |
 | `--background` | `-B` | Background Alu BED for hierarchical stacking, auto-loaded if not specified |
 | `--target-regions` | `-T` | Panel capture BED (enables bait edge masking) |
+| `--skip-target-regions` | | Force WGS mode (ignore bundled targets from --assay) |
 | `--bait-padding` | | Bait edge padding in bp (default: 50, see below) |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--pon-model` | `-P` | PON model for z-score computation |

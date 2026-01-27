@@ -54,7 +54,6 @@ nav:
     - Fragment-level Methylation (UXM): features/uxm.md
     - Mutant Fragment Size (mFSD): features/mfsd.md
     - Region MDS (Per-Exon Motif Diversity): features/region-mds.md
-    - Output Formats: features/output-formats.md
     - JSON Output: features/json-output.md
     - PON Building: features/build-pon.md
   - Advanced:

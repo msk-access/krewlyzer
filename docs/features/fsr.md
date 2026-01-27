@@ -104,6 +104,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--sample-name` | `-s` | Override sample name |
 | `--bin-input` | `-b` | Custom bin file |
 | `--target-regions` | `-T` | Target BED (for on/off-target split) |
+| `--skip-target-regions` | | Force WGS mode (ignore bundled targets from --assay) |
 | `--pon-model` | `-P` | PON model for count normalization |
 | `--genome` | `-G` | Genome build: hg19/hg38 |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |

@@ -26,6 +26,11 @@ console = Console(stderr=True)
 logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("fsd")
 
+# Import asset resolution and startup banner
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
+
 
 def fsd(
     bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
@@ -33,6 +38,8 @@ def fsd(
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     arms_file: Optional[Path] = typer.Option(None, "--arms-file", "-a", help="Path to chromosome arms BED file"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSD)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1/xs2) for auto-loading bundled assets"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
@@ -49,6 +56,7 @@ def fsd(
     With --pon-model: Additional z-score columns comparing to PON baseline
     """
     from .core.unified_processor import run_features
+    from .assets import AssetManager
     
     # Configure verbose logging
     if verbose:
@@ -73,16 +81,53 @@ def fsd(
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
+    # Initialize AssetManager
+    assets = AssetManager(genome)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
     try:
-        # Call unified processor with FSD enabled
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions, assay=assay, skip_target_regions=skip_target_regions,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="fsd", version=__version__,
+        inputs={"Fragments": str(bedgz_input.name), "Output": str(output)},
+        config={"Genome": f"{assets.raw_genome} → {assets.genome_dir}", "Assay": assay or "None", "Mode": "Panel" if is_panel_mode else "WGS"},
+        assets=[ResolvedAsset("PON", resolved_pon_path, pon_source), ResolvedAsset("Targets", resolved_target_path, target_source)],
+        logger=logger
+    )
+    
+    try:
         outputs = run_features(
             bed_path=bedgz_input,
             output_dir=output,
             sample_name=sample_name,
             genome=genome,
             enable_fsd=True,
-            target_regions=target_regions,
-            pon_model=pon_model,
+            target_regions=resolved_target_path,
+            assay=assay,
+            pon_model=resolved_pon_path,
             skip_pon_zscore=skip_pon,
             fsd_arms=arms_file,
             gc_correct=gc_correct,
@@ -90,7 +135,6 @@ def fsd(
             verbose=verbose,
         )
         
-        # Report results
         if outputs.fsd and outputs.fsd.exists():
             logger.info(f"✅ FSD complete: {outputs.fsd}")
         if outputs.fsd_ontarget and outputs.fsd_ontarget.exists():

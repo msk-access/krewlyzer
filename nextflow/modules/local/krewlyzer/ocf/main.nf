@@ -31,6 +31,7 @@ process KREWLYZER_OCF {
     def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
     def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
     krewlyzer ocf \\
@@ -43,6 +44,7 @@ process KREWLYZER_OCF {
         $targets_arg \\
         $pon_arg \\
         $verbose_arg \\
+        $skip_targets_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

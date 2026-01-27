@@ -112,11 +112,11 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--variants` | `-v` | PATH | | VCF/MAF for mFSD analysis |
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode) |
+| `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets from --assay) |
 | `--bin-input` | `-b` | PATH | | Custom bins for FSC/FSR |
 | `--pon-model` | `-P` | PATH | | PON model for normalization |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--assay` | `-A` | TEXT | | Assay code (xs1, xs2) for gene-centric FSC |
-| `--output-format` | `-F` | TEXT | auto | Output format: auto, tsv, parquet, json |
 | `--generate-json` | | FLAG | | Generate unified sample.features.json |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |

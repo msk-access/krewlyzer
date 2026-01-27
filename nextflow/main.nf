@@ -63,7 +63,7 @@ workflow {
          
          Output Format:
          --generate_json   Generate unified sample.features.json for ML (default: false)
-         --output_format   Output format: auto, tsv, parquet, json (default: auto)
+         --skip_target_regions  Force WGS mode (ignore bundled targets from --assay)
          
          Profiles:
          -profile docker   Run with Docker

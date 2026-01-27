@@ -172,12 +172,18 @@ class AssetManager:
             assay: Assay code (xs1, xs2)
             
         Returns:
-            Path to target BED file
+            Path to target BED file (supports .bed.gz and .bed)
         """
+        # Try .bed.gz first (BGZF compressed), then .bed
+        path_gz = self._get_path("targets", f"{assay}.targets.bed.gz")
+        if path_gz.exists():
+            return path_gz
+        
         path = self._get_path("targets", f"{assay}.targets.bed")
-        if not path.exists():
-            raise FileNotFoundError(f"Target BED not found for assay '{assay}': {path}")
-        return path
+        if path.exists():
+            return path
+        
+        raise FileNotFoundError(f"Target BED not found for assay '{assay}': tried {path_gz} and {path}")
     
     def get_wps_anchors(self, assay: str = None) -> Path:
         """
@@ -196,21 +202,36 @@ class AssetManager:
             logger.warning(f"Panel-specific WPS anchors not found for '{assay}', using genome-wide")
         return self.wps_anchors
     
-    def get_pon(self, assay: str) -> Path:
+    def get_pon(self, assay: str, variant: str = "all_unique") -> Path:
         """
         Get bundled PON model for a specific assay.
         
         Args:
             assay: Assay code (xs1, xs2)
+            variant: PON variant to use:
+                - "all_unique": All unique reads (default, most common)
+                - "duplex": Duplex consensus reads only
             
         Returns:
             Path to PON parquet file
+            
+        Raises:
+            FileNotFoundError: If no bundled PON exists for the assay/variant
         """
-        # New naming convention: pon/GRCh37/xs1.pon.parquet
-        path = self._get_path("pon", f"{assay}.pon.parquet")
-        if path.exists():
-            return path
-        raise FileNotFoundError(f"PON not found for assay '{assay}': {path}")
+        # Try variant-specific naming: xs2.all_unique.pon.parquet
+        variant_path = self._get_path("pon", f"{assay}.{variant}.pon.parquet")
+        if variant_path.exists():
+            return variant_path
+        
+        # Fallback to simple naming: xs2.pon.parquet (legacy)
+        simple_path = self._get_path("pon", f"{assay}.pon.parquet")
+        if simple_path.exists():
+            return simple_path
+        
+        raise FileNotFoundError(
+            f"PON not found for assay '{assay}' (variant='{variant}'): "
+            f"tried {variant_path} and {simple_path}"
+        )
     
     def list_available_assays(self) -> list:
         """List all available assays based on bundled gene BED files."""

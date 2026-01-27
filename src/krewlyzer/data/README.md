@@ -28,8 +28,8 @@ data/
 │       └── xs2.genes.bed.gz            # MSK-ACCESS v2 (146 genes)
 ├── targets/             # Target region BEDs for panels
 │   └── GRCh37/
-│       ├── xs1.targets.bed             # MSK-ACCESS v1 targets
-│       └── xs2.targets.bed             # MSK-ACCESS v2 targets
+│       ├── xs1.targets.bed.gz          # MSK-ACCESS v1 targets (probe-A + probe-B)
+│       └── xs2.targets.bed.gz          # MSK-ACCESS v2 targets
 ├── pon/                 # Panel of Normals models
 ├── TFBS/                # Transcription factor binding sites for region entropy
 └── ATAC/                # ATAC-seq peaks for region entropy
@@ -86,8 +86,8 @@ Panel of Normals (PON) models for z-score normalization.
 
 ### targets
 Target region BED files for panel sequencing.
-- `xs1.targets.bed` - MSK-ACCESS v1 capture regions
-- `xs2.targets.bed` - MSK-ACCESS v2 capture regions
+- `xs1.targets.bed.gz` - MSK-ACCESS v1 capture regions (probe-A + probe-B, BGZF compressed)
+- `xs2.targets.bed.gz` - MSK-ACCESS v2 capture regions (BGZF compressed)
 
 ### genes
 Gene-grouped target regions for gene-centric analysis.

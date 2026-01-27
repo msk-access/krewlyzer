@@ -40,6 +40,7 @@ This model is used for bias correction and z-score normalization during sample p
 |--------|---------|-------------|
 | `-G, --genome` | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
 | `-T, --target-regions` | None | BED file with target regions (panel mode) |
+| `--skip-target-regions` | False | Force WGS mode (ignore bundled targets from --assay) |
 | `-W, --wps-anchors` | Built-in | WPS anchors BED.gz (merged TSS+CTCF) |
 | `-b, --bin-file` | Built-in | Bin file for FSC/FSR |
 | `--temp-dir` | System temp | Directory for temporary files |

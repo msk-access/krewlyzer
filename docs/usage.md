@@ -108,5 +108,5 @@ krewlyzer run-all ... --output-format parquet
 krewlyzer fsd -i sample.bed.gz -o out/ --format json
 ```
 
-See [Output Formats](features/output-formats.md) for full documentation.
+See [JSON Output](features/json-output.md) for full documentation.
 

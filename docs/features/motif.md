@@ -52,6 +52,8 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--kmer` | `-k` | INT | 4 | K-mer size for motif extraction |
 | `--target-regions` | `-T` | PATH | | Target BED (for on/off-target motifs) |
+| `--skip-target-regions` | | FLAG | | Force WGS mode (ignore bundled targets from --assay) |
+| `--assay` | `-A` | TEXT | | Assay type (xs1/xs2/wgs) for asset auto-loading |
 | `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |

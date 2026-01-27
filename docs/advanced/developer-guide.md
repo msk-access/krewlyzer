@@ -13,6 +13,8 @@ krewlyzer/
 │   ├── extract.py          # BAM → BED extraction
 │   ├── fsc.py, fsd.py, ... # Standalone tools
 │   ├── core/               # Shared processors
+│   │   ├── asset_resolution.py  # Target/PON resolution logic
+│   │   ├── logging.py      # Startup banner and logging
 │   │   ├── gc_assets.py    # GC resolution helper
 │   │   ├── fsc_processor.py
 │   │   ├── wps_processor.py

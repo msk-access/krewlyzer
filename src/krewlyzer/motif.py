@@ -31,12 +31,20 @@ logger = logging.getLogger("motif")
 # Rust backend is required
 from krewlyzer import _core
 
+# Import asset resolution and startup banner
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
+
 
 def motif(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file"),
     genome_reference: Path = typer.Option(..., '-r', '--reference', help="Reference genome FASTA (indexed)"),
     output: Path = typer.Option(..., '-o', '--output', help="Output directory"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     target_regions: Optional[Path] = typer.Option(None, '-T', '--target-regions', help="Target regions BED (for panel data: generates on/off-target motifs)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1/xs2) for auto-loading bundled assets"),
     pon_model: Optional[Path] = typer.Option(None, '-P', '--pon-model', help="PON model for MDS z-score computation"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
@@ -56,6 +64,8 @@ def motif(
     
     Note: For fragment extraction (BED.gz), use `krewlyzer extract` instead.
     """
+    from .assets import AssetManager
+    
     # Configure verbose logging
     if verbose:
         logger.setLevel(logging.DEBUG)
@@ -89,6 +99,43 @@ def motif(
     # Derive sample name (use provided or derive from BAM filename)
     if sample_name is None:
         sample_name = bam_input.stem.replace('.bam', '')
+    
+    # Initialize AssetManager
+    assets = AssetManager(genome)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions, assay=assay, skip_target_regions=skip_target_regions,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="motif", version=__version__,
+        inputs={"BAM": str(bam_input.name), "Reference": str(genome_reference.name), "Output": str(output)},
+        config={"Genome": f"{assets.raw_genome} → {assets.genome_dir}", "Assay": assay or "None", "Mode": "Panel" if is_panel_mode else "WGS", "K-mer": str(kmer)},
+        assets=[ResolvedAsset("PON", resolved_pon_path, pon_source), ResolvedAsset("Targets", resolved_target_path, target_source)],
+        logger=logger
+    )
     
     # Pre-check BAM compatibility with current filters
     if require_proper_pair:
@@ -128,24 +175,22 @@ def motif(
             threads=threads,
             skip_duplicates=True,
             require_proper_pair=require_proper_pair,
-            target_regions=target_regions,
+            target_regions=resolved_target_path,
             exclude_regions=None,
             write_bed=False,  # Motif command doesn't write BED
             output_dir=None,
             sample_name=sample_name,
-            genome="hg19",  # Default for motif
+            genome=genome,
         )
         
         logger.info(f"Processed {result.fragment_count:,} fragments")
         
-        # Load PON model if provided and not skipped
+        # Load PON model if resolved and not skipped
         pon = None
-        if skip_pon:
-            logger.info("--skip-pon: skipping PON z-score normalization")
-        elif pon_model and pon_model.exists():
+        if resolved_pon_path and resolved_pon_path.exists():
             try:
                 from .pon.model import PonModel
-                pon = PonModel.load(pon_model)
+                pon = PonModel.load(resolved_pon_path)
                 logger.debug(f"Loaded PON model for z-score computation")
             except Exception as e:
                 logger.warning(f"Could not load PON model: {e}")
@@ -155,7 +200,7 @@ def motif(
             result=result,
             output_dir=output,
             pon=pon,
-            include_ontarget=target_regions is not None and target_regions.exists(),
+            include_ontarget=is_panel_mode,
         )
         
         # Additional aberrant k-mer analysis if PON provided

@@ -90,6 +90,7 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
 | `--ocr-input` | `-r` | PATH | | Open chromatin regions file |
 | `--pon-model` | `-P` | PATH | | PON model for z-score computation |
 | `--target-regions` | `-T` | PATH | | Target BED (for on/off-target split) |
+| `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets from --assay) |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
