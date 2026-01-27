@@ -43,6 +43,7 @@ def region_entropy(
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data)"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0 = use all available cores)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """
@@ -105,6 +106,15 @@ def region_entropy(
         logger.info(f"Using PON for z-score normalization: {pon_model.name}")
     elif skip_pon:
         logger.info("--skip-pon: skipping PON z-score normalization")
+    
+    # Configure thread pool for Rayon parallelization
+    if threads > 0:
+        try:
+            _core.configure_threads(threads)
+            logger.debug(f"Configured {threads} threads for parallel processing")
+        except RuntimeError:
+            # Thread pool already configured (can only be set once per process)
+            pass
     
     try:
         # TFBS

@@ -34,6 +34,7 @@ def region_mds(
     maxlen: int = typer.Option(1000, "--maxlen", help="Maximum fragment length (default: 1000 for consistency with run-all)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0 = use all available cores)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
     silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
 ):
@@ -117,6 +118,15 @@ def region_mds(
     logger.info(f"  Gene BED: {resolved_gene_bed}")
     logger.info(f"  Output: {output_exon}, {output_gene}")
     logger.info(f"  Filters: mapq>={mapq}, length=[{minlen},{maxlen}]")
+    
+    # Configure thread pool for Rayon parallelization
+    if threads > 0:
+        try:
+            _core.configure_threads(threads)
+            logger.debug(f"Configured {threads} threads for parallel processing")
+        except RuntimeError:
+            # Thread pool already configured (can only be set once per process)
+            pass
     
     # Call Rust engine
     n_regions, n_genes = _core.region_mds.run_region_mds(
