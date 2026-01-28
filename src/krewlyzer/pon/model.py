@@ -711,8 +711,12 @@ class PonModel:
     fsc_region_baseline: Optional[FscRegionBaseline] = None  # Per-exon normalized depth (panel mode)
     
     # On-target baselines (panel mode only)
+    # On-target regions have 1000x-5000x depth vs 0.5x-1x off-target
+    # Separate baselines prevent variance mismatch in z-score calculation
     gc_bias_ontarget: Optional[GcBiasModel] = None
     fsd_baseline_ontarget: Optional[FsdBaseline] = None
+    tfbs_baseline_ontarget: Optional[TfbsBaseline] = None  # TFBS on-target entropy
+    atac_baseline_ontarget: Optional[AtacBaseline] = None  # ATAC on-target entropy
     
     @classmethod
     def load(cls, path: Path) -> "PonModel":
@@ -890,6 +894,37 @@ class PonModel:
             atac_baseline = AtacBaseline(baseline=RegionEntropyBaseline(atac_data))
             logger.debug(f"Loaded ATAC baseline: {len(atac_data)} labels")
         
+        # =====================================================================
+        # Parse on-target TFBS baseline (panel mode)
+        # Separate baseline for on-target entropy (different depth/variance)
+        # =====================================================================
+        tfbs_ontarget_df = df_all[df_all["table"] == "tfbs_baseline_ontarget"]
+        tfbs_baseline_ontarget = None
+        if not tfbs_ontarget_df.empty:
+            from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+            tfbs_ontarget_data = {}
+            for _, row in tfbs_ontarget_df.iterrows():
+                label = row["label"]
+                mean = float(row["entropy_mean"])
+                std = float(row["entropy_std"])
+                tfbs_ontarget_data[label] = (mean, std)
+            tfbs_baseline_ontarget = TfbsBaseline(baseline=RegionEntropyBaseline(tfbs_ontarget_data))
+            logger.debug(f"Loaded TFBS on-target baseline: {len(tfbs_ontarget_data)} labels")
+        
+        # Parse on-target ATAC baseline (panel mode)
+        atac_ontarget_df = df_all[df_all["table"] == "atac_baseline_ontarget"]
+        atac_baseline_ontarget = None
+        if not atac_ontarget_df.empty:
+            from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
+            atac_ontarget_data = {}
+            for _, row in atac_ontarget_df.iterrows():
+                label = row["label"]
+                mean = float(row["entropy_mean"])
+                std = float(row["entropy_std"])
+                atac_ontarget_data[label] = (mean, std)
+            atac_baseline_ontarget = AtacBaseline(baseline=RegionEntropyBaseline(atac_ontarget_data))
+            logger.debug(f"Loaded ATAC on-target baseline: {len(atac_ontarget_data)} labels")
+        
         # Parse FSC gene baseline (panel mode)
         fsc_gene_df = df_all[df_all["table"] == "fsc_gene_baseline"]
         fsc_gene_baseline = None
@@ -918,6 +953,31 @@ class PonModel:
             fsc_region_baseline = FscRegionBaseline(data=fsc_region_data)
             logger.debug(f"Loaded FSC region baseline: {len(fsc_region_data)} regions")
         
+        # Parse Region MDS baseline
+        region_mds_df = df_all[df_all["table"] == "region_mds"]
+        region_mds = None
+        if not region_mds_df.empty:
+            gene_baseline = {}
+            for _, row in region_mds_df.iterrows():
+                gene = row["gene"]
+                gene_baseline[gene] = {
+                    "mds_mean": float(row.get("mds_mean", 0.0)),
+                    "mds_std": float(row.get("mds_std", 1.0)),
+                    "mds_e1_mean": float(row["mds_e1_mean"]) if pd.notna(row.get("mds_e1_mean")) else None,
+                    "mds_e1_std": float(row["mds_e1_std"]) if pd.notna(row.get("mds_e1_std")) else None,
+                    "n_samples": int(row.get("n_samples", 0)),
+                }
+            region_mds = RegionMdsBaseline(gene_baseline=gene_baseline)
+            logger.debug(f"Loaded Region MDS baseline: {len(gene_baseline)} genes")
+        
+        # Parse WPS Background baseline
+        wps_background_df = df_all[df_all["table"] == "wps_background"]
+        wps_background_baseline = None
+        if not wps_background_df.empty:
+            groups_df = wps_background_df.drop(columns=["table"], errors="ignore")
+            wps_background_baseline = WpsBackgroundBaseline(groups=groups_df)
+            logger.debug(f"Loaded WPS Background baseline: {len(groups_df)} groups")
+        
         # Build model
         model = cls(
             schema_version=str(meta.get("schema_version", "1.0")),
@@ -936,8 +996,13 @@ class PonModel:
             gc_bias_ontarget=gc_bias_ontarget,
             tfbs_baseline=tfbs_baseline,
             atac_baseline=atac_baseline,
+            # On-target entropy baselines (panel mode)
+            tfbs_baseline_ontarget=tfbs_baseline_ontarget,
+            atac_baseline_ontarget=atac_baseline_ontarget,
             fsc_gene_baseline=fsc_gene_baseline,
             fsc_region_baseline=fsc_region_baseline,
+            region_mds=region_mds,
+            wps_background_baseline=wps_background_baseline,
         )
         
         logger.info(f"Loaded PON model: {model.assay} (n={model.n_samples})")
@@ -947,6 +1012,11 @@ class PonModel:
                 logger.info(f"  FSD on-target: {len(fsd_baseline_ontarget.arms)} arms")
             if gc_bias_ontarget:
                 logger.info(f"  GC on-target: {len(gc_bias_ontarget.gc_bins)} bins")
+            # On-target entropy baselines
+            if tfbs_baseline_ontarget:
+                logger.info(f"  TFBS on-target: {len(tfbs_baseline_ontarget.labels)} labels")
+            if atac_baseline_ontarget:
+                logger.info(f"  ATAC on-target: {len(atac_baseline_ontarget.labels)} labels")
         if gc_bias:
             logger.info(f"  GC bias: {len(gc_bias.gc_bins)} bins")
         if fsd_baseline:

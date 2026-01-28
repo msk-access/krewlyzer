@@ -348,11 +348,11 @@ pub struct BaitMask {
 impl BaitMask {
     /// Create BaitMask from target regions BED file
     pub fn from_bed(bed_path: &Path, chrom_map: &mut ChromosomeMap, trim_bp: u64) -> Result<Self> {
-        use std::io::{BufRead, BufReader};
-        use std::fs::File;
+        use std::io::BufRead;
         
-        let file = File::open(bed_path).with_context(|| format!("Failed to open target regions: {:?}", bed_path))?;
-        let reader = BufReader::new(file);
+        // Use bed::get_reader to handle both plain and gzipped BED files
+        let reader = crate::bed::get_reader(bed_path)
+            .with_context(|| format!("Failed to open target regions: {:?}", bed_path))?;
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(u64, u64), u32>>> = HashMap::new();
         
         let valid_chroms: Vec<String> = (1..=22).map(|i| i.to_string()).chain(vec!["X".to_string(), "Y".to_string()]).collect();

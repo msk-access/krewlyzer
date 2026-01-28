@@ -257,6 +257,7 @@ def build_pon(
                     reference=reference,
                     params=sample_params,
                     target_regions=resolved_target_path if is_panel_mode else None,
+                    assay=assay,  # Enable gene-centric FSC for PON
                     enable_fsc=True,
                     enable_fsr=False,  # Not needed for PON
                     enable_fsd=True,
@@ -326,6 +327,12 @@ def build_pon(
         all_atac_data = []
         all_fsd_data_ontarget = []
         all_gc_data_ontarget = []
+        
+        # On-target entropy data collectors (panel mode only)
+        # These build separate baselines for on-target regions which have
+        # fundamentally different depth/variance due to capture enrichment
+        all_tfbs_data_ontarget = []
+        all_atac_data_ontarget = []
         
         # Collect file paths for Rust-based baseline computation
         fsd_paths = []
@@ -409,13 +416,22 @@ def build_pon(
                     "mds": outputs.mds_score
                 })
             
-            # Collect TFBS entropy data
+            # Collect TFBS entropy data (off-target / WGS-like)
             if outputs.tfbs_data:
                 all_tfbs_data.append(outputs.tfbs_data)
             
-            # Collect ATAC entropy data
+            # Collect ATAC entropy data (off-target / WGS-like)
             if outputs.atac_data:
                 all_atac_data.append(outputs.atac_data)
+            
+            # Collect on-target TFBS entropy data (panel mode)
+            # On-target regions have different depth/variance - need separate baseline
+            if outputs.tfbs_data_ontarget:
+                all_tfbs_data_ontarget.append(outputs.tfbs_data_ontarget)
+                
+            # Collect on-target ATAC entropy data (panel mode)
+            if outputs.atac_data_ontarget:
+                all_atac_data_ontarget.append(outputs.atac_data_ontarget)
             
             # Collect FSC gene data (panel mode - normalized depth per gene)
             if feat and feat.fsc_gene and feat.fsc_gene.exists():
@@ -498,17 +514,33 @@ def build_pon(
         logger.info("  Computing MDS baseline...")
         mds_baseline = _compute_mds_baseline(all_mds_data)
     
-    # Build TFBS baseline
+    # Build TFBS baseline (off-target / WGS-like)
     tfbs_baseline = None
     if all_tfbs_data:
-        logger.info("  Computing TFBS baseline...")
+        logger.info("  Computing TFBS baseline (off-target)...")
         tfbs_baseline = _compute_tfbs_baseline(all_tfbs_data)
     
-    # Build ATAC baseline
+    # Build ATAC baseline (off-target / WGS-like)
     atac_baseline = None
     if all_atac_data:
-        logger.info("  Computing ATAC baseline...")
+        logger.info("  Computing ATAC baseline (off-target)...")
         atac_baseline = _compute_atac_baseline(all_atac_data)
+    
+    # =========================================================================
+    # Build on-target TFBS/ATAC baselines (panel mode only)
+    # On-target regions have 1000x-5000x depth vs 0.5x-1x off-target
+    # Using off-target baseline for on-target z-scores would artificially 
+    # inflate scores due to variance mismatch
+    # =========================================================================
+    tfbs_baseline_ontarget = None
+    if is_panel_mode and all_tfbs_data_ontarget:
+        logger.info(f"  Computing on-target TFBS baseline ({len(all_tfbs_data_ontarget)} samples)...")
+        tfbs_baseline_ontarget = _compute_tfbs_baseline(all_tfbs_data_ontarget)
+    
+    atac_baseline_ontarget = None
+    if is_panel_mode and all_atac_data_ontarget:
+        logger.info(f"  Computing on-target ATAC baseline ({len(all_atac_data_ontarget)} samples)...")
+        atac_baseline_ontarget = _compute_atac_baseline(all_atac_data_ontarget)
     
     # Build on-target FSD baseline (panel mode only)
     fsd_baseline_ontarget = None
@@ -577,6 +609,9 @@ def build_pon(
         region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
+        # On-target baselines (panel mode only)
+        tfbs_baseline_ontarget=tfbs_baseline_ontarget,
+        atac_baseline_ontarget=atac_baseline_ontarget,
         fsc_gene_baseline=fsc_gene_baseline,
         fsc_region_baseline=fsc_region_baseline,
         fsd_baseline_ontarget=fsd_baseline_ontarget,
@@ -642,6 +677,11 @@ def build_pon(
             lambda b: f"{len(b.gc_bins)} bins" if hasattr(b, 'gc_bins') else "OK"))
         logger.info(_baseline_status("fsd_baseline_ontarget", fsd_baseline_ontarget,
             lambda b: f"{len(b.arms)} arms" if hasattr(b, 'arms') else "OK"))
+        # On-target Region Entropy baselines (capture-specific distributions)
+        logger.info(_baseline_status("tfbs_baseline_ontarget", tfbs_baseline_ontarget,
+            lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
+        logger.info(_baseline_status("atac_baseline_ontarget", atac_baseline_ontarget,
+            lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
         logger.info(_baseline_status("fsc_gene_baseline", fsc_gene_baseline,
             lambda b: f"{len(b)} genes" if b else "OK"))
         logger.info(_baseline_status("fsc_region_baseline", fsc_region_baseline,
@@ -1269,6 +1309,33 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             })
     atac_df = pd.DataFrame(atac_rows) if atac_rows else pd.DataFrame()
     
+    # =========================================================================
+    # Build on-target TFBS baseline DataFrame (panel mode)
+    # Separate table for on-target entropy which has different depth/variance
+    # =========================================================================
+    tfbs_ontarget_rows = []
+    if model.tfbs_baseline_ontarget and model.tfbs_baseline_ontarget.baseline:
+        for label, (mean, std) in model.tfbs_baseline_ontarget.baseline.data.items():
+            tfbs_ontarget_rows.append({
+                "table": "tfbs_baseline_ontarget",
+                "label": label,
+                "entropy_mean": mean,
+                "entropy_std": std,
+            })
+    tfbs_ontarget_df = pd.DataFrame(tfbs_ontarget_rows) if tfbs_ontarget_rows else pd.DataFrame()
+    
+    # Build on-target ATAC baseline DataFrame (panel mode)
+    atac_ontarget_rows = []
+    if model.atac_baseline_ontarget and model.atac_baseline_ontarget.baseline:
+        for label, (mean, std) in model.atac_baseline_ontarget.baseline.data.items():
+            atac_ontarget_rows.append({
+                "table": "atac_baseline_ontarget",
+                "label": label,
+                "entropy_mean": mean,
+                "entropy_std": std,
+            })
+    atac_ontarget_df = pd.DataFrame(atac_ontarget_rows) if atac_ontarget_rows else pd.DataFrame()
+    
     # Build FSC gene baseline DataFrame (panel mode)
     fsc_gene_rows = []
     if model.fsc_gene_baseline:
@@ -1295,7 +1362,27 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             })
     fsc_region_df = pd.DataFrame(fsc_region_rows) if fsc_region_rows else pd.DataFrame()
     
-    # Combine and save
+    # Build Region MDS baseline DataFrame
+    region_mds_rows = []
+    if model.region_mds and model.region_mds.gene_baseline:
+        for gene, data in model.region_mds.gene_baseline.items():
+            region_mds_rows.append({
+                "table": "region_mds",
+                "gene": gene,
+                "mds_mean": data.get("mds_mean", 0.0),
+                "mds_std": data.get("mds_std", 1.0),
+                "mds_e1_mean": data.get("mds_e1_mean"),
+                "mds_e1_std": data.get("mds_e1_std"),
+                "n_samples": data.get("n_samples", 0),
+            })
+    region_mds_df = pd.DataFrame(region_mds_rows) if region_mds_rows else pd.DataFrame()
+    
+    # Build WPS Background baseline DataFrame
+    wps_background_df = pd.DataFrame()
+    if model.wps_background_baseline and model.wps_background_baseline.groups is not None:
+        wps_background_df = model.wps_background_baseline.groups.copy()
+        wps_background_df["table"] = "wps_background"
+    
     all_dfs = [metadata_df]
     if not gc_bias_df.empty:
         all_dfs.append(gc_bias_df)
@@ -1315,10 +1402,19 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(tfbs_df)
     if not atac_df.empty:
         all_dfs.append(atac_df)
+    # On-target entropy baselines (panel mode)
+    if not tfbs_ontarget_df.empty:
+        all_dfs.append(tfbs_ontarget_df)
+    if not atac_ontarget_df.empty:
+        all_dfs.append(atac_ontarget_df)
     if not fsc_gene_df.empty:
         all_dfs.append(fsc_gene_df)
     if not fsc_region_df.empty:
         all_dfs.append(fsc_region_df)
+    if not region_mds_df.empty:
+        all_dfs.append(region_mds_df)
+    if not wps_background_df.empty:
+        all_dfs.append(wps_background_df)
     
     combined_df = pd.concat(all_dfs, ignore_index=True)
     combined_df.to_parquet(output, index=False)

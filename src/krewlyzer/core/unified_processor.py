@@ -654,12 +654,24 @@ def run_features(
         from .region_entropy_processor import process_region_entropy
         # Note: load_pon_model is imported at module level (line 41)
         
-        # Load GC correction factors (prefer off-target for genome-wide)
+        # =====================================================================
+        # Load GC correction factors for region entropy
+        # Off-target: WGS-like GC bias model (used for global/off-target fragments)
+        # On-target: capture-specific GC bias model (used for on-target fragments)
+        # =====================================================================
         gc_factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
         gc_factors_ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
         
         gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
         gc_ontarget_str = str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
+        
+        # Log GC factor availability for debugging
+        if gc_str:
+            logger.debug(f"  GC factors (off-target): {gc_factors_path.name}")
+        if is_panel_mode and gc_ontarget_str:
+            logger.debug(f"  GC factors (on-target): {gc_factors_ontarget_path.name}")
+        elif is_panel_mode and not gc_ontarget_str:
+            logger.debug("  GC factors (on-target): not available, using off-target fallback")
         
         # Use pon_parquet directly for Z-score normalization (Rust implementation)
         entropy_pon_parquet = pon_parquet if (pon_parquet and not skip_pon_zscore) else None
@@ -676,24 +688,36 @@ def run_features(
                 tfbs_regions = str(assets.tfbs_regions)
                 out_tfbs_raw = output_dir / f"{sample_name}.TFBS.raw.tsv"
                 
-                # Call Rust with optional target_regions for dual output
+                # Call Rust with dual GC factors and optional target_regions
+                # - gc_str: off-target/WGS GC bias correction
+                # - gc_ontarget_str: on-target/capture-specific GC bias correction
                 target_str = str(resolved_target_regions) if is_panel_mode else None
                 n_off, n_on = _core.region_entropy.run_region_entropy(
-                    str(bed_path), tfbs_regions, str(out_tfbs_raw), gc_str, target_str, True
+                    str(bed_path),      # Fragment BED.gz
+                    tfbs_regions,       # TFBS region BED  
+                    str(out_tfbs_raw),  # Output path (off-target)
+                    gc_str,             # GC factors for off-target fragments
+                    gc_ontarget_str,    # GC factors for on-target fragments (panel mode)
+                    target_str,         # Target regions BED (panel mode)
+                    True                # Silent mode
                 )
                 
                 # Process off-target output (primary/WGS-like)
+                # Uses tfbs_baseline for z-score normalization
                 outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
                 process_region_entropy(out_tfbs_raw, outputs.tfbs, entropy_pon_parquet, "tfbs_baseline")
                 out_tfbs_raw.unlink(missing_ok=True)
                 logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_off} TFs)")
                 
                 # Process on-target output (panel mode only)
+                # Uses tfbs_baseline_ontarget for z-score normalization (separate distribution)
                 if is_panel_mode:
                     out_tfbs_on_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
                     if out_tfbs_on_raw.exists():
                         outputs.tfbs_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.tsv"
-                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, entropy_pon_parquet, "tfbs_baseline")
+                        # On-target uses on-target baseline (different depth/variance)
+                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, 
+                                             entropy_pon_parquet, "tfbs_baseline_ontarget")
                         out_tfbs_on_raw.unlink(missing_ok=True)
                         logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name} ({n_on} TFs)")
                     
@@ -706,24 +730,36 @@ def run_features(
                 atac_regions = str(assets.atac_regions)
                 out_atac_raw = output_dir / f"{sample_name}.ATAC.raw.tsv"
                 
-                # Call Rust with optional target_regions for dual output
+                # Call Rust with dual GC factors and optional target_regions
+                # - gc_str: off-target/WGS GC bias correction
+                # - gc_ontarget_str: on-target/capture-specific GC bias correction
                 target_str = str(resolved_target_regions) if is_panel_mode else None
                 n_off, n_on = _core.region_entropy.run_region_entropy(
-                    str(bed_path), atac_regions, str(out_atac_raw), gc_str, target_str, True
+                    str(bed_path),      # Fragment BED.gz
+                    atac_regions,       # ATAC region BED
+                    str(out_atac_raw),  # Output path (off-target)
+                    gc_str,             # GC factors for off-target fragments
+                    gc_ontarget_str,    # GC factors for on-target fragments (panel mode)
+                    target_str,         # Target regions BED (panel mode)
+                    True                # Silent mode
                 )
                 
                 # Process off-target output (primary/WGS-like)
+                # Uses atac_baseline for z-score normalization
                 outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
                 process_region_entropy(out_atac_raw, outputs.atac, entropy_pon_parquet, "atac_baseline")
                 out_atac_raw.unlink(missing_ok=True)
                 logger.info(f"✓ ATAC entropy: {outputs.atac.name} ({n_off} cancer types)")
                 
                 # Process on-target output (panel mode only)
+                # Uses atac_baseline_ontarget for z-score normalization (separate distribution)
                 if is_panel_mode:
                     out_atac_on_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
                     if out_atac_on_raw.exists():
                         outputs.atac_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.tsv"
-                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget, entropy_pon_parquet, "atac_baseline")
+                        # On-target uses on-target baseline (different depth/variance)
+                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget,
+                                             entropy_pon_parquet, "atac_baseline_ontarget")
                         out_atac_on_raw.unlink(missing_ok=True)
                         logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name} ({n_on} cancer types)")
                     

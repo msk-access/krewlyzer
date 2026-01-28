@@ -258,36 +258,76 @@ impl FragmentConsumer for RegionEntropyConsumer {
 /// - Writes off-target entropy to `output_path` (WGS-like, uses all off-target reads)
 /// - Writes on-target entropy to `output_path.ontarget` suffix
 /// - This matches the dual-output pattern used by FSD, FSC, OCF
+///
+/// # GC Correction (Panel Mode)
+/// When both `gc_correction_path` and `gc_correction_ontarget_path` are provided:
+/// - Off-target fragments use `gc_correction_path` (WGS-like bias model)
+/// - On-target fragments use `gc_correction_ontarget_path` (capture-specific bias model)
+/// This is critical for accurate entropy calculation as on-target and off-target
+/// regions have fundamentally different GC bias profiles due to capture efficiency.
 #[pyfunction]
-#[pyo3(signature = (bed_path, region_path, output_path, gc_correction_path=None, target_regions_path=None, silent=false))]
+#[pyo3(signature = (bed_path, region_path, output_path, gc_correction_path=None, gc_correction_ontarget_path=None, target_regions_path=None, silent=false))]
 pub fn run_region_entropy(
     _py: Python,
     bed_path: String,
     region_path: String,
     output_path: String,
-    gc_correction_path: Option<String>,
+    gc_correction_path: Option<String>,           // GC factors for off-target/WGS fragments
+    gc_correction_ontarget_path: Option<String>,  // GC factors for on-target fragments (panel mode)
     target_regions_path: Option<String>,
     silent: bool,
 ) -> PyResult<(usize, usize)> {
     let mut chrom_map = ChromosomeMap::new();
 
-    // Load GC factors if provided
-    let factors = if let Some(p) = gc_correction_path {
-        match CorrectionFactors::load_csv(&p) {
+    // -------------------------------------------------------------------------
+    // Load GC correction factors for off-target fragments (WGS-like)
+    // These factors correct for GC bias in off-target/genome-wide regions
+    // -------------------------------------------------------------------------
+    let factors_offtarget = if let Some(ref p) = gc_correction_path {
+        match CorrectionFactors::load_csv(p) {
             Ok(f) => {
-                log::info!("RegionEntropy: Loaded GC correction factors from {}", p);
+                log::info!("RegionEntropy: Loaded OFF-TARGET GC factors: {} ({} bins)", 
+                          p, f.data.len());
                 Some(Arc::new(f))
             }
             Err(e) => {
-                log::warn!("RegionEntropy: Failed to load GC factors: {}", e);
+                log::warn!("RegionEntropy: Failed to load off-target GC factors from {}: {}", p, e);
                 None
             }
         }
     } else {
+        log::debug!("RegionEntropy: No off-target GC correction factors provided");
         None
     };
 
+    // -------------------------------------------------------------------------
+    // Load GC correction factors for on-target fragments (panel mode)
+    // These factors correct for capture-specific GC bias in targeted regions
+    // Falls back to off-target factors if not provided
+    // -------------------------------------------------------------------------
+    let factors_ontarget = if let Some(ref p) = gc_correction_ontarget_path {
+        match CorrectionFactors::load_csv(p) {
+            Ok(f) => {
+                log::info!("RegionEntropy: Loaded ON-TARGET GC factors: {} ({} bins)", 
+                          p, f.data.len());
+                Some(Arc::new(f))
+            }
+            Err(e) => {
+                log::warn!("RegionEntropy: Failed to load on-target GC factors from {}: {}, falling back to off-target", p, e);
+                factors_offtarget.clone()  // Fallback to off-target factors
+            }
+        }
+    } else if target_regions_path.is_some() {
+        // Panel mode but no on-target factors - use off-target as fallback
+        log::debug!("RegionEntropy: Panel mode without on-target GC factors, using off-target factors");
+        factors_offtarget.clone()
+    } else {
+        None  // WGS mode - no on-target factors needed
+    };
+
+    // -------------------------------------------------------------------------
     // Load target regions for panel mode (on/off-target split)
+    // -------------------------------------------------------------------------
     let is_panel_mode = target_regions_path.is_some();
     let target_tree: Option<HashMap<u32, COITree<(), u32>>> = if let Some(ref p) = target_regions_path {
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(), u32>>> = HashMap::new();
@@ -319,20 +359,31 @@ pub fn run_region_entropy(
         None
     };
 
-    // Create consumers (one for off-target, one for on-target in panel mode)
+    // -------------------------------------------------------------------------
+    // Create consumers with appropriate GC factors
+    // Off-target consumer: uses WGS-like GC factors
+    // On-target consumer: uses capture-specific GC factors
+    // -------------------------------------------------------------------------
     let consumer_off = RegionEntropyConsumer::new(
         std::path::Path::new(&region_path),
         &mut chrom_map,
-        factors.clone(),
+        factors_offtarget.clone(),  // OFF-TARGET uses off-target GC factors
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+    
+    log::debug!("RegionEntropy: Created off-target consumer (GC factors: {})", 
+               factors_offtarget.is_some());
 
     let mut consumer_on = if is_panel_mode {
-        Some(RegionEntropyConsumer::new(
+        let consumer = RegionEntropyConsumer::new(
             std::path::Path::new(&region_path),
             &mut chrom_map,
-            factors.clone(),
-        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?)
+            factors_ontarget.clone(),  // ON-TARGET uses on-target GC factors
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        
+        log::debug!("RegionEntropy: Created on-target consumer (GC factors: {})", 
+                   factors_ontarget.is_some());
+        Some(consumer)
     } else {
         None
     };
