@@ -6,7 +6,7 @@
 
 use std::path::Path;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read};
 use anyhow::{Context, Result};
 
 /// Check if a file appears to be BGZF format by examining the header.
