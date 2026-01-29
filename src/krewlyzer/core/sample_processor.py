@@ -175,10 +175,10 @@ class SampleOutputs:
     
     # Region Entropy data (in-memory for PON building)
     # Dict[label, (count, mean_size, entropy)]
-    tfbs_data: Optional[Dict[str, Any]] = None
-    tfbs_data_ontarget: Optional[Dict[str, Any]] = None
-    atac_data: Optional[Dict[str, Any]] = None
-    atac_data_ontarget: Optional[Dict[str, Any]] = None
+    tfbs_data: Optional[Dict[str, Any]] = None  # Genome-wide (.TFBS.tsv)
+    tfbs_data_ontarget: Optional[Dict[str, Any]] = None  # Panel-specific regions (.TFBS.ontarget.tsv)
+    atac_data: Optional[Dict[str, Any]] = None  # Genome-wide (.ATAC.tsv)
+    atac_data_ontarget: Optional[Dict[str, Any]] = None  # Panel-specific regions (.ATAC.ontarget.tsv)
 
 
 # =============================================================================
@@ -797,6 +797,7 @@ def process_sample(
             except Exception:
                 pass
         
+        
         # ATAC entropy data
         if feature_outputs.atac and feature_outputs.atac.exists():
             try:
@@ -810,6 +811,7 @@ def process_sample(
             try:
                 df = load_entropy_tsv(feature_outputs.atac_ontarget)
                 outputs.atac_data_ontarget = extract_entropy_data(df)
+                logger.debug(f"  Extracted {len(outputs.atac_data_ontarget)} ATAC on-target labels")
             except Exception:
                 pass
     

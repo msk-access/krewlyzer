@@ -212,6 +212,70 @@ def compute_wps_z_vector(
     return pon.wps_baseline.compute_z_vector(region_id, np.asarray(sample_vector), column)
 
 
+def compute_wps_panel_zscore(
+    value: float,
+    gene: str,
+    pon
+) -> Optional[float]:
+    """
+    Compute WPS z-score for panel-specific anchors (v1.0 scalar format).
+    
+    Uses wps_baseline_panel instead of wps_baseline (genome-wide).
+    For panel mode samples processed with panel-specific anchors.
+    
+    Args:
+        value: The observed WPS value
+        gene: Gene name
+        pon: Loaded PonModel with wps_baseline_panel
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.wps_baseline_panel is None:
+        return None
+    
+    stats = pon.wps_baseline_panel.get_stats(gene)
+    if stats is None:
+        return None
+    
+    mean, std = stats
+    if std > 0:
+        return (value - mean) / std
+    return 0.0
+
+
+def compute_wps_panel_z_vector(
+    sample_vector,
+    region_id: str,
+    pon,
+    column: str = "wps_nuc"
+):
+    """
+    Compute 200-element position-wise z-score vector using panel baseline (v2.0 format).
+    
+    Uses wps_baseline_panel for panel-specific anchors.
+    
+    Args:
+        sample_vector: 200-element sample WPS vector (numpy array or list)
+        region_id: Region identifier
+        pon: Loaded PonModel with wps_baseline_panel (v2.0)
+        column: Vector column prefix ('wps_nuc' or 'wps_tf')
+        
+    Returns:
+        200-element numpy array of z-scores or None if not computable
+    """
+    import numpy as np
+    
+    if pon is None or pon.wps_baseline_panel is None:
+        return None
+    
+    if pon.wps_baseline_panel.schema_version != "2.0":
+        logger.warning("compute_wps_panel_z_vector requires v2.0 PON (vector format)")
+        return None
+    
+    return pon.wps_baseline_panel.compute_z_vector(region_id, np.asarray(sample_vector), column)
+
+
 def compute_wps_shape_score(
     sample_vector,
     region_id: str,
@@ -293,6 +357,53 @@ def compute_atac_zscore(
     
     return pon.atac_baseline.get_zscore(label, entropy)
 
+
+def compute_tfbs_ontarget_zscore(
+    label: str,
+    entropy: float,
+    pon
+) -> Optional[float]:
+    """
+    Compute TFBS entropy z-score using panel-specific (ontarget) baseline.
+    
+    Uses tfbs_baseline_ontarget which is built from panel-intersection TFBS regions.
+    
+    Args:
+        label: TF label (e.g., "CTCF", "FOXA1")
+        entropy: Observed entropy value
+        pon: Loaded PonModel with tfbs_baseline_ontarget
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.tfbs_baseline_ontarget is None:
+        return None
+    
+    return pon.tfbs_baseline_ontarget.get_zscore(label, entropy)
+
+
+def compute_atac_ontarget_zscore(
+    label: str,
+    entropy: float,
+    pon
+) -> Optional[float]:
+    """
+    Compute ATAC entropy z-score using panel-specific (ontarget) baseline.
+    
+    Uses atac_baseline_ontarget which is built from panel-intersection ATAC regions.
+    
+    Args:
+        label: Cancer type label (e.g., "BRCA", "LUAD")
+        entropy: Observed entropy value
+        pon: Loaded PonModel with atac_baseline_ontarget
+        
+    Returns:
+        Z-score or None if not computable
+    """
+    if pon is None or pon.atac_baseline_ontarget is None:
+        return None
+    
+    return pon.atac_baseline_ontarget.get_zscore(label, entropy)
 
 def compute_ocf_zscore(
     region_id: str,

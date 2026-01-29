@@ -5,13 +5,15 @@ Calculates OCF features showing fragment orientation patterns around open chroma
 This CLI is a thin wrapper around the unified processor.
 
 OCF measures tissue-of-origin based on end-motif orientation at regulatory elements.
+OCF Score = (Upstream - Downstream) / (Upstream + Downstream)
 
-Output Files:
-    - {sample}.OCF.tsv: Per-region OCF scores and fragment counts
-    - {sample}.OCF.sync.tsv: Synchronized regions for panel comparison
-    - Panel mode: {sample}.OCF.ontarget.tsv for on-target regions
-
-OCF Score: Measures strand asymmetry of fragment ends = (U-D)/(U+D) where U=upstream, D=downstream.
+Output Files (WGS mode: 2 files, Panel mode: 6 files):
+    - {sample}.OCF.tsv: Summary scores (all fragments)
+    - {sample}.OCF.sync.tsv: Detailed sync data (all fragments)
+    - {sample}.OCF.ontarget.tsv: Summary scores (on-target only)
+    - {sample}.OCF.ontarget.sync.tsv: Detailed sync (on-target)
+    - {sample}.OCF.offtarget.tsv: Summary scores (off-target only)
+    - {sample}.OCF.offtarget.sync.tsv: Detailed sync (off-target)
 """
 
 import typer
@@ -136,9 +138,11 @@ def ocf(
         if outputs.ocf and outputs.ocf.exists():
             logger.info(f"✅ OCF complete: {outputs.ocf}")
         if outputs.ocf_sync and outputs.ocf_sync.exists():
-            logger.info(f"✅ OCF sync: {outputs.ocf_sync}")
+            logger.info(f"  OCF sync: {outputs.ocf_sync}")
         if outputs.ocf_ontarget and outputs.ocf_ontarget.exists():
-            logger.info(f"✅ OCF on-target: {outputs.ocf_ontarget}")
+            logger.info(f"  OCF on-target: {outputs.ocf_ontarget}")
+        if outputs.ocf_offtarget and outputs.ocf_offtarget.exists():
+            logger.info(f"  OCF off-target: {outputs.ocf_offtarget}")
             
     except FileNotFoundError as e:
         logger.error(str(e))

@@ -6,9 +6,13 @@ Calculates Shannon entropy of fragment size distributions at regulatory regions:
 - ATAC: Cancer-specific ATAC-seq peaks (23 cancer types from TCGA)
 
 Output Files:
-    - {sample}.TFBS.tsv: Per-TF entropy scores
-    - {sample}.ATAC.tsv: Per-cancer-type entropy scores
-    - Panel mode: {sample}.TFBS.ontarget.tsv and {sample}.ATAC.ontarget.tsv
+    Genome-wide (WGS-comparable, all fragments):
+    - {sample}.TFBS.tsv: TFBS entropy scores
+    - {sample}.ATAC.tsv: ATAC entropy scores
+    
+    Panel-specific (uses pre-intersected regions overlapping targets):
+    - {sample}.TFBS.ontarget.tsv: TFBS entropy for panel-specific regions
+    - {sample}.ATAC.ontarget.tsv: ATAC entropy for panel-specific regions
 """
 
 import typer
@@ -159,15 +163,17 @@ def region_entropy(
     try:
         # TFBS
         if tfbs:
-            tfbs_path = tfbs_regions if tfbs_regions else (assets.tfbs_regions if assets.tfbs_available else None)
-            if tfbs_path and Path(tfbs_path).exists():
-                logger.info(f"Computing TFBS entropy...")
+            # Always use genome-wide regions for primary output (WGS-comparable)
+            tfbs_path_gw = tfbs_regions if tfbs_regions else (assets.tfbs_regions if assets.tfbs_available else None)
+            
+            if tfbs_path_gw and Path(tfbs_path_gw).exists():
+                logger.info(f"Computing TFBS entropy (genome-wide)...")
                 out_raw = output / f"{sample_name}.TFBS.raw.tsv"
                 out_final = output / f"{sample_name}.TFBS.tsv"
                 
-                # Call Rust with optional target_regions for dual output
+                # Call Rust with optional target_regions for on/off-target split
                 n_off, n_on = _core.region_entropy.run_region_entropy(
-                    str(bedgz_input), str(tfbs_path), str(out_raw), gc_str, 
+                    str(bedgz_input), str(tfbs_path_gw), str(out_raw), gc_str, 
                     target_regions_str, not verbose
                 )
                 
@@ -176,28 +182,40 @@ def region_entropy(
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ TFBS: {out_final} ({n_off} TFs)")
                 
-                # Process on-target output (panel mode)
-                if is_panel_mode:
-                    out_raw_on = output / f"{sample_name}.TFBS.ontarget.raw.tsv"
-                    out_final_on = output / f"{sample_name}.TFBS.ontarget.tsv"
-                    if out_raw_on.exists():
-                        process_region_entropy(out_raw_on, out_final_on, entropy_pon_parquet, "tfbs_baseline")
-                        out_raw_on.unlink(missing_ok=True)
-                        logger.info(f"✅ TFBS on-target: {out_final_on} ({n_on} TFs)")
             else:
                 logger.warning("TFBS regions not available for this genome")
+            
+            # Panel-specific TFBS (using panel-intersection regions)
+            # Output renamed to .ontarget.tsv for consistency with other features
+            if is_panel_mode and assay:
+                tfbs_path_panel = assets.get_tfbs_regions(assay)
+                if tfbs_path_panel and tfbs_path_panel.exists() and tfbs_path_panel != tfbs_path_gw:
+                    logger.info(f"Computing TFBS entropy (panel-specific: {assay})...")
+                    out_raw_ont = output / f"{sample_name}.TFBS.ontarget.raw.tsv"
+                    out_final_ont = output / f"{sample_name}.TFBS.ontarget.tsv"
+                    
+                    n_ont, _ = _core.region_entropy.run_region_entropy(
+                        str(bedgz_input), str(tfbs_path_panel), str(out_raw_ont), gc_str, 
+                        None, not verbose  # No target split for panel-specific
+                    )
+                    
+                    process_region_entropy(out_raw_ont, out_final_ont, entropy_pon_parquet, "tfbs_baseline_ontarget")
+                    out_raw_ont.unlink(missing_ok=True)
+                    logger.info(f"✅ TFBS on-target: {out_final_ont} ({n_ont} TFs)")
         
         # ATAC
         if atac:
-            atac_path = atac_regions if atac_regions else (assets.atac_regions if assets.atac_available else None)
-            if atac_path and Path(atac_path).exists():
-                logger.info(f"Computing ATAC entropy...")
+            # Always use genome-wide regions for primary output (WGS-comparable)
+            atac_path_gw = atac_regions if atac_regions else (assets.atac_regions if assets.atac_available else None)
+            
+            if atac_path_gw and Path(atac_path_gw).exists():
+                logger.info(f"Computing ATAC entropy (genome-wide)...")
                 out_raw = output / f"{sample_name}.ATAC.raw.tsv"
                 out_final = output / f"{sample_name}.ATAC.tsv"
                 
-                # Call Rust with optional target_regions for dual output
+                # Call Rust with optional target_regions for on/off-target split
                 n_off, n_on = _core.region_entropy.run_region_entropy(
-                    str(bedgz_input), str(atac_path), str(out_raw), gc_str,
+                    str(bedgz_input), str(atac_path_gw), str(out_raw), gc_str,
                     target_regions_str, not verbose
                 )
                 
@@ -206,16 +224,26 @@ def region_entropy(
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ ATAC: {out_final} ({n_off} cancer types)")
                 
-                # Process on-target output (panel mode)
-                if is_panel_mode:
-                    out_raw_on = output / f"{sample_name}.ATAC.ontarget.raw.tsv"
-                    out_final_on = output / f"{sample_name}.ATAC.ontarget.tsv"
-                    if out_raw_on.exists():
-                        process_region_entropy(out_raw_on, out_final_on, entropy_pon_parquet, "atac_baseline")
-                        out_raw_on.unlink(missing_ok=True)
-                        logger.info(f"✅ ATAC on-target: {out_final_on} ({n_on} cancer types)")
             else:
                 logger.warning("ATAC regions not available for this genome")
+            
+            # Panel-specific ATAC (using panel-intersection regions)
+            # Output renamed to .ontarget.tsv for consistency with other features
+            if is_panel_mode and assay:
+                atac_path_panel = assets.get_atac_regions(assay)
+                if atac_path_panel and atac_path_panel.exists() and atac_path_panel != atac_path_gw:
+                    logger.info(f"Computing ATAC entropy (panel-specific: {assay})...")
+                    out_raw_ont = output / f"{sample_name}.ATAC.ontarget.raw.tsv"
+                    out_final_ont = output / f"{sample_name}.ATAC.ontarget.tsv"
+                    
+                    n_ont, _ = _core.region_entropy.run_region_entropy(
+                        str(bedgz_input), str(atac_path_panel), str(out_raw_ont), gc_str, 
+                        None, not verbose  # No target split for panel-specific
+                    )
+                    
+                    process_region_entropy(out_raw_ont, out_final_ont, entropy_pon_parquet, "atac_baseline_ontarget")
+                    out_raw_ont.unlink(missing_ok=True)
+                    logger.info(f"✅ ATAC on-target: {out_final_ont} ({n_ont} cancer types)")
                 
     except FileNotFoundError as e:
         logger.error(str(e))

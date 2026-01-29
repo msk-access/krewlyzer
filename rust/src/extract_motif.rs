@@ -1,3 +1,14 @@
+//! BAM/CRAM Fragment Extraction with Motif Counting
+//!
+//! Extracts cfDNA fragments from BAM/CRAM files in a single pass:
+//! - Fragment coordinates → BED.gz output
+//! - End motif (EM) k-mer counts
+//! - Breakpoint motif (BPM) k-mer counts
+//! - GC content observations for bias correction
+//!
+//! For panel data, separates on-target and off-target counts.
+//! Off-target is used for unbiased GC model training.
+
 use pyo3::prelude::*;
 use std::fs::File;
 use std::io::Write;

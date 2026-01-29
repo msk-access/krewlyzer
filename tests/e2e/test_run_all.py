@@ -86,6 +86,7 @@ def create_dummy_data(temp_dir):
     
     return bam, ref, out_dir, bins, arms, ocr, wps
 
+@pytest.mark.slow
 def test_run_all_unified():
     with tempfile.TemporaryDirectory() as temp_dir:
         bam, ref, out_dir, bins, arms, ocr, wps = create_dummy_data(temp_dir)

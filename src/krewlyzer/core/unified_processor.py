@@ -40,7 +40,6 @@ from .fsd_processor import process_fsd
 from .wps_processor import post_process_wps
 from .pon_integration import load_pon_model
 from .gene_bed import load_gene_bed
-from .ocf_processor import create_panel_ocf_atlas
 
 # Rust backend
 from krewlyzer import _core
@@ -70,17 +69,22 @@ class FeatureOutputs:
     wps: Optional[Path] = None              # WPS parquet
     wps_background: Optional[Path] = None   # WPS Alu stacking
     wps_panel: Optional[Path] = None        # Panel WPS (assay-specific)
-    ocf: Optional[Path] = None              # OCF scores (genome-wide, all fragments)
-    ocf_sync: Optional[Path] = None         # OCF sync data
-    ocf_ontarget: Optional[Path] = None     # On-target OCF (on-target frags + panel OCRs)
+    ocf: Optional[Path] = None              # OCF scores (all fragments - WGS-comparable)
+    ocf_sync: Optional[Path] = None         # OCF sync data (all fragments)
+    ocf_ontarget: Optional[Path] = None     # On-target OCF (panel mode)
     ocf_ontarget_sync: Optional[Path] = None  # On-target OCF sync data
-    panel_ocf_regions: Optional[Path] = None  # Filtered OCF regions BED for panel
+    ocf_offtarget: Optional[Path] = None    # Off-target OCF (panel mode)
+    ocf_sync_offtarget: Optional[Path] = None  # Off-target OCF sync data
     gc_factors: Optional[Path] = None       # GC correction factors
     # Region Entropy (TFBS/ATAC size entropy)
-    tfbs: Optional[Path] = None             # TFBS entropy (off-target)
-    tfbs_ontarget: Optional[Path] = None    # TFBS entropy (on-target, panel mode)
-    atac: Optional[Path] = None             # ATAC entropy (off-target)
-    atac_ontarget: Optional[Path] = None    # ATAC entropy (on-target, panel mode)
+    tfbs: Optional[Path] = None             # TFBS entropy (all fragments - genome-wide)
+    tfbs_ontarget: Optional[Path] = None    # TFBS entropy (panel-specific regions)
+    tfbs_sync: Optional[Path] = None        # TFBS sync (all fragments)
+    tfbs_sync_ontarget: Optional[Path] = None  # TFBS sync (panel-specific regions)
+    atac: Optional[Path] = None             # ATAC entropy (all fragments - genome-wide)
+    atac_ontarget: Optional[Path] = None    # ATAC entropy (panel-specific regions)
+    atac_sync: Optional[Path] = None        # ATAC sync (all fragments)
+    atac_sync_ontarget: Optional[Path] = None  # ATAC sync (panel-specific regions)
 
 
 def run_features(
@@ -307,8 +311,7 @@ def run_features(
         res_wps = None
         res_wps_bg = None
     
-    # OCF regions
-    res_ocf_panel = None  # Panel-filtered OCF regions (for second OCF run)
+    # OCF regions - resolve from user input or bundled assets
     if enable_ocf:
         if resolved_ocf_regions and resolved_ocf_regions.exists():
             res_ocf = resolved_ocf_regions
@@ -318,22 +321,6 @@ def run_features(
             logger.warning(f"OCF regions not available for {genome}, skipping OCF")
             enable_ocf = False
             res_ocf = None
-        
-        # In panel mode, also create filtered OCF regions for focused analysis
-        # We run OCF twice: once with full regions, once with panel-filtered
-        if res_ocf and is_panel_mode and resolved_target_regions:
-            panel_ocf_regions_path = output_dir / f"{sample_name}.panel_ocf_regions.bed"
-            n_regions = create_panel_ocf_atlas(
-                ocf_atlas_path=res_ocf,
-                target_regions=resolved_target_regions,
-                output_path=panel_ocf_regions_path,
-                promoter_extension=2000,
-            )
-            if n_regions > 0:
-                logger.info(f"Created panel OCF regions ({n_regions} entries)")
-                res_ocf_panel = panel_ocf_regions_path
-            else:
-                logger.warning("Panel OCF regions empty, skipping panel OCF")
         
         if res_ocf:
             logger.debug(f"OCF regions: {res_ocf}")
@@ -367,18 +354,12 @@ def run_features(
             outputs.wps_background = output_dir / f"{sample_name}.WPS_background.parquet"
     
     # OCF outputs (uses temp subdir due to Rust hardcoded names)
-    ocf_panel_tmp_dir = None
+    # Triple-output: Rust produces all/on-target/off-target with sync files
     if enable_ocf:
         ocf_tmp_dir = output_dir / f"{sample_name}_ocf_tmp"
         ocf_tmp_dir.mkdir(parents=True, exist_ok=True)
         outputs.ocf = output_dir / f"{sample_name}.OCF.tsv"
         outputs.ocf_sync = output_dir / f"{sample_name}.OCF.sync.tsv"
-        
-        # Panel OCF regions for ontarget output (on-target frags + panel OCRs)
-        if res_ocf_panel:
-            outputs.panel_ocf_regions = res_ocf_panel
-            ocf_panel_tmp_dir = output_dir / f"{sample_name}_ocf_ontarget_tmp"
-            ocf_panel_tmp_dir.mkdir(parents=True, exist_ok=True)
     else:
         ocf_tmp_dir = None
     
@@ -572,8 +553,14 @@ def run_features(
             logger.debug(f"Panel WPS not available: {e}")
     
     # Move OCF files from temp dir to final locations
+    # Rust OCF now produces 6 files in panel mode:
+    # - all.ocf.tsv, all.sync.tsv (ALL fragments)
+    # - all.ocf.ontarget.tsv, all.sync.ontarget.tsv (on-target)
+    # - all.ocf.offtarget.tsv, all.sync.offtarget.tsv (off-target)
     if enable_ocf and ocf_tmp_dir:
         import shutil
+        
+        # Primary output (ALL fragments - WGS-comparable)
         rust_ocf = ocf_tmp_dir / "all.ocf.tsv"
         rust_sync = ocf_tmp_dir / "all.sync.tsv"
         
@@ -592,59 +579,41 @@ def run_features(
         if rust_sync.exists():
             shutil.move(str(rust_sync), str(outputs.ocf_sync))
         
-        # Cleanup first temp dir (we don't use the ontarget from full OCRs)
+        # On-target output (panel mode only)
+        rust_ocf_ontarget = ocf_tmp_dir / "all.ocf.ontarget.tsv"
+        rust_sync_ontarget = ocf_tmp_dir / "all.sync.ontarget.tsv"
+        
+        if rust_ocf_ontarget.exists():
+            outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
+            shutil.move(str(rust_ocf_ontarget), str(outputs.ocf_ontarget))
+            logger.info(f"✓ OCF on-target: {outputs.ocf_ontarget.name}")
+        if rust_sync_ontarget.exists():
+            outputs.ocf_ontarget_sync = output_dir / f"{sample_name}.OCF.ontarget.sync.tsv"
+            shutil.move(str(rust_sync_ontarget), str(outputs.ocf_ontarget_sync))
+        
+        # Off-target output (panel mode only)
+        rust_ocf_offtarget = ocf_tmp_dir / "all.ocf.offtarget.tsv"
+        rust_sync_offtarget = ocf_tmp_dir / "all.sync.offtarget.tsv"
+        
+        if rust_ocf_offtarget.exists():
+            outputs.ocf_offtarget = output_dir / f"{sample_name}.OCF.offtarget.tsv"
+            shutil.move(str(rust_ocf_offtarget), str(outputs.ocf_offtarget))
+            logger.info(f"✓ OCF off-target: {outputs.ocf_offtarget.name}")
+        if rust_sync_offtarget.exists():
+            outputs.ocf_sync_offtarget = output_dir / f"{sample_name}.OCF.offtarget.sync.tsv"
+            shutil.move(str(rust_sync_offtarget), str(outputs.ocf_sync_offtarget))
+        
+        # Cleanup temp dir
         try:
-            # Remove any remaining files and the dir
             for f in ocf_tmp_dir.glob("*"):
                 f.unlink()
             ocf_tmp_dir.rmdir()
         except OSError:
             pass
         
-        # Panel OCF: Run OCF with panel-filtered regions + target filtering
-        # OCF.ontarget = on-target fragments + panel-filtered OCR regions
-        # This is consistent with other features (FSD.ontarget, FSC.ontarget)
-        if res_ocf_panel and ocf_panel_tmp_dir:
-            logger.info("Running OCF ontarget (panel regions + on-target fragments)...")
-            try:
-                _core.run_unified_pipeline(
-                    str(bed_path),
-                    # No GC correction needed (already computed)
-                    None, None, None, None,
-                    # No FSC/FSD/WPS (already done)
-                    None, None,
-                    None, None,
-                    None, None,
-                    False,
-                    None, None,
-                    # OCF with panel-filtered regions
-                    str(res_ocf_panel), str(ocf_panel_tmp_dir),
-                    # WITH target filtering to get on-target fragments
-                    str(resolved_target_regions), 0,
-                    True  # silent
-                )
-                
-                # Take the ONTARGET output (on-target frags + panel OCRs)
-                rust_ocf_ontarget = ocf_panel_tmp_dir / "all.ocf.ontarget.tsv"
-                rust_sync_ontarget = ocf_panel_tmp_dir / "all.sync.ontarget.tsv"
-                
-                if rust_ocf_ontarget.exists():
-                    outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
-                    shutil.move(str(rust_ocf_ontarget), str(outputs.ocf_ontarget))
-                    logger.info(f"✓ OCF ontarget: {outputs.ocf_ontarget.name}")
-                if rust_sync_ontarget.exists():
-                    outputs.ocf_ontarget_sync = output_dir / f"{sample_name}.OCF.ontarget.sync.tsv"
-                    shutil.move(str(rust_sync_ontarget), str(outputs.ocf_ontarget_sync))
-                
-                # Cleanup
-                try:
-                    for f in ocf_panel_tmp_dir.glob("*"):
-                        f.unlink()
-                    ocf_panel_tmp_dir.rmdir()
-                except OSError:
-                    pass
-            except Exception as e:
-                logger.warning(f"OCF ontarget failed: {e}")
+        # Note: The panel OCF run with filtered regions is no longer needed
+        # because the Rust triple-output now handles on/off-target splitting
+        # automatically when target_regions is provided
     
     # =========================================================================
     # 6. TFBS/ATAC REGION ENTROPY
@@ -682,86 +651,144 @@ def run_features(
             if enable_atac:
                 logger.info("  ATAC: --skip-pon active, outputting raw values (no z-scores)")
         
-        # TFBS Entropy - Uses Rust dual output (off-target + on-target in single pass)
+        # TFBS Entropy - Dual output architecture:
+        # 1. Genome-wide: Uses all TFBS regions for WGS-comparable output
+        # 2. Panel-specific: Uses pre-intersected TFBS regions that overlap with capture
         if enable_tfbs and assets.tfbs_available:
             try:
-                tfbs_regions = str(assets.tfbs_regions)
+                # =========================================================
+                # GENOME-WIDE TFBS (primary output - WGS-comparable)
+                # =========================================================
+                tfbs_regions_gw = str(assets.tfbs_regions)
                 out_tfbs_raw = output_dir / f"{sample_name}.TFBS.raw.tsv"
                 
-                # Call Rust with dual GC factors and optional target_regions
-                # - gc_str: off-target/WGS GC bias correction
-                # - gc_ontarget_str: on-target/capture-specific GC bias correction
-                target_str = str(resolved_target_regions) if is_panel_mode else None
-                n_off, n_on = _core.region_entropy.run_region_entropy(
+                # Call Rust with genome-wide regions (no target filtering)
+                n_all, _ = _core.region_entropy.run_region_entropy(
                     str(bed_path),      # Fragment BED.gz
-                    tfbs_regions,       # TFBS region BED  
-                    str(out_tfbs_raw),  # Output path (off-target)
-                    gc_str,             # GC factors for off-target fragments
-                    gc_ontarget_str,    # GC factors for on-target fragments (panel mode)
-                    target_str,         # Target regions BED (panel mode)
+                    tfbs_regions_gw,    # TFBS region BED (genome-wide)
+                    str(out_tfbs_raw),  # Output path
+                    gc_str,             # GC factors
+                    None,               # No on-target GC (not splitting)
+                    None,               # No target regions (no split)
                     True                # Silent mode
                 )
                 
-                # Process off-target output (primary/WGS-like)
-                # Uses tfbs_baseline for z-score normalization
+                # Process output with z-score normalization
                 outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
                 process_region_entropy(out_tfbs_raw, outputs.tfbs, entropy_pon_parquet, "tfbs_baseline")
                 out_tfbs_raw.unlink(missing_ok=True)
-                logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_off} TFs)")
+                logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_all} TFs)")
                 
-                # Process on-target output (panel mode only)
-                # Uses tfbs_baseline_ontarget for z-score normalization (separate distribution)
-                if is_panel_mode:
-                    out_tfbs_on_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
-                    if out_tfbs_on_raw.exists():
+                # Keep sync file as-is (no z-score normalization needed)
+                out_tfbs_sync_raw = output_dir / f"{sample_name}.TFBS.sync.raw.tsv"
+                if out_tfbs_sync_raw.exists():
+                    outputs.tfbs_sync = output_dir / f"{sample_name}.TFBS.sync.tsv"
+                    out_tfbs_sync_raw.rename(outputs.tfbs_sync)
+                
+                # =========================================================
+                # PANEL-SPECIFIC TFBS (uses pre-intersected regions)
+                # Only generated when assay is specified and panel regions exist
+                # =========================================================
+                if is_panel_mode and resolved_assay:
+                    tfbs_regions_panel = assets.get_tfbs_regions(resolved_assay)
+                    if tfbs_regions_panel and tfbs_regions_panel.exists() and tfbs_regions_panel != assets.tfbs_regions:
+                        logger.info(f"Computing TFBS entropy (panel-specific: {resolved_assay})...")
+                        out_tfbs_ont_raw = output_dir / f"{sample_name}.TFBS.ontarget.raw.tsv"
+                        
+                        # Call Rust with panel-specific regions
+                        n_ont, _ = _core.region_entropy.run_region_entropy(
+                            str(bed_path),              # Fragment BED.gz
+                            str(tfbs_regions_panel),    # TFBS regions (panel-specific)
+                            str(out_tfbs_ont_raw),      # Output path
+                            gc_ontarget_str or gc_str,  # Use on-target GC if available
+                            None,                       # No split
+                            None,                       # No target filtering
+                            True                        # Silent mode
+                        )
+                        
+                        # Process output with ontarget baseline
                         outputs.tfbs_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.tsv"
-                        # On-target uses on-target baseline (different depth/variance)
-                        process_region_entropy(out_tfbs_on_raw, outputs.tfbs_ontarget, 
+                        process_region_entropy(out_tfbs_ont_raw, outputs.tfbs_ontarget, 
                                              entropy_pon_parquet, "tfbs_baseline_ontarget")
-                        out_tfbs_on_raw.unlink(missing_ok=True)
-                        logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name} ({n_on} TFs)")
+                        out_tfbs_ont_raw.unlink(missing_ok=True)
+                        logger.info(f"✓ TFBS on-target: {outputs.tfbs_ontarget.name} ({n_ont} TFs)")
+                        
+                        # Keep sync file for panel-specific
+                        out_tfbs_ont_sync_raw = output_dir / f"{sample_name}.TFBS.ontarget.sync.raw.tsv"
+                        if out_tfbs_ont_sync_raw.exists():
+                            outputs.tfbs_sync_ontarget = output_dir / f"{sample_name}.TFBS.ontarget.sync.tsv"
+                            out_tfbs_ont_sync_raw.rename(outputs.tfbs_sync_ontarget)
                     
             except Exception as e:
                 logger.warning(f"TFBS entropy failed: {e}")
         
-        # ATAC Entropy - Uses Rust dual output (off-target + on-target in single pass)
+        # ATAC Entropy - Dual output architecture:
+        # 1. Genome-wide: Uses all ATAC regions for WGS-comparable output
+        # 2. Panel-specific: Uses pre-intersected ATAC regions that overlap with capture
         if enable_atac and assets.atac_available:
             try:
-                atac_regions = str(assets.atac_regions)
+                # =========================================================
+                # GENOME-WIDE ATAC (primary output - WGS-comparable)
+                # =========================================================
+                atac_regions_gw = str(assets.atac_regions)
                 out_atac_raw = output_dir / f"{sample_name}.ATAC.raw.tsv"
                 
-                # Call Rust with dual GC factors and optional target_regions
-                # - gc_str: off-target/WGS GC bias correction
-                # - gc_ontarget_str: on-target/capture-specific GC bias correction
-                target_str = str(resolved_target_regions) if is_panel_mode else None
-                n_off, n_on = _core.region_entropy.run_region_entropy(
+                # Call Rust with genome-wide regions (no target filtering)
+                n_all, _ = _core.region_entropy.run_region_entropy(
                     str(bed_path),      # Fragment BED.gz
-                    atac_regions,       # ATAC region BED
-                    str(out_atac_raw),  # Output path (off-target)
-                    gc_str,             # GC factors for off-target fragments
-                    gc_ontarget_str,    # GC factors for on-target fragments (panel mode)
-                    target_str,         # Target regions BED (panel mode)
+                    atac_regions_gw,    # ATAC region BED (genome-wide)
+                    str(out_atac_raw),  # Output path
+                    gc_str,             # GC factors
+                    None,               # No on-target GC (not splitting)
+                    None,               # No target regions (no split)
                     True                # Silent mode
                 )
                 
-                # Process off-target output (primary/WGS-like)
-                # Uses atac_baseline for z-score normalization
+                # Process output with z-score normalization
                 outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
                 process_region_entropy(out_atac_raw, outputs.atac, entropy_pon_parquet, "atac_baseline")
                 out_atac_raw.unlink(missing_ok=True)
-                logger.info(f"✓ ATAC entropy: {outputs.atac.name} ({n_off} cancer types)")
+                logger.info(f"✓ ATAC entropy: {outputs.atac.name} ({n_all} cancer types)")
                 
-                # Process on-target output (panel mode only)
-                # Uses atac_baseline_ontarget for z-score normalization (separate distribution)
-                if is_panel_mode:
-                    out_atac_on_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
-                    if out_atac_on_raw.exists():
+                # Keep sync file as-is (no z-score normalization needed)
+                out_atac_sync_raw = output_dir / f"{sample_name}.ATAC.sync.raw.tsv"
+                if out_atac_sync_raw.exists():
+                    outputs.atac_sync = output_dir / f"{sample_name}.ATAC.sync.tsv"
+                    out_atac_sync_raw.rename(outputs.atac_sync)
+                
+                # =========================================================
+                # PANEL-SPECIFIC ATAC (uses pre-intersected regions)
+                # Only generated when assay is specified and panel regions exist
+                # =========================================================
+                if is_panel_mode and resolved_assay:
+                    atac_regions_panel = assets.get_atac_regions(resolved_assay)
+                    if atac_regions_panel and atac_regions_panel.exists() and atac_regions_panel != assets.atac_regions:
+                        logger.info(f"Computing ATAC entropy (panel-specific: {resolved_assay})...")
+                        out_atac_ont_raw = output_dir / f"{sample_name}.ATAC.ontarget.raw.tsv"
+                        
+                        # Call Rust with panel-specific regions
+                        n_ont, _ = _core.region_entropy.run_region_entropy(
+                            str(bed_path),              # Fragment BED.gz
+                            str(atac_regions_panel),    # ATAC regions (panel-specific)
+                            str(out_atac_ont_raw),      # Output path
+                            gc_ontarget_str or gc_str,  # Use on-target GC if available
+                            None,                       # No split
+                            None,                       # No target filtering
+                            True                        # Silent mode
+                        )
+                        
+                        # Process output with ontarget baseline
                         outputs.atac_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.tsv"
-                        # On-target uses on-target baseline (different depth/variance)
-                        process_region_entropy(out_atac_on_raw, outputs.atac_ontarget,
+                        process_region_entropy(out_atac_ont_raw, outputs.atac_ontarget, 
                                              entropy_pon_parquet, "atac_baseline_ontarget")
-                        out_atac_on_raw.unlink(missing_ok=True)
-                        logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name} ({n_on} cancer types)")
+                        out_atac_ont_raw.unlink(missing_ok=True)
+                        logger.info(f"✓ ATAC on-target: {outputs.atac_ontarget.name} ({n_ont} cancer types)")
+                        
+                        # Keep sync file for panel-specific
+                        out_atac_ont_sync_raw = output_dir / f"{sample_name}.ATAC.ontarget.sync.raw.tsv"
+                        if out_atac_ont_sync_raw.exists():
+                            outputs.atac_sync_ontarget = output_dir / f"{sample_name}.ATAC.ontarget.sync.tsv"
+                            out_atac_ont_sync_raw.rename(outputs.atac_sync_ontarget)
                     
             except Exception as e:
                 logger.warning(f"ATAC entropy failed: {e}")

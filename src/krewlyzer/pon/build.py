@@ -334,11 +334,13 @@ def build_pon(
         all_tfbs_data_ontarget = []
         all_atac_data_ontarget = []
         
+        
         # Collect file paths for Rust-based baseline computation
         fsd_paths = []
         wps_paths = []
         fsd_ontarget_paths = []  # On-target FSD for panel mode
         wps_background_paths = []  # WPS Alu background for NRL baseline
+        wps_panel_paths = []  # Panel-specific WPS parquets (panel mode only)
         mds_gene_paths = []  # Region MDS per-gene files
         
         # FSC gene/region data collectors (panel mode only)
@@ -363,6 +365,23 @@ def build_pon(
                         })
                 except Exception as e:
                     logger.debug(f"  Could not read GC data for {sample_name}: {e}")
+            
+            # Collect on-target GC data for gc_bias_ontarget (panel mode)
+            # On-target FSC counts have the same format with mean_gc column
+            fsc_counts_on = Path(temp_output_dir) / sample_name / f"{sample_name}.fsc_counts.ontarget.tsv"
+            if fsc_counts_on.exists():
+                try:
+                    fsc_on_df = pd.read_csv(fsc_counts_on, sep='\t')
+                    if all(col in fsc_on_df.columns for col in ['ultra_short', 'core_short', 'mono_nucl', 'di_nucl', 'long', 'mean_gc']):
+                        all_gc_data_ontarget.append({
+                            "gc": fsc_on_df['mean_gc'].values,
+                            "short": (fsc_on_df['ultra_short'] + fsc_on_df['core_short']).values,
+                            "intermediate": fsc_on_df['mono_nucl'].values,
+                            "long": (fsc_on_df['di_nucl'] + fsc_on_df['long']).values,
+                        })
+                        logger.debug(f"  Collected on-target GC data from {sample_name}")
+                except Exception as e:
+                    logger.debug(f"  Could not read on-target GC data for {sample_name}: {e}")
             
             # Collect FSD data
             if feat and feat.fsd:
@@ -404,6 +423,10 @@ def build_pon(
             if feat and feat.wps_background and feat.wps_background.exists():
                 wps_background_paths.append(str(feat.wps_background))
             
+            # Collect WPS panel parquets (panel mode only)
+            if feat and feat.wps_panel and feat.wps_panel.exists():
+                wps_panel_paths.append(str(feat.wps_panel))
+            
             # Collect region MDS gene paths (generated during processing)
             sample_mds_gene = Path(temp_output_dir) / sample_name / f"{sample_name}.MDS.gene.tsv"
             if sample_mds_gene.exists():
@@ -425,7 +448,7 @@ def build_pon(
                 all_atac_data.append(outputs.atac_data)
             
             # Collect on-target TFBS entropy data (panel mode)
-            # On-target regions have different depth/variance - need separate baseline
+            # Uses panel-specific regions (pre-intersected with targets) for higher signal
             if outputs.tfbs_data_ontarget:
                 all_tfbs_data_ontarget.append(outputs.tfbs_data_ontarget)
                 
@@ -542,6 +565,7 @@ def build_pon(
         logger.info(f"  Computing on-target ATAC baseline ({len(all_atac_data_ontarget)} samples)...")
         atac_baseline_ontarget = _compute_atac_baseline(all_atac_data_ontarget)
     
+    
     # Build on-target FSD baseline (panel mode only)
     fsd_baseline_ontarget = None
     if is_panel_mode and all_fsd_data_ontarget:
@@ -564,6 +588,13 @@ def build_pon(
     if wps_background_paths:
         logger.info("  Computing WPS background baseline (Alu NRL)...")
         wps_background_baseline = _compute_wps_background_baseline(wps_background_paths)
+    
+    # Build WPS panel baseline (panel mode only)
+    # Uses panel-specific anchors overlapping target regions
+    wps_baseline_panel = None
+    if is_panel_mode and wps_panel_paths:
+        logger.info(f"  Computing WPS panel baseline ({len(wps_panel_paths)} samples)...")
+        wps_baseline_panel = _compute_wps_baseline(wps_panel_paths)
     
     # Build Region MDS baseline (per-gene MDS statistics)
     region_mds_baseline = None
@@ -604,12 +635,13 @@ def build_pon(
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
         wps_background_baseline=wps_background_baseline,
+        wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
         mds_baseline=mds_baseline,
         region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
-        # On-target baselines (panel mode only)
+        # On-target baselines (panel mode - uses panel-specific regions)
         tfbs_baseline_ontarget=tfbs_baseline_ontarget,
         atac_baseline_ontarget=atac_baseline_ontarget,
         fsc_gene_baseline=fsc_gene_baseline,
@@ -682,10 +714,13 @@ def build_pon(
             lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
         logger.info(_baseline_status("atac_baseline_ontarget", atac_baseline_ontarget,
             lambda b: f"{len(b.labels)} labels" if hasattr(b, 'labels') else "OK"))
+        logger.info(_baseline_status("wps_baseline_panel", wps_baseline_panel,
+            lambda b: f"{len(b.regions)} regions" if hasattr(b, 'regions') else "OK"))
         logger.info(_baseline_status("fsc_gene_baseline", fsc_gene_baseline,
             lambda b: f"{len(b)} genes" if b else "OK"))
         logger.info(_baseline_status("fsc_region_baseline", fsc_region_baseline,
             lambda b: f"{len(b)} regions" if b else "OK"))
+        
     
     logger.info(f"")
     logger.info(f"=" * 60)
@@ -1235,6 +1270,12 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         wps_df = model.wps_baseline.regions.copy()
         wps_df["table"] = "wps_baseline"
     
+    # Build WPS panel baseline DataFrame (panel mode only)
+    wps_panel_df = pd.DataFrame()
+    if model.wps_baseline_panel and model.wps_baseline_panel.regions is not None:
+        wps_panel_df = model.wps_baseline_panel.regions.copy()
+        wps_panel_df["table"] = "wps_baseline_panel"
+    
     # Build OCF baseline DataFrame
     ocf_df = pd.DataFrame()
     if model.ocf_baseline and model.ocf_baseline.regions is not None:
@@ -1336,6 +1377,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             })
     atac_ontarget_df = pd.DataFrame(atac_ontarget_rows) if atac_ontarget_rows else pd.DataFrame()
     
+    
     # Build FSC gene baseline DataFrame (panel mode)
     fsc_gene_rows = []
     if model.fsc_gene_baseline:
@@ -1390,6 +1432,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(fsd_df)
     if not wps_df.empty:
         all_dfs.append(wps_df)
+    if not wps_panel_df.empty:
+        all_dfs.append(wps_panel_df)
     if not ocf_df.empty:
         all_dfs.append(ocf_df)
     if not mds_df.empty:
@@ -1407,6 +1451,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(tfbs_ontarget_df)
     if not atac_ontarget_df.empty:
         all_dfs.append(atac_ontarget_df)
+    # FSC gene/region baselines (panel mode)
     if not fsc_gene_df.empty:
         all_dfs.append(fsc_gene_df)
     if not fsc_region_df.empty:

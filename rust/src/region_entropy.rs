@@ -3,9 +3,18 @@
 //! Calculates Shannon entropy of fragment size distributions aggregated by genomic regions.
 //! Used for TFBS (transcription factor binding site) and ATAC (cancer peak) analysis.
 //!
-//! # Output Format
-//! - `{sample}.{type}.tsv`: Entropy scores per region label
-//!   Columns: label, count, mean_size, entropy
+//! ## Triple-Output (Panel Mode)
+//! - ALL fragments (primary, WGS-comparable)
+//! - On-target fragments only
+//! - Off-target fragments only
+//!
+//! ## Output Files (6 per type in panel mode)
+//! - `{sample}.{TFBS|ATAC}.tsv`: Summary entropy scores (label, count, mean_size, entropy)
+//! - `{sample}.{TFBS|ATAC}.sync.tsv`: Detailed size distributions (label, size, count, proportion)
+//! - `{sample}.{TFBS|ATAC}.ontarget.tsv`: On-target summary
+//! - `{sample}.{TFBS|ATAC}.sync.ontarget.tsv`: On-target detailed
+//! - `{sample}.{TFBS|ATAC}.offtarget.tsv`: Off-target summary
+//! - `{sample}.{TFBS|ATAC}.sync.offtarget.tsv`: Off-target detailed
 
 use pyo3::prelude::*;
 use std::path::Path;
@@ -200,6 +209,45 @@ impl RegionEntropyConsumer {
         log::info!("RegionEntropy: Wrote {} labels to {:?}", n_written, output_path);
         Ok(())
     }
+
+    /// Write sync-style detailed output (per-label, per-size histograms for QC)
+    /// 
+    /// Format: label, size, count, proportion
+    /// This enables downstream QC of fragment size distributions per label.
+    pub fn write_sync_output(&self, output_path: &Path) -> Result<()> {
+        let mut f = File::create(output_path)
+            .with_context(|| format!("Failed to create sync output file: {:?}", output_path))?;
+        writeln!(f, "label\tsize\tcount\tproportion")?;
+
+        // Sort output by label name for consistency
+        let mut indices: Vec<usize> = (0..self.labels.len()).collect();
+        indices.sort_by_key(|&i| &self.labels[i]);
+
+        let mut n_written = 0;
+        for i in indices {
+            let s = &self.stats[i];
+            if s.total_count > 0.0 {
+                // Write each size bin with count > 0
+                for (size, &count) in s.len_counts.iter().enumerate() {
+                    if count > 0.0 {
+                        let proportion = count / s.total_count;
+                        writeln!(
+                            f,
+                            "{}\t{}\t{:.1}\t{:.6}",
+                            self.labels[i],
+                            size,
+                            count,
+                            proportion
+                        )?;
+                        n_written += 1;
+                    }
+                }
+            }
+        }
+
+        log::info!("RegionEntropy: Wrote {} sync rows to {:?}", n_written, output_path);
+        Ok(())
+    }
 }
 
 impl FragmentConsumer for RegionEntropyConsumer {
@@ -361,89 +409,168 @@ pub fn run_region_entropy(
 
     // -------------------------------------------------------------------------
     // Create consumers with appropriate GC factors
-    // Off-target consumer: uses WGS-like GC factors
-    // On-target consumer: uses capture-specific GC factors
+    // - all: uses off-target GC factors (WGS-like, for primary output)
+    // - on_target: uses on-target GC factors (capture-specific)
+    // - off_target: uses off-target GC factors
     // -------------------------------------------------------------------------
-    let consumer_off = RegionEntropyConsumer::new(
+    
+    // "all" consumer - receives ALL fragments (primary output, WGS-comparable)
+    let consumer_all = RegionEntropyConsumer::new(
         std::path::Path::new(&region_path),
         &mut chrom_map,
-        factors_offtarget.clone(),  // OFF-TARGET uses off-target GC factors
+        factors_offtarget.clone(),  // Use off-target/WGS GC factors for primary
     )
     .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
     
-    log::debug!("RegionEntropy: Created off-target consumer (GC factors: {})", 
+    log::debug!("RegionEntropy: Created 'all' consumer (GC factors: {})", 
                factors_offtarget.is_some());
 
-    let mut consumer_on = if is_panel_mode {
-        let consumer = RegionEntropyConsumer::new(
+    // Panel mode consumers (on_target and off_target)
+    let (consumer_on, consumer_off) = if is_panel_mode {
+        // On-target consumer
+        let on = RegionEntropyConsumer::new(
             std::path::Path::new(&region_path),
             &mut chrom_map,
-            factors_ontarget.clone(),  // ON-TARGET uses on-target GC factors
+            factors_ontarget.clone(),  // ON-TARGET uses capture-specific GC factors
+        ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        
+        // Off-target consumer
+        let off = RegionEntropyConsumer::new(
+            std::path::Path::new(&region_path),
+            &mut chrom_map,
+            factors_offtarget.clone(),  // OFF-TARGET uses WGS-like GC factors
         ).map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
         log::debug!("RegionEntropy: Created on-target consumer (GC factors: {})", 
                    factors_ontarget.is_some());
-        Some(consumer)
+        log::debug!("RegionEntropy: Created off-target consumer (GC factors: {})", 
+                   factors_offtarget.is_some());
+        
+        (Some(on), Some(off))
     } else {
-        None
+        (None, None)
     };
 
-    // Create a dual consumer wrapper for processing
-    let dual_consumer = DualRegionEntropyConsumer {
+    // Create a triple consumer wrapper for processing
+    let triple_consumer = TripleRegionEntropyConsumer {
+        all: consumer_all,
+        on_target: consumer_on,
         off_target: consumer_off,
-        on_target: consumer_on.take(),
         target_tree,
     };
 
     // Process fragments
-    let analyzer = FragmentAnalyzer::new(dual_consumer, 100_000);
+    let analyzer = FragmentAnalyzer::new(triple_consumer, 100_000);
     let final_consumer = analyzer
         .process_file(std::path::Path::new(&bed_path), &mut chrom_map, silent)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
-    // Write off-target output (primary/WGS-style)
-    let n_off = final_consumer.off_target.stats.iter().filter(|s| s.total_count > 0.0).count();
-    final_consumer.off_target
+    // -------------------------------------------------------------------------
+    // Write outputs - 6 files in panel mode, 2 files in WGS mode
+    // Summary files: .tsv (label, count, mean_size, entropy)
+    // Sync files: .sync.tsv (label, size, count, proportion)
+    // -------------------------------------------------------------------------
+    
+    // Helper function to construct output paths
+    fn make_output_path(base: &str, suffix: &str, is_sync: bool) -> String {
+        let sync_suffix = if is_sync { ".sync" } else { "" };
+        if base.contains(".raw.tsv") {
+            base.replace(".raw.tsv", &format!("{}{}.raw.tsv", suffix, sync_suffix))
+        } else {
+            base.replace(".tsv", &format!("{}{}.tsv", suffix, sync_suffix))
+        }
+    }
+
+    // 1. Write "all" output (primary - WGS-comparable)
+    let n_all = final_consumer.all.stats.iter().filter(|s| s.total_count > 0.0).count();
+    final_consumer.all
         .write_output(std::path::Path::new(&output_path))
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    
+    // Write "all" sync output
+    let sync_path = make_output_path(&output_path, "", true);
+    final_consumer.all
+        .write_sync_output(std::path::Path::new(&sync_path))
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
 
-    // Write on-target output (panel mode only)
+    // 2. Write on-target output (panel mode only)
     let n_on = if let Some(ref on_target) = final_consumer.on_target {
-        // Construct proper ontarget path: foo.TFBS.raw.tsv -> foo.TFBS.ontarget.raw.tsv
-        let ontarget_path = if output_path.contains(".raw.tsv") {
-            output_path.replace(".raw.tsv", ".ontarget.raw.tsv")
-        } else {
-            output_path.replace(".tsv", ".ontarget.tsv")
-        };
+        let ontarget_path = make_output_path(&output_path, ".ontarget", false);
+        let ontarget_sync_path = make_output_path(&output_path, ".ontarget", true);
         
         let n = on_target.stats.iter().filter(|s| s.total_count > 0.0).count();
         on_target
             .write_output(std::path::Path::new(&ontarget_path))
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
-        
-        log::info!("RegionEntropy: Panel mode - {} off-target, {} on-target labels", n_off, n);
+        on_target
+            .write_sync_output(std::path::Path::new(&ontarget_sync_path))
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
         n
     } else {
         0
     };
 
-    Ok((n_off, n_on))
+    // 3. Write off-target output (panel mode only)
+    let n_off = if let Some(ref off_target) = final_consumer.off_target {
+        let offtarget_path = make_output_path(&output_path, ".offtarget", false);
+        let offtarget_sync_path = make_output_path(&output_path, ".offtarget", true);
+        
+        let n = off_target.stats.iter().filter(|s| s.total_count > 0.0).count();
+        off_target
+            .write_output(std::path::Path::new(&offtarget_path))
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        off_target
+            .write_sync_output(std::path::Path::new(&offtarget_sync_path))
+            .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+        n
+    } else {
+        0
+    };
+
+    if is_panel_mode {
+        log::info!("RegionEntropy: Panel mode - {} all, {} on-target, {} off-target labels", 
+                  n_all, n_on, n_off);
+    } else {
+        log::info!("RegionEntropy: WGS mode - {} labels", n_all);
+    }
+
+    // Return (n_all, n_on) for backward compatibility
+    // Note: n_off is logged but not returned (could extend return type if needed)
+    Ok((n_all, n_on))
 }
 
-/// Dual consumer wrapper for on/off-target split processing
+/// Triple consumer wrapper for all/on/off-target output (panel mode)
+/// 
+/// When in panel mode:
+/// - `all`: Receives ALL fragments (WGS-comparable, for primary PON baseline)
+/// - `on_target`: Receives only on-target fragments (capture-specific)
+/// - `off_target`: Receives only off-target fragments (background)
+/// 
+/// When NOT in panel mode:
+/// - `all`: Receives all fragments (same as WGS)
+/// - `on_target`: None
+/// - `off_target`: None
 #[derive(Clone)]
-struct DualRegionEntropyConsumer {
-    off_target: RegionEntropyConsumer,
+struct TripleRegionEntropyConsumer {
+    /// ALL fragments (primary output, WGS-comparable)
+    all: RegionEntropyConsumer,
+    /// On-target fragments only (panel mode)
     on_target: Option<RegionEntropyConsumer>,
+    /// Off-target fragments only (panel mode)
+    off_target: Option<RegionEntropyConsumer>,
+    /// Target region interval trees for on/off-target routing
     target_tree: Option<HashMap<u32, COITree<(), u32>>>,
 }
 
-impl FragmentConsumer for DualRegionEntropyConsumer {
+impl FragmentConsumer for TripleRegionEntropyConsumer {
     fn name(&self) -> &str {
-        "DualRegionEntropy"
+        "TripleRegionEntropy"
     }
 
     fn consume(&mut self, frag: &Fragment) {
+        // ALL fragments go to the 'all' consumer (WGS-comparable)
+        self.all.consume(frag);
+        
         // Determine if fragment overlaps target regions (panel mode)
         let is_on_target = if let Some(ref trees) = self.target_tree {
             if let Some(tree) = trees.get(&frag.chrom_id) {
@@ -459,20 +586,25 @@ impl FragmentConsumer for DualRegionEntropyConsumer {
             false
         };
 
-        // Route fragment to appropriate consumer
+        // Route to on_target or off_target based on overlap
         if is_on_target {
             if let Some(ref mut on_target) = self.on_target {
                 on_target.consume(frag);
             }
         } else {
-            self.off_target.consume(frag);
+            if let Some(ref mut off_target) = self.off_target {
+                off_target.consume(frag);
+            }
         }
     }
 
     fn merge(&mut self, other: Self) {
-        self.off_target.merge(other.off_target);
+        self.all.merge(other.all);
         if let (Some(ref mut on), Some(other_on)) = (&mut self.on_target, other.on_target) {
             on.merge(other_on);
+        }
+        if let (Some(ref mut off), Some(other_off)) = (&mut self.off_target, other.off_target) {
+            off.merge(other_off);
         }
     }
 }

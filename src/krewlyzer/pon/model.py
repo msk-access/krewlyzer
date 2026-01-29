@@ -702,6 +702,7 @@ class PonModel:
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
     wps_background_baseline: Optional[WpsBackgroundBaseline] = None  # Alu periodicity
+    wps_baseline_panel: Optional[WpsBaseline] = None  # Panel-specific WPS (panel mode only)
     ocf_baseline: Optional[OcfBaseline] = None
     mds_baseline: Optional[MdsBaseline] = None
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
@@ -711,12 +712,12 @@ class PonModel:
     fsc_region_baseline: Optional[FscRegionBaseline] = None  # Per-exon normalized depth (panel mode)
     
     # On-target baselines (panel mode only)
-    # On-target regions have 1000x-5000x depth vs 0.5x-1x off-target
-    # Separate baselines prevent variance mismatch in z-score calculation
+    # TFBS/ATAC on-target uses panel-specific regions (pre-intersected with targets)
+    # for higher signal in target-adjacent chromatin. Other features use fragment filtering.
     gc_bias_ontarget: Optional[GcBiasModel] = None
     fsd_baseline_ontarget: Optional[FsdBaseline] = None
-    tfbs_baseline_ontarget: Optional[TfbsBaseline] = None  # TFBS on-target entropy
-    atac_baseline_ontarget: Optional[AtacBaseline] = None  # ATAC on-target entropy
+    tfbs_baseline_ontarget: Optional[TfbsBaseline] = None  # Panel-specific TFBS regions
+    atac_baseline_ontarget: Optional[AtacBaseline] = None  # Panel-specific ATAC regions
     
     @classmethod
     def load(cls, path: Path) -> "PonModel":
@@ -803,6 +804,32 @@ class PonModel:
                     wps_baseline = WpsBaseline(regions=regions_df, schema_version="1.0")
             else:
                 logger.warning("WPS baseline missing expected columns (wps_nuc_*), skipping")
+        
+        # Parse WPS panel baseline (panel mode only) - same format as wps_baseline
+        wps_panel_df = df_all[df_all["table"] == "wps_baseline_panel"]
+        wps_baseline_panel = None
+        if not wps_panel_df.empty:
+            if "wps_nuc_mean" in wps_panel_df.columns:
+                first_val = wps_panel_df["wps_nuc_mean"].iloc[0] if len(wps_panel_df) > 0 else None
+                is_vector = isinstance(first_val, (list, np.ndarray)) if first_val is not None else False
+                
+                if is_vector:
+                    cols = ["region_id", "wps_nuc_mean", "wps_nuc_std", "wps_tf_mean", "wps_tf_std"]
+                    if "n_samples" in wps_panel_df.columns:
+                        cols.append("n_samples")
+                    regions_df = wps_panel_df[cols].copy()
+                    wps_baseline_panel = WpsBaseline(regions=regions_df, schema_version="2.0")
+                    logger.info(f"Loaded WPS panel baseline v2.0: {len(regions_df)} regions")
+                else:
+                    regions_df = wps_panel_df[["region_id", "wps_nuc_mean", "wps_nuc_std", 
+                                        "wps_tf_mean", "wps_tf_std"]].copy()
+                    regions_df = regions_df.rename(columns={
+                        "wps_nuc_mean": "wps_long_mean",
+                        "wps_nuc_std": "wps_long_std",
+                        "wps_tf_mean": "wps_short_mean",
+                        "wps_tf_std": "wps_short_std",
+                    })
+                    wps_baseline_panel = WpsBaseline(regions=regions_df, schema_version="1.0")
         
         # Parse OCF baseline
         ocf_df = df_all[df_all["table"] == "ocf_baseline"]
@@ -925,7 +952,11 @@ class PonModel:
             atac_baseline_ontarget = AtacBaseline(baseline=RegionEntropyBaseline(atac_ontarget_data))
             logger.debug(f"Loaded ATAC on-target baseline: {len(atac_ontarget_data)} labels")
         
-        # Parse FSC gene baseline (panel mode)
+        
+        # =====================================================================
+        # FSC Gene/Region Baselines (panel mode)
+        # =====================================================================
+
         fsc_gene_df = df_all[df_all["table"] == "fsc_gene_baseline"]
         fsc_gene_baseline = None
         if not fsc_gene_df.empty:
@@ -990,13 +1021,14 @@ class PonModel:
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
+            wps_baseline_panel=wps_baseline_panel,
             ocf_baseline=ocf_baseline,
             mds_baseline=mds_baseline,
             fsd_baseline_ontarget=fsd_baseline_ontarget,
             gc_bias_ontarget=gc_bias_ontarget,
             tfbs_baseline=tfbs_baseline,
             atac_baseline=atac_baseline,
-            # On-target entropy baselines (panel mode)
+            # On-target entropy baselines (panel mode - panel-specific regions)
             tfbs_baseline_ontarget=tfbs_baseline_ontarget,
             atac_baseline_ontarget=atac_baseline_ontarget,
             fsc_gene_baseline=fsc_gene_baseline,

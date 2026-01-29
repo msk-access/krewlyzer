@@ -7,11 +7,18 @@
 //! - **Strand asymmetry**: OCF = (Upstream - Downstream) / (Upstream + Downstream)
 //! - **Region types**: Calculates per-OCR and synchronized (pooled) scores
 //! - **GC correction**: Per-fragment weight adjustment via correction factors
-//! - **Panel mode**: On-target and off-target split outputs
+//! - **Triple-output (panel mode)**: Inclusive routing produces:
+//!   - ALL fragments (primary, WGS-comparable)
+//!   - On-target fragments only
+//!   - Off-target fragments only
 //!
-//! ## Output
-//! - {sample}.OCF.tsv: Per-region scores and fragment counts
-//! - {sample}.OCF.sync.tsv: Synchronized regions for cross-sample comparison
+//! ## Output Files (6 in panel mode, 2 in WGS mode)
+//! - all.ocf.tsv: Summary scores (all fragments)
+//! - all.sync.tsv: Detailed sync data (all fragments)
+//! - all.ocf.ontarget.tsv: Summary scores (on-target only)
+//! - all.sync.ontarget.tsv: Detailed sync data (on-target only)
+//! - all.ocf.offtarget.tsv: Summary scores (off-target only)
+//! - all.sync.offtarget.tsv: Detailed sync data (off-target only)
 
 use pyo3::prelude::*;
 use std::path::PathBuf;
@@ -157,11 +164,12 @@ pub struct OcfConsumer {
     // Target regions for on/off-target split (panel data)
     target_tree: Option<Arc<HashMap<u32, COITree<(), u32>>>>,
     
-    // Thread-local state
-    // Indexed by LabelID
-    // Off-target stats (primary - unbiased)
-    stats: Vec<LabelStats>,
-    // On-target stats (for comparison - PCR biased)
+    // Thread-local state - Indexed by LabelID
+    // ALL fragments (primary output, WGS-comparable)
+    stats_all: Vec<LabelStats>,
+    // Off-target fragments only (panel mode)
+    stats_off: Vec<LabelStats>,
+    // On-target fragments only (panel mode)
     stats_on: Vec<LabelStats>,
 }
 
@@ -193,12 +201,13 @@ impl OcfConsumer {
             trees.insert(cid, COITree::new(&nodes));
         }
         
-        // Init stats (off-target and on-target)
-        let stats = vec![LabelStats::new(); labels.len()];
+        // Init stats (all, off-target, on-target)
+        let stats_all = vec![LabelStats::new(); labels.len()];
+        let stats_off = vec![LabelStats::new(); labels.len()];
         let stats_on = vec![LabelStats::new(); labels.len()];
         
         if target_regions.is_some() {
-            log::info!("OCF: Panel mode enabled, on/off-target split active");
+            log::info!("OCF: Panel mode enabled, triple output active (all/on/off)");
         }
         
         Ok(Self {
@@ -207,7 +216,8 @@ impl OcfConsumer {
             labels: Arc::new(labels),
             factors,
             target_tree: target_regions,
-            stats,
+            stats_all,
+            stats_off,
             stats_on,
         })
     }
@@ -227,14 +237,22 @@ impl OcfConsumer {
     }
     
     pub fn write_output(&self, output_dir: &Path) -> Result<()> {
-        // Write off-target stats (primary - unbiased for biomarkers)
-        self.write_stats(&self.stats, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
+        // Write primary stats (ALL fragments - WGS-comparable)
+        self.write_stats(&self.stats_all, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
+        log::info!("OCF: Wrote primary output files (all fragments)");
         
-        // Write on-target stats if we have any data
+        // Write on-target stats if we have any data (panel mode)
         let has_on_target_data = self.stats_on.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
         if has_on_target_data {
             self.write_stats(&self.stats_on, output_dir, "all.ocf.ontarget.tsv", "all.sync.ontarget.tsv")?;
             log::info!("OCF: Wrote on-target output files");
+        }
+        
+        // Write off-target stats if we have any data (panel mode)
+        let has_off_target_data = self.stats_off.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
+        if has_off_target_data {
+            self.write_stats(&self.stats_off, output_dir, "all.ocf.offtarget.tsv", "all.sync.offtarget.tsv")?;
+            log::info!("OCF: Wrote off-target output files");
         }
         
         Ok(())
@@ -302,8 +320,9 @@ impl FragmentConsumer for OcfConsumer {
     }
 
     fn consume(&mut self, fragment: &Fragment) {
-        // Check if fragment is on-target (for routing to correct stats vector)
-        let on_target = self.is_on_target(fragment);
+        // Check if fragment overlaps target regions (panel mode routing)
+        let is_panel_mode = self.target_tree.is_some();
+        let on_target = if is_panel_mode { self.is_on_target(fragment) } else { false };
         
         if let Some(tree) = self.trees.get(&fragment.chrom_id) {
             let start = fragment.start as i32;
@@ -313,45 +332,48 @@ impl FragmentConsumer for OcfConsumer {
                 let region_idx = node.metadata.to_owned();
                 let region = &self.region_infos[region_idx];
                 
-                // Route to correct stats vector based on on-target status
-                let label_stats = if on_target {
-                    &mut self.stats_on[region.label_id]
-                } else {
-                    &mut self.stats[region.label_id]
-                };
-                
-                // Logic per Legacy:
-                let r_start = fragment.start; // u64
-                let r_end = fragment.end;     // u64
-                let reg_start = region.start; // u64
-                let reg_end = region.end;     // u64
-                
+                // Compute weight once
                 let gc_pct = (fragment.gc * 100.0).round() as u8;
                 let weight = if let Some(ref factors) = self.factors {
-                        factors.get_factor(fragment.length, gc_pct)
+                    factors.get_factor(fragment.length, gc_pct)
                 } else { 1.0 };
                 
-                // Starts
-                if r_start >= reg_start {
-                    let s = (r_start - reg_start) as usize;
-                    if s < 2000 {
-                        label_stats.left_pos[s] += weight;
-                        label_stats.total_starts += weight;
-                    } else {
+                // Helper closure to update stats
+                let update_stats = |label_stats: &mut LabelStats| {
+                    let r_start = fragment.start;
+                    let r_end = fragment.end;
+                    let reg_start = region.start;
+                    let reg_end = region.end;
+                    
+                    // Starts
+                    if r_start >= reg_start {
+                        let s = (r_start - reg_start) as usize;
+                        if s < 2000 {
+                            label_stats.left_pos[s] += weight;
+                        }
                         label_stats.total_starts += weight;
                     }
-                }
-                
-                // Ends
-                if r_end <= reg_end {
-                    let diff = r_end.wrapping_sub(reg_start).wrapping_add(1);
-                    let e = diff as usize;
                     
-                    if e < 2000 {
-                         label_stats.right_pos[e] += weight;
-                         label_stats.total_ends += weight;
+                    // Ends
+                    if r_end <= reg_end {
+                        let diff = r_end.wrapping_sub(reg_start).wrapping_add(1);
+                        let e = diff as usize;
+                        if e < 2000 {
+                            label_stats.right_pos[e] += weight;
+                        }
+                        label_stats.total_ends += weight;
+                    }
+                };
+                
+                // INCLUSIVE routing: ALL fragments go to stats_all
+                update_stats(&mut self.stats_all[region.label_id]);
+                
+                // Panel mode: additionally route to on-target or off-target
+                if is_panel_mode {
+                    if on_target {
+                        update_stats(&mut self.stats_on[region.label_id]);
                     } else {
-                         label_stats.total_ends += weight;
+                        update_stats(&mut self.stats_off[region.label_id]);
                     }
                 }
             });
@@ -359,9 +381,13 @@ impl FragmentConsumer for OcfConsumer {
     }
 
     fn merge(&mut self, other: Self) {
+        // Merge all stats (primary)
+        for (i, other_s) in other.stats_all.iter().enumerate() {
+            self.stats_all[i].merge(other_s);
+        }
         // Merge off-target stats
-        for (i, other_s) in other.stats.iter().enumerate() {
-            self.stats[i].merge(other_s);
+        for (i, other_s) in other.stats_off.iter().enumerate() {
+            self.stats_off[i].merge(other_s);
         }
         // Merge on-target stats
         for (i, other_s) in other.stats_on.iter().enumerate() {

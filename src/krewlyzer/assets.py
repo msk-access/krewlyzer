@@ -1,3 +1,17 @@
+"""
+Asset Manager for Krewlyzer.
+
+Provides discovery and resolution of bundled data assets (BED files, PON models,
+GC references) based on genome build (hg19/hg38) and assay type (xs1, xs2).
+
+Architecture:
+    data/{Category}/{Genome}/{Filename}
+
+Example:
+    >>> assets = AssetManager("hg19")
+    >>> path = assets.wps_anchors  # Returns bundled WPS anchors for hg19
+"""
+
 from pathlib import Path
 from enum import Enum
 from typing import Optional
@@ -80,6 +94,23 @@ class AssetManager:
         """Check if TFBS regions are available for this genome"""
         return self.tfbs_regions.exists()
     
+    def get_tfbs_regions(self, assay: str = None) -> Path:
+        """
+        Get TFBS regions BED, optionally filtered for a specific assay.
+        
+        Args:
+            assay: Optional assay code (xs1, xs2). If None, returns genome-wide regions.
+            
+        Returns:
+            Path to TFBS regions file
+        """
+        if assay:
+            path = self._get_path("TFBS", f"{assay}.meta_clusters_{self.file_prefix}.bed.gz")
+            if path.exists():
+                return path
+            logger.warning(f"Panel-specific TFBS regions not found for '{assay}', using genome-wide")
+        return self.tfbs_regions
+    
     @property
     def atac_regions(self) -> Path:
         """TCGA ATAC-seq cancer peak atlas for size entropy analysis"""
@@ -90,6 +121,23 @@ class AssetManager:
     def atac_available(self) -> bool:
         """Check if ATAC regions are available for this genome"""
         return self.atac_regions.exists()
+    
+    def get_atac_regions(self, assay: str = None) -> Path:
+        """
+        Get ATAC regions BED, optionally filtered for a specific assay.
+        
+        Args:
+            assay: Optional assay code (xs1, xs2). If None, returns genome-wide regions.
+            
+        Returns:
+            Path to ATAC regions file
+        """
+        if assay:
+            path = self._get_path("ATAC", f"{assay}.TCGA_ATAC_peak.{self.file_prefix}.bed.gz")
+            if path.exists():
+                return path
+            logger.warning(f"Panel-specific ATAC regions not found for '{assay}', using genome-wide")
+        return self.atac_regions
 
     @property
     def wps_anchors(self) -> Path:

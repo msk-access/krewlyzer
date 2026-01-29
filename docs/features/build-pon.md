@@ -17,6 +17,8 @@ Creates a PON model containing all baselines needed for cfDNA analysis from a co
 - **WPS Baseline** - Nucleosome protection per region
 - **OCF Baseline** - Open chromatin footprinting per region
 - **MDS Baseline** - Motif diversity and k-mer frequencies
+- **TFBS Baseline** - Transcription factor binding site entropy (808 TFs)
+- **ATAC Baseline** - ATAC-seq peak entropy (23 cancer types)
 
 This model is used for bias correction and z-score normalization during sample processing.
 
@@ -154,6 +156,17 @@ The output is a Parquet file containing:
 | **WPS Baseline** | Mean/std WPS per transcript region | WPS |
 | **OCF Baseline** | Mean/std OCF per open chromatin region | OCF |
 | **MDS Baseline** | K-mer frequencies and MDS mean/std | Motif |
+| **TFBS Baseline** | Mean/std entropy per TF (808 factors) | Region Entropy |
+| **ATAC Baseline** | Mean/std entropy per cancer type (23 types) | Region Entropy |
+
+In **panel mode**, additional on-target baselines are included:
+
+| Component | Description |
+|-----------|-------------|
+| **GC Bias (ontarget)** | On-target GC correction model |
+| **FSD Baseline (ontarget)** | On-target FSD stats |
+| **TFBS Baseline (ontarget)** | Panel-specific TF entropy |
+| **ATAC Baseline (ontarget)** | Panel-specific ATAC entropy |
 
 ## Panel Mode
 

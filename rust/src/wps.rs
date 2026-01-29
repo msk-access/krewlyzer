@@ -1129,15 +1129,8 @@ pub struct AluRegion {
 /// Parse Alu BED7 file with subfamily column
 /// Format: chrom, start, end, name, score, strand, subfamily
 pub fn parse_alu_regions(bed_path: &Path) -> Result<Vec<AluRegion>> {
-    let file = File::open(bed_path).with_context(|| format!("Failed to open Alu BED: {:?}", bed_path))?;
-    
-    // Handle gzip
-    let reader: Box<dyn BufRead> = if bed_path.to_string_lossy().ends_with(".gz") {
-        use flate2::read::GzDecoder;
-        Box::new(BufReader::new(GzDecoder::new(file)))
-    } else {
-        Box::new(BufReader::new(file))
-    };
+    // Use shared get_reader for consistent BGZF/gzip handling
+    let reader = crate::bed::get_reader(bed_path)?;
     
     let mut regions = Vec::new();
     let valid_chroms: Vec<String> = (1..=22).map(|i| i.to_string())

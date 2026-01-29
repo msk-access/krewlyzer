@@ -152,20 +152,28 @@ In panel mode, `krewlyzer extract` generates TWO correction factor files:
 
 In panel mode, each feature outputs two files:
 
-| Feature | Off-Target File | On-Target File |
-|---------|-----------------|----------------|
+| Feature | Primary File | On-Target File |
+|---------|--------------|----------------|
 | FSC | `.FSC.tsv` | `.FSC.ontarget.tsv` |
 | FSR | `.FSR.tsv` | `.FSR.ontarget.tsv` |
 | FSD | `.FSD.tsv` | `.FSD.ontarget.tsv` |
 | OCF | `.OCF.tsv` | `.OCF.ontarget.tsv` |
-| TFBS | `.TFBS.tsv` | `.TFBS.ontarget.tsv` |
-| ATAC | `.ATAC.tsv` | `.ATAC.ontarget.tsv` |
+| TFBS | `.TFBS.tsv` (genome-wide) | `.TFBS.ontarget.tsv` (panel regions) |
+| ATAC | `.ATAC.tsv` (genome-wide) | `.ATAC.ontarget.tsv` (panel regions) |
 
-**Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/ocf.md#panel-mode---target-regions) for details.
+> [!NOTE]
+> On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
+> when available, providing better accuracy for capture-biased data.
 
-**Note on TFBS/ATAC**: Off-target files use off-target reads across all ~800 TFs / 23 cancer types (WGS-like coverage). On-target files use only on-target reads. See [Region Entropy](../features/region-entropy.md#panel-mode-dual-output) for details.
+**Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/ocf.md#panel-mode) for details.
 
-**Off-target files** are used for:
+**Note on TFBS/ATAC**: 
+- Primary files (`.TFBS.tsv`, `.ATAC.tsv`) use **all fragments** across all ~808 TFs / 23 cancer types → WGS-comparable baseline
+- On-target files use **pre-intersected panel regions** → panel-specific signal enrichment
+
+See [Region Entropy](../features/region-entropy.md#panel-mode-dual-output) for details.
+
+**Primary files** are used for:
 - Fragment-based biomarkers
 - GC-corrected coverage analysis
 - Comparison with WGS baselines

@@ -148,7 +148,7 @@ When `--pon-model` is provided, OCF output includes z-score columns:
 
 ---
 
-## Panel Mode (--target-regions)
+## Panel Mode
 
 For targeted sequencing panels (MSK-ACCESS):
 
@@ -197,7 +197,8 @@ Before the ontarget OCF run, the genome-wide OCR atlas (~50,000 regions) is filt
 | `{sample}.OCF.ontarget.tsv` | **On-target only** | **Panel ~500** | Panel-focused tissue signal |
 | `{sample}.OCF.sync.tsv` | All fragments | All ~50K | Debugging/visualization |
 | `{sample}.OCF.ontarget.sync.tsv` | On-target only | Panel ~500 | Panel OCF detail |
-| `{sample}.panel_ocf_regions.bed` | - | - | Filtered OCR regions used |
+| `{sample}.OCF.offtarget.tsv` | Off-target only | All ~50K | Off-target baseline |
+| `{sample}.OCF.offtarget.sync.tsv` | Off-target only | All ~50K | Off-target detail |
 
 > [!NOTE]
 > The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).

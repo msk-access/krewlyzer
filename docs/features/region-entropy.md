@@ -180,25 +180,51 @@ chr1  15000  15200  LUAD
 
 For targeted sequencing panels (like MSK-ACCESS), krewlyzer generates **dual output**:
 
-- **Off-target (WGS-like)**: Uses all off-target reads → provides genome-wide ~800 TF / 23 cancer type coverage
-- **On-target**: Uses only on-target reads → panel-specific signal
+1. **Genome-wide (`.tsv`)**: All fragments across all TFBS/ATAC regions → WGS-comparable baseline
+2. **Panel-specific (`.ontarget.tsv`)**: Uses pre-intersected panel regions → panel-specific signal
 
-This matches the behavior of other tools (FSD, FSC, OCF) which split off-target and on-target reads.
-
-```bash
-# With target regions → generates both .tsv and .ontarget.tsv files
-krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
-    -T msk-access-v1.targets.bed
+```mermaid
+flowchart LR
+    subgraph "Genome-wide Output"
+        GW_TFBS["All TFBS regions"]
+        GW_ATAC["All ATAC regions"]
+    end
+    
+    subgraph "Panel-specific Output"
+        PS_TFBS["xs1/xs2 TFBS regions"]
+        PS_ATAC["xs1/xs2 ATAC regions"]
+    end
+    
+    GW_TFBS --> TSV1["sample.TFBS.tsv"]
+    GW_ATAC --> TSV2["sample.ATAC.tsv"]
+    PS_TFBS --> TSV3["sample.TFBS.ontarget.tsv"]
+    PS_ATAC --> TSV4["sample.ATAC.ontarget.tsv"]
 ```
 
-**Outputs:**
+### Usage
 
-| File | Source | Coverage |
-|------|--------|----------|
-| `{sample}.TFBS.tsv` | Off-target reads | ~800 TFs (WGS-like) |
-| `{sample}.TFBS.ontarget.tsv` | On-target reads | Panel-overlapping TFs |
-| `{sample}.ATAC.tsv` | Off-target reads | 23 cancer types (WGS-like) |
-| `{sample}.ATAC.ontarget.tsv` | On-target reads | Panel-overlapping peaks |
+```bash
+# With --assay → auto-loads panel-specific region files
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ --assay xs2
+
+# Or with target regions → enables panel mode
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
+    -T msk-access-v2.targets.bed
+```
+
+### Output Files (Panel Mode)
+
+| File | Description | GC Correction |
+|------|-------------|---------------|
+| `{sample}.TFBS.tsv` | All 808 TFs (genome-wide) | Off-target GC model |
+| `{sample}.TFBS.ontarget.tsv` | TFs overlapping panel | **On-target GC model** |
+| `{sample}.TFBS.sync.tsv` | Detailed size distributions | - |
+| `{sample}.TFBS.ontarget.sync.tsv` | Panel size distributions | - |
+| `{sample}.ATAC.tsv` | All 23 cancer types | Off-target GC model |
+| `{sample}.ATAC.ontarget.tsv` | Cancer types in panel | **On-target GC model** |
+
+> **Note**: On-target outputs use on-target GC correction factors when available,
+> providing better accuracy for capture-biased data.
 
 ---
 

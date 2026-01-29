@@ -4,7 +4,7 @@
 FROM python:3.10-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential git pkg-config clang libclang-dev \
+    build-essential git git-lfs pkg-config clang libclang-dev \
     zlib1g-dev libbz2-dev liblzma-dev libcurl4-openssl-dev libssl-dev \
     curl && rm -rf /var/lib/apt/lists/*
 
@@ -17,7 +17,8 @@ RUN pip install --no-cache-dir "maturin[patchelf]" uv
 
 WORKDIR /build
 
-# Copy project files
+# Copy project files (assumes LFS files are already checked out locally)
+# If building from CI, ensure `git lfs pull` was run before docker build
 COPY pyproject.toml README.md LICENSE ./
 COPY rust/ rust/
 COPY src/ src/

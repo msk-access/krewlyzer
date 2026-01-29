@@ -50,9 +50,11 @@ The performance-critical functions are implemented in Rust and exposed to Python
 | Module | Size | Purpose |
 |--------|------|---------|
 | `lib.rs` | 4KB | PyO3 module definition, thread config |
+| `bed.rs` | 4KB | **BGZF-first file reader** - auto-detects BGZF vs gzip |
 | `extract_motif.rs` | 17KB | BAM parsing, fragment extraction, motif counting |
 | `motif_utils.rs` | 4KB | Shared 4-mer encoding and MDS calculation |
 | `region_mds.rs` | 18KB | Per-region MDS analysis (Helzer et al.) |
+| `region_entropy.rs` | 15KB | TFBS/ATAC region entropy with panel support |
 | `pipeline.rs` | 10KB | Unified FSC/FSD/WPS/OCF pipeline |
 | `fsc.rs` | 11KB | Fragment size coverage by bins |
 | `fsd.rs` | 7KB | Size distribution per arm |
@@ -62,6 +64,25 @@ The performance-critical functions are implemented in Rust and exposed to Python
 | `gc_correction.rs` | 20KB | LOESS-based GC bias correction |
 | `pon_model.rs` | 7KB | PON model loading and hybrid correction |
 | `gc_reference.rs` | 20KB | Pre-computed GC reference generation |
+
+### BGZF-First File Reader (`bed.rs`)
+
+The `get_reader()` function provides smart compressed file handling:
+
+```mermaid
+flowchart LR
+    A[".bed.gz file"] --> B{Is BGZF?}
+    B -->|Yes| C["noodles::bgzf::Reader"]
+    B -->|No| D["flate2::MultiGzDecoder"]
+    C --> E["BufReader"]
+    D --> E
+```
+
+- **BGZF detection**: Examines file header for BGZF magic bytes (`0x1f 0x8b` + `BC` subfield)
+- **Primary**: Uses `noodles::bgzf::io::Reader` for BGZF files (tabix-indexed)
+- **Fallback**: Uses `flate2::MultiGzDecoder` for standard gzip files
+
+This is critical because fragment BED files with `.tbi` indexes use BGZF compression, which contains multiple gzip blocks. Standard `GzDecoder` only reads the first block.
 
 ### Shared Utilities: `motif_utils.rs`
 

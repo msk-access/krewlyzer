@@ -1,3 +1,13 @@
+//! UXM (Fragment-level Methylation) Analysis
+//!
+//! Calculates fragment-level methylation status from bisulfite-converted BAM files.
+//! For each marker region, classifies fragments as:
+//! - U: Unmethylated (ratio <= unmethy_threshold)
+//! - X: Mixed (between thresholds)
+//! - M: Methylated (ratio >= methy_threshold)
+//!
+//! Uses XM tag from BAM for CpG methylation calls (Z=methylated, z=unmethylated).
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;

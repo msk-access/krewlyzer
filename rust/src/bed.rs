@@ -1,28 +1,69 @@
 //! BED file parsing and fragment counting
 //!
 //! Handles both standard gzip and BGZF-compressed BED files for fragment analysis.
+//! Uses noodles::bgzf for BGZF files (optimal for tabix-indexed files) with
+//! flate2::MultiGzDecoder as fallback for standard gzip.
 
 use std::path::Path;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use anyhow::{Context, Result};
-use flate2::read::GzDecoder;
 
-/// Open a file and return a buffered reader, handling gzip compression transparently.
+/// Check if a file appears to be BGZF format by examining the header.
 /// 
-/// Uses flate2::GzDecoder which works for both standard gzip and BGZF formats.
+/// BGZF files have the gzip magic bytes (0x1f 0x8b) followed by specific
+/// flags indicating extra fields, and a "BC" subfield identifier.
+fn is_bgzf_file(path: &Path) -> bool {
+    if let Ok(mut file) = File::open(path) {
+        let mut header = [0u8; 18];
+        if file.read_exact(&mut header).is_ok() {
+            // Check gzip magic (0x1f 0x8b)
+            if header[0] != 0x1f || header[1] != 0x8b {
+                return false;
+            }
+            // Check FEXTRA flag (bit 2 of FLG byte at position 3)
+            if header[3] & 0x04 == 0 {
+                return false;
+            }
+            // Check for BC subfield at position 12-13
+            if header[12] == b'B' && header[13] == b'C' {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Open a file and return a buffered reader, handling compression transparently.
+/// 
+/// For .gz files:
+/// - First checks if the file is BGZF format (via magic bytes)
+/// - Uses noodles::bgzf::io::Reader for BGZF files (optimal for tabix-indexed)
+/// - Falls back to flate2::MultiGzDecoder for standard gzip files
+/// 
+/// This is critical for tabix-indexed BED.gz files which use BGZF compression.
 pub fn get_reader(path: &Path) -> Result<Box<dyn BufRead>> {
-    let file = File::open(path)
-        .with_context(|| format!("Failed to open file: {:?}", path))?;
-    
     let is_gz = path.extension()
         .map(|ext| ext == "gz")
         .unwrap_or(false);
         
     if is_gz {
-        // Use flate2 GzDecoder - works for both standard gzip and BGZF
-        Ok(Box::new(BufReader::new(GzDecoder::new(file))))
+        if is_bgzf_file(path) {
+            // Use noodles::bgzf for proper BGZF reading (supports seeking, multi-block)
+            let file = File::open(path)
+                .with_context(|| format!("Failed to open BGZF file: {:?}", path))?;
+            let bgzf_reader = noodles::bgzf::io::Reader::new(file);
+            Ok(Box::new(BufReader::new(bgzf_reader)))
+        } else {
+            // Fallback to MultiGzDecoder for standard gzip files
+            let file = File::open(path)
+                .with_context(|| format!("Failed to open gzip file: {:?}", path))?;
+            use flate2::read::MultiGzDecoder;
+            Ok(Box::new(BufReader::new(MultiGzDecoder::new(file))))
+        }
     } else {
+        let file = File::open(path)
+            .with_context(|| format!("Failed to open file: {:?}", path))?;
         Ok(Box::new(BufReader::new(file)))
     }
 }

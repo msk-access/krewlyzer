@@ -1,3 +1,15 @@
+//! Unified Feature Pipeline Orchestration
+//!
+//! Single-pass feature extraction from BED.gz fragments.
+//! Coordinates multiple consumers (FSC, WPS, FSD, OCF) in a single read.
+//!
+//! Entry point: `run_unified_pipeline()` - exposed to Python via PyO3.
+//!
+//! Features:
+//! - GC correction (compute or load factors)
+//! - On/off-target splitting for panel data
+//! - BaitMask for WPS edge detection
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use anyhow::{Result, Context};
