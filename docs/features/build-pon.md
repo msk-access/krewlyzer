@@ -221,3 +221,99 @@ Z-score interpretation:
 | -2 to +2 | Normal range |
 | < -2 | Abnormally low diversity |
 | > +2 | Rare, check data quality |
+
+## HPC Usage (SLURM)
+
+For running `build-pon` on HPC clusters with SLURM, use one of these approaches:
+
+### Resource Planning
+
+| Parallel Samples | Memory | CPUs | Est. Time (50 samples) |
+|-----------------|--------|------|------------------------|
+| 2 | 32 GB | 16 | ~48 hours |
+| 4 | 64 GB | 32 | ~24 hours |
+| 8 | 120 GB | 48 | ~12 hours |
+
+> [!TIP]
+> Use `--memory-per-sample` to estimate memory needs. Each sample typically uses 8-12 GB for panel data.
+
+### sbatch Script (Recommended)
+
+Create `run_pon.sh`:
+
+```bash
+#!/bin/bash
+#SBATCH --partition=your_partition
+#SBATCH --job-name=build_pon
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=48
+#SBATCH --mem=120G
+#SBATCH --time=12:00:00
+#SBATCH --output=pon_build_%j.out
+#SBATCH --error=pon_build_%j.err
+
+# Create temp directory
+mkdir -p ./pon_temp
+
+krewlyzer build-pon samples.txt \
+  --assay your-assay \
+  -r /path/to/reference.fasta \
+  -o output.pon.parquet \
+  --temp-dir ./pon_temp \
+  --threads 48 \
+  -P 8 \
+  --memory-per-sample 12 \
+  --sample-timeout 7200 \
+  --allow-failures \
+  -v
+```
+
+Submit with:
+```bash
+sbatch run_pon.sh
+```
+
+### srun One-liner
+
+```bash
+mkdir -p ./pon_temp && srun \
+  --partition=your_partition \
+  --job-name=build_pon \
+  --nodes=1 \
+  --ntasks=1 \
+  --cpus-per-task=48 \
+  --mem=120G \
+  --time=12:00:00 \
+  krewlyzer build-pon samples.txt \
+    --assay your-assay \
+    -r /path/to/reference.fasta \
+    -o output.pon.parquet \
+    --temp-dir ./pon_temp \
+    --threads 48 -P 8 --memory-per-sample 12 \
+    --sample-timeout 7200 --allow-failures -v \
+  2>&1 | tee pon_build.log
+```
+
+### Key SLURM Parameters
+
+| Parameter | Value | Explanation |
+|-----------|-------|-------------|
+| `--nodes=1` | 1 | Single node (Python multiprocessing doesn't span nodes) |
+| `--ntasks=1` | 1 | One main process (parallelism handled internally) |
+| `--cpus-per-task` | 48 | All CPUs available to the process |
+| `--mem` | 120G | 8 samples × 12 GB + buffer |
+
+### Key krewlyzer Parameters
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `-P` / `--parallel-samples` | 8 | Concurrent samples (internal workers) |
+| `--threads` | 48 | Total threads (divided among workers) |
+| `--memory-per-sample` | 12 | Memory hint for auto-mode |
+| `--sample-timeout` | 7200 | Per-sample timeout in seconds (2 hours) |
+| `--temp-dir` | ./pon_temp | Local scratch directory |
+| `--allow-failures` | - | Continue if a sample fails |
+
+> [!WARNING]
+> If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
