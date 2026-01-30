@@ -293,6 +293,11 @@ def build_pon(
     import shutil
     import time
     from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+    import multiprocessing as mp
+    
+    # Use 'spawn' context to avoid fork-related deadlocks with Rayon thread pools
+    # on HPC systems. Fork + pre-initialized threads = deadlock.
+    mp_context = mp.get_context('spawn')
     from krewlyzer.core.resource_utils import detect_resources, calculate_auto_parallel_samples
     
     # ═══════════════════════════════════════════════════════════════════════════
@@ -374,7 +379,7 @@ def build_pon(
             # ─────────────────────────────────────────────────────────────────
             logger.info(f"Starting parallel processing with {actual_parallel} workers...")
             
-            with ProcessPoolExecutor(max_workers=actual_parallel) as executor:
+            with ProcessPoolExecutor(max_workers=actual_parallel, mp_context=mp_context) as executor:
                 # Submit all sample processing tasks
                 futures = {
                     executor.submit(
