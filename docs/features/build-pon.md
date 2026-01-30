@@ -48,6 +48,9 @@ This model is used for bias correction and z-score normalization during sample p
 | `--temp-dir` | System temp | Directory for temporary files |
 | `-p, --threads` | 4 | Total threads (divided among parallel samples) |
 | `-P, --parallel-samples` | 1 | Number of samples to process in parallel |
+| `--memory-per-sample` | 12 | Expected memory per sample in GB (panel: 12-20, WGS: 4-8) |
+| `--sample-timeout` | 3600 | Max seconds per sample (0=no timeout) |
+| `--allow-failures` | False | Continue if a sample fails |
 | `--require-proper-pair` | False | Only properly paired reads |
 | `-v, --verbose` | False | Verbose output |
 
@@ -230,12 +233,12 @@ For running `build-pon` on HPC clusters with SLURM, use one of these approaches:
 
 | Parallel Samples | Memory | CPUs | Est. Time (50 samples) |
 |-----------------|--------|------|------------------------|
-| 2 | 32 GB | 16 | ~48 hours |
-| 4 | 64 GB | 32 | ~24 hours |
-| 8 | 120 GB | 48 | ~12 hours |
+| 2 | 50 GB | 16 | ~48 hours |
+| 4 | 100 GB | 32 | ~24 hours |
+| 6 | 150 GB | 48 | ~12 hours |
 
 > [!TIP]
-> Use `--memory-per-sample` to estimate memory needs. Each sample typically uses 8-12 GB for panel data.
+> High-coverage panel data (e.g., MSK-ACCESS) typically uses **15-20 GB per sample** during peak extraction. WGS data may use less. Start conservative and adjust based on memory logs.
 
 ### sbatch Script (Recommended)
 
@@ -248,7 +251,7 @@ Create `run_pon.sh`:
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=48
-#SBATCH --mem=120G
+#SBATCH --mem=150G
 #SBATCH --time=12:00:00
 #SBATCH --output=pon_build_%j.out
 #SBATCH --error=pon_build_%j.err
@@ -262,8 +265,8 @@ krewlyzer build-pon samples.txt \
   -o output.pon.parquet \
   --temp-dir ./pon_temp \
   --threads 48 \
-  -P 8 \
-  --memory-per-sample 12 \
+  -P 6 \
+  --memory-per-sample 20 \
   --sample-timeout 7200 \
   --allow-failures \
   -v
@@ -283,14 +286,14 @@ mkdir -p ./pon_temp && srun \
   --nodes=1 \
   --ntasks=1 \
   --cpus-per-task=48 \
-  --mem=120G \
+  --mem=150G \
   --time=12:00:00 \
   krewlyzer build-pon samples.txt \
     --assay your-assay \
     -r /path/to/reference.fasta \
     -o output.pon.parquet \
     --temp-dir ./pon_temp \
-    --threads 48 -P 8 --memory-per-sample 12 \
+    --threads 48 -P 6 --memory-per-sample 20 \
     --sample-timeout 7200 --allow-failures -v \
   2>&1 | tee pon_build.log
 ```
@@ -302,15 +305,15 @@ mkdir -p ./pon_temp && srun \
 | `--nodes=1` | 1 | Single node (Python multiprocessing doesn't span nodes) |
 | `--ntasks=1` | 1 | One main process (parallelism handled internally) |
 | `--cpus-per-task` | 48 | All CPUs available to the process |
-| `--mem` | 120G | 8 samples × 12 GB + buffer |
+| `--mem` | 150G | 6 samples × 20 GB + buffer |
 
 ### Key krewlyzer Parameters
 
 | Parameter | Example | Description |
 |-----------|---------|-------------|
-| `-P` / `--parallel-samples` | 8 | Concurrent samples (internal workers) |
+| `-P` / `--parallel-samples` | 6 | Concurrent samples (internal workers) |
 | `--threads` | 48 | Total threads (divided among workers) |
-| `--memory-per-sample` | 12 | Memory hint for auto-mode |
+| `--memory-per-sample` | 20 | Memory hint for auto-mode (panel: 15-20 GB) |
 | `--sample-timeout` | 7200 | Per-sample timeout in seconds (2 hours) |
 | `--temp-dir` | ./pon_temp | Local scratch directory |
 | `--allow-failures` | - | Continue if a sample fails |
