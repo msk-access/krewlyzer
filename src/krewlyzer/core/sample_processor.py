@@ -707,6 +707,16 @@ def process_sample(
     # Initialize outputs
     outputs = SampleOutputs(sample_id=sample_name, bed_path=input_path)
     
+    # Short sample ID for logging (first 20 chars)
+    short_id = sample_name[:20] + "..." if len(sample_name) > 20 else sample_name
+    
+    # Import resource utils for memory tracking
+    from .resource_utils import get_current_memory_gb
+    
+    # Track timing and memory
+    phase_start = time.time()
+    start_mem = get_current_memory_gb()
+    
     logger.info(f"Processing sample: {sample_name}")
     logger.debug(f"Input: {input_path} ({'BAM/CRAM' if is_bam else 'BED.gz'})")
     
@@ -745,6 +755,11 @@ def process_sample(
         outputs.gc_observations_ontarget = result.gc_observations_ontarget
         outputs.mds_counts = result.kmer_frequencies
         outputs.mds_score = result.mds_score
+        
+        # Log checkpoint after extraction
+        elapsed = time.time() - phase_start
+        current_mem = get_current_memory_gb()
+        logger.info(f"[{short_id}] +{elapsed:.0f}s | Extract done | {result.fragment_count:,} frags | Mem: {current_mem:.1f}GB")
         
         # === Compute GC correction factors for downstream tools ===
         # Off-target factors (WGS-like, primary)
@@ -785,6 +800,10 @@ def process_sample(
         logger.info(f"Using pre-extracted BED.gz")
     
     # === Phase 2: Run feature extraction ===
+    # Log checkpoint before features
+    elapsed = time.time() - phase_start
+    current_mem = get_current_memory_gb()
+    logger.info(f"[{short_id}] +{elapsed:.0f}s | GC done | Mem: {current_mem:.1f}GB")
     logger.info(f"Running feature extraction...")
     
     feature_outputs = run_features(
@@ -850,5 +869,17 @@ def process_sample(
             except Exception:
                 pass
     
-    logger.info(f"Sample processing complete: {sample_name}")
+    # Final checkpoint
+    total_elapsed = time.time() - phase_start
+    final_mem = get_current_memory_gb()
+    mem_delta = final_mem - start_mem
+    
+    # Format elapsed time nicely
+    if total_elapsed >= 60:
+        mins, secs = divmod(int(total_elapsed), 60)
+        elapsed_str = f"{mins}m{secs:02d}s"
+    else:
+        elapsed_str = f"{total_elapsed:.0f}s"
+    
+    logger.info(f"[{short_id}] COMPLETE | {elapsed_str} | Mem: {final_mem:.1f}GB ({mem_delta:+.1f}GB)")
     return outputs

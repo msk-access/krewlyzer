@@ -67,8 +67,21 @@ def _process_sample_subprocess(
         SampleOutputs with all extraction and feature results.
     """
     import logging
+    import time
     from krewlyzer import _core
     from krewlyzer.core.sample_processor import process_sample
+    from krewlyzer.core.resource_utils import get_current_memory_gb
+    
+    # Create a short sample ID for cleaner logs (first 20 chars)
+    short_id = sample_name[:20] + "..." if len(sample_name) > 20 else sample_name
+    
+    # Create a logger for this subprocess with sample prefix
+    proc_logger = logging.getLogger(f"build-pon")
+    
+    # Track timing
+    start_time = time.time()
+    start_mem = get_current_memory_gb()
+    proc_logger.info(f"[{short_id}] START | Mem: {start_mem:.1f}GB")
     
     # Configure rayon thread pool for THIS subprocess
     try:
@@ -95,6 +108,11 @@ def _process_sample_subprocess(
         enable_ocf=True,
         pon_mode=True,  # Skip PON normalization (we're building the PON)
     )
+    
+    # Log memory and time after sample processing
+    elapsed = time.time() - start_time
+    end_mem = get_current_memory_gb()
+    proc_logger.info(f"[{short_id}] DONE | {elapsed:.0f}s | Mem: {end_mem:.1f}GB (+{end_mem - start_mem:.1f}GB) | {outputs.fragment_count:,} frags")
     
     # Run region-mds for per-gene MDS baseline (BAM/CRAM only)
     is_bam_input = str(sample_path).endswith(('.bam', '.cram'))
@@ -306,18 +324,24 @@ def build_pon(
     # ═══════════════════════════════════════════════════════════════════════════
     
     # Determine parallel processing configuration
+    detected_cpus, detected_ram = detect_resources()
+    
     if parallel_samples == 0:
         # Auto-detect based on resources
-        detected_cpus, detected_ram = detect_resources()
         actual_parallel = calculate_auto_parallel_samples(
             threads=threads,
             memory_gb=detected_ram,
             memory_per_sample=memory_per_sample,
         )
         logger.info(f"Auto-detected resources: {detected_cpus} CPUs, {detected_ram:.1f} GB RAM")
-        logger.info(f"Auto-selected {actual_parallel} parallel samples")
+        logger.info(f"Auto-selected {actual_parallel} parallel samples (assuming {memory_per_sample:.1f} GB per sample)")
     else:
         actual_parallel = parallel_samples
+        estimated_mem = actual_parallel * memory_per_sample
+        logger.info(f"Detected resources: {detected_cpus} CPUs, {detected_ram:.1f} GB RAM")
+        logger.info(f"User specified: {actual_parallel} parallel samples × {memory_per_sample:.1f} GB = {estimated_mem:.1f} GB estimated")
+        if estimated_mem > detected_ram:
+            logger.warning(f"⚠️  Estimated memory ({estimated_mem:.1f} GB) exceeds detected RAM ({detected_ram:.1f} GB) - OOM likely!")
     
     # Calculate threads per sample
     threads_per_sample = max(1, threads // max(1, actual_parallel))

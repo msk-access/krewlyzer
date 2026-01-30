@@ -7,6 +7,7 @@ use in parallel sample processing.
 
 import os
 import logging
+import time
 from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
@@ -127,6 +128,63 @@ def detect_resources() -> Tuple[int, float]:
     cpus = detect_available_cpus()
     memory_gb = detect_available_memory_gb()
     return cpus, memory_gb
+
+
+def get_current_memory_gb() -> float:
+    """
+    Get current process memory usage (RSS) in GB.
+    
+    Useful for monitoring memory during processing.
+    
+    Returns:
+        Current RSS memory in GB.
+    """
+    try:
+        import psutil
+        process = psutil.Process(os.getpid())
+        return process.memory_info().rss / (1024 ** 3)
+    except ImportError:
+        pass
+    
+    # Linux fallback - read from /proc
+    try:
+        with open(f'/proc/{os.getpid()}/status', 'r') as f:
+            for line in f:
+                if line.startswith('VmRSS:'):
+                    kb = int(line.split()[1])
+                    return kb / (1024 ** 2)  # KB to GB
+    except (FileNotFoundError, PermissionError, ValueError):
+        pass
+    
+    return 0.0
+
+
+def log_checkpoint(logger, sample_id: str, stage: str, start_time: float, start_mem: float) -> None:
+    """
+    Log a processing checkpoint with elapsed time and memory.
+    
+    Provides consistent timestamped logging for tracking progress through
+    long-running sample processing.
+    
+    Args:
+        logger: Logger instance
+        sample_id: Short sample identifier
+        stage: Current processing stage name
+        start_time: Processing start time from time.time()
+        start_mem: Starting memory from get_current_memory_gb()
+    """
+    elapsed = time.time() - start_time
+    current_mem = get_current_memory_gb()
+    mem_delta = current_mem - start_mem
+    
+    # Format elapsed as mm:ss for longer runs
+    if elapsed >= 60:
+        mins, secs = divmod(int(elapsed), 60)
+        elapsed_str = f"{mins}m{secs:02d}s"
+    else:
+        elapsed_str = f"{elapsed:.0f}s"
+    
+    logger.info(f"[{sample_id}] {elapsed_str} | {stage} | Mem: {current_mem:.1f}GB ({mem_delta:+.1f}GB)")
 
 
 def calculate_auto_parallel_samples(
