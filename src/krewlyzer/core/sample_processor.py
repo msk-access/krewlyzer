@@ -745,6 +745,41 @@ def process_sample(
         outputs.gc_observations_ontarget = result.gc_observations_ontarget
         outputs.mds_counts = result.kmer_frequencies
         outputs.mds_score = result.mds_score
+        
+        # === Compute GC correction factors for downstream tools ===
+        # Off-target factors (WGS-like, primary)
+        if result.gc_observations:
+            try:
+                gc_ref = assets.resolve("gc_reference")
+                valid_regions = assets.resolve("valid_regions")
+                factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
+                
+                n_factors = _core.gc.compute_and_write_gc_factors(
+                    result.gc_observations,
+                    str(gc_ref),
+                    str(valid_regions),
+                    str(factors_path)
+                )
+                logger.debug(f"  Computed {n_factors} off-target GC factors: {factors_path.name}")
+            except Exception as e:
+                logger.debug(f"  Off-target GC factor computation failed: {e}")
+        
+        # On-target factors (panel mode - used by FSC, RegionEntropy)
+        if result.gc_observations_ontarget and result.is_panel_mode:
+            try:
+                gc_ref = assets.resolve("gc_reference")
+                valid_regions = assets.resolve("valid_regions")
+                factors_ontarget_path = output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
+                
+                n_factors_on = _core.gc.compute_and_write_gc_factors(
+                    result.gc_observations_ontarget,
+                    str(gc_ref),
+                    str(valid_regions),
+                    str(factors_ontarget_path)
+                )
+                logger.info(f"  Computed {n_factors_on} on-target GC factors: {factors_ontarget_path.name}")
+            except Exception as e:
+                logger.debug(f"  On-target GC factor computation failed: {e}")
     else:
         outputs.bed_path = input_path
         logger.info(f"Using pre-extracted BED.gz")

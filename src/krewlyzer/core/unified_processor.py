@@ -222,13 +222,13 @@ def run_features(
     resolved_wps_empty = _resolve_bool(wps_empty, False)
     resolved_assay = _resolve_str(assay)
     
-    # Configure thread pool
+    # Configure thread pool (may fail if already configured by parent process)
     if resolved_threads > 0:
         try:
             _core.configure_threads(resolved_threads)
             logger.debug(f"Configured {resolved_threads} threads")
         except Exception as e:
-            logger.warning(f"Could not configure threads: {e}")
+            logger.debug(f"Thread pool already configured: {e}")
     
     # Log enabled features
     features = []
@@ -662,6 +662,8 @@ def run_features(
                 tfbs_regions_gw = str(assets.tfbs_regions)
                 out_tfbs_raw = output_dir / f"{sample_name}.TFBS.raw.tsv"
                 
+                logger.info(f"Computing TFBS entropy (genome-wide)...")
+                
                 # Call Rust with genome-wide regions (no target filtering)
                 n_all, _ = _core.region_entropy.run_region_entropy(
                     str(bed_path),      # Fragment BED.gz
@@ -732,6 +734,8 @@ def run_features(
                 # =========================================================
                 atac_regions_gw = str(assets.atac_regions)
                 out_atac_raw = output_dir / f"{sample_name}.ATAC.raw.tsv"
+                
+                logger.info(f"Computing ATAC entropy (genome-wide)...")
                 
                 # Call Rust with genome-wide regions (no target filtering)
                 n_all, _ = _core.region_entropy.run_region_entropy(

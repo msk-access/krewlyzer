@@ -59,13 +59,13 @@ Cancer cells exhibit:
 
 ```mermaid
 flowchart LR
-    BED["sample.bed.gz"] --> RUST["Rust Backend"]
+    BED["sample.bed.gz"] --> RUST["Rust Backend<br/>(par_iter)"]
     TFBS["TFBS regions"] --> RUST
     ATAC["ATAC regions"] --> RUST
     
     RUST --> ENTROPY["Entropy Calculation"]
     
-    subgraph "Per Region Label"
+    subgraph "Per Region Label (Parallel)"
         ENTROPY --> COUNT["Fragment count"]
         ENTROPY --> SIZES["Size distribution"]
         SIZES --> SHANNON["Shannon Entropy"]
@@ -74,6 +74,8 @@ flowchart LR
     SHANNON --> TSV["TFBS.tsv / ATAC.tsv"]
     TSV --> PON["PON Z-score"]
 ```
+
+> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of TFBS/ATAC regions.
 
 ---
 

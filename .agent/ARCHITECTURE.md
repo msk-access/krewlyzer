@@ -57,3 +57,61 @@ let chrom_id = chrom_map.get_id(chrom_norm);
 ## Gzip Support
 
 `bed::get_reader()` uses flate2 - works with both standard gzip and BGZF.
+
+---
+
+## Parallel Processing Architecture
+
+### Tier-1: Sample-Level Parallelization (`build-pon -P`)
+
+For PON building, samples are processed in parallel using Python `ProcessPoolExecutor`:
+
+```python
+# build.py
+with ProcessPoolExecutor(max_workers=parallel_samples) as executor:
+    futures = {executor.submit(process_sample, ...): sample for sample in samples}
+```
+
+### Tier-2: Region-Level Parallelization (Rust)
+
+Within each sample, regions are processed in parallel using Rayon:
+
+| Module | Line | Pattern |
+|--------|------|---------|
+| `wps.rs` | 834 | `.par_iter()` over anchor regions |
+| `region_entropy.rs` | 222 | `.par_iter()` over TFBS/ATAC labels |
+
+```rust
+// Example: WPS region parallelization
+regions.par_iter().for_each(|region| {
+    // Process each region independently
+});
+```
+
+### Thread Configuration
+
+```python
+_core.configure_threads(num_threads)  # Sets Rayon thread pool size
+```
+
+---
+
+## PON Baseline Requirements
+
+| Baseline | MIN_SAMPLES | Notes |
+|----------|:-----------:|-------|
+| **fsc_gene_baseline** | 3 | Per-gene normalized depth |
+| **fsc_region_baseline** | 3 | Per-exon normalized depth |
+| **region_mds_baseline** | 3 | Per-gene MDS |
+| Other baselines | 1+ | No minimum |
+
+---
+
+## FSC Gene Aggregation (`fsc.rs`)
+
+| Function | Purpose |
+|----------|---------|
+| `aggregate_by_gene()` | Counts fragments per gene/region with GC correction |
+| Output | `FSC.gene.tsv`, `FSC.regions.tsv` |
+| Uses | On-target GC factors for panel mode |
+

@@ -35,6 +35,92 @@ from krewlyzer.core.logging import log_startup_banner, ResolvedAsset
 from krewlyzer import __version__
 
 
+def _process_sample_subprocess(
+    sample_path: Path,
+    output_dir: Path,
+    sample_name: str,
+    reference: Path,
+    sample_params: 'SampleParams',
+    target_regions: Optional[Path],
+    assay: str,
+    threads_per_sample: int,
+    gene_bed: Optional[Path] = None,
+) -> 'SampleOutputs':
+    """
+    Process a single sample in a subprocess.
+    
+    This wrapper configures the rayon thread pool for this subprocess,
+    then calls process_sample. It's designed to be called via ProcessPoolExecutor.
+    
+    Args:
+        sample_path: Path to BAM/CRAM or BED.gz file.
+        output_dir: Directory for sample outputs.
+        sample_name: Sample identifier.
+        reference: Reference FASTA path.
+        sample_params: Sample processing parameters.
+        target_regions: Optional panel target regions.
+        assay: Assay name for asset resolution.
+        threads_per_sample: Threads to allocate to this sample's rayon pool.
+        gene_bed: Optional gene BED for region-MDS.
+    
+    Returns:
+        SampleOutputs with all extraction and feature results.
+    """
+    import logging
+    from krewlyzer import _core
+    from krewlyzer.core.sample_processor import process_sample
+    
+    # Configure rayon thread pool for THIS subprocess
+    try:
+        _core.configure_threads(threads_per_sample)
+    except Exception:
+        pass  # May fail if already configured, that's ok
+    
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Process sample
+    outputs = process_sample(
+        input_path=sample_path,
+        output_dir=output_dir,
+        sample_name=sample_name,
+        reference=reference,
+        params=sample_params,
+        target_regions=target_regions,
+        assay=assay,
+        enable_fsc=True,
+        enable_fsr=False,  # Not needed for PON
+        enable_fsd=True,
+        enable_wps=True,
+        enable_ocf=True,
+        pon_mode=True,  # Skip PON normalization (we're building the PON)
+    )
+    
+    # Run region-mds for per-gene MDS baseline (BAM/CRAM only)
+    is_bam_input = str(sample_path).endswith(('.bam', '.cram'))
+    if is_bam_input and gene_bed and gene_bed.exists():
+        try:
+            mds_exon_output = output_dir / f"{sample_name}.MDS.exon.tsv"
+            mds_gene_output = output_dir / f"{sample_name}.MDS.gene.tsv"
+            
+            _core.region_mds.run_region_mds(
+                str(sample_path),           # BAM/CRAM path
+                str(reference),             # Reference FASTA
+                str(gene_bed),              # Gene BED file
+                str(mds_exon_output),       # Per-exon output
+                str(mds_gene_output),       # Per-gene output
+                e1_only=False,
+                mapq=sample_params.mapq,
+                min_len=sample_params.minlen,
+                max_len=400,  # Standard cfDNA range for motifs
+                silent=True,
+            )
+        except Exception:
+            pass  # Non-critical, continue without MDS
+    
+    return outputs
+
+
 def build_pon(
     sample_list: Path = typer.Argument(..., help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline."),
     assay: str = typer.Option(..., "--assay", "-a", help="Assay name (e.g., msk-access-v2)"),
@@ -44,7 +130,11 @@ def build_pon(
     output: Path = typer.Option(..., "--output", "-o", help="Output PON model file (.pon.parquet)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="BED file with target regions (panel mode - builds dual on/off-target baselines)"),
     temp_dir: Optional[Path] = typer.Option(None, "--temp-dir", help="Directory for temporary files (default: system temp)"),
-    threads: int = typer.Option(4, "--threads", "-p", help="Number of threads"),
+    threads: int = typer.Option(4, "--threads", "-p", help="Total threads (divided among parallel samples)"),
+    parallel_samples: int = typer.Option(1, "--parallel-samples", "-P", help="Number of samples to process concurrently (0=auto, 1=sequential)"),
+    memory_per_sample: float = typer.Option(2.0, "--memory-per-sample", help="Expected peak memory per sample in GB (for auto mode). Default: 2 GB for panels, use 16+ for WGS"),
+    sample_timeout: int = typer.Option(0, "--sample-timeout", help="Max seconds per sample, 0=no timeout"),
+    allow_failures: bool = typer.Option(False, "--allow-failures", help="Continue building PON even if some samples fail"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair", help="Only extract properly paired reads (default: False for v1 ACCESS compatibility)"),
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets (build as WGS)"),
@@ -202,16 +292,38 @@ def build_pon(
     import tempfile
     import shutil
     import time
-    from concurrent.futures import ProcessPoolExecutor, as_completed
+    from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
+    from krewlyzer.core.resource_utils import detect_resources, calculate_auto_parallel_samples
     
     # ═══════════════════════════════════════════════════════════════════════════
     # UNIFIED SAMPLE PROCESSING (replaces Phase 1 + Phase 2)
     # Uses process_sample() from core/sample_processor.py for consistent processing
     # ═══════════════════════════════════════════════════════════════════════════
     
+    # Determine parallel processing configuration
+    if parallel_samples == 0:
+        # Auto-detect based on resources
+        detected_cpus, detected_ram = detect_resources()
+        actual_parallel = calculate_auto_parallel_samples(
+            threads=threads,
+            memory_gb=detected_ram,
+            memory_per_sample=memory_per_sample,
+        )
+        logger.info(f"Auto-detected resources: {detected_cpus} CPUs, {detected_ram:.1f} GB RAM")
+        logger.info(f"Auto-selected {actual_parallel} parallel samples")
+    else:
+        actual_parallel = parallel_samples
+    
+    # Calculate threads per sample
+    threads_per_sample = max(1, threads // max(1, actual_parallel))
+    
     logger.info(f"=" * 60)
     logger.info(f"SAMPLE PROCESSING ({n_samples} samples)")
     logger.info(f"=" * 60)
+    if actual_parallel > 1:
+        logger.info(f"Parallel mode: {actual_parallel} concurrent samples, {threads_per_sample} threads each")
+    else:
+        logger.info(f"Sequential mode: {threads} threads")
     
     # Setup parameters for sample processing
     sample_params = SampleParams(
@@ -222,7 +334,7 @@ def build_pon(
         skip_duplicates=True,
         require_proper_pair=require_proper_pair,
         kmer=4,
-        threads=max(1, threads // max(1, min(4, n_samples))),  # Divide threads among samples
+        threads=threads_per_sample,
         bin_file=bin_file,
         wps_anchors=wps_regions,  # Use resolved WPS anchors (modern) or transcript file (legacy)
         wps_background=wps_bg_file,  # Bundled Alu regions for NRL baseline
@@ -235,77 +347,141 @@ def build_pon(
     
     # Process samples
     all_outputs: List[SampleOutputs] = []
+    failed_samples: List[tuple] = []
     processing_start = time.time()
-    succeeded_count = 0
-    failed_count = 0
+
     
     try:
-        for i, sample_path in enumerate(samples, 1):
-            # Extract sample name from path (handle BAM, CRAM, and BED.gz)
-            sample_name = sample_path.stem
+        # Resolve gene BED once for all samples
+        gene_bed = assets.get_gene_bed_for_mode(assay)
+        
+        # Helper to extract sample name from path
+        def get_sample_name(sample_path: Path) -> str:
+            name = sample_path.stem
             for suffix in ['.bed', '.bam', '.cram']:
-                sample_name = sample_name.replace(suffix, '')
-            sample_start = time.time()
+                name = name.replace(suffix, '')
+            return name
+        
+        # Build sample info list
+        sample_infos = [
+            (sample_path, get_sample_name(sample_path))
+            for sample_path in samples
+        ]
+        
+        if actual_parallel > 1:
+            # ─────────────────────────────────────────────────────────────────
+            # PARALLEL PROCESSING
+            # ─────────────────────────────────────────────────────────────────
+            logger.info(f"Starting parallel processing with {actual_parallel} workers...")
             
-            logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")
-            
-            try:
-                outputs = process_sample(
-                    input_path=sample_path,
-                    output_dir=Path(temp_output_dir) / sample_name,
-                    sample_name=sample_name,
-                    reference=reference,
-                    params=sample_params,
-                    target_regions=resolved_target_path if is_panel_mode else None,
-                    assay=assay,  # Enable gene-centric FSC for PON
-                    enable_fsc=True,
-                    enable_fsr=False,  # Not needed for PON
-                    enable_fsd=True,
-                    enable_wps=True,
-                    enable_ocf=True,
-                    pon_mode=True,  # Skip PON normalization (we're building the PON)
-                )
+            with ProcessPoolExecutor(max_workers=actual_parallel) as executor:
+                # Submit all sample processing tasks
+                futures = {
+                    executor.submit(
+                        _process_sample_subprocess,
+                        sample_path,
+                        Path(temp_output_dir) / sample_name,
+                        sample_name,
+                        reference,
+                        sample_params,
+                        resolved_target_path if is_panel_mode else None,
+                        assay,
+                        threads_per_sample,
+                        gene_bed,
+                    ): (sample_path, sample_name)
+                    for sample_path, sample_name in sample_infos
+                }
                 
-                all_outputs.append(outputs)
-                elapsed = time.time() - sample_start
-                logger.info(f"  ✓ Done in {elapsed:.1f}s ({outputs.fragment_count:,} frags)")
-                succeeded_count += 1
-                
-                # Run region-mds for per-gene MDS baseline
-                # Note: requires BAM path, not BED - need the original sample_path
-                try:
-                    sample_out_dir = Path(temp_output_dir) / sample_name
-                    mds_exon_output = sample_out_dir / f"{sample_name}.MDS.exon.tsv"
-                    mds_gene_output = sample_out_dir / f"{sample_name}.MDS.gene.tsv"
-                    gene_bed = assets.get_gene_bed_for_mode(assay)
+                completed = 0
+                for future in as_completed(futures):
+                    sample_path, sample_name = futures[future]
+                    completed += 1
                     
-                    # Only run for BAM/CRAM input (not BED.gz) since we need read sequences
+                    try:
+                        timeout_val = sample_timeout if sample_timeout > 0 else None
+                        outputs = future.result(timeout=timeout_val)
+                        all_outputs.append(outputs)
+                        logger.info(f"[{completed}/{n_samples}] ✓ {sample_name} ({outputs.fragment_count:,} frags)")
+                        
+                    except FuturesTimeoutError:
+                        error_msg = f"Timed out after {sample_timeout}s"
+                        logger.error(f"[{completed}/{n_samples}] ✗ {sample_name}: {error_msg}")
+                        failed_samples.append((sample_path, error_msg))
+                        if not allow_failures:
+                            raise RuntimeError(f"Sample {sample_name} timed out. Use --allow-failures to continue.")
+                            
+                    except Exception as e:
+                        error_msg = str(e)
+                        logger.error(f"[{completed}/{n_samples}] ✗ {sample_name}: {error_msg}")
+                        failed_samples.append((sample_path, error_msg))
+                        if not allow_failures:
+                            raise RuntimeError(f"Sample {sample_name} failed: {error_msg}. Use --allow-failures to continue.")
+            
+            # Implicit barrier: ProcessPoolExecutor.__exit__ waits for all futures
+            
+        else:
+            # ─────────────────────────────────────────────────────────────────
+            # SEQUENTIAL PROCESSING (backward compatible)
+            # ─────────────────────────────────────────────────────────────────
+            for i, (sample_path, sample_name) in enumerate(sample_infos, 1):
+                sample_start = time.time()
+                logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")
+                
+                try:
+                    outputs = process_sample(
+                        input_path=sample_path,
+                        output_dir=Path(temp_output_dir) / sample_name,
+                        sample_name=sample_name,
+                        reference=reference,
+                        params=sample_params,
+                        target_regions=resolved_target_path if is_panel_mode else None,
+                        assay=assay,
+                        enable_fsc=True,
+                        enable_fsr=False,
+                        enable_fsd=True,
+                        enable_wps=True,
+                        enable_ocf=True,
+                        pon_mode=True,
+                    )
+                    
+                    all_outputs.append(outputs)
+                    elapsed = time.time() - sample_start
+                    logger.info(f"  ✓ Done in {elapsed:.1f}s ({outputs.fragment_count:,} frags)")
+                    
+                    # Run region-mds for per-gene MDS baseline (BAM/CRAM only)
                     is_bam_input = str(sample_path).endswith(('.bam', '.cram'))
                     if is_bam_input and gene_bed and gene_bed.exists():
-                        _core.region_mds.run_region_mds(
-                            str(sample_path),           # BAM/CRAM path
-                            str(reference),             # Reference FASTA
-                            str(gene_bed),              # Gene BED file
-                            str(mds_exon_output),       # Per-exon output
-                            str(mds_gene_output),       # Per-gene output
-                            e1_only=False,
-                            mapq=sample_params.mapq,
-                            min_len=sample_params.minlen,
-                            max_len=400,  # Standard cfDNA range for motifs
-                            silent=True,
-                        )
-                        logger.debug(f"    Generated {mds_gene_output.name}")
+                        try:
+                            sample_out_dir = Path(temp_output_dir) / sample_name
+                            _core.region_mds.run_region_mds(
+                                str(sample_path),
+                                str(reference),
+                                str(gene_bed),
+                                str(sample_out_dir / f"{sample_name}.MDS.exon.tsv"),
+                                str(sample_out_dir / f"{sample_name}.MDS.gene.tsv"),
+                                e1_only=False,
+                                mapq=sample_params.mapq,
+                                min_len=sample_params.minlen,
+                                max_len=400,
+                                silent=True,
+                            )
+                        except Exception as e:
+                            logger.debug(f"    Could not run region-mds: {e}")
+                    
                 except Exception as e:
-                    logger.debug(f"    Could not run region-mds: {e}")
-                
-            except Exception as e:
-                logger.warning(f"  ✗ Failed: {e}")
-                failed_count += 1
+                    logger.warning(f"  ✗ Failed: {e}")
+                    failed_samples.append((sample_path, str(e)))
+                    if not allow_failures:
+                        raise RuntimeError(f"Sample {sample_name} failed: {e}. Use --allow-failures to continue.")
         
+        # ─────────────────────────────────────────────────────────────────
+        # PROCESSING COMPLETE - CHECK RESULTS
+        # ─────────────────────────────────────────────────────────────────
         processing_elapsed = time.time() - processing_start
         logger.info(f"-" * 60)
-        logger.info(f"Processing complete: {succeeded_count} succeeded, {failed_count} failed ({processing_elapsed:.1f}s)")
+        logger.info(f"Processing complete: {len(all_outputs)} succeeded, {len(failed_samples)} failed ({processing_elapsed:.1f}s)")
         
+
         if len(all_outputs) < 1:
             logger.error("No samples processed successfully")
             raise typer.Exit(1)

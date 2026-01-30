@@ -27,7 +27,8 @@ use pyo3::prelude::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rust_htslib::faidx;
-use log::{info, debug};
+use log::{info, debug, warn};
+use rayon::prelude::*;
 
 // GC correction support 
 use crate::gc_correction::CorrectionFactors;
@@ -795,158 +796,299 @@ impl WpsConsumer {
         let mut prot_tf_builder = ListBuilder::new(Float32Builder::new());
         let mut depth_builder = Float32Builder::new();
         
-        eprintln!("DEBUG: Starting region loop, {} regions, {} accumulators", self.regions.len(), self.accumulators.len());
-        let mut processed_count = 0usize;
+        // =========================================================================
+        // PARALLEL REGION PROCESSING
+        // =========================================================================
+        // Region binning is CPU-bound and embarrassingly parallel.
+        // Each region independently: integrates diff arrays → bins → smooths.
+        // We collect results, then sequentially write to Parquet builders.
+        // =========================================================================
         
-        for (i, region) in self.regions.iter().enumerate() {
-            let acc_opt = self.accumulators.get(&i);
-            if acc_opt.is_none() { continue; }
-            
-            let acc = acc_opt.unwrap();
-            let len = (region.end - region.start + 1) as usize;
-            
-            // Reconstruct raw values from difference arrays
-            let mut wps_long_raw = Vec::with_capacity(len);
-            let mut wps_short_raw = Vec::with_capacity(len);
-            let mut spanning_long_raw = Vec::with_capacity(len);
-            let mut endpoints_long_raw = Vec::with_capacity(len);
-            let mut spanning_short_raw = Vec::with_capacity(len);
-            let mut endpoints_short_raw = Vec::with_capacity(len);
-            
-            let mut curr_wps_long = 0.0;
-            let mut curr_wps_short = 0.0;
-            let mut curr_span_long = 0.0;
-            let mut curr_end_long = 0.0;
-            let mut curr_span_short = 0.0;
-            let mut curr_end_short = 0.0;
-            let mut curr_cov = 0.0;
-            
-            for j in 0..len {
-                curr_wps_long += acc.wps_long[j];
-                curr_wps_short += acc.wps_short[j];
-                curr_span_long += acc.spanning_long[j];
-                curr_end_long += acc.endpoints_long[j];
-                curr_span_short += acc.spanning_short[j];
-                curr_end_short += acc.endpoints_short[j];
-                curr_cov += acc.cov_long[j] + acc.cov_short[j];
+        use std::time::Instant;
+        let parallel_start = Instant::now();
+        
+        /// Result from processing a single region (collected for sequential write)
+        #[derive(Debug)]
+        struct RegionResult {
+            region_idx: usize,
+            region_id: String,
+            chrom: String,
+            center: i32,
+            strand: String,
+            region_type: String,
+            binned_wps_nuc: Vec<f32>,
+            binned_wps_tf: Vec<f32>,
+            binned_mask: Vec<i8>,
+            binned_prot_nuc: Vec<f32>,
+            binned_prot_tf: Vec<f32>,
+            local_depth: f32,
+        }
+        
+        // Clone shared references for parallel access
+        let regions = &self.regions;
+        let accumulators = &self.accumulators;
+        let bait_mask = &self.bait_mask;
+        
+        // Parallel computation of all region binned vectors
+        let results: Vec<Option<RegionResult>> = regions
+            .par_iter()
+            .enumerate()
+            .map(|(i, region)| {
+                // Skip regions without accumulator data
+                let acc = accumulators.get(&i)?;
+                let len = (region.end - region.start + 1) as usize;
                 
-                wps_long_raw.push(curr_wps_long);
-                wps_short_raw.push(curr_wps_short);
-                spanning_long_raw.push(curr_span_long);
-                endpoints_long_raw.push(curr_end_long);
-                spanning_short_raw.push(curr_span_short);
-                endpoints_short_raw.push(curr_end_short);
-            }
-            
-            // Skip empty regions
-            if curr_cov == 0.0 { continue; }
-            
-            // Bin aggregation: 2000bp → 200 bins
-            let mut binned_wps_nuc = vec![0.0f32; NUM_BINS];
-            let mut binned_wps_tf = vec![0.0f32; NUM_BINS];
-            let mut binned_mask = vec![1i8; NUM_BINS];
-            let mut binned_prot_nuc = vec![0.0f32; NUM_BINS];
-            let mut binned_prot_tf = vec![0.0f32; NUM_BINS];
-            
-            for bin_idx in 0..NUM_BINS {
-                let start_pos = bin_idx * BIN_SIZE;
-                let end_pos = (start_pos + BIN_SIZE).min(len);
+                // -------------------------------------------------------------
+                // Step 1: Integrate difference arrays to get raw WPS values
+                // This is O(len) per region, ~2000 iterations for standard windows
+                // -------------------------------------------------------------
+                let mut wps_long_raw = Vec::with_capacity(len);
+                let mut wps_short_raw = Vec::with_capacity(len);
+                let mut spanning_long_raw = Vec::with_capacity(len);
+                let mut endpoints_long_raw = Vec::with_capacity(len);
+                let mut spanning_short_raw = Vec::with_capacity(len);
+                let mut endpoints_short_raw = Vec::with_capacity(len);
                 
-                if start_pos >= len { break; }
+                let mut curr_wps_long = 0.0;
+                let mut curr_wps_short = 0.0;
+                let mut curr_span_long = 0.0;
+                let mut curr_end_long = 0.0;
+                let mut curr_span_short = 0.0;
+                let mut curr_end_short = 0.0;
+                let mut curr_cov = 0.0;
                 
-                let mut sum_wps_nuc = 0.0;
-                let mut sum_wps_tf = 0.0;
-                let mut sum_span_nuc = 0.0;
-                let mut sum_end_nuc = 0.0;
-                let mut sum_span_tf = 0.0;
-                let mut sum_end_tf = 0.0;
-                let mut mask_ok = true;
-                let count = (end_pos - start_pos) as f32;
-                
-                for j in start_pos..end_pos {
-                    sum_wps_nuc += wps_long_raw[j];
-                    sum_wps_tf += wps_short_raw[j];
-                    sum_span_nuc += spanning_long_raw[j];
-                    sum_end_nuc += endpoints_long_raw[j];
-                    sum_span_tf += spanning_short_raw[j];
-                    sum_end_tf += endpoints_short_raw[j];
+                for j in 0..len {
+                    curr_wps_long += acc.wps_long[j];
+                    curr_wps_short += acc.wps_short[j];
+                    curr_span_long += acc.spanning_long[j];
+                    curr_end_long += acc.endpoints_long[j];
+                    curr_span_short += acc.spanning_short[j];
+                    curr_end_short += acc.endpoints_short[j];
+                    curr_cov += acc.cov_long[j] + acc.cov_short[j];
                     
-                    // Check capture mask for this position
-                    if let Some(ref bait_mask) = self.bait_mask {
-                        let chrom_id = 0u32; // Simplified - need proper chrom_id lookup
-                        let pos = region.start + j as u64;
-                        let (_, reliable) = bait_mask.check_position(chrom_id, pos);
-                        if !reliable { mask_ok = false; }
-                    }
+                    wps_long_raw.push(curr_wps_long);
+                    wps_short_raw.push(curr_wps_short);
+                    spanning_long_raw.push(curr_span_long);
+                    endpoints_long_raw.push(curr_end_long);
+                    spanning_short_raw.push(curr_span_short);
+                    endpoints_short_raw.push(curr_end_short);
                 }
                 
-                binned_wps_nuc[bin_idx] = (sum_wps_nuc / count as f64) as f32;
-                binned_wps_tf[bin_idx] = (sum_wps_tf / count as f64) as f32;
-                binned_mask[bin_idx] = if mask_ok { 1 } else { 0 };
+                // Skip empty regions (no coverage)
+                if curr_cov == 0.0 {
+                    return None;
+                }
                 
-                let total_nuc = sum_span_nuc + sum_end_nuc;
-                let total_tf = sum_span_tf + sum_end_tf;
-                binned_prot_nuc[bin_idx] = if total_nuc > 0.0 { (sum_span_nuc / total_nuc) as f32 } else { 0.0 };
-                binned_prot_tf[bin_idx] = if total_tf > 0.0 { (sum_span_tf / total_tf) as f32 } else { 0.0 };
-            }
-            
-            // Reverse for minus strand
-            if region.strand == "-" {
-                binned_wps_nuc.reverse();
-                binned_wps_tf.reverse();
-                binned_mask.reverse();
-                binned_prot_nuc.reverse();
-                binned_prot_tf.reverse();
-            }
-            
-            // Apply Savitzky-Golay smoothing (window=11, order=3, matching scipy defaults)
-            use sci_rs::signal::filter::savgol_filter_dyn;
-            const SAVGOL_WINDOW: usize = 11;
-            const SAVGOL_POLYORDER: usize = 3;
-            
-            if binned_wps_nuc.len() >= SAVGOL_WINDOW {
-                binned_wps_nuc = savgol_filter_dyn(
-                    binned_wps_nuc.iter().map(|x| *x as f64),
-                    SAVGOL_WINDOW, SAVGOL_POLYORDER, None, None
-                ).into_iter().map(|x| x as f32).collect();
+                // -------------------------------------------------------------
+                // Step 2: Bin aggregation (2000bp → 200 bins of 10bp each)
+                // -------------------------------------------------------------
+                let mut binned_wps_nuc = vec![0.0f32; NUM_BINS];
+                let mut binned_wps_tf = vec![0.0f32; NUM_BINS];
+                let mut binned_mask = vec![1i8; NUM_BINS];
+                let mut binned_prot_nuc = vec![0.0f32; NUM_BINS];
+                let mut binned_prot_tf = vec![0.0f32; NUM_BINS];
                 
-                binned_wps_tf = savgol_filter_dyn(
-                    binned_wps_tf.iter().map(|x| *x as f64),
-                    SAVGOL_WINDOW, SAVGOL_POLYORDER, None, None
-                ).into_iter().map(|x| x as f32).collect();
+                for bin_idx in 0..NUM_BINS {
+                    let start_pos = bin_idx * BIN_SIZE;
+                    let end_pos = (start_pos + BIN_SIZE).min(len);
+                    
+                    if start_pos >= len {
+                        break;
+                    }
+                    
+                    let mut sum_wps_nuc = 0.0;
+                    let mut sum_wps_tf = 0.0;
+                    let mut sum_span_nuc = 0.0;
+                    let mut sum_end_nuc = 0.0;
+                    let mut sum_span_tf = 0.0;
+                    let mut sum_end_tf = 0.0;
+                    let mut mask_ok = true;
+                    let count = (end_pos - start_pos) as f32;
+                    
+                    for j in start_pos..end_pos {
+                        sum_wps_nuc += wps_long_raw[j];
+                        sum_wps_tf += wps_short_raw[j];
+                        sum_span_nuc += spanning_long_raw[j];
+                        sum_end_nuc += endpoints_long_raw[j];
+                        sum_span_tf += spanning_short_raw[j];
+                        sum_end_tf += endpoints_short_raw[j];
+                        
+                        // Check capture mask for panel edge detection
+                        if let Some(ref mask) = bait_mask {
+                            let chrom_id = 0u32; // Simplified - need proper chrom_id lookup
+                            let pos = region.start + j as u64;
+                            let (_, reliable) = mask.check_position(chrom_id, pos);
+                            if !reliable {
+                                mask_ok = false;
+                            }
+                        }
+                    }
+                    
+                    binned_wps_nuc[bin_idx] = (sum_wps_nuc / count as f64) as f32;
+                    binned_wps_tf[bin_idx] = (sum_wps_tf / count as f64) as f32;
+                    binned_mask[bin_idx] = if mask_ok { 1 } else { 0 };
+                    
+                    let total_nuc = sum_span_nuc + sum_end_nuc;
+                    let total_tf = sum_span_tf + sum_end_tf;
+                    binned_prot_nuc[bin_idx] = if total_nuc > 0.0 {
+                        (sum_span_nuc / total_nuc) as f32
+                    } else {
+                        0.0
+                    };
+                    binned_prot_tf[bin_idx] = if total_tf > 0.0 {
+                        (sum_span_tf / total_tf) as f32
+                    } else {
+                        0.0
+                    };
+                }
+                
+                // -------------------------------------------------------------
+                // Step 3: Strand reversal for minus strand regions
+                // -------------------------------------------------------------
+                if region.strand == "-" {
+                    binned_wps_nuc.reverse();
+                    binned_wps_tf.reverse();
+                    binned_mask.reverse();
+                    binned_prot_nuc.reverse();
+                    binned_prot_tf.reverse();
+                }
+                
+                // -------------------------------------------------------------
+                // Step 4: Savitzky-Golay smoothing (window=11, order=3)
+                // Matches scipy.signal.savgol_filter defaults
+                // -------------------------------------------------------------
+                use sci_rs::signal::filter::savgol_filter_dyn;
+                const SAVGOL_WINDOW: usize = 11;
+                const SAVGOL_POLYORDER: usize = 3;
+                
+                if binned_wps_nuc.len() >= SAVGOL_WINDOW {
+                    binned_wps_nuc = savgol_filter_dyn(
+                        binned_wps_nuc.iter().map(|x| *x as f64),
+                        SAVGOL_WINDOW,
+                        SAVGOL_POLYORDER,
+                        None,
+                        None,
+                    )
+                    .into_iter()
+                    .map(|x| x as f32)
+                    .collect();
+                    
+                    binned_wps_tf = savgol_filter_dyn(
+                        binned_wps_tf.iter().map(|x| *x as f64),
+                        SAVGOL_WINDOW,
+                        SAVGOL_POLYORDER,
+                        None,
+                        None,
+                    )
+                    .into_iter()
+                    .map(|x| x as f32)
+                    .collect();
+                }
+                
+                // Determine region type from ID prefix
+                let region_type = if region.id.starts_with("TSS|") {
+                    "TSS"
+                } else if region.id.starts_with("CTCF|") {
+                    "CTCF"
+                } else {
+                    "OTHER"
+                };
+                
+                Some(RegionResult {
+                    region_idx: i,
+                    region_id: region.id.clone(),
+                    chrom: region.chrom.clone(),
+                    center: region.center as i32,
+                    strand: region.strand.clone(),
+                    region_type: region_type.to_string(),
+                    binned_wps_nuc,
+                    binned_wps_tf,
+                    binned_mask,
+                    binned_prot_nuc,
+                    binned_prot_tf,
+                    local_depth: (curr_cov / len as f64) as f32,
+                })
+            })
+            .collect();
+        
+        let parallel_elapsed = parallel_start.elapsed();
+        
+        // =========================================================================
+        // PARALLEL DIAGNOSTICS & ORDER VALIDATION
+        // =========================================================================
+        let valid_results: Vec<&RegionResult> = results.iter().filter_map(|r| r.as_ref()).collect();
+        let n_computed = valid_results.len();
+        
+        // Validate output ordering (detect any par_iter ordering issues)
+        let mut order_valid = true;
+        let mut last_idx: Option<usize> = None;
+        for result in &valid_results {
+            if let Some(last) = last_idx {
+                if result.region_idx <= last {
+                    warn!("⚠️ ORDER VIOLATION: Region {} appears after {} (parallel ordering issue)", 
+                        result.region_idx, last);
+                    order_valid = false;
+                }
             }
-            
-            // Region type
-            let region_type = if region.id.starts_with("TSS|") { "TSS" } 
-                else if region.id.starts_with("CTCF|") { "CTCF" } 
-                else { "OTHER" };
-            
-            // Append row
-            region_id_builder.append_value(&region.id);
-            chrom_builder.append_value(&region.chrom);
-            center_builder.append_value(region.center as i32);
-            strand_builder.append_value(&region.strand);
-            region_type_builder.append_value(region_type);
+            last_idx = Some(result.region_idx);
+        }
+        
+        if order_valid {
+            debug!("Parallel region processing: {} regions computed in {:.2}s, order validated", 
+                n_computed, parallel_elapsed.as_secs_f64());
+        }
+        
+        // Log parallel summary
+        let n_threads = rayon::current_num_threads();
+        info!("WPS parallel binning: {} regions in {:.2}s ({} threads, {:.0} regions/sec)",
+            n_computed, parallel_elapsed.as_secs_f64(), n_threads,
+            n_computed as f64 / parallel_elapsed.as_secs_f64().max(0.001));
+        
+        // =========================================================================
+        // SEQUENTIAL PARQUET WRITE
+        // =========================================================================
+        // Arrow builders are not thread-safe, so we write sequentially.
+        // Order is preserved by par_iter().enumerate().collect() pattern.
+        // =========================================================================
+        let mut processed_count = 0usize;
+        
+        for result in valid_results {
+            region_id_builder.append_value(&result.region_id);
+            chrom_builder.append_value(&result.chrom);
+            center_builder.append_value(result.center);
+            strand_builder.append_value(&result.strand);
+            region_type_builder.append_value(&result.region_type);
             
             // Append list values
-            for v in &binned_wps_nuc { wps_nuc_builder.values().append_value(*v); }
+            for v in &result.binned_wps_nuc {
+                wps_nuc_builder.values().append_value(*v);
+            }
             wps_nuc_builder.append(true);
             
-            for v in &binned_wps_tf { wps_tf_builder.values().append_value(*v); }
+            for v in &result.binned_wps_tf {
+                wps_tf_builder.values().append_value(*v);
+            }
             wps_tf_builder.append(true);
             
-            for v in &binned_mask { mask_builder.values().append_value(*v); }
+            for v in &result.binned_mask {
+                mask_builder.values().append_value(*v);
+            }
             mask_builder.append(true);
             
-            for v in &binned_prot_nuc { prot_nuc_builder.values().append_value(*v); }
+            for v in &result.binned_prot_nuc {
+                prot_nuc_builder.values().append_value(*v);
+            }
             prot_nuc_builder.append(true);
             
-            for v in &binned_prot_tf { prot_tf_builder.values().append_value(*v); }
+            for v in &result.binned_prot_tf {
+                prot_tf_builder.values().append_value(*v);
+            }
             prot_tf_builder.append(true);
             
-            depth_builder.append_value((curr_cov / len as f64) as f32);
+            depth_builder.append_value(result.local_depth);
             processed_count += 1;
         }
+
         
         eprintln!("DEBUG: Loop complete. Processed {} regions with data", processed_count);
         

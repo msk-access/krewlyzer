@@ -46,7 +46,8 @@ This model is used for bias correction and z-score normalization during sample p
 | `-W, --wps-anchors` | Built-in | WPS anchors BED.gz (merged TSS+CTCF) |
 | `-b, --bin-file` | Built-in | Bin file for FSC/FSR |
 | `--temp-dir` | System temp | Directory for temporary files |
-| `-p, --threads` | 4 | Number of threads |
+| `-p, --threads` | 4 | Total threads (divided among parallel samples) |
+| `-P, --parallel-samples` | 1 | Number of samples to process in parallel |
 | `--require-proper-pair` | False | Only properly paired reads |
 | `-v, --verbose` | False | Verbose output |
 
@@ -60,21 +61,29 @@ flowchart TB
         BED["BED.gz files"]
     end
     
-    subgraph "Per-Sample Processing (Rust + Python)"
+    subgraph "Per-Sample Processing (Parallel with -P)"
         EXT["Extract fragments"]
         GC["GC observations"]
         FSD["FSD per arm"]
         WPS["WPS per anchor"]
         OCF["OCF per region"]
         MDS["MDS k-mers"]
+        FSC_G["FSC gene/region"]
+        TFBS["TFBS entropy"]
+        ATAC["ATAC entropy"]
+        RMDS["Region MDS"]
     end
     
-    subgraph "Baseline Aggregation (Python)"
+    subgraph "Baseline Aggregation"
         AGG_GC["GC bias curves\nmean/std per bin"]
         AGG_FSD["FSD baseline\nmean/std per arm"]
         AGG_WPS["WPS baseline\nmean/std per region"]
         AGG_OCF["OCF baseline\nmean/std per region"]
         AGG_MDS["MDS baseline\nk-mer mean/std"]
+        AGG_FSC["FSC gene/region\nmean/std per gene"]
+        AGG_TFBS["TFBS baseline\nmean/std per TF"]
+        AGG_ATAC["ATAC baseline\nmean/std per type"]
+        AGG_RMDS["Region MDS\nmean/std per gene"]
     end
     
     subgraph Output
@@ -82,7 +91,7 @@ flowchart TB
     end
     
     SL --> BAM & BED
-    BAM --> EXT --> GC & FSD & WPS & OCF & MDS
+    BAM --> EXT --> GC & FSD & WPS & OCF & MDS & FSC_G & TFBS & ATAC & RMDS
     BED --> GC & FSD & WPS & OCF
     
     GC --> AGG_GC --> PON
@@ -90,6 +99,10 @@ flowchart TB
     WPS --> AGG_WPS --> PON
     OCF --> AGG_OCF --> PON
     MDS --> AGG_MDS --> PON
+    FSC_G --> AGG_FSC --> PON
+    TFBS --> AGG_TFBS --> PON
+    ATAC --> AGG_ATAC --> PON
+    RMDS --> AGG_RMDS --> PON
 ```
 
 ## Examples
@@ -158,6 +171,9 @@ The output is a Parquet file containing:
 | **MDS Baseline** | K-mer frequencies and MDS mean/std | Motif |
 | **TFBS Baseline** | Mean/std entropy per TF (808 factors) | Region Entropy |
 | **ATAC Baseline** | Mean/std entropy per cancer type (23 types) | Region Entropy |
+| **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
+| **FSC Gene Baseline** | Per-gene normalized depth mean/std | FSC Gene |
+| **FSC Region Baseline** | Per-exon normalized depth mean/std | FSC Region |
 
 In **panel mode**, additional on-target baselines are included:
 
@@ -179,6 +195,7 @@ When `--target-regions` is provided:
 ## Recommendations
 
 - **Minimum samples**: 10+ for stable baselines
+- **FSC gene/region**: Requires minimum **3 samples** per gene for statistics
 - **Same assay**: All samples must be from the same assay
 - **Same reference**: Must match reference used for processing
 - **Healthy samples**: Use confirmed non-cancer samples only

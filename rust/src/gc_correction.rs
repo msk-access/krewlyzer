@@ -243,8 +243,10 @@ pub fn compute_gcfix_factors(
 ) -> Result<CorrectionFactors> {
     let cfg = config.unwrap_or_default();
     let mut factors = HashMap::new();
+    let mut bins_processed = 0u32;
+    let mut bins_skipped = 0u32;
     
-    // Iterate over each length bin (0..68)
+    // Iterate over each length bin (0..188)
     for bin_idx in 0..LengthBin::NUM_BINS {
         let bin = LengthBin(bin_idx);
         
@@ -267,6 +269,7 @@ pub fn compute_gcfix_factors(
         let n_points = gc_points.len();
         if n_points < 10 {
             debug!("Skipping length bin {:?} - insufficient data points ({})", bin, n_points);
+            bins_skipped += 1;
             continue;
         }
         
@@ -278,13 +281,9 @@ pub fn compute_gcfix_factors(
             .fraction(cfg.fraction)
             .iterations(cfg.iterations)
             .delta(cfg.delta)
-            .adapter(Batch)
-            .build(); // Using .build() directly? Check prev code
+            .adapter(Batch);
             
-        // Previous code: .build().map_err(...)?
-        // Let's check imports
-        
-        if let Ok(model) = model {
+        if let Ok(model) = model.build() {
              if let Ok(result) = model.fit(&gc_points, &ratios) {
                  for (i, &gc_val) in result.x.iter().enumerate() {
                      let gc_byte = (gc_val * 100.0).round() as u8;
@@ -306,10 +305,13 @@ pub fn compute_gcfix_factors(
                      });
                  }
                  
-                 info!("Computed factors for bin {:?}: {} points, mean_ratio={:.3}", bin, result.x.len(), mean_ratio);
+                 debug!("Computed factors for bin {:?}: {} points, mean_ratio={:.3}", bin, result.x.len(), mean_ratio);
+                 bins_processed += 1;
              }
         }
     }
+    
+    info!("GC correction: {} length bins processed, {} skipped (insufficient data)", bins_processed, bins_skipped);
     
     Ok(CorrectionFactors { data: factors })
 }

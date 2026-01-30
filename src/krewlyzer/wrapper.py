@@ -642,6 +642,10 @@ def run_all(
                     mapq=mapq,
                     minlen=minlen,
                     maxlen=400,  # Use standard cfDNA range for motifs
+                    pon_model=resolved_pon_path,  # Pass already-resolved PON
+                    skip_pon=skip_pon,            # Pass skip_pon flag
+                    threads=threads,              # Pass threads for parallel processing
+                    verbose=debug,                # Pass verbose flag
                     silent=not debug,
                 )
                 logger.info(f"Region-MDS complete: {n_regions} regions, {n_genes} genes")

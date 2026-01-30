@@ -24,6 +24,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{Result, Context};
 use coitrees::{COITree, IntervalNode, IntervalTree};
+use rayon::prelude::*;
 
 use crate::bed::{Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
@@ -181,29 +182,104 @@ impl RegionEntropyConsumer {
     }
 
     /// Write entropy output to TSV file
+    /// 
+    /// Uses parallel computation for entropy calculation (CPU-bound Shannon entropy).
+    /// Output is sorted alphabetically by label for deterministic output.
     pub fn write_output(&self, output_path: &Path) -> Result<()> {
+        use std::time::Instant;
+        
         let mut f = File::create(output_path)
             .with_context(|| format!("Failed to create output file: {:?}", output_path))?;
         writeln!(f, "label\tcount\tmean_size\tentropy")?;
 
-        // Sort output by label name for consistency
+        // Sort indices by label name for deterministic output order
         let mut indices: Vec<usize> = (0..self.labels.len()).collect();
         indices.sort_by_key(|&i| &self.labels[i]);
 
+        // =========================================================================
+        // PARALLEL ENTROPY COMPUTATION
+        // =========================================================================
+        // Shannon entropy is CPU-bound (log2 computation over 1000+ histogram bins).
+        // Pre-compute all statistics in parallel, then write sequentially.
+        // =========================================================================
+        let parallel_start = Instant::now();
+        
+        /// Pre-computed label statistics for parallel collection
+        #[derive(Debug)]
+        struct LabelResult {
+            label: String,
+            count: f64,
+            mean_size: f64,
+            entropy: f64,
+        }
+        
+        // Reference for parallel access
+        let stats = &self.stats;
+        let labels = &self.labels;
+        
+        // Parallel entropy calculation
+        let computed: Vec<Option<LabelResult>> = indices
+            .par_iter()
+            .map(|&i| {
+                let s = &stats[i];
+                
+                // Skip labels with no data
+                if s.total_count <= 0.0 {
+                    return None;
+                }
+                
+                let entropy = s.calculate_entropy();
+                let mean_size = s.mean_size();
+                
+                // Validate floating point results (detect accumulation issues)
+                if entropy.is_nan() || entropy.is_infinite() {
+                    log::warn!("⚠️ FLOAT ISSUE: Label '{}' has invalid entropy: {}", labels[i], entropy);
+                }
+                if mean_size.is_nan() || mean_size.is_infinite() {
+                    log::warn!("⚠️ FLOAT ISSUE: Label '{}' has invalid mean_size: {}", labels[i], mean_size);
+                }
+                
+                Some(LabelResult {
+                    label: labels[i].clone(),
+                    count: s.total_count,
+                    mean_size,
+                    entropy,
+                })
+            })
+            .collect();
+        
+        let parallel_elapsed = parallel_start.elapsed();
+        
+        // Count valid results and check for NaN issues
+        let valid_results: Vec<&LabelResult> = computed.iter().filter_map(|r| r.as_ref()).collect();
+        let n_computed = valid_results.len();
+        let nan_count = valid_results.iter().filter(|r| r.entropy.is_nan()).count();
+        
+        if nan_count > 0 {
+            log::warn!("⚠️ {} labels have NaN entropy - check input data", nan_count);
+        }
+        
+        // Log parallel summary
+        let n_threads = rayon::current_num_threads();
+        log::debug!("RegionEntropy parallel: {} labels in {:.3}s ({} threads)",
+            n_computed, parallel_elapsed.as_secs_f64(), n_threads);
+
+        // =========================================================================
+        // SEQUENTIAL FILE WRITE
+        // =========================================================================
+        // Order preserved by sorted indices + par_iter().collect()
+        // =========================================================================
         let mut n_written = 0;
-        for i in indices {
-            let s = &self.stats[i];
-            if s.total_count > 0.0 {
-                writeln!(
-                    f,
-                    "{}\t{:.1}\t{:.2}\t{:.4}",
-                    self.labels[i],
-                    s.total_count,
-                    s.mean_size(),
-                    s.calculate_entropy()
-                )?;
-                n_written += 1;
-            }
+        for result in valid_results {
+            writeln!(
+                f,
+                "{}\t{:.1}\t{:.2}\t{:.4}",
+                result.label,
+                result.count,
+                result.mean_size,
+                result.entropy
+            )?;
+            n_written += 1;
         }
 
         log::info!("RegionEntropy: Wrote {} labels to {:?}", n_written, output_path);

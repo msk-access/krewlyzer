@@ -54,10 +54,10 @@ flowchart TB
         UP --> ASSETS["AssetManager"]
     end
     
-    subgraph "Rust Backend"
+    subgraph "Rust Backend (Parallel)"
         UP --> RUST["_core.run_unified_pipeline()"]
         RUST --> GC["GC correction"]
-        GC --> WPS_NUC["WPS foreground (anchors)"]
+        GC --> WPS_NUC["WPS foreground<br/>(par_iter over regions)"]
         GC --> WPS_BG["WPS background (Alu)"]
     end
     
@@ -70,6 +70,8 @@ flowchart TB
         PON --> OUT["WPS.parquet"]
     end
 ```
+
+> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of anchor regions.
 
 ---
 
