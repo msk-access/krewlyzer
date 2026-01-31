@@ -120,6 +120,17 @@ class FeatureSerializer:
         
         self.features["fsc"] = df.to_dict(orient="records")
     
+    def add_fsc_e1(self, df: pd.DataFrame):
+        """
+        Add FULL FSC E1-only data (first exon per gene).
+        
+        E1 (promoter-proximal) has stronger cancer signal per Helzer et al. (2025).
+        """
+        if df is None or df.empty:
+            return
+        
+        self.features["fsc_region_e1"] = df.to_dict(orient="records")
+    
     def add_wps(self, df: pd.DataFrame):
         """
         Add FULL WPS vectors (all values per region).
@@ -350,6 +361,15 @@ class FeatureSerializer:
         fsc_region_path = output_dir / f"{sample_id}.FSC.regions.tsv"
         if fsc_region_path.exists():
             serializer.features["fsc_region"] = pd.read_csv(fsc_region_path, sep="\t").to_dict(orient="records")
+        
+        # =====================================================================
+        # FSC E1-Only - First Exon Per Gene (promoter-proximal sensitivity)
+        # Per Helzer et al. (2025): E1 has stronger cancer signal than whole-gene
+        # =====================================================================
+        fsc_e1_path = output_dir / f"{sample_id}.FSC.regions.e1only.tsv"
+        if fsc_e1_path.exists():
+            serializer.features["fsc_region_e1"] = pd.read_csv(fsc_e1_path, sep="\t").to_dict(orient="records")
+            logger.debug(f"  Loaded fsc_region_e1 from {fsc_e1_path.name}")
         
         # =====================================================================
         # WPS - Windowed Protection Score

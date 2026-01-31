@@ -62,6 +62,7 @@ class FeatureOutputs:
     fsc_ontarget: Optional[Path] = None     # On-target FSC (panel)
     fsc_gene: Optional[Path] = None         # Gene-centric FSC
     fsc_region: Optional[Path] = None        # Per-region FSC (exon/probe level)
+    fsc_region_e1: Optional[Path] = None     # E1-only FSC (first exon per gene)
     fsr: Optional[Path] = None              # FSR ratios
     fsr_ontarget: Optional[Path] = None     # On-target FSR (panel)
     fsd: Optional[Path] = None              # FSD per arm
@@ -116,6 +117,7 @@ def run_features(
     fsc_bins: Optional[Path] = None,
     fsc_windows: int = 100000,
     fsc_continue_n: int = 50,
+    disable_e1_aggregation: bool = False,  # Skip E1-only FSC region filtering
     
     # FSD-specific options
     fsd_arms: Optional[Path] = None,
@@ -500,6 +502,14 @@ def run_features(
                 logger.info(f"✓ FSC regions: {outputs.fsc_region.name} (--skip-pon active)")
             else:
                 logger.info(f"✓ FSC regions: {outputs.fsc_region.name}")
+            
+            # Generate E1-only FSC regions (first exon per gene)
+            # E1 (promoter-proximal) has stronger cancer signal per Helzer et al. (2025)
+            if not disable_e1_aggregation and outputs.fsc_region and outputs.fsc_region.exists():
+                from .fsc_processor import filter_fsc_to_e1
+                outputs.fsc_region_e1 = filter_fsc_to_e1(outputs.fsc_region)
+                if outputs.fsc_region_e1:
+                    logger.info(f"✓ FSC E1-only: {outputs.fsc_region_e1.name}")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
     

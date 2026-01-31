@@ -33,6 +33,15 @@ flowchart TB
         VCF["variants.vcf/maf"] --> MFSD
     end
     
+    subgraph "With --assay (Panel Mode)"
+        PIPELINE --> FSCG["FSC.gene.tsv"]
+        FSCG --> FSCR["FSC.regions.tsv"]
+        FSCR --> E1["FSC.regions.e1only.tsv"]
+        BAM --> RMDS["Region-MDS"]
+        RMDS --> MDSE["MDS.exon.tsv"]
+        RMDS --> MDSG["MDS.gene.tsv"]
+    end
+    
     subgraph "With --target-regions"
         TARGETS["Target BED"] --> PIPELINE
         PIPELINE --> ON["*.ontarget.tsv files"]
@@ -110,23 +119,37 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--input` | `-i` | PATH | *required* | Input BAM file (sorted, indexed) |
 | `--reference` | `-r` | PATH | *required* | Reference genome FASTA |
 | `--output` | `-o` | PATH | *required* | Output directory |
-| `--variants` | `-v` | PATH | | VCF/MAF for mFSD analysis |
-| `--target-regions` | `-T` | PATH | | Target BED (panel mode) |
-| `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets from --assay) |
-| `--bin-input` | `-b` | PATH | | Custom bins for FSC/FSR |
-| `--pon-model` | `-P` | PATH | | PON model for normalization |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
-| `--assay` | `-A` | TEXT | | Assay code (xs1, xs2) for gene-centric FSC |
-| `--generate-json` | | FLAG | | Generate unified sample.features.json |
-| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length (extended FSD range) |
-| `--gc-correct` | | FLAG | True | Apply GC bias correction |
+| `--skip-duplicates` | | FLAG | True | Skip duplicate reads |
+| `--require-proper-pair` | | FLAG | True | Require proper pairs |
+| `--exclude-regions` | `-x` | PATH | | Exclude regions BED file |
+| `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
+| `--assay` | `-A` | TEXT | | Assay code (xs1, xs2) for gene-centric FSC |
+| `--bisulfite-bam` | | PATH | | Bisulfite BAM for UXM (optional) |
+| `--variants` | `-v` | PATH | | VCF/MAF for mFSD analysis |
+| `--duplex` | `-D` | FLAG | False | Enable duplex weighting for mFSD |
+| `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
+| `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+| `--arms-file` | `-a` | PATH | | Custom arms file for FSD |
+| `--bin-input` | `-b` | PATH | | Custom bins for FSC/FSR |
+| `--ocr-file` | | PATH | | Custom OCR file for OCF |
+| `--wps-anchors` | | PATH | | WPS anchors BED for dual-stream profiling |
+| `--wps-background` | | PATH | | WPS background Alu BED |
+| `--bait-padding` | | INT | 50 | Bait edge padding in bp |
+| `--pon-model` | `-P` | PATH | | PON model for normalization |
 | `--skip-pon` | | FLAG | False | Skip PON z-score normalization |
+| `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets) |
 | `--no-tfbs` | | FLAG | False | Skip TFBS region entropy analysis |
 | `--no-atac` | | FLAG | False | Skip ATAC region entropy analysis |
-| `--verbose` | `-v` | FLAG | | Enable verbose logging |
+| `--disable-e1-aggregation` | | FLAG | False | Skip E1-only FSC region filtering |
+| `--region-mds-e1-only` | | FLAG | False | Run region-MDS on E1 (first exon) only |
+| `--generate-json` | | FLAG | False | Generate unified sample.features.json |
+| `--debug` | | FLAG | False | Enable debug logging |
+| `--validate-assets` | | FLAG | False | Validate bundled assets before running |
 
 ---
 

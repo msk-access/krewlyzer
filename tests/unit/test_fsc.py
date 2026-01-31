@@ -185,3 +185,57 @@ def test_aggregate_by_gene_region_mode(tmp_path):
     
     # Each region should have 1 fragment
     assert df['total'].tolist() == [1, 1]
+
+
+@pytest.mark.unit
+def test_filter_fsc_to_e1(tmp_path):
+    """Test E1-only filtering (first exon per gene by position).
+    
+    E1 (first exon) serves as a proxy for promoter regions.
+    Per Helzer et al. (2025), E1 has stronger cancer signal than
+    whole-gene averages.
+    """
+    from krewlyzer.core.fsc_processor import filter_fsc_to_e1
+    import pandas as pd
+    
+    # Create test FSC.regions.tsv with multiple exons per gene
+    regions_file = tmp_path / "test.FSC.regions.tsv"
+    df = pd.DataFrame({
+        'chrom': ['chr1', 'chr1', 'chr2', 'chr2', 'chr2'],
+        'start': [1000, 500, 2000, 1500, 3000],  # Gene1 E1 at 500, Gene2 E1 at 1500
+        'end': [1200, 700, 2200, 1700, 3200],
+        'gene': ['Gene1', 'Gene1', 'Gene2', 'Gene2', 'Gene2'],
+        'region_name': ['Gene1_ex2', 'Gene1_ex1', 'Gene2_ex2', 'Gene2_ex1', 'Gene2_ex3'],
+        'normalized_depth': [100.0, 150.0, 200.0, 180.0, 120.0],
+        'total': [50, 75, 100, 90, 60],
+    })
+    df.to_csv(regions_file, sep='\t', index=False)
+    
+    # Filter to E1 only
+    e1_output = filter_fsc_to_e1(regions_file)
+    
+    # Verify output
+    assert e1_output is not None
+    assert e1_output.exists()
+    assert 'e1only' in e1_output.name
+    
+    e1_df = pd.read_csv(e1_output, sep='\t')
+    
+    # Should have 2 genes
+    assert len(e1_df) == 2
+    
+    # Should have E1 (first by position) for each gene
+    gene1 = e1_df[e1_df['gene'] == 'Gene1'].iloc[0]
+    gene2 = e1_df[e1_df['gene'] == 'Gene2'].iloc[0]
+    
+    assert gene1['start'] == 500   # Gene1 E1 at position 500
+    assert gene2['start'] == 1500  # Gene2 E1 at position 1500
+
+
+@pytest.mark.unit
+def test_filter_fsc_to_e1_nonexistent_file(tmp_path):
+    """Test filter_fsc_to_e1 handles missing input gracefully."""
+    from krewlyzer.core.fsc_processor import filter_fsc_to_e1
+    
+    result = filter_fsc_to_e1(tmp_path / "nonexistent.tsv")
+    assert result is None

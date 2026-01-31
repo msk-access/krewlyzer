@@ -92,6 +92,8 @@ def run_all(
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay is specified (run as WGS)"),
     no_tfbs: bool = typer.Option(False, "--no-tfbs", help="Skip TFBS region entropy analysis"),
     no_atac: bool = typer.Option(False, "--no-atac", help="Skip ATAC region entropy analysis"),
+    disable_e1_aggregation: bool = typer.Option(False, "--disable-e1-aggregation", help="Skip E1-only FSC region filtering (first exon per gene)"),
+    region_mds_e1_only: bool = typer.Option(False, "--region-mds-e1-only", help="Run region-MDS on E1 (first exon) only for promoter-focused analysis"),
     
     # JSON output option
     generate_json: bool = typer.Option(False, "--generate-json", help="Generate unified sample.features.json with ALL data for ML pipelines"),
@@ -520,6 +522,7 @@ def run_all(
                 fsc_bins=bin_input,
                 fsc_windows=fsc_windows,
                 fsc_continue_n=fsc_continue_n,
+                disable_e1_aggregation=disable_e1_aggregation,
                 fsd_arms=resolved_arms_file,
                 wps_anchors=resolved_wps_anchors,
                 wps_background=resolved_wps_background,
@@ -608,7 +611,8 @@ def run_all(
                     mapq=mapq,
                     minlen=minlen,
                     maxlen=maxlen,
-                    require_proper_pair=require_proper_pair,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=False,  # mFSD works best with lenient filtering for duplex BAMs
                     duplex=duplex,
                     output_distributions=False,
                     verbose=debug,
@@ -638,10 +642,10 @@ def run_all(
                     gene_bed=gene_bed,
                     genome=genome,
                     assay=resolved_assay,
-                    e1_only=False,
+                    e1_only=region_mds_e1_only,
                     mapq=mapq,
                     minlen=minlen,
-                    maxlen=400,  # Use standard cfDNA range for motifs
+                    maxlen=maxlen,  # Use same maxlen as other tools for consistency
                     pon_model=resolved_pon_path,  # Pass already-resolved PON
                     skip_pon=skip_pon,            # Pass skip_pon flag
                     threads=threads,              # Pass threads for parallel processing

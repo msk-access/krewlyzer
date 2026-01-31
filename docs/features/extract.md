@@ -59,7 +59,7 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--exclude-regions` | `-x` | PATH | | BED file of regions to exclude |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
-| `--maxlen` | | INT | 400 | Maximum fragment length |
+| `--maxlen` | | INT | 1000 | Maximum fragment length |
 | `--skip-duplicates` | | FLAG | True | Skip duplicate reads |
 | `--require-proper-pair` | | FLAG | True | Require proper read pairs |
 | `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |

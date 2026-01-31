@@ -26,6 +26,7 @@ This generates `{sample}.features.json` alongside the standard TSV/Parquet outpu
   "fsc": { ... },
   "fsc_gene": { ... },
   "fsc_region": { ... },
+  "fsc_region_e1": { ... },
   "fsr": { ... },
   "fsd": { ... },
   "wps": { ... },
@@ -129,6 +130,32 @@ Per-exon/target fragment size data. More granular than gene-level.
 |-------|------|-------------|
 | `region_name` | string | Unique exon/target identifier |
 | `normalized_depth` | float | RPKM-like depth: (count × 10⁹) / (bp × total_frags) |
+
+---
+
+### FSC Region E1 (Panel Mode Only)
+
+First exon (E1) per gene, filtered from `fsc_region`. E1 serves as a promoter-proximal proxy with stronger cancer signal (Helzer et al. 2025).
+
+```json
+"fsc_region_e1": [
+  {
+    "chrom": "14",
+    "start": 105238685,
+    "end": 105238805,
+    "gene": "AKT1",
+    "region_name": "exon_AKT1_15a_1",
+    "region_bp": 120,
+    "ultra_short": 19.0,
+    "mono_nucl": 635.0,
+    "total": 1082.0,
+    "normalized_depth": 3039.77
+  }
+]
+```
+
+> [!TIP]
+> Use `fsc_region_e1` for **early cancer detection** models where promoter fragmentation changes are a primary signal.
 
 ### FSR (Fragment Size Ratios)
 
@@ -424,7 +451,8 @@ out/
 ├── sample.FSC.tsv                   # Fragment size coverage (bin-level)
 ├── sample.FSC.ontarget.tsv          # Panel mode: on-target FSC
 ├── sample.FSC.gene.tsv              # Gene-level FSC (with --assay)
-├── sample.FSC.region.tsv            # Exon-level FSC (aggregate_by='region')
+├── sample.FSC.regions.tsv           # Exon-level FSC (aggregate_by='region')
+├── sample.FSC.regions.e1only.tsv    # E1-only FSC (first exon per gene)
 └── sample.correction_factors.tsv    # GC correction factors
 ```
 

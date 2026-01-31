@@ -91,6 +91,10 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
 | `--correction-factors` | `-F` | PATH | | Pre-computed correction factors CSV |
 | `--duplex` | `-D` | FLAG | | Enable duplex consensus weighting (fgbio/Marianas) |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
+| `--minlen` | | INT | 65 | Minimum fragment length |
+| `--maxlen` | | INT | 1000 | Maximum fragment length |
+| `--skip-duplicates` | | FLAG | True | Skip duplicate reads (always enabled in backend) |
+| `--require-proper-pair` | | FLAG | False | Require proper pairs (disable for duplex BAMs) |
 | `--output-distributions` | `-d` | FLAG | | Output per-variant size distributions |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |

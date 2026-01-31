@@ -44,6 +44,7 @@ pub struct RegionInfo {
     pub name: String,
     pub strand: char,
     pub chrom_id: u32,
+    pub is_e1: bool,  // True if this is the first exon (E1) for its gene
 }
 
 /// Per-region MDS statistics
@@ -168,6 +169,7 @@ fn parse_gene_bed(
             name,
             strand,
             chrom_id,
+            is_e1: false,  // Set later by identify_e1_regions()
         });
     }
 
@@ -175,9 +177,15 @@ fn parse_gene_bed(
     Ok((regions, detected_format))
 }
 
-/// Identify E1 (first exon) for each gene by genomic position
+/// Identify and mark E1 (first exon) for each gene by genomic position.
+/// 
+/// E1 (first exon) serves as a proxy for promoter regions which are
+/// Nucleosome Depleted Regions (NDRs). Per Helzer et al. (2025), E1
+/// has stronger cancer signal than whole-gene averages.
+/// 
+/// Returns the count of E1 regions identified.
 fn identify_e1_regions(regions: &mut [RegionInfo]) -> usize {
-    // Group by gene, find first by position
+    // Group by gene, find first by position (lowest start coordinate)
     let mut gene_first: HashMap<String, (usize, u64)> = HashMap::new();
 
     for (idx, region) in regions.iter().enumerate() {
@@ -190,6 +198,11 @@ fn identify_e1_regions(regions: &mut [RegionInfo]) -> usize {
                 }
             })
             .or_insert((idx, region.start));
+    }
+
+    // Mark E1 regions
+    for (best_idx, _) in gene_first.values() {
+        regions[*best_idx].is_e1 = true;
     }
 
     let e1_count = gene_first.len();
@@ -310,9 +323,17 @@ pub fn run_region_mds(
         return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>("No regions found in gene BED"));
     }
 
-    // Identify E1 regions
+    // Identify E1 regions (mark is_e1 = true)
     let n_e1 = identify_e1_regions(&mut regions);
     info!("  E1 regions: {}", n_e1);
+
+    // Apply E1 filtering if requested
+    // This reduces processing time and output size for promoter-focused analysis
+    if e1_only {
+        let original_count = regions.len();
+        regions.retain(|r| r.is_e1);
+        info!("  E1 filtering: {} -> {} regions (E1 only)", original_count, regions.len());
+    }
 
     // Build interval trees for fast overlap lookup
     let trees = Arc::new(build_interval_trees(&regions));

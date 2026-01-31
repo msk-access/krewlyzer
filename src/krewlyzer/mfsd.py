@@ -34,6 +34,7 @@ def mfsd(
     mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
     minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length (filters discordant reads)"),
     maxlen: int = typer.Option(1000, "--maxlen", help="Maximum fragment length (default: 1000 for extended FSD range)"),
+    skip_duplicates: bool = typer.Option(True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads (always enabled in Rust backend)"),
     require_proper_pair: bool = typer.Option(False, "--require-proper-pair/--no-require-proper-pair", help="Require proper pairs (disable for duplex BAMs)"),
     duplex: bool = typer.Option(False, "--duplex", "-D", help="Enable duplex weighting (fgbio cD tag or Marianas read names). Only use for duplex consensus BAMs."),
     output_distributions: bool = typer.Option(False, "--output-distributions", "-d", help="Output per-variant size distributions"),

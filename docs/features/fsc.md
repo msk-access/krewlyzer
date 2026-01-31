@@ -99,6 +99,10 @@ flowchart TB
         PROC --> AGG["Window aggregation"]
         AGG --> PON["PON log2 ratios"]
         PON --> OUT["FSC.tsv"]
+        PON --> GENE["FSC.gene.tsv"]
+        GENE --> REG["FSC.regions.tsv"]
+        REG --> E1["filter_fsc_to_e1()"]
+        E1 --> E1OUT["FSC.regions.e1only.tsv"]
     end
 ```
 
@@ -356,6 +360,24 @@ chrom  start      end      gene  region_name     region_bp  ultra_short  ...  no
 1      11168235  11168345  MTOR  MTOR_target_02  110        8.0          ...  1272.71
 1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
 ```
+
+### E1-Only FSC Output (NEW)
+
+**File**: `{sample}.FSC.regions.e1only.tsv`
+
+E1 (first exon) filtering extracts only the first exon per gene by genomic position. Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+
+**Usage**:
+```bash
+# Default: E1-only file generated automatically with --assay
+krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2
+
+# Disable E1-only generation
+krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2 --disable-e1-aggregation
+```
+
+> [!TIP]
+> E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
 
 ### Normalized Depth (RPKM-like)
 

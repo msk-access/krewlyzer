@@ -203,6 +203,21 @@ Region MDS runs automatically when `--assay` is specified:
 krewlyzer run-all -i sample.bam -r ref.fa -o output/ --assay xs2 --generate-json
 ```
 
+### E1-Only Mode
+
+For promoter-focused analysis, use `--region-mds-e1-only` to process only first exons:
+
+```bash
+# Standalone
+krewlyzer region-mds sample.bam ref.fa output/ --assay xs2 --e1-only
+
+# Via run-all
+krewlyzer run-all -i sample.bam -r ref.fa -o output/ --assay xs2 --region-mds-e1-only
+```
+
+> [!TIP]
+> E1-only mode reduces processing time and output size for promoter-centric cancer detection.
+
 See [Panel Mode](../advanced/panel-mode.md) for details on panel-specific processing.
 
 ---

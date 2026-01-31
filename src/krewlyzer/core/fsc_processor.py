@@ -487,3 +487,91 @@ def apply_fsc_region_pon(
     logger.debug(f"Applied FSC region PON: {n_with_zscore}/{len(df)} regions with z-scores")
     
     return output_path
+
+
+# ============================================================================
+# E1-ONLY FILTERING
+# ============================================================================
+#
+# First exon (E1) filtering extracts only promoter-proximal regions.
+# Per Helzer et al. (2025), promoters are Nucleosome Depleted Regions (NDRs)
+# with distinct fragmentation patterns. E1 signal is often stronger for
+# early cancer detection than whole-gene averages.
+#
+# E1 is identified as the first exon by genomic position per gene,
+# consistent with the region-mds implementation.
+# ============================================================================
+
+def filter_fsc_to_e1(
+    fsc_regions_path: Path,
+    output_path: Path = None,
+) -> Path:
+    """
+    Filter FSC regions to E1 (first exon) per gene.
+    
+    Extracts the first exon by genomic position for each gene from the
+    full FSC.regions.tsv file. This focuses on promoter-proximal regions
+    where cancer fragmentation signal is strongest.
+    
+    Args:
+        fsc_regions_path: Path to FSC.regions.tsv file
+        output_path: Output path (defaults to input.e1only.tsv)
+        
+    Returns:
+        Path to E1-only output file, or None if input doesn't exist
+        
+    Scientific context:
+        E1 (first exon) serves as a proxy for promoter regions which are
+        Nucleosome Depleted Regions (NDRs). Differential enzymatic access
+        at NDRs produces distinct fragment end motifs. Cancer signal is
+        often stronger at E1 than averaging across all exons.
+    """
+    import pandas as pd
+    
+    fsc_regions_path = Path(fsc_regions_path)
+    
+    if not fsc_regions_path.exists():
+        logger.warning(f"FSC regions file not found: {fsc_regions_path}")
+        return None
+    
+    # Default output path: replace .tsv with .e1only.tsv
+    if output_path is None:
+        stem = fsc_regions_path.stem
+        if stem.endswith('.regions'):
+            stem = stem.replace('.regions', '.regions.e1only')
+        else:
+            stem = f"{stem}.e1only"
+        output_path = fsc_regions_path.parent / f"{stem}.tsv"
+    output_path = Path(output_path)
+    
+    # Read input
+    df = pd.read_csv(fsc_regions_path, sep='\t')
+    
+    # Validate required columns
+    required_cols = ['gene', 'chrom', 'start']
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        logger.warning(f"FSC regions file missing required columns {missing}: {fsc_regions_path}")
+        return None
+    
+    if df.empty:
+        logger.warning(f"FSC regions file is empty: {fsc_regions_path}")
+        return None
+    
+    n_input = len(df)
+    n_genes = df['gene'].nunique()
+    
+    # Sort by gene + genomic position, take first per gene (E1 = lowest start)
+    df_sorted = df.sort_values(['gene', 'chrom', 'start'])
+    e1_df = df_sorted.groupby('gene', as_index=False).first()
+    
+    # Preserve original column order
+    original_cols = [c for c in df.columns if c in e1_df.columns]
+    e1_df = e1_df[original_cols]
+    
+    # Write output
+    e1_df.to_csv(output_path, sep='\t', index=False)
+    
+    logger.info(f"FSC E1-only filter: {n_input} regions → {len(e1_df)} E1 regions ({n_genes} genes) → {output_path.name}")
+    
+    return output_path

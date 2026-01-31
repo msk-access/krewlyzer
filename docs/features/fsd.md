@@ -209,17 +209,19 @@ $$
 
 ---
 
-## 67-Bin Structure
+## 187-Bin Structure (65-999bp, 5bp steps)
 
-| Bin Index | Size Range | Description |
+| Bin Range | Size Range | Description |
 |-----------|------------|-------------|
 | 0 | 65-69bp | Ultra-short (sub-nucleosomal) |
-| 1-6 | 70-99bp | Short mono-nucleosomal |
+| 1-6 | 70-99bp | Short fragments |
 | 7-16 | 100-149bp | Core mono-nucleosomal |
-| 17-24 | 150-189bp | Peak mono-nucleosomal |
-| 25-34 | 190-239bp | Di-nucleosomal transition |
-| 35-50 | 240-319bp | Di-nucleosomal |
-| 51-66 | 320-399bp | Multi-nucleosomal |
+| 17-30 | 150-219bp | Peak mono-nucleosomal |
+| 31-50 | 220-319bp | Di-nucleosomal |
+| 51-86 | 320-499bp | Multi-nucleosomal |
+| 87-186 | 500-999bp | Extended range |
+
+> **Note**: The pipeline uses 5bp bins from 65bp to 999bp, yielding 187 columns. This extended range (up to 1000bp) captures multi-nucleosomal fragments for comprehensive FSD analysis.
 
 ---
 
