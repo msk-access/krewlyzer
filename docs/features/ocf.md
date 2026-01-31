@@ -89,6 +89,7 @@ krewlyzer ocf -i sample.bed.gz -o output/ \
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--ocr-input` | `-r` | PATH | | Open chromatin regions file |
 | `--pon-model` | `-P` | PATH | | PON model for z-score computation |
+| `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--target-regions` | `-T` | PATH | | Target BED (for on/off-target split) |
 | `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets from --assay) |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |

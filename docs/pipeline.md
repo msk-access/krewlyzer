@@ -141,6 +141,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/ \
 | `--wps-background` | | PATH | | WPS background Alu BED |
 | `--bait-padding` | | INT | 50 | Bait edge padding in bp |
 | `--pon-model` | `-P` | PATH | | PON model for normalization |
+| `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` (default) or `duplex` |
 | `--skip-pon` | | FLAG | False | Skip PON z-score normalization |
 | `--skip-target-regions` | | FLAG | False | Force WGS mode (ignore bundled targets) |
 | `--no-tfbs` | | FLAG | False | Skip TFBS region entropy analysis |
@@ -274,6 +275,7 @@ BAM + MAF → MFSD       (parallel path)
 | `--targets` | | Global target BED (fallback) |
 | `--genome` | `hg19` | Genome build |
 | `--pon_model` | | Global PON model (fallback) |
+| `--pon_variant` | `all_unique` | PON variant: `all_unique` or `duplex` |
 | `--bait_padding` | `50` | Bait edge padding for WPS |
 | `--skip_pon` | `false` | Skip PON z-score normalization |
 | `--no_tfbs` | `false` | Disable TFBS region entropy |

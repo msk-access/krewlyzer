@@ -106,6 +106,7 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 | `--sample-name` | `-s` | Auto | Override sample name |
 | `--arms-file` | `-a` | Bundled | Chromosome arms BED file |
 | `--pon-model` | `-P` | None | PON model for log-ratio computation |
+| `--pon-variant` | | all_unique | PON variant: `all_unique` or `duplex` |
 | `--target-regions` | `-T` | None | Target BED (enables on/off split) |
 | `--skip-target-regions` | | False | Force WGS mode (ignore bundled targets from --assay) |
 | `--genome` | `-G` | hg19 | Genome build (hg19/hg38) |

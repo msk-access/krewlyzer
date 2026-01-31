@@ -127,6 +127,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
 | `--gc-factors` | `-F` | PATH | | GC correction factors TSV |
 | `--pon-model` | `-P` | PATH | | PON model for z-score normalization |
+| `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization (for ML negatives) |
 | `--target-regions` | `-T` | PATH | | Target regions BED (panel mode: generates .ontarget.tsv) |
 | `--skip-target-regions` | | FLAG | | Force WGS mode (ignore bundled targets from --assay) |

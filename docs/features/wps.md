@@ -211,6 +211,7 @@ For targeted panels like MSK-ACCESS, genome-wide WPS anchors include many region
 | `--bait-padding` | | Bait edge padding in bp (default: 50, see below) |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--pon-model` | `-P` | PON model for z-score computation |
+| `--pon-variant` | | PON variant: `all_unique` (default) or `duplex` |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--threads` | `-t` | Number of threads (0=all cores) |
 | `--format` | `-f` | Output format: tsv, parquet, json |

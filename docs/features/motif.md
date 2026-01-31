@@ -56,6 +56,8 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `--assay` | `-A` | TEXT | | Assay type (xs1/xs2/wgs) for asset auto-loading |
 | `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
+| `--pon-model` | `-P` | PATH | | PON model for z-score computation |
+| `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
 

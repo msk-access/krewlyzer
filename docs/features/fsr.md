@@ -106,6 +106,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--target-regions` | `-T` | Target BED (for on/off-target split) |
 | `--skip-target-regions` | | Force WGS mode (ignore bundled targets from --assay) |
 | `--pon-model` | `-P` | PON model for count normalization |
+| `--pon-variant` | | PON variant: `all_unique` (default) or `duplex` |
 | `--genome` | `-G` | Genome build: hg19/hg38 |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--threads` | `-t` | Number of threads (0=all cores) |

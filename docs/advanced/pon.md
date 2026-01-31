@@ -44,6 +44,31 @@ The `--skip-pon` flag:
 - Available on all tools: `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `region-entropy`, `motif`
 - Logs which tools are skipping normalization
 
+## PON Variant Selection (`--pon-variant`)
+
+For duplex sequencing workflows (fgbio/Marianas), use `--pon-variant duplex` to select PONs built from duplex consensus reads:
+
+```bash
+# Default: all_unique PON (maximum coverage for standard cfDNA)
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2
+
+# Duplex PON (highest accuracy for duplex sequencing data)
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
+```
+
+| Variant | Description | Best For |
+|---------|-------------|----------|
+| `all_unique` | Built from all unique reads | Standard cfDNA (default) |
+| `duplex` | Built from duplex consensus reads | Duplex sequencing workflows |
+
+> [!TIP]
+> The `--pon-variant` flag is independent of the `--duplex` flag for mFSD. Use `--duplex` for mFSD weighting (enables cD tag usage), and `--pon-variant` for PON selection across all tools.
+
+The `--pon-variant` flag:
+- Defaults to `all_unique` (maximum coverage PON)
+- Available on all PON-using tools: `run-all`, `fsc`, `fsd`, `fsr`, `wps`, `ocf`, `motif`, `region-entropy`, `region-mds`
+- File structure: `pon/{genome}/{variant}/{assay}.{variant}.pon.parquet`
+
 ## PON Components
 
 | Component | Description | Used By |

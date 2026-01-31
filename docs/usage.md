@@ -86,6 +86,20 @@ krewlyzer fsd -i sample.bed.gz -o out/ --skip-pon
 
 > **Warning:** `-P/--pon-model` and `--skip-pon` are mutually exclusive.
 
+### PON Variant Selection (`--pon-variant`)
+
+For duplex sequencing workflows, select the appropriate PON variant:
+
+```bash
+# Default: all_unique PON (standard cfDNA, max coverage)
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2
+
+# Duplex PON (highest accuracy for duplex consensus BAMs)
+krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
+```
+
+> **Note:** `--pon-variant` controls PON file selection, while `--duplex` (mFSD only) enables cD tag weighting.
+
 ## Output Formats
 
 Krewlyzer outputs support multiple formats for different use cases.

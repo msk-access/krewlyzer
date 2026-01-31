@@ -187,7 +187,7 @@ class TestResolvePonModel:
         
         assert path == bundled_file
         assert source == "bundled"
-        mock_assets.get_pon.assert_called_once_with("xs2")
+        mock_assets.get_pon.assert_called_once_with("xs2", variant="all_unique")
     
     def test_no_bundled_pon_returns_none(self, mock_assets, mock_logger):
         """Assay without bundled PON should return (None, 'none')."""
@@ -230,6 +230,61 @@ class TestResolvePonModel:
                 assets=mock_assets,
                 log=mock_logger
             )
+    
+    def test_variant_default_is_all_unique(self, mock_assets, mock_logger, tmp_path):
+        """Default variant should be 'all_unique' when not specified."""
+        bundled_file = tmp_path / "xs2.all_unique.pon.parquet"
+        bundled_file.write_bytes(b"")
+        mock_assets.get_pon.return_value = bundled_file
+        
+        path, source = resolve_pon_model(
+            explicit_path=None,
+            assay="xs2",
+            skip_pon=False,
+            assets=mock_assets,
+            log=mock_logger
+            # variant not specified, should default to "all_unique"
+        )
+        
+        assert path == bundled_file
+        mock_assets.get_pon.assert_called_once_with("xs2", variant="all_unique")
+    
+    def test_variant_duplex_passed_to_assets(self, mock_assets, mock_logger, tmp_path):
+        """--pon-variant duplex should be passed to assets.get_pon()."""
+        bundled_file = tmp_path / "xs2.duplex.pon.parquet"
+        bundled_file.write_bytes(b"")
+        mock_assets.get_pon.return_value = bundled_file
+        
+        path, source = resolve_pon_model(
+            explicit_path=None,
+            assay="xs2",
+            skip_pon=False,
+            assets=mock_assets,
+            variant="duplex",
+            log=mock_logger
+        )
+        
+        assert path == bundled_file
+        assert source == "bundled"
+        mock_assets.get_pon.assert_called_once_with("xs2", variant="duplex")
+    
+    def test_explicit_path_ignores_variant(self, mock_assets, mock_logger, tmp_path):
+        """Explicit --pon-model should ignore --pon-variant."""
+        explicit_file = tmp_path / "custom.pon.parquet"
+        explicit_file.write_bytes(b"")
+        
+        path, source = resolve_pon_model(
+            explicit_path=explicit_file,
+            assay="xs2",
+            skip_pon=False,
+            assets=mock_assets,
+            variant="duplex",  # Should be ignored
+            log=mock_logger
+        )
+        
+        assert path == explicit_file
+        assert source == "explicit"
+        mock_assets.get_pon.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

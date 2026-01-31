@@ -181,6 +181,7 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--skip-target-regions` | | Force WGS mode (ignore bundled targets from --assay) |
 | `--assay` | `-A` | Assay type (xs1/xs2) for gene-centric FSC |
 | `--pon-model` | `-P` | PoN model for log2 ratio normalization |
+| `--pon-variant` | | PON variant: `all_unique` (default) or `duplex` |
 | `--genome` | `-G` | Genome build: hg19/hg38 (default: hg19) |
 | `--gc-correct` | | Apply GC bias correction (default: enabled) |
 | `--windows` | `-w` | Window size for aggregation (default: 100000) |
