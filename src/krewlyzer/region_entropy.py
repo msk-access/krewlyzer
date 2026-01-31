@@ -50,6 +50,7 @@ def region_entropy(
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     gc_factors: Optional[Path] = typer.Option(None, "--gc-factors", "-F", help="GC correction factors TSV"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data)"),
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
@@ -108,7 +109,7 @@ def region_entropy(
     try:
         resolved_pon_path, pon_source = resolve_pon_model(
             explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
-            assets=assets, log=logger
+            assets=assets, variant=pon_variant, log=logger
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")

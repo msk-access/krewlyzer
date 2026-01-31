@@ -157,6 +157,7 @@ def resolve_pon_model(
     assay: Optional[str],
     skip_pon: bool,
     assets: "AssetManager",
+    variant: str = "all_unique",
     log: Optional[logging.Logger] = None
 ) -> Tuple[Optional[Path], str]:
     """
@@ -165,7 +166,7 @@ def resolve_pon_model(
     Implements the following priority:
     1. Explicit --pon-model path (if valid) → "explicit"
     2. --skip-pon flag → None, "skipped"
-    3. Bundled PON for --assay (if available) → "bundled"
+    3. Bundled PON for --assay + --pon-variant (if available) → "bundled"
     4. No PON available → None, "none"
     
     Args:
@@ -173,6 +174,9 @@ def resolve_pon_model(
         assay: Assay code from --assay option (xs1, xs2, wgs, etc.), or None
         skip_pon: True if --skip-pon was specified
         assets: AssetManager instance for loading bundled PON
+        variant: PON variant to use ("all_unique" or "duplex"). Defaults to "all_unique".
+                 - all_unique: Maximum coverage (duplex + simplex + singletons)
+                 - duplex: Highest accuracy (duplex consensus only)
         log: Optional logger for debug output (defaults to module logger)
     
     Returns:
@@ -184,9 +188,9 @@ def resolve_pon_model(
         ValueError: If both --pon-model and --skip-pon are provided
     
     Example:
-        >>> path, source = resolve_pon_model(None, "xs2", False, assets)
+        >>> path, source = resolve_pon_model(None, "xs2", False, assets, variant="duplex")
         >>> print(f"{path.name} ({source})")
-        xs2.all_unique.pon.parquet (bundled)
+        xs2.duplex.pon.parquet (bundled)
     """
     log = log or logger
     
@@ -220,21 +224,21 @@ def resolve_pon_model(
         return None, "skipped"
     
     # ==========================================================================
-    # PRIORITY 3: Auto-load bundled PON for assay
+    # PRIORITY 3: Auto-load bundled PON for assay + variant
     # ==========================================================================
     if assay:
         try:
-            bundled_path = assets.get_pon(assay)
+            bundled_path = assets.get_pon(assay, variant=variant)
             if bundled_path and bundled_path.exists():
-                log.debug(f"PON resolution: Auto-loaded bundled PON for assay '{assay}': {bundled_path}")
+                log.info(f"PON resolution: Loaded bundled {variant} PON for '{assay}': {bundled_path.name}")
                 return bundled_path, "bundled"
             else:
                 log.debug(f"PON resolution: Bundled PON path invalid for assay '{assay}'")
                 return None, "none"
             
         except FileNotFoundError:
-            # No bundled PON for this assay
-            log.debug(f"PON resolution: No bundled PON for assay '{assay}'")
+            # No bundled PON for this assay/variant
+            log.debug(f"PON resolution: No bundled PON for assay='{assay}', variant='{variant}'")
             return None, "none"
     
     # ==========================================================================

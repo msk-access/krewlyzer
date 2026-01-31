@@ -46,6 +46,7 @@ def motif(
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
     assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1/xs2) for auto-loading bundled assets"),
     pon_model: Optional[Path] = typer.Option(None, '-P', '--pon-model', help="PON model for MDS z-score computation"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     kmer: int = typer.Option(4, '-k', '--kmer', help="K-mer size for motif extraction"),
     chromosomes: Optional[str] = typer.Option(None, '--chromosomes', help="Comma-separated chromosomes to process"),
@@ -109,7 +110,7 @@ def motif(
     try:
         resolved_pon_path, pon_source = resolve_pon_model(
             explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
-            assets=assets, log=logger
+            assets=assets, variant=pon_variant, log=logger
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")

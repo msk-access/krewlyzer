@@ -42,6 +42,7 @@ def fsd(
     assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1/xs2) for auto-loading bundled assets"),
     genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
@@ -90,7 +91,7 @@ def fsd(
     try:
         resolved_pon_path, pon_source = resolve_pon_model(
             explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
-            assets=assets, log=logger
+            assets=assets, variant=pon_variant, log=logger
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")

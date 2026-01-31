@@ -111,6 +111,7 @@ process KREWLYZER_RUNALL {
     
     // Skip/disable flags
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
+    def pon_variant_arg = params.pon_variant != 'all_unique' ? "--pon-variant ${params.pon_variant}" : ""
     def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
     def no_tfbs_arg = params.no_tfbs ? "--no-tfbs" : ""
     def no_atac_arg = params.no_atac ? "--no-atac" : ""
@@ -144,6 +145,7 @@ process KREWLYZER_RUNALL {
         $duplex_arg \\
         $bait_padding_arg \\
         $skip_pon_arg \\
+        $pon_variant_arg \\
         $skip_targets_arg \\
         $no_tfbs_arg \\
         $no_atac_arg \\

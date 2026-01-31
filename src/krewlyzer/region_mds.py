@@ -38,6 +38,7 @@ def region_mds(
     minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
     maxlen: int = typer.Option(1000, "--maxlen", help="Maximum fragment length (default: 1000 for consistency with run-all)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization (for PON samples used as ML negatives)"),
     threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0 = use all available cores)"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
@@ -117,7 +118,7 @@ def region_mds(
     try:
         resolved_pon_path, pon_source = resolve_pon_model(
             explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
-            assets=assets, log=logger
+            assets=assets, variant=pon_variant, log=logger
         )
     except ValueError as e:
         raise typer.BadParameter(str(e))

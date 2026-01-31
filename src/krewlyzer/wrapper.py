@@ -88,6 +88,7 @@ def run_all(
     wps_background: Optional[Path] = typer.Option(None, "--wps-background", help="WPS background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
     bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for GC correction and z-scores"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization for all tools (for PON samples used as ML negatives)"),
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay is specified (run as WGS)"),
     no_tfbs: bool = typer.Option(False, "--no-tfbs", help="Skip TFBS region entropy analysis"),
@@ -215,6 +216,7 @@ def run_all(
             assay=resolved_assay,
             skip_pon=skip_pon,
             assets=assets,
+            variant=pon_variant,
             log=logger
         )
     except ValueError as e:

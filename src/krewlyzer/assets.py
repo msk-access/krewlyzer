@@ -252,13 +252,18 @@ class AssetManager:
     
     def get_pon(self, assay: str, variant: str = "all_unique") -> Path:
         """
-        Get bundled PON model for a specific assay.
+        Get bundled PON model for a specific assay and variant.
+        
+        Searches in order:
+        1. Subdirectory: pon/{genome}/{variant}/{assay}.{variant}.pon.parquet
+        2. Flat variant: pon/{genome}/{assay}.{variant}.pon.parquet
+        3. Legacy: pon/{genome}/{assay}.pon.parquet
         
         Args:
-            assay: Assay code (xs1, xs2)
+            assay: Assay code (xs1, xs2, wgs)
             variant: PON variant to use:
-                - "all_unique": All unique reads (default, most common)
-                - "duplex": Duplex consensus reads only
+                - "all_unique": All unique molecules (default) - includes duplex, simplex, singletons
+                - "duplex": Duplex consensus reads only - highest accuracy, lower coverage
             
         Returns:
             Path to PON parquet file
@@ -266,19 +271,30 @@ class AssetManager:
         Raises:
             FileNotFoundError: If no bundled PON exists for the assay/variant
         """
-        # Try variant-specific naming: xs2.all_unique.pon.parquet
-        variant_path = self._get_path("pon", f"{assay}.{variant}.pon.parquet")
-        if variant_path.exists():
-            return variant_path
+        # Priority 1: Subdirectory structure (new standard)
+        # e.g., pon/GRCh37/all_unique/xs1.all_unique.pon.parquet
+        subdir_path = self.base_path / "pon" / self.genome_dir / variant / f"{assay}.{variant}.pon.parquet"
+        if subdir_path.exists():
+            logger.debug(f"PON resolved from subdirectory: {subdir_path}")
+            return subdir_path
         
-        # Fallback to simple naming: xs2.pon.parquet (legacy)
-        simple_path = self._get_path("pon", f"{assay}.pon.parquet")
-        if simple_path.exists():
-            return simple_path
+        # Priority 2: Flat structure with variant suffix
+        # e.g., pon/GRCh37/xs2.all_unique.pon.parquet
+        flat_variant_path = self._get_path("pon", f"{assay}.{variant}.pon.parquet")
+        if flat_variant_path.exists():
+            logger.debug(f"PON resolved from flat path: {flat_variant_path}")
+            return flat_variant_path
+        
+        # Priority 3: Legacy naming (no variant suffix)
+        # e.g., pon/GRCh37/xs2.pon.parquet
+        legacy_path = self._get_path("pon", f"{assay}.pon.parquet")
+        if legacy_path.exists():
+            logger.warning(f"Using legacy PON (no variant suffix): {legacy_path}")
+            return legacy_path
         
         raise FileNotFoundError(
-            f"PON not found for assay '{assay}' (variant='{variant}'): "
-            f"tried {variant_path} and {simple_path}"
+            f"PON not found for assay='{assay}', variant='{variant}'. "
+            f"Searched: {subdir_path}, {flat_variant_path}, {legacy_path}"
         )
     
     def list_available_assays(self) -> list:

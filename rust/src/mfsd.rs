@@ -94,6 +94,8 @@ struct VariantResult {
     skipped_proper_pair: usize,
     skipped_size: usize,
     skipped_extreme: usize,  // Discordant reads with TLEN > 10000
+    // Duplex tag tracking (for --duplex warning)
+    duplex_tags_found: usize,
 }
 
 impl VariantResult {
@@ -1000,6 +1002,11 @@ pub fn calculate_mfsd(
                     1.0  // No duplex weighting for non-duplex data
                 };
                 
+                // Track duplex tags found (weight != 1.0 means a tag was found)
+                if duplex_mode && duplex_weight != 1.0 {
+                    result.duplex_tags_found += 1;
+                }
+                
                 // Combined weight: GC correction * duplex confidence
                 let weight = gc_weight * duplex_weight;
                 
@@ -1065,6 +1072,20 @@ pub fn calculate_mfsd(
     
     if variants_no_coverage > 0 {
         warn!("{} variants had no fragment coverage", variants_no_coverage);
+    }
+    
+    // Duplex tag warning: alert user if --duplex was set but no tags were found
+    if duplex_mode {
+        let total_fragments = total_ref + total_alt + total_nonref + total_n;
+        let total_duplex_tags: usize = results.iter().map(|(_, res)| res.duplex_tags_found).sum();
+        if total_duplex_tags == 0 && total_fragments > 0 {
+            warn!("--duplex mode enabled but NO cD/Marianas tags found in {} fragments. \
+                   Ensure BAM was processed by fgbio/Marianas consensus caller.", total_fragments);
+        } else {
+            info!("Duplex tags found in {}/{} ({:.1}%) fragments", 
+                total_duplex_tags, total_fragments,
+                if total_fragments > 0 { total_duplex_tags as f64 / total_fragments as f64 * 100.0 } else { 0.0 });
+        }
     }
 
     // 3. Write Main Output

@@ -44,6 +44,7 @@ def fsc(
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
     bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
     pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
     skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSC)"),
     skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
@@ -100,6 +101,7 @@ def fsc(
             assay=assay,
             skip_pon=skip_pon,
             assets=assets,
+            variant=pon_variant,
             log=logger
         )
     except ValueError as e:
