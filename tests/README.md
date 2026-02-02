@@ -1,29 +1,41 @@
 # Krewlyzer Test Suite
 
+## Overview
+
+**239 tests** covering all features:
+
+| Category | Tests | Speed | Location |
+|----------|:-----:|-------|----------|
+| **Unit** | 155 | <1s | `tests/unit/` |
+| **Integration** | 52 | 5-30s | `tests/integration/` |
+| **CLI** | 10 | 2-5s | `tests/cli/` |
+| **E2E** | 3 | 30-60s | `tests/e2e/` |
+| **Asset Resolution** | 19 | <1s | `tests/test_asset_resolution.py` |
+
 ## Structure
 
 ```
 tests/
-├── conftest.py                 # Shared fixtures (15+ fixtures)
-├── README.md                   # This file
-├── cli/                        # CLI tests (10 tests)
-│   └── test_cli.py             # --help output validation
-├── unit/                       # Unit tests (20 tests)
-│   ├── test_fsc.py             # FSC fragment counting (3)
-│   ├── test_fsd.py             # FSD ratio calculations (5)
-│   ├── test_wps.py             # WPS score formulas (6)
-│   └── test_normalization.py   # Depth/GC normalization (6)
-├── integration/                # Integration tests (14 tests)
-│   ├── test_extract.py         # Extract blacklist/filtering (1)
-│   ├── test_motif.py           # Motif extraction (4)
-│   ├── test_mfsd.py            # mFSD variant classification (8)
-│   ├── test_ocf.py             # OCF processing (1)
-│   └── test_uxm.py             # UXM methylation (1)
-├── e2e/                        # End-to-end tests (1 test)
-│   └── test_run_all.py         # Full pipeline
-└── data/                       # Test data
-    ├── fixtures/               # Pre-generated fixtures
-    └── create_test_data.py     # Data generator script
+├── conftest.py             # Shared fixtures (15+ fixtures)
+├── README.md               # This file
+├── test_asset_resolution.py # Asset resolution (19 tests)
+├── cli/                    # CLI help tests (10)
+├── unit/                   # Unit tests (155)
+│   ├── test_fsc.py         # FSC fragment counting
+│   ├── test_fsd.py         # FSD ratio calculations
+│   ├── test_wps.py         # WPS score formulas
+│   ├── test_pon_model.py   # PON model loading (51)
+│   ├── test_gene_bed.py    # Gene BED parsing (25)
+│   └── ...
+├── integration/            # Integration tests (52)
+│   ├── test_extract.py     # Extract pipeline
+│   ├── test_mfsd.py        # mFSD variant classification
+│   ├── test_region_entropy.py # TFBS/ATAC entropy
+│   └── ...
+├── e2e/                    # End-to-end tests (3)
+│   └── test_run_all.py     # Full pipeline
+└── data/                   # Test data
+    └── fixtures/           # Pre-generated fixtures
 ```
 
 ## Running Tests
@@ -33,17 +45,18 @@ tests/
 pytest tests/
 
 # By category
-pytest tests/unit/           # Fast unit tests (~0.5s)
-pytest tests/integration/    # Integration tests
-pytest tests/e2e/            # End-to-end tests
+pytest tests/unit/           # Fast unit tests
+pytest tests/integration/    # Tool integration
+pytest tests/e2e/            # Full pipeline
 
-# By marker
-pytest -m unit               # Unit tests only
-pytest -m integration        # Integration tests
-pytest -m rust               # Tests requiring Rust backend
+# Specific feature
+pytest tests/unit/test_fsc.py
+
+# Stop on first failure
+pytest -x
 
 # With coverage
-pytest tests/ --cov=krewlyzer
+pytest tests/ --cov=krewlyzer --cov-report=html
 ```
 
 ## Test Markers
@@ -54,43 +67,23 @@ pytest tests/ --cov=krewlyzer
 | `integration` | Tool integration tests |
 | `e2e` | End-to-end workflow tests |
 | `slow` | Tests taking >10s |
-| `rust` | Tests requiring Rust backend |
 
-## Shared Fixtures (conftest.py)
+## Fixtures
+
+Key fixtures in `conftest.py`:
 
 | Fixture | Description |
 |---------|-------------|
 | `temp_bam` | Minimal BAM with proper pair |
-| `temp_bedgz` | Minimal BED.gz with fragments |
-| `temp_reference` | FASTA reference (2kb) |
-| `temp_bins` | FSC bins file |
-| `temp_arms` | FSD arms file |
-| `temp_transcripts` | WPS transcripts file |
-| `temp_ocr` | OCF regions file |
-| `temp_markers` | UXM markers file |
-| `temp_vcf` | mFSD variants file |
+| `temp_bedgz` | Minimal BED.gz (3 fragments) |
+| `temp_reference` | FASTA reference (12kb) |
+| `temp_bins`, `temp_arms` | FSC/FSD resources |
 | `full_test_data` | Complete bundle for run-all |
+| `real_bam`, `real_pon` | Production data fixtures |
 
-## Current Status
+## Documentation
 
-| Category | Passed | Skipped | Total |
-|----------|--------|---------|-------|
-| CLI | 10 | 0 | 10 |
-| Unit | 20 | 0 | 20 |
-| Integration | 32 | 4 | 36 |
-| E2E | 1 | 0 | 1 |
-| **Total** | **63** | **4** | **67** |
-
-**Coverage: 46%**
-
-✅ All executing tests pass
-
-## Real Data Fixtures
-
-Test fixtures in `tests/data/fixtures/`:
-- `test_sample.bam` - 3,144 reads from chr1:1-2000000
-- `test.pon.parquet` - MSK-ACCESS v1 PON model
-- `test_genome.fa` - 2Mb chr1 reference
-- `test_bins.bed` - 20 x 100kb bins
-- `test_arms.bed` - Chr1 p/q arms
-- `test_transcripts.tsv` - 3 test genes
+See [Testing Guide](../docs/development/testing-guide.md) for:
+- Feature → test file mapping
+- Test writing examples
+- Fixture reference

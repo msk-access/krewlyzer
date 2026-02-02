@@ -168,57 +168,33 @@ serializer = FeatureSerializer.from_outputs(output_dir, sample_id)
 
 ---
 
-## Testing Locally
+## Testing
 
-### Setup
+Krewlyzer has **239 tests** across unit, integration, and e2e categories.
 
-```bash
-# Clone and install
-git clone https://github.com/msk-access/krewlyzer.git
-cd krewlyzer
+**→ [Testing Guide](testing-guide.md)** for complete documentation including:
+- Feature → test file mapping
+- Fixture reference
+- Test writing examples
 
-# Create venv
-uv venv .venv
-source .venv/bin/activate
-
-# Install with test dependencies
-uv pip install -e ".[test]"
-```
-
-### Running Tests
+### Quick Commands
 
 ```bash
 # All tests
 pytest tests/
 
-# By category
-pytest tests/unit/           # Fast (~0.5s)
-pytest tests/integration/    # Full tool tests
-pytest tests/e2e/            # End-to-end
+# Fast unit tests only
+pytest tests/unit/
+
+# Specific feature
+pytest tests/unit/test_fsc.py
 
 # With coverage
 pytest tests/ --cov=krewlyzer --cov-report=html
 ```
 
-### Test Markers
-
-```bash
-pytest -m unit           # Unit tests only
-pytest -m integration    # Integration tests
-pytest -m rust           # Tests requiring Rust backend
-pytest -m "not slow"     # Skip slow tests
-```
-
-### Test Fixtures
-
-Key fixtures in `tests/conftest.py`:
-
-| Fixture | Description |
-|---------|-------------|
-| `temp_bam` | Minimal BAM with reads |
-| `temp_bedgz` | Pre-extracted BED.gz |
-| `temp_reference` | 2kb FASTA reference |
-| `full_test_data` | Complete bundle for run-all |
+> [!TIP]
+> **Modifying a feature?** Check the [Feature → Test Map](testing-guide.md#feature--test-map) to find which test file to update.
 
 ---
 

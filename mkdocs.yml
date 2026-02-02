@@ -90,6 +90,7 @@ nav:
   
   - Development:
     - Developer Guide: development/developer-guide.md
+    - Testing Guide: development/testing-guide.md
     - Release Guide: development/release-guide.md
     - Contributing: development/contributing.md
     - Contributing Data: development/contributing-data.md
