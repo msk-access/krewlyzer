@@ -2,6 +2,82 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-02-02
+
+### Added
+
+#### PON Framework
+- **`build-pon` command**: Generate PON models from cohort samples with FSD/WPS/OCF/MDS baselines
+- **Bundled PON assets**: Pre-computed xs1/xs2 PON models for `all_unique` and `duplex` variants
+- **`--pon-variant` flag**: Select between `all_unique` (max coverage) or `duplex` (highest accuracy) PON models
+- **Duplex tag warning**: mFSD warns when `--duplex` is used but no cD tags found in BAM
+
+#### Panel Mode (MSK-ACCESS)
+- **Assay-aware asset resolution**: Auto-load targets, anchors, PON via `-A/--assay xs1|xs2`
+- **On/Off-target splitting**: All tools produce separate `.ontarget.tsv` outputs
+- **Gene-level FSC**: New `{sample}.FSC.gene.tsv` and `{sample}.FSC.regions.e1only.tsv`
+- **Bait edge masking**: WPS `--bait-padding` to remove capture artifacts
+- **`--skip-target-regions`**: Force WGS mode for panel assays
+
+#### Duplex Sequencing
+- **`--duplex` flag (mFSD)**: Enable family size (cD tag) weighting for duplex BAMs
+- **LLR scoring**: Log-likelihood ratio classification for cross-species support
+- **GC-weighted mFSD**: 5 new GC-corrected mean fragment size columns
+
+#### Region-Based Analysis
+- **Region Entropy**: TFBS/ATAC dual-output architecture with per-cluster entropy
+- **Region MDS**: Per-gene Motif Diversity Score with E1-only filtering
+- **Rust backend**: New `region_entropy.rs` for high-performance calculation
+
+#### Feature Enhancements
+- **Jagged Index**: 1-mer End Motif analysis with C-end fraction
+- **WPS v2.0**: Hierarchical stacking, extended anchors, panel-specific normalization
+- **Output formats**: `--format` flag (tsv/parquet/json) for all tools
+- **`--generate-json`**: Unified JSON export with all features
+
+#### Infrastructure
+- **Git LFS**: Large files (.gz, .parquet, .bed) tracked via git-lfs
+- **BGZF compression**: All BED outputs use block-gzip format
+- **GC references**: Pre-computed Parquet format for GRCh37/GRCh38
+- **Unified processor**: Single-pass Rust pipeline for Extract→Motif→FSC→FSD→WPS→OCF
+
+### Changed
+
+#### Nextflow Pipeline
+- **nf-core compliance**: Refactored to shared INPUT_CHECK subworkflow
+- **KREWLYZER_RUNALL**: Unified module with 30+ output channels
+- **`pon_variant` parameter**: New pipeline parameter (default: `all_unique`)
+
+#### CLI
+- **9 tools with `--pon-variant`**: run-all, fsc, fsd, fsr, wps, ocf, motif, region-entropy, region-mds
+- **Centralized asset resolution**: `resolve_pon_model()` and `resolve_target_regions()`
+- **Filter flags**: `--mapq`, `--minlen`, `--maxlen`, `--skip-duplicates`, `--require-proper-pair`
+- **Parallel processing**: `--threads` option across all tools
+
+#### Data & Assets
+- **Terminology**: Renamed "blacklist" to "exclude_regions" for inclusive language
+- **Directory structure**: `data/{type}/{genome}/{variant}/` for organized assets
+- **Memory optimization**: Parallel sample processing with spawn context in build-pon
+
+### Fixed
+- mFSD: Filter discordant reads with extreme TLEN values
+- mFSD: Fix verbose mode hanging by moving debug logging outside parallel loop
+- Proper pair detection for legacy BAMs without proper pair flags
+- GC correction for gene-level FSC in panel mode
+- CIGAR handling improvements for INDELs and complex variants
+- BAM extraction for v1 ACCESS and bgzip output format
+
+### Documentation
+- **11 docs updated**: PON Variant Selection across pon.md, pipeline.md, usage.md, feature docs
+- **Release Guide**: New `docs/advanced/release-guide.md` for version release process
+- **Math rendering**: LaTeX formulas in all feature documentation
+- **Glossary**: New terms and definitions
+
+### Tests
+- **28 new test files**: Unit, integration, and e2e coverage
+- **4 PON variant tests**: test_asset_resolution.py
+- **Real data tests**: test_real_data.py for end-to-end validation
+
 ## [0.3.2] - 2025-12-18
 
 ### Fixed

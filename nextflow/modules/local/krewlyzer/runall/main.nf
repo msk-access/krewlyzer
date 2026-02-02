@@ -15,7 +15,7 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.3.2"
+    container "ghcr.io/msk-access/krewlyzer:0.5.0"
 
     input:
     tuple val(meta), path(bam), path(bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)
@@ -180,7 +180,7 @@ process KREWLYZER_RUNALL {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.3.2
+        krewlyzer: 0.5.0
     END_VERSIONS
     """
 }
