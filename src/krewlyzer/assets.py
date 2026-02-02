@@ -16,6 +16,7 @@ from pathlib import Path
 from enum import Enum
 from typing import Optional
 import logging
+import os
 
 logger = logging.getLogger("krewlyzer.assets")
 
@@ -40,9 +41,20 @@ class AssetManager:
             self.file_prefix = "hg38"
         else:
             raise ValueError(f"Unsupported genome: {genome}. Must be hg19/GRCh37 or hg38/GRCh38.")
-            
-        # Assets are located in krewlyzer/data/...
-        self.base_path = Path(__file__).parent / "data"
+        
+        # Check KREWLYZER_DATA_DIR env var first (for pip install + external data clone)
+        # Then fall back to bundled data (for editable install or Docker)
+        env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
+        if env_data_dir:
+            self.base_path = Path(env_data_dir).expanduser()
+            if not self.base_path.exists():
+                raise ValueError(
+                    f"KREWLYZER_DATA_DIR does not exist: {env_data_dir}\n"
+                    f"Clone data with: git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data && cd ~/.krewlyzer-data && git lfs pull"
+                )
+            logger.info(f"Using external data directory: {self.base_path}")
+        else:
+            self.base_path = Path(__file__).parent / "data"
 
     def _get_path(self, category_dir: str, filename: str) -> Path:
         path = self.base_path / category_dir / self.genome_dir / filename

@@ -49,12 +49,22 @@ Cancer cells leave molecular fingerprints in your blood. Krewlyzer finds them.
 ## Quick Install
 
 ```bash
-# Docker (recommended)
+# Docker (recommended - all data bundled)
 docker pull ghcr.io/msk-access/krewlyzer:latest
 
-# pip
+# Clone + Install (development)
+git clone https://github.com/msk-access/krewlyzer.git && cd krewlyzer
+git lfs pull && pip install -e .
+
+# pip + Data Clone (custom environments)
 pip install krewlyzer
+git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data
+cd ~/.krewlyzer-data && git lfs pull
+export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data
 ```
+
+> [!NOTE]
+> **pip users**: The `KREWLYZER_DATA_DIR` env var is required to locate bundled assets. See [Installation Guide](https://msk-access.github.io/krewlyzer/getting-started/installation/) for details.
 
 ## Quick Start
 
@@ -140,4 +150,4 @@ GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](./LICENSE).
 
 ---
 
-*Developed by the MSK-ACCESS team at Memorial Sloan Kettering Cancer Center.*
+*Developed by Ronak Shah (@rhshah) at Memorial Sloan Kettering Cancer Center.*

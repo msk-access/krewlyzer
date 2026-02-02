@@ -39,9 +39,11 @@ build-backend = "maturin"
 python-source = "src"
 manifest-path = "rust/Cargo.toml"
 module-name = "krewlyzer._core"
-include = [
-    "src/krewlyzer/data/**/*"
-]
+# NOTE: No 'include' directive = no data bundled in wheel (keeps wheel <100MB for PyPI)
+# Data source by installation method:
+#   - Docker: bundled in image
+#   - git clone + pip install -e .: uses source directory directly
+#   - pip install: requires KREWLYZER_DATA_DIR env var pointing to cloned data
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

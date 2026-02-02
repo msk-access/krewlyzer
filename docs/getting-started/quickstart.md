@@ -4,15 +4,27 @@ Get running with Krewlyzer in 5 minutes.
 
 ## Quick Install
 
-=== "pip"
-    ```bash
-    pip install krewlyzer
-    ```
-
-=== "Docker"
+=== "Docker (Recommended)"
     ```bash
     docker pull ghcr.io/msk-access/krewlyzer:latest
     ```
+
+=== "Clone + Install"
+    ```bash
+    git clone https://github.com/msk-access/krewlyzer.git && cd krewlyzer
+    git lfs pull && pip install -e .
+    ```
+
+=== "pip + Data Clone"
+    ```bash
+    pip install krewlyzer
+    git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data
+    cd ~/.krewlyzer-data && git lfs pull
+    export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data
+    ```
+
+> [!NOTE]
+> **pip users**: See [Installation Guide](installation.md) for `KREWLYZER_DATA_DIR` setup.
 
 ## Your First Analysis
 

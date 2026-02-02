@@ -2,7 +2,7 @@
 
 ## Overview
 
-Krewlyzer has **239 tests** covering all features via pytest.
+Krewlyzer has **245 tests** covering all features via pytest.
 
 | Category | Tests | Speed | Location |
 |----------|:-----:|-------|----------|
@@ -39,6 +39,7 @@ Krewlyzer has **239 tests** covering all features via pytest.
 | **PON Build** | `integration/test_pon.py`, `test_pon_dual_gc.py` | 8 |
 | **Gene BED** | `unit/test_gene_bed.py` | 25 |
 | **Asset Manager** | `unit/test_asset_manager.py` | 10 |
+| **External Data Dir** | `unit/test_external_data_dir.py` | 6 |
 | **Asset Resolution** | `test_asset_resolution.py` | 19 |
 | **BGZF Reader** | `unit/test_bgzf_reader.py` | 5 |
 | **Normalization** | `unit/test_normalization.py` | 6 |
