@@ -23,8 +23,8 @@ Krewlyzer extracts **fragmentomics features** from cfDNA sequencing data:
 krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 ```
 
-> **New to cfDNA?** Start with [What is Cell-Free DNA?](introduction.md)  
-> **Need terminology help?** See the [Glossary](glossary.md)
+> **New to cfDNA?** Start with [What is Cell-Free DNA?](getting-started/concepts.md)  
+> **Need terminology help?** See the [Glossary](reference/glossary.md)
 
 ---
 

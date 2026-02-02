@@ -6,16 +6,16 @@ Krewlyzer provides 11 standalone feature extraction commands plus a unified `run
 
 | Command | Input | Output | Primary Use Case |
 |---------|-------|--------|------------------|
-| [`extract`](extract.md) | BAM | `.bed.gz`, `.metadata.json` | Fragment extraction & GC factors |
-| [`motif`](motif.md) | BAM | `.EndMotif.tsv`, `.MDS.tsv` | Fragmentation patterns |
-| [`fsc`](fsc.md) | BED.gz | `.FSC.tsv` | Copy number detection |
-| [`fsr`](fsr.md) | BED.gz | `.FSR.tsv` | Tumor fraction estimation |
-| [`fsd`](fsd.md) | BED.gz | `.FSD.tsv` | Size distribution analysis |
-| [`wps`](wps.md) | BED.gz | `.WPS.tsv.gz` | Nucleosome positioning |
-| [`ocf`](ocf.md) | BED.gz | `.OCF.tsv` | Tissue of origin |
-| [`region-entropy`](region-entropy.md) | BED.gz | `.TFBS.tsv`, `.ATAC.tsv` | Regulatory region analysis |
-| [`uxm`](uxm.md) | Bisulfite BAM | `.UXM.tsv` | Methylation deconvolution |
-| [`mfsd`](mfsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
+| [`extract`](core/extract.md) | BAM | `.bed.gz`, `.metadata.json` | Fragment extraction & GC factors |
+| [`motif`](regulatory/motif.md) | BAM | `.EndMotif.tsv`, `.MDS.tsv` | Fragmentation patterns |
+| [`fsc`](core/fsc.md) | BED.gz | `.FSC.tsv` | Copy number detection |
+| [`fsr`](core/fsr.md) | BED.gz | `.FSR.tsv` | Tumor fraction estimation |
+| [`fsd`](core/fsd.md) | BED.gz | `.FSD.tsv` | Size distribution analysis |
+| [`wps`](core/wps.md) | BED.gz | `.WPS.tsv.gz` | Nucleosome positioning |
+| [`ocf`](regulatory/ocf.md) | BED.gz | `.OCF.tsv` | Tissue of origin |
+| [`region-entropy`](regulatory/region-entropy.md) | BED.gz | `.TFBS.tsv`, `.ATAC.tsv` | Regulatory region analysis |
+| [`uxm`](methylation/uxm.md) | Bisulfite BAM | `.UXM.tsv` | Methylation deconvolution |
+| [`mfsd`](core/fsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
 | `run-all` | BAM | All outputs | Complete analysis |
 
 ---
@@ -126,12 +126,12 @@ All feature commands share these core options:
 | `-v, --verbose` | Enable verbose logging |
 | `-f, --format` | Output format: tsv, parquet, json |
 
-See individual feature pages for command-specific options, or [JSON Output](json-output.md) for format details.
+See individual feature pages for command-specific options, or [JSON Output](output/json-output.md) for format details.
 
 ---
 
 ## Additional Resources
 
-- **[JSON Output](json-output.md)** - Unified JSON for ML pipelines (`--generate-json`)
-- **[Panel Mode](../advanced/panel-mode.md)** - MSK-ACCESS and targeted panel analysis (`--assay`)
-- **[PON Building](build-pon.md)** - Creating cohort baselines for z-score normalization
+- **[JSON Output](output/json-output.md)** - Unified JSON for ML pipelines (`--generate-json`)
+- **[Panel Mode](../guides/panel-mode.md)** - MSK-ACCESS and targeted panel analysis (`--assay`)
+- **[PON Building](../guides/building-pon.md)** - Creating cohort baselines for z-score normalization
