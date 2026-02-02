@@ -38,40 +38,67 @@ plugins:
 
 nav:
   - Home: index.md
-  - Introduction: introduction.md
-  - Getting Started: getting-started.md
-  - Installation: installation.md
-  - Usage: usage.md
+  
+  - Getting Started:
+    - Overview: getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - Concepts: getting-started/concepts.md
+  
+  - CLI Reference:
+    - Overview: cli/index.md
+    - run-all: cli/run-all.md
+  
+  - Nextflow Pipeline:
+    - Overview: nextflow/index.md
+    - Samplesheet: nextflow/samplesheet.md
+    - Parameters: nextflow/parameters.md
+    - Outputs: nextflow/outputs.md
+    - Examples: nextflow/examples.md
+  
   - Features:
     - Overview: features/index.md
-    - Fragment Extraction: features/extract.md
-    - Motif Extraction: features/motif.md
-    - Fragment Size Coverage (FSC): features/fsc.md
-    - Fragment Size Ratio (FSR): features/fsr.md
-    - Fragment Size Distribution (FSD): features/fsd.md
-    - Windowed Protection Score (WPS): features/wps.md
-    - Orientation-aware Fragmentation (OCF): features/ocf.md
-    - Region Entropy (TFBS/ATAC): features/region-entropy.md
-    - Fragment-level Methylation (UXM): features/uxm.md
-    - Mutant Fragment Size (mFSD): features/mfsd.md
-    - Region MDS (Per-Exon Motif Diversity): features/region-mds.md
-    - JSON Output: features/json-output.md
-    - PON Building: features/build-pon.md
-  - Advanced:
-    - Architecture: advanced/architecture.md
-    - PON Models: advanced/pon.md
-    - GC Correction: advanced/gc-correction.md
-    - Input File Formats: advanced/input-formats.md
-    - Panel Mode: advanced/panel-mode.md
-    - MSK-ACCESS Quickstart: advanced/msk-access-quickstart.md
-    - Developer Guide: advanced/developer-guide.md
-  - Pipeline: pipeline.md
-  - Troubleshooting: troubleshooting.md
-  - Citation: citation.md
-  - Glossary: glossary.md
-  - Changelog: changelog.md
-  - Contributing Data: contributing-data.md
-  - Contributing: contributing.md
+    - Core:
+      - Fragment Extraction: features/core/extract.md
+      - FSC: features/core/fsc.md
+      - FSD: features/core/fsd.md
+      - FSR: features/core/fsr.md
+      - WPS: features/core/wps.md
+    - Regulatory:
+      - End Motif: features/regulatory/motif.md
+      - OCF: features/regulatory/ocf.md
+      - Region Entropy: features/regulatory/region-entropy.md
+      - Region MDS: features/regulatory/region-mds.md
+    - Variant:
+      - mFSD: features/variant/mfsd.md
+    - Methylation:
+      - UXM: features/methylation/uxm.md
+    - Output:
+      - JSON Export: features/output/json-output.md
+  
+  - Guides:
+    - Panel Mode: guides/panel-mode.md
+    - MSK-ACCESS Quickstart: guides/msk-access-quickstart.md
+    - Building PON: guides/building-pon.md
+    - GC Correction: guides/gc-correction.md
+  
+  - Reference:
+    - PON Models: reference/pon-models.md
+    - Input Formats: reference/input-formats.md
+    - Architecture: reference/architecture.md
+    - Glossary: reference/glossary.md
+  
+  - Development:
+    - Developer Guide: development/developer-guide.md
+    - Testing Guide: development/testing-guide.md
+    - Release Guide: development/release-guide.md
+    - Contributing: development/contributing.md
+    - Contributing Data: development/contributing-data.md
+  
+  - Resources:
+    - Citation: resources/citation.md
+    - Troubleshooting: resources/troubleshooting.md
+    - Changelog: resources/changelog.md
 
 markdown_extensions:
   - admonition
