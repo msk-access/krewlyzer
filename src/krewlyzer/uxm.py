@@ -1,8 +1,15 @@
 """
 Fragment-level Methylation analysis (UXM) calculation.
 
-Calculates UXM features for a single sample.
+Analyzes CpG methylation patterns in cell-free DNA fragments using bisulfite BAM.
+UXM (Unmethylated-to-methylated Xition) scores measure epigenetic tissue signatures.
+
 Uses Rust backend for accelerated computation.
+
+Input: Bisulfite-converted BAM file (from WGBS or capture panel)
+Output: {sample}.UXM.tsv - Fragment-level methylation scores at marker regions
+
+Markers: Genomic regions where methylation status differs between tissues.
 """
 
 import typer
@@ -14,7 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("uxm")
 
 # Rust backend is required
@@ -22,11 +29,13 @@ from krewlyzer import _core
 
 
 def uxm(
-    bam_input: Path = typer.Argument(..., help="Input bisulfite BAM file"),
+    bam_input: Path = typer.Option(..., "--input", "-i", help="Input bisulfite BAM file"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
     sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
     mark_input: Optional[Path] = typer.Option(None, "--mark-input", "-m", help="Path to genomic marker file"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)")
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
 ):
     """
     Calculate Fragment-level Methylation (UXM) features for a single sample.
@@ -34,6 +43,13 @@ def uxm(
     Input: Bisulfite BAM file
     Output: {sample}.UXM.tsv file with fragment-level methylation scores
     """
+    from .assets import AssetManager
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+    
     # Configure Rust thread pool
     if threads > 0:
         try:
@@ -51,14 +67,28 @@ def uxm(
         logger.error(f"Input must be a .bam file: {bam_input}")
         raise typer.Exit(1)
     
-    # Default marker file
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if mark_input and mark_input.exists():
+        logger.debug(f"Validating user-provided marker file: {mark_input}")
+        validate_file(mark_input, FileSchema.BED3)
+    
+    # Initialize Asset Manager
+    try:
+        assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} → {assets.genome_dir}")
+    except ValueError as e:
+        logger.error(str(e))
+        raise typer.Exit(1)
+    
+    # Default marker file via AssetManager
     if mark_input is None:
-        pkg_dir = Path(__file__).parent
-        mark_input = pkg_dir / "data" / "methylation-markers" / "uxm_markers_hg19.bed"
-        if mark_input.exists():
+        try:
+            mark_input = assets.resolve("methylation_markers")
             logger.info(f"Using default marker file: {mark_input}")
-        else:
-            logger.error("No default marker file found. Please provide --mark-input")
+        except FileNotFoundError as e:
+            logger.error(f"Methylation markers not found: {e}")
+            logger.error(f"Please provide --mark-input or ensure markers exist for {genome}")
             raise typer.Exit(1)
     
     if not mark_input.exists():
@@ -93,4 +123,7 @@ def uxm(
 
     except Exception as e:
         logger.error(f"UXM calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
         raise typer.Exit(1)

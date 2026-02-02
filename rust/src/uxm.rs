@@ -1,7 +1,17 @@
+//! UXM (Fragment-level Methylation) Analysis
+//!
+//! Calculates fragment-level methylation status from bisulfite-converted BAM files.
+//! For each marker region, classifies fragments as:
+//! - U: Unmethylated (ratio <= unmethy_threshold)
+//! - X: Mixed (between thresholds)
+//! - M: Methylated (ratio >= methy_threshold)
+//!
+//! Uses XM tag from BAM for CpG methylation calls (Z=methylated, z=unmethylated).
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 use rust_htslib::bam::{self, Read};
 use rust_htslib::bam::record::Aux;
 use rayon::prelude::*;
@@ -21,6 +31,7 @@ use log::info;
 /// * `unmethy_threshold` - Threshold for 'U'
 /// * `pe_type` - "SE" or "PE"
 #[pyfunction]
+#[pyo3(signature = (bam_path, marker_path, output_file, map_quality, min_cpg, methy_threshold, unmethy_threshold, _pe_type, silent=false))]
 pub fn calculate_uxm(
     bam_path: PathBuf,
     marker_path: PathBuf,
@@ -29,7 +40,8 @@ pub fn calculate_uxm(
     min_cpg: u32,
     methy_threshold: f64,
     unmethy_threshold: f64,
-    _pe_type: String, // Prefixed with _ as currently unused
+    _pe_type: String,
+    silent: bool,
 ) -> PyResult<()> {
     // 1. Load Markers
     struct Marker {
@@ -40,8 +52,8 @@ pub fn calculate_uxm(
     // SAFETY: Share BAM path strings.
     
     let mut markers = Vec::new();
-    let file = File::open(&marker_path)?;
-    let reader = BufReader::new(file);
+    let reader = crate::bed::get_reader(&marker_path)
+        .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     
     info!("Loading markers from {:?}...", marker_path);
 
@@ -60,13 +72,18 @@ pub fn calculate_uxm(
     let total_markers = markers.len();
     info!("Found {} markers. Processing in parallel...", total_markers);
     
-    // Progress Bar
-    let pb = ProgressBar::new(total_markers as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    // Progress Bar (hidden when called from wrapper)
+    let pb = if silent {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(total_markers as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    };
 
     // 2. Process Markers (Parallel)
     let results: Vec<String> = markers.par_iter()

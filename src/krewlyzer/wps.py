@@ -1,142 +1,166 @@
 """
 Windowed Protection Score (WPS) calculation.
 
-Calculates unified WPS features (Long, Short, Ratio) for a single sample.
-Uses Rust backend for accelerated computation.
+Calculates WPS features for a single sample measuring nucleosome positioning.
+This CLI is a thin wrapper around the unified processor.
+
+Dual-stream weighted fragment processing:
+- WPS-Nuc (Nucleosome): 120bp window, weighted fragments
+  * Primary [160,175bp]: weight 1.0
+  * Secondary [120,159]∪[176,180bp]: weight 0.5
+- WPS-TF (Transcription Factor): 16bp window, fragments [35,80bp]
+
+Output: {sample}.WPS.parquet with columns:
+    - gene_id, chrom, pos
+    - cov_long, cov_short (coverage)
+    - wps_long, wps_short, wps_ratio (raw WPS)
+    
+With --pon-model: Adds wps_long_z and wps_short_z columns (z-scores vs PON)
+With --assay: Adds {sample}.WPS.panel.parquet for panel-specific anchors
 """
 
 import typer
 from pathlib import Path
 from typing import Optional
 import logging
-import json
 
 from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console)], format="%(message)s")
+logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
 logger = logging.getLogger("wps")
 
-# Rust backend is required
-from krewlyzer import _core
+# Import asset resolution and startup banner
+from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.logging import log_startup_banner, ResolvedAsset
+from . import __version__
 
 
 def wps(
-    bedgz_input: Path = typer.Argument(..., help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file (default: derived from input filename)"),
-    tsv_input: Optional[Path] = typer.Option(None, "--tsv-input", "-t", help="Path to transcript/region TSV file"),
-    reference: Optional[Path] = typer.Option(None, "--reference", "-r", help="Reference FASTA for GC computation (required for GC correction)"),
+    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
+    wps_anchors: Optional[Path] = typer.Option(None, "--wps-anchors", help="WPS anchors BED (merged TSS+CTCF) for dual-stream profiling"),
+    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay code (xs1, xs2) for auto-loading bundled assets"),
+    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Panel capture BED (enables bait edge masking)"),
+    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
+    bait_padding: int = typer.Option(50, "--bait-padding", help="Bait edge padding in bp (default 50, use 15-20 for small exon panels)"),
+    background: Optional[Path] = typer.Option(None, "--background", "-B", help="Background Alu BED for hierarchical stacking (auto-loaded if not specified)"),
+    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
+    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for z-score computation"),
+    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
+    skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
     empty: bool = typer.Option(False, "--empty/--no-empty", help="Include regions with no coverage"),
-    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction using LOESS (default: True, requires --reference)"),
-    threads: int = typer.Option(0, "--threads", "-p", help="Number of threads (0=all cores)"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging")
+    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
+    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
 ):
     """
     Calculate unified Windowed Protection Score (WPS) features for a single sample.
     
-    Calculates both Long WPS (nucleosome, 120-180bp) and Short WPS (TF, 35-80bp)
-    in a single pass, plus their ratio and normalized versions.
-    
     Input: .bed.gz file from extract step
-    Output: {sample}.WPS.tsv.gz file with columns:
-        - gene_id, chrom, pos
-        - cov_long, cov_short (coverage)
-        - wps_long, wps_short, wps_ratio (raw WPS)
-        - wps_long_norm, wps_short_norm, wps_ratio_norm (normalized per million)
-    
-    GC Correction:
-        By default, computes region GC content from the reference FASTA.
-        Use --no-gc-correct to disable, or provide --reference to enable.
+    Output: {sample}.WPS.parquet with nucleosome positioning scores per region
     """
-    # Configure Rust thread pool
-    if threads > 0:
-        try:
-            _core.configure_threads(threads)
-            logger.info(f"Configured {threads} threads for parallel processing")
-        except Exception as e:
-            logger.warning(f"Could not configure threads: {e}")
+    from .core.unified_processor import run_features
+    from .assets import AssetManager
+    
+    # Configure verbose logging
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+        logging.getLogger("krewlyzer.core.unified_processor").setLevel(logging.DEBUG)
     
     # Input validation
     if not bedgz_input.exists():
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
     
-    if not str(bedgz_input).endswith('.bed.gz'):
-        logger.error(f"Input must be a .bed.gz file: {bedgz_input}")
-        raise typer.Exit(1)
+    # Validate user-provided override files
+    from .core.asset_validation import validate_file, FileSchema
+    if wps_anchors and wps_anchors.exists():
+        logger.debug(f"Validating user-provided WPS anchors: {wps_anchors}")
+        validate_file(wps_anchors, FileSchema.WPS_ANCHORS)
+    if background and background.exists():
+        logger.debug(f"Validating user-provided WPS background: {background}")
+        validate_file(background, FileSchema.WPS_ANCHORS)
+    if target_regions and target_regions.exists():
+        logger.debug(f"Validating user-provided target regions: {target_regions}")
+        validate_file(target_regions, FileSchema.BED3)
     
-    # GC correction requires reference
-    if gc_correct and reference is None:
-        logger.warning("GC correction enabled but --reference not provided. Disabling GC correction.")
-        logger.warning("Use --reference (-r) to enable GC correction, or --no-gc-correct to suppress this warning.")
-        gc_correct = False
-    
-    if reference and not reference.exists():
-        logger.error(f"Reference FASTA not found: {reference}")
-        raise typer.Exit(1)
-    
-    # Default transcript file
-    if tsv_input is None:
-        pkg_dir = Path(__file__).parent
-        tsv_input = pkg_dir / "data" / "TranscriptAnno" / "transcriptAnno-hg19-1kb.tsv"
-        logger.info(f"Using default transcript file: {tsv_input}")
-    
-    if not tsv_input.exists():
-        logger.error(f"Transcript file not found: {tsv_input}")
-        raise typer.Exit(1)
-    
-    # Create output directory
-    output.mkdir(parents=True, exist_ok=True)
-    
-    # Derive sample name (use provided or derive from input filename)
+    # Derive sample name
     if sample_name is None:
         sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
     
+    # Initialize AssetManager
+    assets = AssetManager(genome)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # ASSET RESOLUTION
+    # ═══════════════════════════════════════════════════════════════════
     try:
-        logger.info(f"Processing {bedgz_input.name}")
-        logger.info("Calculating unified WPS (Long: 120-180bp, Short: 35-80bp)")
-        
-        if gc_correct:
-            logger.info(f"GC correction enabled using reference: {reference.name}")
-        
-        # Get metadata if available
-        total_fragments = None
-        metadata_file = str(bedgz_input).replace('.bed.gz', '.metadata.json')
-        if Path(metadata_file).exists():
-            try:
-                with open(metadata_file, 'r') as f:
-                    meta = json.load(f)
-                    total_fragments = meta.get('total_fragments')
-                    if total_fragments:
-                        logger.info(f"Loaded metadata: {total_fragments:,} fragments")
-            except Exception as e:
-                logger.warning(f"Could not load metadata: {e}")
-        else:
-            logger.warning(f"Metadata file not found: {metadata_file}")
-            logger.warning("WPS normalized columns (wps_*_norm) will NOT be comparable across samples!")
-            logger.warning("Run 'krewlyzer extract' first to generate metadata.json")
-
-        
-        # Call Rust backend (unified calculation with GC correction support)
-        reference_path = str(reference) if reference else None
-        count = _core.calculate_wps(
-            str(bedgz_input),
-            str(tsv_input),
-            str(output),
-            sample_name,
-            empty,
-            total_fragments,
-            reference_path,
-            gc_correct,
-            verbose
+        resolved_pon_path, pon_source = resolve_pon_model(
+            explicit_path=pon_model, assay=assay, skip_pon=skip_pon,
+            assets=assets, variant=pon_variant, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions, assay=assay, skip_target_regions=skip_target_regions,
+            assets=assets, log=logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    
+    is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # STARTUP BANNER
+    # ═══════════════════════════════════════════════════════════════════
+    log_startup_banner(
+        tool_name="wps", version=__version__,
+        inputs={"Fragments": str(bedgz_input.name), "Output": str(output)},
+        config={"Genome": f"{assets.raw_genome} → {assets.genome_dir}", "Assay": assay or "None", "Mode": "Panel" if is_panel_mode else "WGS"},
+        assets=[ResolvedAsset("PON", resolved_pon_path, pon_source), ResolvedAsset("Targets", resolved_target_path, target_source)],
+        logger=logger
+    )
+    
+    try:
+        outputs = run_features(
+            bed_path=bedgz_input,
+            output_dir=output,
+            sample_name=sample_name,
+            genome=genome,
+            enable_wps=True,
+            target_regions=resolved_target_path,
+            assay=assay,
+            pon_model=resolved_pon_path,
+            skip_pon_zscore=skip_pon,
+            wps_anchors=wps_anchors,
+            wps_background=background,
+            wps_bait_padding=bait_padding,
+            wps_empty=empty,
+            gc_correct=gc_correct,
+            threads=threads,
+            verbose=verbose,
         )
         
-        logger.info(f"WPS complete: processed {count} regions → {output}/{sample_name}.WPS.tsv.gz")
-        logger.info("Output columns: gene_id, chrom, pos, cov_long, cov_short, wps_long, wps_short, wps_ratio, wps_long_norm, wps_short_norm, wps_ratio_norm")
-
-    except Exception as e:
-        logger.error(f"WPS calculation failed: {e}")
+        if outputs.wps and outputs.wps.exists():
+            logger.info(f"✅ WPS complete: {outputs.wps}")
+        if outputs.wps_background and outputs.wps_background.exists():
+            logger.info(f"✅ WPS background: {outputs.wps_background}")
+        if outputs.wps_panel and outputs.wps_panel.exists():
+            logger.info(f"✅ WPS panel: {outputs.wps_panel}")
+            
+    except FileNotFoundError as e:
+        logger.error(str(e))
         raise typer.Exit(1)
-
+    except RuntimeError as e:
+        logger.error(f"WPS calculation failed: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        raise typer.Exit(1)

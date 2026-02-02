@@ -1,7 +1,23 @@
 //! krewlyzer-core: High-performance Rust backend for cfDNA analysis
-//! 
+//!
 //! This crate provides fast implementations of fragment size analysis functions
 //! for cell-free DNA analysis, exposed to Python via PyO3.
+//!
+//! ## Feature Modules
+//! - **extract_motif**: Fragment extraction, End/Breakpoint motifs, GC correction
+//! - **fsc**: Fragment Size Coverage (windowed depth per size bin)
+//! - **fsd**: Fragment Size Distribution (histograms per chromosome arm)
+//! - **wps**: Windowed Protection Score (nucleosome/TF profiling, FFT periodicity, NRL)
+//! - **ocf**: Orientation-aware cfDNA Fragmentation (strand asymmetry at OCRs)
+//! - **mfsd**: Mutant Fragment Size Distribution (variant-level size profiles)
+//! - **uxm**: Fragment-level Methylation (bisulfite BAM analysis)
+//!
+//! ## Support Modules
+//! - **engine**: Generic fragment analysis engine with parallel processing
+//! - **pipeline**: Unified pipeline orchestration for run-all
+//! - **gc_correction**: LOESS-based GC bias correction
+//! - **filters**: Read filtering (MAPQ, length, proper pair, duplicates)
+//! - **bed**: BED file parsing (gzip-compressed)
 
 use pyo3::prelude::*;
 
@@ -18,6 +34,12 @@ pub mod extract_motif;
 pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;
+pub mod pon_model;
+pub mod pon_builder;  // PON aggregation functions
+pub mod gc_reference;
+pub mod region_entropy;  // TFBS/ATAC size entropy
+pub mod motif_utils;     // Shared motif/sequence utilities
+pub mod region_mds;      // Per-region MDS (Helzer et al.)
 
 /// Read filtering configuration
 #[pyclass]
@@ -69,21 +91,24 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     
     // FSC functions
     m.add_function(wrap_pyfunction!(fsc::count_fragments_by_bins, m)?)?;
-    m.add_function(wrap_pyfunction!(fsc::count_fragments_gc_corrected, m)?)?;
+    m.add_function(wrap_pyfunction!(fsc::aggregate_by_gene, m)?)?;
 
     // FSD submodule
     let fsd_mod = PyModule::new(m.py(), "fsd")?;
     fsd_mod.add_function(wrap_pyfunction!(fsd::calculate_fsd, &fsd_mod)?)?;
+    fsd_mod.add_function(wrap_pyfunction!(fsd::apply_pon_logratio, &fsd_mod)?)?;
     m.add_submodule(&fsd_mod)?;
 
-    // WPS submodule (also exposed as function above? Cleaned up duplication)
+    // WPS submodule
     let wps_mod = PyModule::new(m.py(), "wps")?;
     wps_mod.add_function(wrap_pyfunction!(wps::calculate_wps, &wps_mod)?)?;
+    wps_mod.add_function(wrap_pyfunction!(wps::apply_pon_zscore, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 
     // OCF submodule
     let ocf_mod = PyModule::new(m.py(), "ocf")?;
     ocf_mod.add_function(wrap_pyfunction!(ocf::calculate_ocf, &ocf_mod)?)?;
+    ocf_mod.add_function(wrap_pyfunction!(ocf::apply_pon_zscore, &ocf_mod)?)?;
     m.add_submodule(&ocf_mod)?;
     
     // mFSD submodule
@@ -104,10 +129,32 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Unified Pipeline (FSC/FSD/WPS/OCF)
     m.add_function(wrap_pyfunction!(pipeline::run_unified_pipeline, m)?)?;
     
-
+    // GC Reference submodule (pre-computed assets)
+    let gc_mod = PyModule::new(m.py(), "gc")?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions_ontarget, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_ref_genome_gc, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_correction::compute_and_write_gc_factors, &gc_mod)?)?;
+    m.add_submodule(&gc_mod)?;
     
-
-
+    // PON Builder submodule (aggregation functions)
+    let pon_builder_mod = PyModule::new(m.py(), "pon_builder")?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_gc_bias_model, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_fsd_baseline, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_wps_baseline, &pon_builder_mod)?)?;
+    pon_builder_mod.add_function(wrap_pyfunction!(pon_builder::compute_region_mds_baseline, &pon_builder_mod)?)?;
+    m.add_submodule(&pon_builder_mod)?;
+    
+    // Region Entropy submodule (TFBS/ATAC size entropy)
+    let region_entropy_mod = PyModule::new(m.py(), "region_entropy")?;
+    region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::run_region_entropy, &region_entropy_mod)?)?;
+    region_entropy_mod.add_function(wrap_pyfunction!(region_entropy::apply_pon_zscore, &region_entropy_mod)?)?;
+    m.add_submodule(&region_entropy_mod)?;
+    
+    // Region MDS submodule (per-region motif diversity, Helzer et al.)
+    let region_mds_mod = PyModule::new(m.py(), "region_mds")?;
+    region_mds_mod.add_function(wrap_pyfunction!(region_mds::run_region_mds, &region_mds_mod)?)?;
+    m.add_submodule(&region_mds_mod)?;
     
     // Version
     #[pyfn(m)]

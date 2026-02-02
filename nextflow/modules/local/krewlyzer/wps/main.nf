@@ -1,50 +1,79 @@
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    KREWLYZER_WPS
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Windowed Protection Score - nucleosome/TF profiling at TSS/CTCF anchors.
+    Dual-stream: WPS-Nuc (150-180bp) and WPS-TF (35-80bp) fragments.
+    Includes FFT periodicity extraction for Nucleosome Repeat Length (NRL).
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
 process KREWLYZER_WPS {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.3.2"
+    container "ghcr.io/msk-access/krewlyzer:0.5.0"
 
     input:
     tuple val(meta), path(bed)
-    path fasta  // Optional if region file relies on it? No, WPS takes regions. But CLI might take ref.
-    // Wait, CLI: krewlyzer wps INPUT REGIONS REF?
-    // Let's check CLI: krewlyzer wps INPUT REGIONS REFERENCE
-    // So reference IS required.
-
-    // Wait, design doc said: "KREWLYZER_WPS(ch_inputs.bedops, file(params.ref))"
-    // So inputs: tuple(meta, bed), fasta.
-    // AND region file?
-    // `krewlyzer wps` REQUIRES region input usually. Or defaults.
-    // If defaults, it uses packaged data.
-    // If custom, passed via --regions? No, positional?
-    // Let's check `wps.py`.
-    
-    // I'll assume standard inputs for now based on wrapper.
-    // Wrapper: wps(input, regions, reference)
-    // If regions is optional (defaults to packaged), then just reference.
+    path fasta
+    path wps_anchors
+    path wps_background
 
     output:
-    tuple val(meta), path("*.WPS.tsv.gz"), emit: tsv
-    path "versions.yml"                  , emit: versions
+    tuple val(meta), path("*.WPS.parquet")           , emit: parquet
+    tuple val(meta), path("*.WPS_background.parquet"), emit: background, optional: true
+    path "versions.yml"                              , emit: versions
+
+    when:
+    task.ext.when == null || task.ext.when
 
     script:
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
-    
-    // NOTE: wps module usually needs --regions or positional.
-    // If running default, wrapper handles it.
-    // But standalone CLI might require it. I'll rely on args passing for optionality or default behavior.
+    def genome_arg = params.genome ? "--genome ${params.genome}" : ""
+    def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
+    def ref_arg = fasta ? "-r ${fasta}" : ""
+    def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
+    def background_arg = wps_background ? "--background ${wps_background}" : ""
+    def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
+    def bait_arg = params.bait_padding ? "--bait-padding ${params.bait_padding}" : ""
+    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def verbose_arg = params.verbose ? "--verbose" : ""
+    def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
     krewlyzer wps \\
-        $bed \\
-        --reference $fasta \\
+        -i $bed \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
+        $ref_arg \\
+        $genome_arg \\
+        $gc_arg \\
+        $anchors_arg \\
+        $background_arg \\
+        $targets_arg \\
+        $bait_arg \\
+        $pon_arg \\
+        $verbose_arg \\
+        $skip_targets_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
         krewlyzer: \$(krewlyzer --version | sed 's/krewlyzer //')
+    END_VERSIONS
+    """
+
+    stub:
+    def prefix = task.ext.prefix ?: "${meta.id}"
+    """
+    touch ${prefix}.WPS.parquet
+    touch ${prefix}.WPS_background.parquet
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        krewlyzer: 0.5.0
     END_VERSIONS
     """
 }

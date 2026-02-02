@@ -1,9 +1,32 @@
+//! Mutant Fragment Size Distribution (mFSD) calculation
+//!
+//! Analyzes fragment size distributions around variant positions to detect
+//! tumor-derived cfDNA. Supports all small variant types with CIGAR-aware extraction.
+//!
+//! ## Variant Types Supported
+//! - **SNV**: Single nucleotide variants
+//! - **MNV**: Multi-nucleotide variants
+//! - **Insertion**: Pure insertions (A→ATG)
+//! - **Deletion**: Pure deletions (ATG→A)
+//! - **Complex**: Combined substitution + indel
+//!
+//! ## Fragment Classification (4-way)
+//! - **REF**: Supports reference allele (healthy baseline)
+//! - **ALT**: Supports alternate allele (tumor signal)
+//! - **NonREF**: Non-REF, non-ALT (sequencing errors, subclones)
+//! - **N**: Contains N at variant position (low quality)
+//!
+//! ## Output
+//! - {sample}.mFSD.tsv: Summary statistics per variant (39 columns)
+//! - {sample}.mFSD.distributions.tsv: Per-size counts (optional)
+
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use rust_htslib::bam::{self, Read};
 use rust_htslib::bam::record::Cigar;
+use rust_htslib::faidx;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
@@ -55,12 +78,24 @@ struct Variant {
 }
 
 /// Result accumulator for a single variant - 4-way classification
+/// Supports both unweighted counts and GC-weighted counts
 #[derive(Debug, Clone, Default)]
 struct VariantResult {
     ref_lengths: Vec<f64>,
     alt_lengths: Vec<f64>,
     nonref_lengths: Vec<f64>,
     n_lengths: Vec<f64>,
+    // Weighted counts (sum of weights, not raw counts)
+    ref_weighted: f64,
+    alt_weighted: f64,
+    nonref_weighted: f64,
+    n_weighted: f64,
+    // Debug: filter counters
+    skipped_proper_pair: usize,
+    skipped_size: usize,
+    skipped_extreme: usize,  // Discordant reads with TLEN > 10000
+    // Duplex tag tracking (for --duplex warning)
+    duplex_tags_found: usize,
 }
 
 impl VariantResult {
@@ -72,6 +107,142 @@ impl VariantResult {
         self.ref_lengths.len() + self.alt_lengths.len() + 
         self.nonref_lengths.len() + self.n_lengths.len()
     }
+    
+    /// Add a fragment to the result with optional GC correction weight
+    fn add_fragment(&mut self, class: FragmentClass, frag_len: f64, weight: f64) {
+        match class {
+            FragmentClass::Ref => {
+                self.ref_lengths.push(frag_len);
+                self.ref_weighted += weight;
+            },
+            FragmentClass::Alt => {
+                self.alt_lengths.push(frag_len);
+                self.alt_weighted += weight;
+            },
+            FragmentClass::NonRef => {
+                self.nonref_lengths.push(frag_len);
+                self.nonref_weighted += weight;
+            },
+            FragmentClass::N => {
+                self.n_lengths.push(frag_len);
+                self.n_weighted += weight;
+            },
+        }
+    }
+}
+
+/// Compute GC content from a sequence
+fn compute_gc_content(seq: &[u8]) -> f64 {
+    if seq.is_empty() {
+        return 0.5; // Default
+    }
+    let gc_count = seq.iter().filter(|&&b| b == b'G' || b == b'g' || b == b'C' || b == b'c').count();
+    gc_count as f64 / seq.len() as f64
+}
+
+// ============================================================================
+// DUPLEX CONSENSUS WEIGHTING
+// ============================================================================
+//
+// Duplex sequencing produces high-confidence consensus reads from multiple
+// raw observations. The family size (number of raw reads) indicates confidence.
+// We apply log-weighting to prioritize high-confidence duplex families.
+//
+// Supported formats:
+// 1. fgbio/picard (XS2): Uses SAM tags aD/bD/cD for depths
+//    - cD = duplex consensus depth (primary weight source)
+//    - See: https://fulcrumgenomics.github.io/fgbio/tools/latest/CallDuplexConsensusReads.html
+//
+// 2. Marianas (XS1): Encodes family size in read name
+//    - Format: Marianas:UMI:chr:start:posCount:negCount:chr2:start2:pos2:neg2
+//    - Family size = posCount + negCount
+//    - See: https://cmo-ci.gitbook.io/marianas/read-name-information
+// ============================================================================
+
+/// Get duplex consensus weight from BAM record
+/// 
+/// Returns a log-scaled weight based on duplex family size.
+/// Higher family size = more sequencing evidence = higher weight.
+/// 
+/// Weight formula: ln(family_size).max(1.0)
+/// - Family size 1: weight 1.0
+/// - Family size 3: weight 1.1
+/// - Family size 10: weight 2.3
+/// - Family size 50: weight 3.9
+fn get_duplex_weight(record: &bam::Record) -> f64 {
+    use rust_htslib::bam::record::Aux;
+    
+    // Method 1: fgbio/picard cD tag (duplex consensus depth)
+    // cD = maximum depth of raw reads at any point in the duplex consensus
+    if let Ok(aux) = record.aux(b"cD") {
+        let depth = match aux {
+            Aux::I8(v) => v as f64,
+            Aux::U8(v) => v as f64,
+            Aux::I16(v) => v as f64,
+            Aux::U16(v) => v as f64,
+            Aux::I32(v) => v as f64,
+            Aux::U32(v) => v as f64,
+            _ => 0.0,
+        };
+        if depth > 0.0 {
+            return depth.ln().max(1.0);
+        }
+    }
+    
+    // Method 2: Marianas read name format
+    // Format: Marianas:UMI:chr:start:posCount:negCount:chr2:start2:pos2:neg2
+    if let Ok(qname) = std::str::from_utf8(record.qname()) {
+        if qname.starts_with("Marianas:") {
+            if let Some(family_size) = parse_marianas_family(qname) {
+                if family_size > 0 {
+                    return (family_size as f64).ln().max(1.0);
+                }
+            }
+        }
+    }
+    
+    1.0  // Default: no duplex weighting
+}
+
+/// Parse Marianas read name to extract family size
+/// 
+/// Read name format: Marianas:UMI:contig:start:posCount:negCount:contig2:start2:pos2:neg2
+/// Family size = posCount + negCount (for read1, fields 4 and 5)
+/// 
+/// Example: "Marianas:ACT+TTA:2:48033828:4:3:2:48033899:4:3"
+/// → posCount=4, negCount=3, family_size=7
+fn parse_marianas_family(qname: &str) -> Option<u32> {
+    let parts: Vec<&str> = qname.split(':').collect();
+    if parts.len() >= 6 {
+        let pos_count: u32 = parts[4].parse().ok()?;
+        let neg_count: u32 = parts[5].parse().ok()?;
+        Some(pos_count + neg_count)
+    } else {
+        None
+    }
+}
+
+
+/// Fetch sequence from reference FASTA for a genomic region
+fn fetch_reference_gc(
+    fasta: &faidx::Reader,
+    chrom: &str,
+    start: u64,
+    end: u64,
+) -> Option<f64> {
+    // Try with and without chr prefix
+    let chroms_to_try = if chrom.starts_with("chr") {
+        vec![chrom.to_string(), chrom.trim_start_matches("chr").to_string()]
+    } else {
+        vec![chrom.to_string(), format!("chr{}", chrom)]
+    };
+    
+    for chr_name in chroms_to_try {
+        if let Ok(seq) = fasta.fetch_seq(&chr_name, start as usize, end as usize) {
+            return Some(compute_gc_content(&seq));
+        }
+    }
+    None
 }
 
 // ============================================================================
@@ -382,6 +553,133 @@ fn classify_fragment(extracted: &str, var: &Variant) -> FragmentClass {
 
 const MIN_FOR_KS: usize = 2;
 
+// ============================================================================
+// LOG-LIKELIHOOD RATIO (LLR) SCORING
+// ============================================================================
+//
+// For duplex/panel mode with very low fragment counts (N<5), traditional
+// statistical tests (KS, t-test) are unreliable. We use a probabilistic
+// approach that answers: "Are these fragments more likely tumor or healthy?"
+//
+// Model: Gaussian size distributions for tumor vs healthy cfDNA
+// Default (Human): Healthy=167bp, Tumor=145bp
+// Canine (Favaro et al.): Healthy=153bp, Tumor=130bp
+// ssDNA library prep: Shift both by -10bp
+//
+// LLR > 0 → fragments are tumor-like
+// LLR < 0 → fragments are healthy-like
+// ============================================================================
+
+/// LLR Model parameters for cross-species/assay support
+/// 
+/// Default: Human cfDNA (167bp healthy, 145bp tumor)
+/// 
+/// # Use Cases
+/// - Human cfDNA: LLRModelParams::default() or ::human()
+/// - Canine cfDNA: LLRModelParams::canine() - peaks at 153bp (Favaro et al.)
+/// - ssDNA library: LLRModelParams::ssdna() - 10bp shorter due to ligation
+/// - FFPE samples: Consider wider sigma values
+#[derive(Clone, Debug)]
+pub struct LLRModelParams {
+    pub healthy_mu: f64,
+    pub healthy_sigma: f64,
+    pub tumor_mu: f64,
+    pub tumor_sigma: f64,
+}
+
+impl Default for LLRModelParams {
+    fn default() -> Self {
+        Self::human()
+    }
+}
+
+impl LLRModelParams {
+    /// Human cfDNA defaults (most common use case)
+    /// Peak at 167bp for healthy mono-nucleosome, 145bp for tumor-derived
+    pub fn human() -> Self {
+        Self {
+            healthy_mu: 167.0,
+            healthy_sigma: 30.0,
+            tumor_mu: 145.0,
+            tumor_sigma: 35.0,
+        }
+    }
+    
+    /// Canine cfDNA model (Favaro et al.)
+    /// Dog cfDNA peaks at 153bp (shorter than human due to smaller nucleosomes)
+    pub fn canine() -> Self {
+        Self {
+            healthy_mu: 153.0,
+            healthy_sigma: 25.0,
+            tumor_mu: 130.0,
+            tumor_sigma: 30.0,
+        }
+    }
+    
+    /// ssDNA ligation library prep (peaks shifted -10bp)
+    /// Single-strand library preps produce shorter fragments
+    pub fn ssdna() -> Self {
+        Self {
+            healthy_mu: 157.0,
+            healthy_sigma: 30.0,
+            tumor_mu: 135.0,
+            tumor_sigma: 35.0,
+        }
+    }
+    
+    /// Custom model from explicit parameters
+    pub fn custom(healthy_mu: f64, healthy_sigma: f64, tumor_mu: f64, tumor_sigma: f64) -> Self {
+        Self { healthy_mu, healthy_sigma, tumor_mu, tumor_sigma }
+    }
+}
+
+/// Probability density function for healthy cfDNA fragment sizes (parameterized)
+fn prob_healthy_param(length: f64, model: &LLRModelParams) -> f64 {
+    let z = (length - model.healthy_mu) / model.healthy_sigma;
+    let norm_const = model.healthy_sigma * (2.0 * std::f64::consts::PI).sqrt();
+    (-0.5 * z * z).exp() / norm_const
+}
+
+/// Probability density function for tumor-derived cfDNA fragment sizes (parameterized)
+fn prob_tumor_param(length: f64, model: &LLRModelParams) -> f64 {
+    let z = (length - model.tumor_mu) / model.tumor_sigma;
+    let norm_const = model.tumor_sigma * (2.0 * std::f64::consts::PI).sqrt();
+    (-0.5 * z * z).exp() / norm_const
+}
+
+/// Calculate Log-Likelihood Ratio for a set of fragment lengths (parameterized)
+/// 
+/// Uses configurable model parameters for cross-species/assay support.
+/// 
+/// Returns: sum of log(P_tumor / P_healthy) for each fragment
+fn calc_log_likelihood_ratio_param(lengths: &[f64], model: &LLRModelParams) -> f64 {
+    if lengths.is_empty() {
+        return 0.0;
+    }
+    
+    lengths.iter().map(|&len| {
+        let p_h = prob_healthy_param(len, model).max(1e-15);
+        let p_t = prob_tumor_param(len, model).max(1e-15);
+        p_t.ln() - p_h.ln()  // Positive = tumor-like
+    }).sum()
+}
+
+/// Calculate Log-Likelihood Ratio for a set of fragment lengths
+/// 
+/// Returns: sum of log(P_tumor / P_healthy) for each fragment
+/// 
+/// Interpretation:
+/// - LLR > +1.0: Strong tumor signature
+/// - LLR > +0.5: Weak tumor signature  
+/// - LLR between -0.5 and +0.5: Inconclusive
+/// - LLR < -0.5: Healthy-like
+/// 
+/// Works well even with N=1-5 fragments (unlike KS test)
+/// Uses default human model (167bp healthy, 145bp tumor)
+fn calc_log_likelihood_ratio(lengths: &[f64]) -> f64 {
+    calc_log_likelihood_ratio_param(lengths, &LLRModelParams::human())
+}
+
 /// Calculate mean of a vector, returns 0.0 if empty
 fn calc_mean(v: &[f64]) -> f64 {
     if v.is_empty() { 0.0 } else { v.iter().sum::<f64>() / v.len() as f64 }
@@ -464,16 +762,59 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `input_format` - "vcf" or "maf" (or "auto")
 /// * `map_quality` - Minimum mapping quality
 /// * `output_distributions` - If true, write per-variant size distributions
+/// * `reference_path` - Optional path to reference FASTA (for GC computation)
+/// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, output_distributions=false))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
     output_file: PathBuf,
     input_format: String,
     map_quality: u8,
+    min_frag_len: i64,
+    max_frag_len: i64,
     output_distributions: bool,
+    reference_path: Option<PathBuf>,
+    correction_factors_path: Option<PathBuf>,
+    require_proper_pair: bool,
+    duplex_mode: bool,
+    silent: bool,
 ) -> PyResult<()> {
+    use crate::gc_correction::CorrectionFactors;
+    use std::sync::Arc;
+    
+    // Load correction factors if provided
+    let factors: Option<Arc<CorrectionFactors>> = if let Some(ref factors_path) = correction_factors_path {
+        match CorrectionFactors::load_csv(factors_path) {
+            Ok(f) => {
+                info!("Loaded GC correction factors from {:?}", factors_path);
+                Some(Arc::new(f))
+            },
+            Err(e) => {
+                warn!("Failed to load correction factors: {}. Proceeding without GC correction.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+    
+    // Load reference FASTA if provided (for GC content computation)
+    let _fasta: Option<faidx::Reader> = if let Some(ref ref_path) = reference_path {
+        match faidx::Reader::from_path(ref_path) {
+            Ok(f) => {
+                info!("Loaded reference FASTA: {:?}", ref_path);
+                Some(f)
+            },
+            Err(e) => {
+                warn!("Failed to load reference FASTA: {}. GC correction disabled.", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
     // 1. Parse Variants
     let mut variants = Vec::new();
     let file = File::open(&input_file)?;
@@ -524,14 +865,22 @@ pub fn calculate_mfsd(
     let complex_count = variants.iter().filter(|v| v.var_type == VariantType::Complex).count();
     debug!("Variant types: {} SNV, {} MNV, {} INS, {} DEL, {} Complex", 
         snv_count, mnv_count, ins_count, del_count, complex_count);
+    
+    // Log filter settings
+    info!("Fragment filters: length {}-{}bp, proper_pair={}, duplex_mode={}", min_frag_len, max_frag_len, require_proper_pair, duplex_mode);
 
-    // Progress Bar
-    let pb = ProgressBar::new(total_vars as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
-        .unwrap()
-        .progress_chars("#>-"));
-    pb.enable_steady_tick(Duration::from_millis(100));
+    // Progress Bar (hidden when called from wrapper)
+    let pb = if silent {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(total_vars as u64);
+        pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+            .unwrap()
+            .progress_chars("#>-"));
+        pb.enable_steady_tick(Duration::from_millis(100));
+        pb
+    };
 
     // 2. Process Variants (Parallel)
     let results: Vec<(Variant, VariantResult)> = variants.par_iter()
@@ -542,6 +891,13 @@ pub fn calculate_mfsd(
             let mut bam = match bam::IndexedReader::from_path(&bam_path) {
                 Ok(b) => b,
                 Err(_) => return (var.clone(), result),
+            };
+            
+            // Thread-local FASTA reader (for GC correction)
+            let thread_fasta: Option<faidx::Reader> = if factors.is_some() {
+                reference_path.as_ref().and_then(|p| faidx::Reader::from_path(p).ok())
+            } else {
+                None
             };
 
             // Get chromosome tid
@@ -586,28 +942,82 @@ pub fn calculate_mfsd(
                 // Only process R1 for fragment counting (avoid double-counting)
                 if record.is_paired() && !record.is_first_in_template() { continue; }
                 
+                // Proper pair filter (optional - disabled by default for duplex BAMs)
+                if require_proper_pair && record.is_paired() && !record.is_proper_pair() {
+                    result.skipped_proper_pair += 1;
+                    continue;
+                }
+                
+                // Get fragment length first to apply size filter early
+                let tlen = record.insert_size().abs();
+                let frag_len = if tlen == 0 { record.seq().len() as i64 } else { tlen };
+                
+                // Fragment size filter - skip discordant/chimeric reads with extreme TLEN
+                if frag_len < min_frag_len || frag_len > max_frag_len {
+                    result.skipped_size += 1;
+                    // Track extreme outliers (discordant reads) for summary logging
+                    if frag_len > 10000 {
+                        result.skipped_extreme += 1;
+                    }
+                    continue;
+                }
+                
+                let frag_len_f64 = frag_len as f64;
+                
                 // Extract sequence at variant
                 let (extracted, has_n) = match extract_sequence_at_variant(&record, var) {
                     Some((s, n)) => (s, n),
                     None => continue, // Read doesn't span variant
                 };
                 
-                // Get fragment length
-                let tlen = record.insert_size().abs();
-                let frag_len = if tlen == 0 { record.seq().len() as i64 } else { tlen };
-                let frag_len = frag_len as f64;
-                
-                // Classify
-                if has_n {
-                    result.n_lengths.push(frag_len);
+                // Compute GC correction weight
+                let gc_weight = if let Some(ref factors_arc) = factors {
+                    // Get fragment coordinates for GC lookup
+                    let frag_start = record.pos() as u64;
+                    let frag_end = if record.insert_size() > 0 {
+                        frag_start + record.insert_size() as u64
+                    } else {
+                        frag_start + record.seq().len() as u64
+                    };
+                    
+                    // Get GC from thread-local FASTA reader
+                    let gc_pct = if let Some(ref fasta) = thread_fasta {
+                        fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end)
+                            .map(|gc| (gc * 100.0).round() as u8)
+                            .unwrap_or(50) // Default 50% GC
+                    } else {
+                        50 // Default if no reference
+                    };
+                    
+                    factors_arc.get_factor(frag_len as u64, gc_pct)
                 } else {
-                    match classify_fragment(&extracted, var) {
-                        FragmentClass::Ref => result.ref_lengths.push(frag_len),
-                        FragmentClass::Alt => result.alt_lengths.push(frag_len),
-                        FragmentClass::NonRef => result.nonref_lengths.push(frag_len),
-                        FragmentClass::N => result.n_lengths.push(frag_len),
-                    }
+                    1.0 // No GC correction
+                };
+                
+                // Compute duplex consensus weight (for fgbio/Marianas duplex BAMs)
+                // Only applied when --duplex flag is set
+                let duplex_weight = if duplex_mode {
+                    get_duplex_weight(&record)
+                } else {
+                    1.0  // No duplex weighting for non-duplex data
+                };
+                
+                // Track duplex tags found (weight != 1.0 means a tag was found)
+                if duplex_mode && duplex_weight != 1.0 {
+                    result.duplex_tags_found += 1;
                 }
+                
+                // Combined weight: GC correction * duplex confidence
+                let weight = gc_weight * duplex_weight;
+                
+                // Classify and add with combined weight
+                let class = if has_n {
+                    FragmentClass::N
+                } else {
+                    classify_fragment(&extracted, var)
+                };
+                
+                result.add_fragment(class, frag_len_f64, weight);
             }
             
             pb.inc(1);
@@ -624,12 +1034,18 @@ pub fn calculate_mfsd(
     let mut total_n = 0usize;
     let mut variants_with_alt = 0usize;
     let mut variants_no_coverage = 0usize;
+    let mut total_skipped_proper_pair = 0usize;
+    let mut total_skipped_size = 0usize;
+    let mut total_skipped_extreme = 0usize;
     
     for (_, res) in &results {
         total_ref += res.ref_lengths.len();
         total_alt += res.alt_lengths.len();
         total_nonref += res.nonref_lengths.len();
         total_n += res.n_lengths.len();
+        total_skipped_proper_pair += res.skipped_proper_pair;
+        total_skipped_size += res.skipped_size;
+        total_skipped_extreme += res.skipped_extreme;
         if !res.alt_lengths.is_empty() {
             variants_with_alt += 1;
         }
@@ -642,20 +1058,50 @@ pub fn calculate_mfsd(
     info!("Variants with ALT support: {}/{} ({:.1}%)", 
         variants_with_alt, results.len(), 
         if results.len() > 0 { variants_with_alt as f64 / results.len() as f64 * 100.0 } else { 0.0 });
+    
+    // Log filter statistics
+    if total_skipped_proper_pair > 0 || total_skipped_size > 0 {
+        info!("Filtered: {} improper-pair, {} out-of-size-range ({}-{}bp)", 
+            total_skipped_proper_pair, total_skipped_size, min_frag_len, max_frag_len);
+    }
+    
+    // Log extreme outliers if any (discordant reads with TLEN > 10000bp)
+    if total_skipped_extreme > 0 {
+        debug!("Skipped {} discordant reads with TLEN > 10000bp", total_skipped_extreme);
+    }
+    
     if variants_no_coverage > 0 {
         warn!("{} variants had no fragment coverage", variants_no_coverage);
+    }
+    
+    // Duplex tag warning: alert user if --duplex was set but no tags were found
+    if duplex_mode {
+        let total_fragments = total_ref + total_alt + total_nonref + total_n;
+        let total_duplex_tags: usize = results.iter().map(|(_, res)| res.duplex_tags_found).sum();
+        if total_duplex_tags == 0 && total_fragments > 0 {
+            warn!("--duplex mode enabled but NO cD/Marianas tags found in {} fragments. \
+                   Ensure BAM was processed by fgbio/Marianas consensus caller.", total_fragments);
+        } else {
+            info!("Duplex tags found in {}/{} ({:.1}%) fragments", 
+                total_duplex_tags, total_fragments,
+                if total_fragments > 0 { total_duplex_tags as f64 / total_fragments as f64 * 100.0 } else { 0.0 });
+        }
     }
 
     // 3. Write Main Output
     info!("Writing output to {:?}...", output_file);
     let mut out_file = File::create(&output_file)?;
     
-    // Header (37 columns)
+    // Header (42 columns - added 5 GC-weighted columns)
     writeln!(out_file, "{}", [
         // Variant info (5)
         "Chrom", "Pos", "Ref", "Alt", "VarType",
         // Counts (5)
         "REF_Count", "ALT_Count", "NonREF_Count", "N_Count", "Total_Count",
+        // GC-Weighted Counts (5)
+        "REF_Weighted", "ALT_Weighted", "NonREF_Weighted", "N_Weighted", "VAF_GC_Corrected",
+        // Log-Likelihood Ratio (2) - for duplex/panel with low N
+        "ALT_LLR", "REF_LLR",
         // Mean sizes (4)
         "REF_MeanSize", "ALT_MeanSize", "NonREF_MeanSize", "N_MeanSize",
         // Primary: ALT vs REF (3)
@@ -732,14 +1178,29 @@ pub fn calculate_mfsd(
         let alt_confidence = confidence_level(n_alt);
         let ks_valid = n_alt >= MIN_FOR_KS && n_ref >= MIN_FOR_KS;
         
+        let w_ref = res.ref_weighted;
+        let w_alt = res.alt_weighted;
+        let w_nonref = res.nonref_weighted;
+        let w_n = res.n_weighted;
+        let vaf_gc_corrected = if w_alt + w_ref > 0.0 { w_alt / (w_alt + w_ref) } else { 0.0 };
+        
+        // LLR scores - for low-N duplex/panel mode
+        // Positive = tumor-like, Negative = healthy-like
+        let alt_llr = calc_log_likelihood_ratio(&res.alt_lengths);
+        let ref_llr = calc_log_likelihood_ratio(&res.ref_lengths);
+        
         // Format NaN as "NA"
         let fmt = |v: f64| if v.is_nan() { "NA".to_string() } else { format!("{:.4}", v) };
         
-        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+        writeln!(out_file, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             // Variant info (5)
             var.chrom, var.pos + 1, var.ref_allele, var.alt_allele, var.var_type.as_str(),
-            // Counts (5)
+            // Raw Counts (5)
             n_ref, n_alt, n_nonref, n_n, n_total,
+            // GC-Weighted Counts (5)
+            fmt(w_ref), fmt(w_alt), fmt(w_nonref), fmt(w_n), fmt(vaf_gc_corrected),
+            // LLR scores (2)
+            fmt(alt_llr), fmt(ref_llr),
             // Mean sizes (4)
             fmt(mean_ref), fmt(mean_alt), fmt(mean_nonref), fmt(mean_n),
             // Primary: ALT vs REF (3)

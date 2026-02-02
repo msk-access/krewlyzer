@@ -1,6 +1,6 @@
 [project]
 name = "krewlyzer"
-version = "0.3.2"
+version = "0.5.0"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
 requires-python = ">=3.8"
@@ -11,7 +11,8 @@ dependencies = [
     "pysam>=0.22.0",
     "pandas>=2.2.0",
     "numpy>=1.20.0",
-    "rich>=13.9.0"
+    "rich>=13.9.0",
+    "pyarrow>=15.0.0"
 ]
 
 [project.optional-dependencies]
@@ -38,3 +39,27 @@ build-backend = "maturin"
 python-source = "src"
 manifest-path = "rust/Cargo.toml"
 module-name = "krewlyzer._core"
+# NOTE: No 'include' directive = no data bundled in wheel (keeps wheel <100MB for PyPI)
+# Data source by installation method:
+#   - Docker: bundled in image
+#   - git clone + pip install -e .: uses source directory directly
+#   - pip install: requires KREWLYZER_DATA_DIR env var pointing to cloned data
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+markers = [
+    "unit: Fast unit tests with no I/O",
+    "integration: Tool integration tests",
+    "e2e: End-to-end workflow tests",
+    "slow: Tests that take >10s",
+    "rust: Tests requiring Rust backend",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["krewlyzer"]
+omit = ["*/tests/*"]
