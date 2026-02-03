@@ -10,6 +10,8 @@ from pathlib import Path
 import tempfile
 import gzip
 
+from conftest import requires_data
+
 from krewlyzer.core.gene_bed import (
     detect_assay,
     detect_version_from_content,
@@ -175,6 +177,7 @@ class TestParseGeneBed:
 # Bundled file tests
 # =============================================================================
 
+@requires_data
 class TestBundledGeneBed:
     """Tests for bundled gene BED file loading."""
     
@@ -194,6 +197,7 @@ class TestBundledGeneBed:
         assert get_bundled_gene_bed("unknown", "GRCh37") is None
 
 
+@requires_data
 class TestLoadGeneBed:
     """Tests for the unified load_gene_bed function."""
     

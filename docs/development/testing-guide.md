@@ -83,6 +83,59 @@ pytest -m "not slow"     # Skip slow tests
 
 ---
 
+## Data Availability
+
+> [!IMPORTANT]
+> The **entire `src/krewlyzer/data/` folder is EXCLUDED from PyPI wheels** to keep size <100MB.
+> Tests that require bundled data files are **automatically skipped** in CI/PyPI installs.
+
+### Data by Install Method
+
+| Install Method | Data Files | Test Coverage |
+|----------------|:----------:|:-------------:|
+| `pip install krewlyzer` (PyPI) | ❌ None | ~85% (skips asset tests) |
+| `pip install -e .` (git clone) | ✅ All | 100% |
+| Docker image | ✅ All | 100% |
+
+### How It Works
+
+Tests that verify bundled assets use the `@requires_data` decorator from `conftest.py`:
+
+```python
+from conftest import requires_data
+
+@requires_data
+class TestAssetManager:
+    def test_gene_bed_exists(self):
+        # Skipped if data not available
+        ...
+```
+
+### Running Full Tests Locally
+
+```bash
+# Clone the repository (includes data/)
+git clone https://github.com/msk-access/krewlyzer.git
+cd krewlyzer
+
+# Development install (uses source data directly)
+pip install -e ".[test]"
+
+# Run all tests - data-dependent tests will pass
+pytest tests/ -v
+```
+
+### External Data Directory
+
+For PyPI installs, you can provide data via environment variable:
+
+```bash
+export KREWLYZER_DATA_DIR=/path/to/krewlyzer/src/krewlyzer/data
+pytest tests/ -v
+```
+
+---
+
 ## Fixtures
 
 Key fixtures from `tests/conftest.py`:
@@ -136,6 +189,17 @@ def test_fsc_cli_produces_output(temp_bedgz, temp_bins, tmp_path):
     
     assert result.exit_code == 0
     assert (tmp_path / "test.FSC.tsv").exists()
+```
+
+### Example Data-Dependent Test
+```python
+from conftest import requires_data
+
+@requires_data
+def test_bundled_gene_bed_loads(manager):
+    """Test bundled gene BED (only runs with source data)."""
+    path = manager.get_gene_bed("xs1")
+    assert path.exists()
 ```
 
 ---
