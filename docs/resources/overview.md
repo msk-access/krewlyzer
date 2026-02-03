@@ -2,7 +2,7 @@
 
 A comprehensive visual guide to Krewlyzer's fragmentomics features and analysis capabilities.
 
-<embed src="Krewlyzer_Fragmentomics_Toolkit.pdf" type="application/pdf" width="100%" height="800">
+![Krewlyzer Fragmentomics Toolkit](../Krewlyzer_Fragmentomics_Toolkit.pdf){ type=application/pdf style="width:100%; height:800px; border:1px solid #ddd; border-radius:4px;" }
 
 ---
 

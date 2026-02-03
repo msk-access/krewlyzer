@@ -35,6 +35,15 @@ theme:
 
 plugins:
   - search
+  - mermaid2:
+      version: "11.4.0"
+  - mkdocs-pdf
+  - to-pdf:
+      output_path: pdf/krewlyzer-docs.pdf
+      enabled_if_env: ENABLE_PDF_EXPORT
+      cover: true
+      cover_title: Krewlyzer Documentation
+      cover_subtitle: Fragmentomics Feature Extraction Toolkit
 
 nav:
   - Home: index.md
@@ -97,6 +106,7 @@ nav:
   
   - Resources:
     - Overview: resources/overview.md
+    - Full Documentation PDF: resources/full-docs.md
     - Citation: resources/citation.md
     - Troubleshooting: resources/troubleshooting.md
     - Changelog: resources/changelog.md
@@ -108,7 +118,7 @@ markdown_extensions:
       custom_fences:
         - name: mermaid
           class: mermaid
-          format: !!python/name:pymdownx.superfences.fence_code_format
+          format: !!python/name:mermaid2.fence_mermaid_custom
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
@@ -118,6 +128,9 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - tables
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
 
 extra_javascript:
   - javascripts/mathjax.js
