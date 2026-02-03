@@ -24,6 +24,7 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 ```
 
 > **New to cfDNA?** Start with [What is Cell-Free DNA?](getting-started/concepts.md)  
+> **Visual learner?** See the [Overview PDF](resources/overview.md)  
 > **Need terminology help?** See the [Glossary](reference/glossary.md)
 
 ---
