@@ -19,11 +19,24 @@ import shutil
 # Data Availability Detection
 # =============================================================================
 
-# Path to data directory (only exists in git clone or Docker, not PyPI install)
-DATA_DIR = Path(__file__).parents[1] / "src" / "krewlyzer" / "data"
+def _check_data_available():
+    """
+    Check if bundled data is available in the installed package.
+    
+    In CI: git checkout has data, but pip install . creates wheel without data.
+    Tests run from checkout but imports come from installed package.
+    So we must check the INSTALLED package path, not source.
+    """
+    try:
+        import krewlyzer
+        pkg_path = Path(krewlyzer.__file__).parent
+        data_dir = pkg_path / "data"
+        # Check if data directory and at least one key asset exist
+        return data_dir.exists() and (data_dir / "genes").exists()
+    except ImportError:
+        return False
 
-# Check if bundled data is available
-DATA_AVAILABLE = DATA_DIR.exists() and (DATA_DIR / "genes").exists()
+DATA_AVAILABLE = _check_data_available()
 
 # Marker for tests that require bundled data
 requires_data = pytest.mark.skipif(
