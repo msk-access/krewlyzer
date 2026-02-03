@@ -39,7 +39,9 @@ build-backend = "maturin"
 python-source = "src"
 manifest-path = "rust/Cargo.toml"
 module-name = "krewlyzer._core"
-# NOTE: No 'include' directive = no data bundled in wheel (keeps wheel <100MB for PyPI)
+# CRITICAL: Exclude data directory to keep wheel <100MB for PyPI
+# Without this, maturin includes ALL source files by default!
+exclude = ["src/krewlyzer/data/**/*"]
 # Data source by installation method:
 #   - Docker: bundled in image
 #   - git clone + pip install -e .: uses source directory directly
