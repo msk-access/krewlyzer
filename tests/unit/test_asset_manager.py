@@ -2,18 +2,23 @@
 Unit tests for AssetManager assay-aware methods.
 
 Tests the new panel-specific asset resolution methods.
+
+NOTE: These tests require bundled data files which are NOT included in PyPI installs.
+They will be skipped in CI. Run locally with: git clone + pip install -e .
 """
 
 import pytest
 from pathlib import Path
 
 from krewlyzer.assets import AssetManager
+from conftest import requires_data
 
 
 # =============================================================================
 # Assay-aware asset resolution tests
 # =============================================================================
 
+@requires_data
 class TestAssetManagerAssayMethods:
     """Tests for assay-aware asset resolution."""
     

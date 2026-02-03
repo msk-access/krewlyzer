@@ -4,12 +4,17 @@ Integration tests for region-entropy (TFBS/ATAC) feature.
 Tests the dual-output architecture:
 - Genome-wide output (all regions)
 - Panel-specific output (.ontarget.tsv)
+
+NOTE: Asset existence tests require bundled data files which are NOT included
+in PyPI installs. They will be skipped in CI. Run locally with: git clone + pip install -e .
 """
 
 import pytest
 import gzip
 import tempfile
 from pathlib import Path
+
+from conftest import requires_data
 
 
 def _rust_available():
@@ -21,6 +26,7 @@ def _rust_available():
         return False
 
 
+@requires_data
 class TestRegionEntropyAssets:
     """Test that TFBS/ATAC assets are available."""
     
@@ -49,7 +55,6 @@ class TestRegionEntropyAssets:
         from krewlyzer.assets import AssetManager
         
         assets = AssetManager("hg19")
-        # Use correct method name
         panel_tfbs = assets.get_tfbs_regions("xs1")
         
         if panel_tfbs:
@@ -60,7 +65,6 @@ class TestRegionEntropyAssets:
         from krewlyzer.assets import AssetManager
         
         assets = AssetManager("hg19")
-        # Use correct method name
         panel_atac = assets.get_atac_regions("xs2")
         
         if panel_atac:

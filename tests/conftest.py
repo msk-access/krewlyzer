@@ -2,6 +2,11 @@
 Shared pytest fixtures for krewlyzer test suite.
 
 This file provides common fixtures used across unit, integration, and e2e tests.
+
+DATA AVAILABILITY NOTE:
+The entire src/krewlyzer/data/ folder is EXCLUDED from PyPI wheels to keep size <100MB.
+Tests that require bundled data files use DATA_AVAILABLE to skip in PyPI installs.
+For full test coverage, use: git clone + pip install -e .
 """
 import pytest
 from pathlib import Path
@@ -9,6 +14,22 @@ import pysam
 import gzip
 import tempfile
 import shutil
+
+# =============================================================================
+# Data Availability Detection
+# =============================================================================
+
+# Path to data directory (only exists in git clone or Docker, not PyPI install)
+DATA_DIR = Path(__file__).parents[1] / "src" / "krewlyzer" / "data"
+
+# Check if bundled data is available
+DATA_AVAILABLE = DATA_DIR.exists() and (DATA_DIR / "genes").exists()
+
+# Marker for tests that require bundled data
+requires_data = pytest.mark.skipif(
+    not DATA_AVAILABLE,
+    reason="Bundled data not available (PyPI install). Use git clone + pip install -e ."
+)
 
 
 # =============================================================================
