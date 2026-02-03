@@ -96,6 +96,7 @@ nav:
     - Contributing Data: development/contributing-data.md
   
   - Resources:
+    - Overview: resources/overview.md
     - Citation: resources/citation.md
     - Troubleshooting: resources/troubleshooting.md
     - Changelog: resources/changelog.md
