@@ -64,6 +64,35 @@ nextflow run msk-access/krewlyzer \
     --outdir results/
 ```
 
+## IRIS HPC (MSK)
+
+For running on MSKCC's IRIS cluster, use the [nf-core/configs](https://github.com/nf-core/configs) institutional profile:
+
+```bash
+nextflow run msk-access/krewlyzer \
+    -profile iris \
+    --samplesheet samples.csv \
+    --ref /data1/ref/hg19/hg19.fa \
+    --outdir /scratch/$GROUP/results/
+```
+
+> [!TIP]
+> The `iris` profile automatically configures:
+> - SLURM executor with proper queue settings
+> - Singularity with pre-cached images at `/data1/core006/resources/singularity_image_library`
+> - Scratch paths and work directories
+
+For preemptable (faster) queue:
+
+```bash
+nextflow run msk-access/krewlyzer \
+    -profile iris \
+    --preemptable true \
+    --samplesheet samples.csv \
+    --ref /data1/ref/hg19/hg19.fa \
+    --outdir /scratch/$GROUP/results/
+```
+
 ## Resume Failed Run
 
 ```bash
