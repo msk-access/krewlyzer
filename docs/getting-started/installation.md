@@ -4,7 +4,7 @@
 
 | Method | Best For | Includes Data |
 |--------|----------|---------------|
-| **Docker** | Production & HPC | ✅ All bundled |
+| **Docker/Singularity** | Production & HPC | ✅ All bundled |
 | **Clone + Install** | Development | ✅ Via Git LFS |
 | **pip + Data Clone** | Custom environments | ⚠️ Requires env var |
 
@@ -15,25 +15,57 @@
 The easiest way to run Krewlyzer with all dependencies and data:
 
 ```bash
-docker pull ghcr.io/msk-access/krewlyzer:latest
+# Use a specific release tag (no :latest tag is published)
+docker pull ghcr.io/msk-access/krewlyzer:0.5.0
 ```
+
+> [!IMPORTANT]
+> We publish versioned tags only (e.g., `:0.5.0`). There is no `:latest` tag.
+> Check [releases](https://github.com/msk-access/krewlyzer/releases) for available versions.
 
 ### Running with Docker
 
 ```bash
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest \
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.5.0 \
     run-all -i /data/sample.bam \
     --reference /data/hg19.fa \
     --output /data/results/ \
     --assay xs2
 ```
 
-!!! tip "Volume Mounting (Standalone Docker)"
-    Use `-v $PWD:/data` to mount your current directory. All paths in the command should use the `/data/` prefix. **For Nextflow pipelines**, volume mounting is automatic—just use host paths in your samplesheet.
+> [!TIP]
+> **Volume Mounting**: Use `-v $PWD:/data` to mount your current directory. All paths use the `/data/` prefix. For Nextflow pipelines, volume mounting is automatic.
 
 ---
 
-## Option 2: Clone Repository
+## Option 2: Singularity/Apptainer (HPC)
+
+For HPC clusters where Docker isn't available:
+
+```bash
+# Pull and convert to Singularity Image Format (SIF)
+singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.0
+
+# Or using Apptainer (newer name for Singularity)
+apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.0
+```
+
+### Running with Singularity
+
+```bash
+singularity exec krewlyzer.sif krewlyzer run-all \
+    -i /path/to/sample.bam \
+    --reference /path/to/hg19.fa \
+    --output /path/to/results/ \
+    --assay xs2
+```
+
+> [!TIP]
+> **HPC Bind Paths**: Singularity auto-binds `$HOME`, `/tmp`, and `$PWD`. For other paths, use `-B /scratch:/scratch`.
+
+---
+
+## Option 3: Clone Repository
 
 Full installation with bundled data (for development or when Docker isn't available):
 
@@ -56,7 +88,7 @@ krewlyzer --version
 
 ---
 
-## Option 3: pip Install + Data Clone
+## Option 4: pip Install + Data Clone
 
 For environments where you want PyPI code with external data:
 

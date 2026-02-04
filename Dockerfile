@@ -46,5 +46,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /wheels/*.whl /tmp/
 RUN pip install --no-cache-dir /tmp/*.whl && rm /tmp/*.whl
 
+# Bundle data files (excluded from wheel to keep PyPI <100MB, but Docker includes them)
+# Copy data to installed package location
+COPY --from=builder /build/src/krewlyzer/data/ /usr/local/lib/python3.10/site-packages/krewlyzer/data/
+
 ENTRYPOINT ["krewlyzer"]
 CMD ["--help"]
