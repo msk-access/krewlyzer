@@ -16,17 +16,17 @@ The easiest way to run Krewlyzer with all dependencies and data:
 
 ```bash
 # Use a specific release tag (no :latest tag is published)
-docker pull ghcr.io/msk-access/krewlyzer:0.5.0
+docker pull ghcr.io/msk-access/krewlyzer:0.5.1
 ```
 
 > [!IMPORTANT]
-> We publish versioned tags only (e.g., `:0.5.0`). There is no `:latest` tag.
+> We publish versioned tags only (e.g., `:0.5.1`). There is no `:latest` tag.
 > Check [releases](https://github.com/msk-access/krewlyzer/releases) for available versions.
 
 ### Running with Docker
 
 ```bash
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.5.0 \
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.5.1 \
     run-all -i /data/sample.bam \
     --reference /data/hg19.fa \
     --output /data/results/ \
@@ -44,10 +44,10 @@ For HPC clusters where Docker isn't available:
 
 ```bash
 # Pull and convert to Singularity Image Format (SIF)
-singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.0
+singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.1
 
 # Or using Apptainer (newer name for Singularity)
-apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.0
+apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.1
 ```
 
 ### Running with Singularity

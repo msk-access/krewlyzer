@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-02-04
+
+### Fixed
+- **Docker Image**: Data folder now bundled in container (was missing in 0.5.0)
+- **CI Tests**: Tests requiring bundled data now skip in PyPI installs via `@requires_data` marker
+
+### Changed
+- **Docker Tags**: Use versioned tags only (e.g., `:0.5.1`); no `:latest` tag published
+
+### Documentation
+- **Installation**: Added Singularity/Apptainer section for HPC clusters
+- **Installation**: Clarified Docker uses release tags, not `:latest`
+- **Nextflow Examples**: Added IRIS HPC cluster profile example (`-profile iris`)
+- **Testing Guide**: Added Data Availability section explaining PyPI vs source
+- **Structure**: Moved Changelog to Development section; removed duplicate files
+- **Mermaid Diagrams**: Upgraded to `mkdocs-mermaid2` plugin for theme-aware rendering
+- **Removed**: Full-site PDF export (unreliable rendering)
+
 ## [0.5.0] - 2026-02-02
 
 ### Added
