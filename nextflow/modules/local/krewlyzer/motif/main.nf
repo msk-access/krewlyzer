@@ -10,7 +10,7 @@
 process KREWLYZER_MOTIF {
     tag "$meta.id"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.5.0"
+    container "ghcr.io/msk-access/krewlyzer:0.5.1"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -52,7 +52,7 @@ process KREWLYZER_MOTIF {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.0
+        krewlyzer: 0.5.1
     END_VERSIONS
     """
 }
