@@ -38,6 +38,7 @@ flowchart TB
     
     subgraph "With --variants"
         BAM --> MFSD["mFSD.tsv"]
+        MFSD_BAM["--mfsd-bam (optional)"] -.-> MFSD
         VCF["variants.vcf/maf"] --> MFSD
     end
     

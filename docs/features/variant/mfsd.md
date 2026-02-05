@@ -79,6 +79,38 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
     --output-distributions
 ```
 
+---
+
+## Dual BAM Support
+
+For optimal results with duplex sequencing panels (e.g., MSK-ACCESS), use separate BAMs:
+
+| BAM Type | Use Case | Why |
+|----------|----------|-----|
+| `all_unique` | FSC, FSD, WPS, OCF | Maximum coverage for background features |
+| `duplex` | mFSD | Highest accuracy for variant detection |
+
+### Via run-all CLI
+
+```bash
+# Provide dedicated duplex BAM for mFSD
+krewlyzer run-all -i sample.all_unique.bam --mfsd-bam sample.duplex.bam \
+    -r hg19.fa -o out/ --assay xs2 --variants sample.maf
+```
+
+> [!NOTE]
+> When `--mfsd-bam` is provided, duplex weighting is **auto-enabled**.
+> If no duplex tags (cD/Marianas) are found, a warning is logged but processing continues with weight=1.0.
+
+### Via Nextflow Samplesheet
+
+```csv
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/variants.maf,true,XS2,,
+```
+
+---
+
 ## CLI Options
 
 | Option | Short | Type | Default | Description |

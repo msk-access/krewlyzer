@@ -18,7 +18,7 @@ process KREWLYZER_RUNALL {
     container "ghcr.io/msk-access/krewlyzer:0.5.1"
 
     input:
-    tuple val(meta), path(bam), path(bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)
+    tuple val(meta), path(bam), path(bai), path(mfsd_bam), path(mfsd_bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)
     path fasta
 
     output:
@@ -89,6 +89,7 @@ process KREWLYZER_RUNALL {
     def prefix = task.ext.prefix ?: "${meta.id}"
     
     // Input file arguments
+    def mfsd_bam_arg = mfsd_bam ? "--mfsd-bam ${mfsd_bam}" : ""
     def bisulfite_arg = bisulfite_bam ? "--bisulfite-bam ${bisulfite_bam}" : ""
     def variant_arg = variants ? "--variants ${variants}" : ""
     def targets_arg = targets ? "--target-regions ${targets}" : ""
@@ -129,6 +130,7 @@ process KREWLYZER_RUNALL {
         --output ./ \\
         --threads $task.cpus \\
         --sample-name $prefix \\
+        $mfsd_bam_arg \\
         $bisulfite_arg \\
         $variant_arg \\
         $targets_arg \\

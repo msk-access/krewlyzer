@@ -94,6 +94,10 @@ workflow INPUT_CHECK {
             def bam = row.bam ? file(row.bam) : null
             def bai = (bam && get_index(bam).exists()) ? get_index(bam) : []
             
+            // mFSD-specific BAM (duplex consensus for mFSD, falls back to main BAM)
+            def mfsd_bam = row.mfsd_bam ? file(row.mfsd_bam) : null
+            def mfsd_bai = (mfsd_bam && get_index(mfsd_bam).exists()) ? get_index(mfsd_bam) : []
+            
             def mbam = row.meth_bam ? file(row.meth_bam) : null
             def mbai = (mbam && get_index(mbam).exists()) ? get_index(mbam) : []
             
@@ -108,7 +112,7 @@ workflow INPUT_CHECK {
             def wps_anchors = resolveWpsAnchors(row)
             def wps_background = params.wps_background ? file(params.wps_background) : []
 
-            [meta, bam, bai, mbam, mbai, bed, vcf, maf, single_sample, pon, targets, wps_anchors, wps_background]
+            [meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single_sample, pon, targets, wps_anchors, wps_background]
         }
         .set { ch_parsed }
 
@@ -124,47 +128,47 @@ workflow INPUT_CHECK {
         }
         .set { ch_branched }
 
-    // Format for run-all: [meta, bam, bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_background]
+    // Format for run-all: [meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_background]
     ch_runall = ch_branched.bam_samples.map { 
-        meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
         // Use MAF if present, else VCF, else empty
         def variants = maf ?: (vcf ?: [])
-        [meta, bam, bai, mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+        [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
     }
 
     // For tool_level: extract path
     ch_extract = ch_branched.bam_samples.map {
-        meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
         [meta, bam, bai, pon ?: [], targets ?: []]
     }
 
     // Pre-extracted BEDs (tool_level only)
     ch_beds = ch_branched.bed_samples.map {
-        meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
         [meta, bed, pon ?: [], targets ?: []]
     }
 
     // Methylation samples
     ch_methyl = ch_parsed
-        .filter { it[3] != null }  // mbam exists
+        .filter { it[5] != null }  // mbam exists (index shifted by 2 for mfsd_bam)
         .map { 
-            meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+            meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
             [meta, mbam, mbai]
         }
 
     // MAF samples for filtering (multi-sample, not single_sample_maf)
     ch_maf_multi = ch_parsed
-        .filter { it[7] != null && !it[8] }  // maf exists AND not single_sample
+        .filter { it[9] != null && !it[10] }  // maf exists AND not single_sample (indices shifted)
         .map {
-            meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+            meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
             [meta, bam, bai, maf]
         }
 
     // MAF samples bypass (single_sample_maf = true)
     ch_maf_single = ch_parsed
-        .filter { it[7] != null && it[8] }  // maf exists AND single_sample
+        .filter { it[9] != null && it[10] }  // maf exists AND single_sample (indices shifted)
         .map {
-            meta, bam, bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+            meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
             [meta, bam, bai, maf]
         }
 
