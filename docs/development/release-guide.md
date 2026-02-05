@@ -11,8 +11,7 @@ This guide documents the process for releasing new versions of Krewlyzer followi
 - All tests passing on develop branch
 
 > [!IMPORTANT]
-> **Version Format**: Use `0.5.2` (no `v` prefix) for version strings in code and filenames.
-> Git tags use the `v` prefix: `v0.5.2`.
+> **Version Format**: Use `0.5.2` (no `v` prefix) everywhere - code, filenames, and git tags.
 
 ---
 
