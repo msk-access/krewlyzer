@@ -1,0 +1,14 @@
+:root {
+  /* Blood-red theme - "Krew" means blood in Polish */
+  --md-primary-fg-color: #ef5552;
+  --md-primary-fg-color--light: #ff7875;
+  --md-primary-fg-color--dark: #c62828;
+  --md-accent-fg-color: #ef5552;
+  --md-accent-fg-color--transparent: rgba(239, 85, 82, 0.1);
+}
+
+/* Dark mode adjustments */
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #ef5552;
+  --md-accent-fg-color: #ff7875;
+}

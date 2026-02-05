@@ -73,6 +73,7 @@ def run_all(
     # Optional inputs for specific tools
     bisulfite_bam: Optional[Path] = typer.Option(None, "--bisulfite-bam", help="Bisulfite BAM for UXM (optional)"),
     variants: Optional[Path] = typer.Option(None, "--variants", "-v", help="VCF/MAF file for mFSD (optional)"),
+    mfsd_bam: Optional[Path] = typer.Option(None, "--mfsd-bam", help="Separate BAM for mFSD (e.g., duplex consensus). Uses main input BAM if not specified."),
     duplex: bool = typer.Option(False, "--duplex", "-D", help="Enable duplex weighting for mFSD (fgbio cD tag or Marianas read names)"),
     
     # Other options
@@ -118,6 +119,7 @@ def run_all(
     resolved_exclude_regions = _resolve_path(exclude_regions)
     resolved_bisulfite_bam = _resolve_path(bisulfite_bam)
     resolved_variants = _resolve_path(variants)
+    resolved_mfsd_bam = _resolve_path(mfsd_bam)
     resolved_arms_file = _resolve_path(arms_file)
     resolved_ocr_file = _resolve_path(ocr_file)
     resolved_pon_model = _resolve_path(pon_model)
@@ -265,14 +267,18 @@ def run_all(
             target_count_detail = f"{n_regions} regions"
     
     # Log startup banner
+    inputs_dict = {
+        "BAM/CRAM": str(bam_input),
+        "Reference": str(reference.name),
+        "Output": str(output),
+    }
+    if resolved_mfsd_bam and resolved_mfsd_bam.exists():
+        inputs_dict["mFSD BAM"] = str(resolved_mfsd_bam.name)
+    
     log_startup_banner(
         tool_name="run-all",
         version=__version__,
-        inputs={
-            "BAM/CRAM": str(bam_input),
-            "Reference": str(reference.name),
-            "Output": str(output),
-        },
+        inputs=inputs_dict,
         config={
             "Genome": f"{assets.raw_genome} → {assets.genome_dir}",
             "Assay": resolved_assay or "None (WGS)",
@@ -603,8 +609,19 @@ def run_all(
                 else:
                     correction_factors_path = gc.factors_input or gc.factors_out
                 
+                # Resolve which BAM to use for mFSD
+                mfsd_bam_path = resolved_mfsd_bam if resolved_mfsd_bam and resolved_mfsd_bam.exists() else bam_input
+                
+                # Auto-enable duplex if dedicated mfsd_bam provided (Option A per implementation plan)
+                duplex_enabled = duplex or (resolved_mfsd_bam is not None and resolved_mfsd_bam.exists())
+                
+                if resolved_mfsd_bam and resolved_mfsd_bam.exists():
+                    logger.info(f"mFSD using dedicated BAM: {resolved_mfsd_bam.name}")
+                    if duplex_enabled and not duplex:
+                        logger.info("Duplex weighting auto-enabled for dedicated mFSD BAM")
+                
                 mfsd(
-                    bam_input=bam_input,
+                    bam_input=mfsd_bam_path,
                     input_file=resolved_variants,
                     output=output,
                     sample_name=sample,
@@ -615,7 +632,7 @@ def run_all(
                     maxlen=maxlen,
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=False,  # mFSD works best with lenient filtering for duplex BAMs
-                    duplex=duplex,
+                    duplex=duplex_enabled,
                     output_distributions=False,
                     verbose=debug,
                     threads=threads
@@ -671,7 +688,7 @@ def run_all(
             from .core.feature_serializer import FeatureSerializer
             
             logger.info("Generating unified features JSON...")
-            serializer = FeatureSerializer.from_outputs(sample, output, version="0.5.1")
+            serializer = FeatureSerializer.from_outputs(sample, output, version="0.5.2")
             
             # Add runtime metadata
             serializer.add_metadata("bam_path", str(bam_input))

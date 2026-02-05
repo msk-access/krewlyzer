@@ -10,8 +10,8 @@ theme:
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
@@ -19,8 +19,8 @@ theme:
     # Palette toggle for dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -128,3 +128,12 @@ markdown_extensions:
 extra_javascript:
   - javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: >
+  Developed by <a href="https://github.com/rhshah">Ronak H Shah</a> @ 
+  <a href="https://www.mskcc.org">MSKCC</a> | 
+  Built with <a href="https://antigravity.google/">Antigravity</a> | 
+  <a href="https://github.com/msk-access/krewlyzer/blob/main/LICENSE">AGPL-3.0</a>

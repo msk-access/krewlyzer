@@ -1,16 +1,16 @@
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 # MSK-ACCESS V1 samples (auto-resolve PON/targets from assay)
-ACCESS_V1_001,/path/to/sample_A.bam,,,,,true,XS1,,
-ACCESS_V1_002,/path/to/sample_B.bam,,,,/path/to/merged_cohort.maf,false,XS1,,
+ACCESS_V1_001,/path/to/sample_A.bam,,,,,,true,XS1,,
+ACCESS_V1_002,/path/to/sample_B.bam,,,,,/path/to/merged_cohort.maf,false,XS1,,
 
-# MSK-ACCESS V2 samples
-ACCESS_V2_001,/path/to/sample_C.bam,,/path/to/sample_C.vcf,,,,XS2,,
+# MSK-ACCESS V2 samples (with duplex BAM for mFSD)
+ACCESS_V2_001,/path/to/sample_C.all_unique.bam,/path/to/sample_C.duplex.bam,,/path/to/sample_C.vcf,,,XS2,,
 
 # WGS samples (no targets needed)
-WGS_001,/path/to/wgs.bam,,,,,,WGS,,
+WGS_001,/path/to/wgs.bam,,,,,,,WGS,,
 
 # Custom assay with explicit PON/targets
-CUSTOM_001,/path/to/custom.bam,,,,,,,/path/to/custom.pon.parquet,/path/to/custom_targets.bed
+CUSTOM_001,/path/to/custom.bam,,,,,,,,/path/to/custom.pon.parquet,/path/to/custom_targets.bed
 
 # Pre-extracted BED (re-run features only)
-RERUN_001,,,,,/path/to/pre_extracted.bed.gz,,,XS1,,
+RERUN_001,,,,,,/path/to/pre_extracted.bed.gz,,XS1,,

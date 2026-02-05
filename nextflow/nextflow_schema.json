@@ -33,7 +33,7 @@
     "samplesheet": {
       "type": "string",
       "format": "file-path",
-      "description": "CSV with columns: sample, bam, meth_bam, vcf, bed, maf, single_sample_maf, assay, pon, targets"
+      "description": "CSV with columns: sample, bam, mfsd_bam, meth_bam, vcf, bed, maf, single_sample_maf, assay, pon, targets"
     },
     "help": {
       "type": "boolean",

@@ -10,7 +10,7 @@
 process KREWLYZER_UXM {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.5.1"
+    container "ghcr.io/msk-access/krewlyzer:0.5.2"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -52,7 +52,7 @@ process KREWLYZER_UXM {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.1
+        krewlyzer: 0.5.2
     END_VERSIONS
     """
 }

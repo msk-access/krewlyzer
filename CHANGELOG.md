@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.2] - 2026-02-05
+
+### Added
+- **Dual BAM Support (mFSD)**: New `--mfsd-bam` parameter in `run-all` to use a dedicated duplex BAM for mFSD while other features use the main all_unique BAM
+  - Auto-duplex detection from filename patterns (`-duplex`, `_duplex`, `.duplex`)
+  - Startup banner shows mFSD BAM path when specified
+  - Nextflow: Added `mfsd_bam` column to samplesheet schema
+
+### Fixed
+- **Correction Factors Loading**: Fixed delimiter detection for `.correction_factors.tsv` files (CSV format with TSV extension)
+
+### Documentation
+- **Release Guide**: Added version format note (use `0.5.2` not `v0.5.2` in code)
+- **mFSD docs**: Updated with dual BAM workflow examples
+- **Samplesheet docs**: Added `mfsd_bam` column documentation
+- **Footer**: Added site footer with author attribution and Antigravity acknowledgment
+- **Theme**: Changed color scheme to blood-red (#ef5552) to match "krew" (blood) branding
+
 ## [0.5.1] - 2026-02-04
 
 ### Fixed
