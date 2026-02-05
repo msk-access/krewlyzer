@@ -53,8 +53,10 @@ def load_correction_factors(factor_path: Path) -> dict:
     factors = {}
     
     try:
-        # Detect format from extension
-        sep = ',' if str(factor_path).endswith('.csv') else '\t'
+        # Sniff actual delimiter from first line (files may have wrong extension)
+        with open(factor_path, 'r') as f:
+            first_line = f.readline()
+        sep = ',' if ',' in first_line else '\t'
         df = pd.read_csv(factor_path, sep=sep)
         
         # Expected columns: length_bin (or similar), gc_percent, factor
