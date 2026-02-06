@@ -11,7 +11,7 @@
 process KREWLYZER_REGION_ENTROPY {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.5.2"
+    container "ghcr.io/msk-access/krewlyzer:0.5.3"
 
     input:
     tuple val(meta), path(bed)
@@ -70,7 +70,7 @@ process KREWLYZER_REGION_ENTROPY {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.2
+        krewlyzer: 0.5.3
     END_VERSIONS
     """
 }

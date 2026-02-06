@@ -33,7 +33,7 @@ include { KREWLYZER } from './workflows/krewlyzer/main'
 def helpMessage() {
     log.info """
     ================================================================
-     K R E W L Y Z E R   P I P E L I N E  (v${workflow.manifest.version ?: '0.5.2'})
+     K R E W L Y Z E R   P I P E L I N E  (v${workflow.manifest.version ?: '0.5.3'})
     ================================================================
      Usage:
      nextflow run main.nf --samplesheet samples.csv --ref hg19.fa [options]
