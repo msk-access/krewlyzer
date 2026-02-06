@@ -12,8 +12,8 @@ Krewlyzer has **245 tests** covering all features via pytest.
 | **E2E** | 3 | 30-60s | `tests/e2e/` |
 | **Asset Resolution** | 19 | <1s | `tests/test_asset_resolution.py` |
 
-> [!NOTE]
-> **Rust code is tested via Python.** The `test_rust_python_equivalence.py` suite verifies Rust output matches Python implementations.
+!!! note
+    **Rust code is tested via Python.** The `test_rust_python_equivalence.py` suite verifies Rust output matches Python implementations.
 
 ---
 
@@ -85,9 +85,9 @@ pytest -m "not slow"     # Skip slow tests
 
 ## Data Availability
 
-> [!IMPORTANT]
-> The **entire `src/krewlyzer/data/` folder is EXCLUDED from PyPI wheels** to keep size <100MB.
-> Tests that require bundled data files are **automatically skipped** in CI/PyPI installs.
+!!! important
+    The **entire `src/krewlyzer/data/` folder is EXCLUDED from PyPI wheels** to keep size <100MB.
+    Tests that require bundled data files are **automatically skipped** in CI/PyPI installs.
 
 ### Data by Install Method
 

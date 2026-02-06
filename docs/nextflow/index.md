@@ -52,6 +52,20 @@ flowchart TB
 - **Container support** - Docker/Singularity
 - **Cloud ready** - AWS, Google Cloud, Azure
 
+## Performance Benchmarks
+
+Real-world performance from MSK-ACCESS v1/v2 duplex plasma samples:
+
+| Sample Type | Duration | CPU Usage | Peak Memory |
+|-------------|----------|-----------|-------------|
+| Healthy control | 2-5 min | 90-140% | 1.7-1.9 GB |
+| ctDNA plasma | 4-6 min | 190-300% | 2.8-3.2 GB |
+
+!!! note "Tested Configuration"
+    - Docker with amd64 emulation on Apple Silicon
+    - 8 CPUs, 32 GB memory
+    - Panel mode with `--skip-pon` and `--duplex` enabled
+
 ## See Also
 
 - [CLI Reference](../cli/index.md) - Command-line usage

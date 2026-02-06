@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer extract`
 
-> **Plain English**: Extract converts your BAM file into cfDNA fragments with quality information.
-> It's the first step for most analyses—think of it as "preprocessing" your sequencing data.
->
-> **Key output**: `.bed.gz` file containing fragment coordinates and GC correction factors.
+!!! info "Plain English"
+    Extract converts your BAM file into cfDNA fragments with quality information.
+    It's the first step for most analyses—think of it as "preprocessing" your sequencing data.
+
+    **Key output**: `.bed.gz` file containing fragment coordinates and GC correction factors.
 
 ---
 
@@ -129,11 +130,11 @@ flowchart TB
 | `correction_factors.ontarget.csv` | GC factors from **on-target only** (for mFSD) |
 | `sample.bed.gz` | All fragments (on + off-target) |
 
-> [!TIP]
-> Use `.correction_factors.ontarget.csv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
+!!! tip
+    Use `.correction_factors.ontarget.csv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
 
-> [!IMPORTANT]
-> The BED file contains all fragments. Target filtering happens **per-tool** using the same `--target-regions` flag in FSC, FSD, WPS, etc.
+!!! important
+    The BED file contains all fragments. Target filtering happens **per-tool** using the same `--target-regions` flag in FSC, FSD, WPS, etc.
 
 ---
 

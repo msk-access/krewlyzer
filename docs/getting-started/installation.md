@@ -16,25 +16,25 @@ The easiest way to run Krewlyzer with all dependencies and data:
 
 ```bash
 # Use a specific release tag (no :latest tag is published)
-docker pull ghcr.io/msk-access/krewlyzer:0.5.1
+docker pull ghcr.io/msk-access/krewlyzer:0.5.2
 ```
 
-> [!IMPORTANT]
-> We publish versioned tags only (e.g., `:0.5.1`). There is no `:latest` tag.
-> Check [releases](https://github.com/msk-access/krewlyzer/releases) for available versions.
+!!! important "Versioned Tags Only"
+    We publish versioned tags only (e.g., `:0.5.2`). There is no `:latest` tag.
+    Check [releases](https://github.com/msk-access/krewlyzer/releases) for available versions.
 
 ### Running with Docker
 
 ```bash
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.5.1 \
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.5.2 \
     run-all -i /data/sample.bam \
     --reference /data/hg19.fa \
     --output /data/results/ \
     --assay xs2
 ```
 
-> [!TIP]
-> **Volume Mounting**: Use `-v $PWD:/data` to mount your current directory. All paths use the `/data/` prefix. For Nextflow pipelines, volume mounting is automatic.
+!!! tip "Volume Mounting"
+    Use `-v $PWD:/data` to mount your current directory. All paths use the `/data/` prefix. For Nextflow pipelines, volume mounting is automatic.
 
 ---
 
@@ -44,10 +44,10 @@ For HPC clusters where Docker isn't available:
 
 ```bash
 # Pull and convert to Singularity Image Format (SIF)
-singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.1
+singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.2
 
 # Or using Apptainer (newer name for Singularity)
-apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.1
+apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:0.5.2
 ```
 
 ### Running with Singularity
@@ -60,8 +60,8 @@ singularity exec krewlyzer.sif krewlyzer run-all \
     --assay xs2
 ```
 
-> [!TIP]
-> **HPC Bind Paths**: Singularity auto-binds `$HOME`, `/tmp`, and `$PWD`. For other paths, use `-B /scratch:/scratch`.
+!!! tip "HPC Bind Paths"
+    Singularity auto-binds `$HOME`, `/tmp`, and `$PWD`. For other paths, use `-B /scratch:/scratch`.
 
 ---
 

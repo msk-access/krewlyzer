@@ -2,11 +2,12 @@
 
 **Command**: `krewlyzer wps`
 
-> **Plain English**: WPS measures how well nucleosomes protect DNA from cutting.
-> Healthy cfDNA shows a regular ~190bp spacing pattern.
-> Cancer disrupts this pattern - **lower `nrl_quality` = more tumor burden**.
->
-> **Quick metric**: `nrl_quality > 0.7` = healthy, `< 0.5` = potentially abnormal
+!!! info "Plain English"
+    WPS measures how well nucleosomes protect DNA from cutting.
+    Healthy cfDNA shows a regular ~190bp spacing pattern.
+    Cancer disrupts this pattern - **lower `nrl_quality` = more tumor burden**.
+
+    **Quick metric**: `nrl_quality > 0.7` = healthy, `< 0.5` = potentially abnormal
 
 ---
 
@@ -71,7 +72,8 @@ flowchart TB
     end
 ```
 
-> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of anchor regions.
+!!! tip "Performance"
+    Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of anchor regions.
 
 ---
 
@@ -290,10 +292,12 @@ Per-region profiles centered on TSS/CTCF anchors (±1kb, 200 bins × 10bp).
 | `capture_mask` | uint8[200] | Panel mask (1=reliable, 0=edge/off-target) |
 | `local_depth` | float32 | Local fragment coverage |
 
-> **Strand Correction**: All profiles are strand-corrected.
-> - Genes on `+` strand are stored 5' → 3'
-> - Genes on `-` strand are **reversed** so they are also 5' → 3'
-> - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
+!!! note "Strand Correction"
+    All profiles are strand-corrected.
+
+    - Genes on `+` strand are stored 5' → 3'
+    - Genes on `-` strand are **reversed** so they are also 5' → 3'
+    - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
 
 #### PON-Normalized Columns (v2.0)
 
@@ -305,11 +309,11 @@ When using a v2.0 vector PON, these additional columns are computed:
 | `shape_score` | float32 | Pearson correlation with healthy shape [-1, 1] |
 | `z_amplitude` | float32 | Mean of abs(z_vector) for backward compat |
 
-> [!TIP]
-> **Shape Score Interpretation:**
-> - **0.9-1.0**: Healthy nucleosome positioning
-> - **0.5-0.9**: Mild chromatin disorganization
-> - **<0.5**: Significant disruption (cancer signal)
+!!! tip
+    **Shape Score Interpretation:**
+    - **0.9-1.0**: Healthy nucleosome positioning
+    - **0.5-0.9**: Mild chromatin disorganization
+    - **<0.5**: Significant disruption (cancer signal)
 
 See [PON v2.0](../../reference/pon-models.md#wps-baseline-wps_baseline) for baseline details.
 
@@ -329,11 +333,12 @@ Hierarchical stacking of ~770K Alu elements into 29 groups.
 | `periodicity_score` | float32 | Raw SNR-based quality score (0-1) |
 | `adjusted_score` | float32 | **NEW**: periodicity_score × deviation_penalty |
 
-> **NRL Deviation Scoring**: The `adjusted_score` penalizes samples with abnormal NRL values.
-> A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
+!!! note "NRL Deviation Scoring"
+    The `adjusted_score` penalizes samples with abnormal NRL values.
+    A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
 
 $$
-\text{adjusted\_score} = \text{periodicity\_score} \times \max\left(0, 1 - \frac{|\text{nrl\_bp} - 190|}{50}\right)
+\text{adjusted_score} = \text{periodicity_score} \times \max\left(0, 1 - \frac{|\text{nrl_bp} - 190|}{50}\right)
 $$
 
 ---
@@ -367,7 +372,8 @@ $$
 
 ## References
 
-> Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
+!!! quote "Reference"
+    Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
 
 ## See Also
 

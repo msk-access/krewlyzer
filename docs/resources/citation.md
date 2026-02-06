@@ -25,6 +25,7 @@ Krewlyzer implements or adapts methods from the following foundational papers in
 - **Other tissues:** Near zero
 
 **Cancer Pattern:**
+
 | Cancer Type | OCF Change |
 |-------------|------------|
 | HCC (liver) | ↑ Liver OCF, correlates with tumor fraction (R=0.36) |
@@ -45,6 +46,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 ```
 
 **Interpretation:**
+
 | WPS Value | Meaning |
 |-----------|---------|
 | **Positive** | Nucleosome present (DNA protected) |
@@ -68,12 +70,14 @@ WPS(k) = N_spanning(k) - N_ends(k)
 **Key Concept:** DELFI (DNA Evaluation of Fragments for earLy Interception) analyzes short/long fragment ratios genome-wide for cancer detection.
 
 **Fragment Classes:**
+
 | Class | Size Range | Origin |
 |-------|------------|--------|
 | Short | 100-150bp | Enriched in tumor cfDNA |
 | Long | 151-220bp | Healthy/mono-nucleosomal |
 
 **Healthy vs Cancer:**
+
 | Metric | Healthy | Cancer |
 |--------|---------|--------|
 | Modal peak | ~166bp | Left-shifted (~145bp) |
@@ -96,6 +100,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 - **X:** Between 25-75%
 
 **Healthy cfDNA Composition:**
+
 | Cell Type | Contribution |
 |-----------|--------------|
 | Megakaryocytes | ~31% |
@@ -120,6 +125,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 - End motif diversity reflects fragmentation patterns
 
 **Healthy vs Cancer:**
+
 | Metric | Healthy | Cancer (ctDNA) |
 |--------|---------|----------------|
 | Jaggedness | Lower | **Higher** |
@@ -189,6 +195,7 @@ From Helzer et al.: "Shannon entropy was calculated on the frequency of the frag
 - MDS changes correlate with aberrant gene regulation in cancer
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
 | Higher (~7.5-8.0) | Diverse motif usage (healthy) |

@@ -10,8 +10,8 @@ This guide documents the process for releasing new versions of Krewlyzer followi
 - Access to push to `origin`
 - All tests passing on develop branch
 
-> [!IMPORTANT]
-> **Version Format**: Use `0.5.2` (no `v` prefix) everywhere - code, filenames, and git tags.
+!!! important
+    **Version Format**: Use `0.5.2` (no `v` prefix) everywhere - code, filenames, and git tags.
 
 ---
 
@@ -84,6 +84,38 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/nextflow.config
 sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/main.nf
 find nextflow/modules -name "main.nf" -exec sed -i '' "s/${OLD_VERSION}/${VERSION}/g" {} \;
 ```
+
+---
+
+## Phase 2.5: Update Documentation Versions
+
+Docker image versions are referenced in documentation files:
+
+| File | Version Location |
+|------|------------------|
+| `docs/getting-started/installation.md` | Docker/Singularity pull commands |
+| `docs/getting-started/quickstart.md` | Docker pull example |
+| `docs/nextflow/examples.md` | Container image references |
+
+### Update Script
+
+```bash
+OLD_VERSION="0.5.1"
+VERSION="X.Y.Z"
+
+# Update installation docs
+sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/installation.md
+sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/quickstart.md
+
+# Verify no :latest tags remain (we don't publish :latest)
+grep -r ":latest" docs/ && echo "WARNING: :latest tags found!" || echo "✓ No :latest tags"
+
+# Verify changes
+grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
+```
+
+!!! warning "No :latest Tag"
+    We do NOT publish a `:latest` tag. Always use explicit version tags like `:0.5.2`.
 
 ---
 

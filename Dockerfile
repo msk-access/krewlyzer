@@ -39,8 +39,10 @@ LABEL org.opencontainers.image.licenses="AGPL-3.0"
 LABEL org.opencontainers.image.authors="Ronak Shah <shahr2@mskcc.org>"
 
 # Runtime dependencies only (amd64 has pre-built wheels)
+# procps and bash are required for Nextflow task metrics and shell execution
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libcurl4 libssl3 zlib1g libbz2-1.0 liblzma5 && \
+    libcurl4 libssl3 zlib1g libbz2-1.0 liblzma5 \
+    procps bash && \
     rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /wheels/*.whl /tmp/

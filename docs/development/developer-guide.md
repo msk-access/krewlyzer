@@ -193,8 +193,8 @@ pytest tests/unit/test_fsc.py
 pytest tests/ --cov=krewlyzer --cov-report=html
 ```
 
-> [!TIP]
-> **Modifying a feature?** Check the [Feature → Test Map](testing-guide.md#feature--test-map) to find which test file to update.
+!!! tip
+    **Modifying a feature?** Check the [Feature → Test Map](testing-guide.md#feature--test-map) to find which test file to update.
 
 ---
 

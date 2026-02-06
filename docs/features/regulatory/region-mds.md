@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer region-mds`
 
-> **Plain English**: Region MDS calculates motif diversity at each gene's exons individually.
-> This reveals *where* aberrant fragmentation is occurring rather than just *if* it's happening globally.
->
-> **Key metric**: E1 MDS - **lower E1 MDS = aberrant fragmentation at first exon = possible cancer signal**
+!!! info "Plain English"
+    Region MDS calculates motif diversity at each gene's exons individually.
+    This reveals *where* aberrant fragmentation is occurring rather than just *if* it's happening globally.
+
+    **Key metric**: E1 MDS - **lower E1 MDS = aberrant fragmentation at first exon = possible cancer signal**
 
 ---
 
@@ -133,6 +134,7 @@ $$
 - Result range: ~6.0 to ~8.0 (higher = more diverse)
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
 | Higher (~7.5-8.0) | Random/diverse motifs (healthy) |
@@ -148,8 +150,8 @@ The first exon of each gene is identified by genomic position and tracked separa
 2. **Transcription start**: Contains or abuts the TSS
 3. **Cancer sensitivity**: Shows most pronounced MDS changes in cancer
 
-> [!TIP]
-> Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
+!!! tip
+    Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
 
 ---
 
@@ -216,8 +218,8 @@ krewlyzer region-mds sample.bam ref.fa output/ --assay xs2 --e1-only
 krewlyzer run-all -i sample.bam -r ref.fa -o output/ --assay xs2 --region-mds-e1-only
 ```
 
-> [!TIP]
-> E1-only mode reduces processing time and output size for promoter-centric cancer detection.
+!!! tip
+    E1-only mode reduces processing time and output size for promoter-centric cancer detection.
 
 See [Panel Mode](../../guides/panel-mode.md) for details on panel-specific processing.
 

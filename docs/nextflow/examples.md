@@ -76,11 +76,11 @@ nextflow run msk-access/krewlyzer \
     --outdir /scratch/$GROUP/results/
 ```
 
-> [!TIP]
-> The `iris` profile automatically configures:
-> - SLURM executor with proper queue settings
-> - Singularity with pre-cached images at `/data1/core006/resources/singularity_image_library`
-> - Scratch paths and work directories
+!!! tip
+    The `iris` profile automatically configures:
+    - SLURM executor with proper queue settings
+    - Singularity with pre-cached images at `/data1/core006/resources/singularity_image_library`
+    - Scratch paths and work directories
 
 For preemptable (faster) queue:
 

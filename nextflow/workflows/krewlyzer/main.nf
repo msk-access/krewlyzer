@@ -77,17 +77,21 @@ workflow KREWLYZER {
         // RUN-ALL MODE: Unified command per sample
         // =====================================================
         
-        // Join run-all input with filtered MAFs
-        ch_runall = INPUT_CHECK.out.runall
-            .map { meta, bam, bai, mbam, variants, pon, targets, wps_anchors, wps_bg ->
-                [meta.id, meta, bam, bai, mbam, pon, targets, wps_anchors, wps_bg]
+        // INPUT_CHECK.out.runall already has: [meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_background]
+        // For samples with multi-sample MAF, we need to replace the variants with the filtered MAF
+        ch_runall_base = INPUT_CHECK.out.runall
+            .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg ->
+                [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg]
             }
-            .join(
-                ch_mfsd_all.map { meta, bam, bai, maf -> [meta.id, maf] },
-                remainder: true
-            )
-            .map { id, meta, bam, bai, mbam, pon, targets, wps_anchors, wps_bg, maf ->
-                [meta, bam, bai, mbam ?: [], maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+        
+        // Get filtered MAFs by sample ID
+        ch_filtered_mafs = ch_mfsd_all.map { meta, bam, bai, maf -> [meta.id, maf] }
+        
+        // Join and reconstruct the full tuple for RUNALL
+        ch_runall = ch_runall_base
+            .join(ch_filtered_mafs, remainder: true)
+            .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, maf ->
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
         
         KREWLYZER_RUNALL(ch_runall, fasta)

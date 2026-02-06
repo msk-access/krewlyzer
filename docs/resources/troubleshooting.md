@@ -192,9 +192,9 @@ krewlyzer build-pon samples.txt -a xs2 -r hg19.fa -o pon.parquet \
     --validate-assets
 ```
 
-> [!TIP]
-> Use `--validate-assets` after krewlyzer updates or when debugging unexpected errors.
-> For routine processing, validation overhead (~100ms) can be skipped.
+!!! tip
+    Use `--validate-assets` after krewlyzer updates or when debugging unexpected errors.
+    For routine processing, validation overhead (~100ms) can be skipped.
 
 ### Common format errors
 

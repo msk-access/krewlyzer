@@ -18,7 +18,10 @@ def set_log_level(log_level: str = typer.Option("INFO", "--log-level", help="Log
         handler.setLevel(level)
     logging.getLogger().setLevel(level)
 
-app = typer.Typer(help="krewlyzer: A comprehensive toolkit for ctDNA fragmentomics analysis.")
+app = typer.Typer(
+    help="krewlyzer: A comprehensive toolkit for ctDNA fragmentomics analysis.",
+    invoke_without_command=True,
+)
 
 from krewlyzer.motif import motif
 from krewlyzer.extract import extract
@@ -117,12 +120,17 @@ app.command(name="build-pon")(build_pon)
 app.command(name="build-gc-reference")(build_gc_reference)
 app.command()(validate)
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(False, "--version", "-v", help="Show version and exit"),
 ):
+    """Krewlyzer: ctDNA fragmentomics analysis toolkit."""
     if version:
-        typer.echo(f"krewlyzer version: {__version__}")
+        typer.echo(f"krewlyzer {__version__}")
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
         raise typer.Exit()
 
 if __name__ == "__main__":

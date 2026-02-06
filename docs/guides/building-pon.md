@@ -157,8 +157,8 @@ Both BAM/CRAM and BED.gz inputs are supported:
 | **BAM/CRAM** | Full | ✓ Included | Slower |
 | **BED.gz** | Skip | ✗ Not available | Faster |
 
-> [!NOTE]
-> **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
+!!! note
+    **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
 
 ## Output
 
@@ -214,8 +214,8 @@ The **MDS (Motif Diversity Score)** baseline is computed from k-mer frequencies 
 | `mds_mean` | Mean MDS (Shannon entropy) |
 | `mds_std` | MDS standard deviation |
 
-> [!IMPORTANT]
-> MDS baseline **requires BAM/CRAM input** because it needs fragment end sequences. BED.gz files cannot provide this data.
+!!! important
+    MDS baseline **requires BAM/CRAM input** because it needs fragment end sequences. BED.gz files cannot provide this data.
 
 Z-score interpretation:
 
@@ -237,8 +237,8 @@ For running `build-pon` on HPC clusters with SLURM, use one of these approaches:
 | 4 | 100 GB | 32 | ~24 hours |
 | 6 | 150 GB | 48 | ~12 hours |
 
-> [!TIP]
-> High-coverage panel data (e.g., MSK-ACCESS) typically uses **15-20 GB per sample** during peak extraction. WGS data may use less. Start conservative and adjust based on memory logs.
+!!! tip
+    High-coverage panel data (e.g., MSK-ACCESS) typically uses **15-20 GB per sample** during peak extraction. WGS data may use less. Start conservative and adjust based on memory logs.
 
 ### sbatch Script (Recommended)
 
@@ -318,5 +318,5 @@ mkdir -p ./pon_temp && srun \
 | `--temp-dir` | ./pon_temp | Local scratch directory |
 | `--allow-failures` | - | Continue if a sample fails |
 
-> [!WARNING]
-> If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
+!!! warning
+    If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.

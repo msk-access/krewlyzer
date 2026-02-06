@@ -6,7 +6,7 @@ Get running with Krewlyzer in 5 minutes.
 
 === "Docker (Recommended)"
     ```bash
-    docker pull ghcr.io/msk-access/krewlyzer:latest
+    docker pull ghcr.io/msk-access/krewlyzer:0.5.2
     ```
 
 === "Clone + Install"
@@ -23,8 +23,8 @@ Get running with Krewlyzer in 5 minutes.
     export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data
     ```
 
-> [!NOTE]
-> **pip users**: See [Installation Guide](installation.md) for `KREWLYZER_DATA_DIR` setup.
+!!! note "pip Users"
+    See [Installation Guide](installation.md) for `KREWLYZER_DATA_DIR` setup.
 
 ## Your First Analysis
 

@@ -80,7 +80,7 @@ workflow INPUT_CHECK {
     // =====================================================
     // PARSE SAMPLESHEET
     // =====================================================
-    Channel.fromPath(samplesheet)
+    samplesheet
         .splitCsv(header: true)
         .map { row ->
             def meta = [id: row.sample, assay: row.assay ?: 'UNKNOWN']
