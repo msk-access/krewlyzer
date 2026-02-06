@@ -98,9 +98,9 @@ krewlyzer run-all -i sample.all_unique.bam --mfsd-bam sample.duplex.bam \
     -r hg19.fa -o out/ --assay xs2 --variants sample.maf
 ```
 
-> [!NOTE]
-> When `--mfsd-bam` is provided, duplex weighting is **auto-enabled**.
-> If no duplex tags (cD/Marianas) are found, a warning is logged but processing continues with weight=1.0.
+!!! note
+    When `--mfsd-bam` is provided, duplex weighting is **auto-enabled**.
+    If no duplex tags (cD/Marianas) are found, a warning is logged but processing continues with weight=1.0.
 
 ### Via Nextflow Samplesheet
 
@@ -180,7 +180,7 @@ Marianas:UMI1+UMI2:contig:start:posCount:negCount:contig2:start2:pos2:neg2
 When `--duplex` is enabled, each fragment receives a weight based on its duplex family size:
 
 $$
-\text{weight} = \max(\ln(\text{family\_size}), 1.0)
+\text{weight} = \max(\ln(\text{family_size}), 1.0)
 $$
 
 | Family Size | Weight | Interpretation |
@@ -194,9 +194,9 @@ $$
 
 ### Interpretation in Duplex Mode
 
-> [!IMPORTANT]
-> When `--duplex` is enabled, `ALT_Weighted` and `REF_Weighted` will exceed raw counts.
-> A ratio of **~1.6x** indicates typical duplex family sizes of 3-5.
+!!! important
+    When `--duplex` is enabled, `ALT_Weighted` and `REF_Weighted` will exceed raw counts.
+    A ratio of **~1.6x** indicates typical duplex family sizes of 3-5.
 
 | Column | Without Duplex | With Duplex |
 |--------|----------------|-------------|
@@ -244,9 +244,9 @@ Using Gaussian models:
 | **-5 to 0** | Weak healthy signal | Likely healthy, low tumor content |
 | **< -5** | Strong healthy signal | Consistent with healthy cfDNA |
 
-> [!TIP]
-> For low-N variants (ALT_Count < 5), use `ALT_LLR` instead of `KS_Pval_ALT_REF`.
-> The LLR is robust with even 1-2 fragments, while KS tests require ≥5.
+!!! tip
+    For low-N variants (ALT_Count < 5), use `ALT_LLR` instead of `KS_Pval_ALT_REF`.
+    The LLR is robust with even 1-2 fragments, while KS tests require ≥5.
 
 ### Clinical Example: MRD Detection
 
@@ -318,9 +318,9 @@ custom = LLRModelParams(
 )
 ```
 
-> [!NOTE]
-> CLI support for preset selection is planned for a future release.
-> Currently, the Rust backend defaults to human parameters.
+!!! note
+    CLI support for preset selection is planned for a future release.
+    Currently, the Rust backend defaults to human parameters.
 
 ---
 
@@ -362,7 +362,7 @@ Where:
 ### Size Delta
 
 $$
-\Delta_{\text{ALT-REF}} = \text{ALT\_MeanSize} - \text{REF\_MeanSize}
+\Delta_{\text{ALT-REF}} = \text{ALT_MeanSize} - \text{REF_MeanSize}
 $$
 
 **Expected:**
@@ -372,7 +372,7 @@ $$
 ### VAF Proxy
 
 $$
-\text{VAF\_Proxy} = \frac{\text{ALT\_Count}}{\text{REF\_Count} + \text{ALT\_Count}}
+\text{VAF_Proxy} = \frac{\text{ALT_Count}}{\text{REF_Count} + \text{ALT_Count}}
 $$
 
 ---

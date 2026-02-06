@@ -36,8 +36,8 @@ For **ML training workflows** where PON samples are used as true negatives, use 
 krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
 ```
 
-> [!WARNING]
-> `-P` and `--skip-pon` are **mutually exclusive**. If you specify an explicit PON model, you want z-scores applied. Use `--skip-pon` only with `-A` (assay) for the ML negatives workflow.
+!!! warning
+    `-P` and `--skip-pon` are **mutually exclusive**. If you specify an explicit PON model, you want z-scores applied. Use `--skip-pon` only with `-A` (assay) for the ML negatives workflow.
 
 The `--skip-pon` flag:
 - Works with `-A/--assay` (auto-loads bundled PON but skips z-scores)
@@ -61,8 +61,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
 | `all_unique` | Built from all unique reads | Standard cfDNA (default) |
 | `duplex` | Built from duplex consensus reads | Duplex sequencing workflows |
 
-> [!TIP]
-> The `--pon-variant` flag is independent of the `--duplex` flag for mFSD. Use `--duplex` for mFSD weighting (enables cD tag usage), and `--pon-variant` for PON selection across all tools.
+!!! tip
+    The `--pon-variant` flag is independent of the `--duplex` flag for mFSD. Use `--duplex` for mFSD weighting (enables cD tag usage), and `--pon-variant` for PON selection across all tools.
 
 The `--pon-variant` flag:
 - Defaults to `all_unique` (maximum coverage PON)
@@ -183,8 +183,8 @@ Per-region nucleosome positioning metrics.
 - `wps_nuc_mean/std`: 200-element vector (nucleosomal footprint)
 - `wps_tf_mean/std`: 200-element vector (TF footprint)
 
-> [!TIP]
-> v2.0 enables position-specific z-scores and **Shape Correlation Score** for cancer detection.
+!!! tip
+    v2.0 enables position-specific z-scores and **Shape Correlation Score** for cancer detection.
 
 #### Shape Score Interpretation
 
@@ -289,6 +289,6 @@ features = {
 combined_signal = sum(abs(z) for z in features.values())
 ```
 
-> [!TIP]
-> **Combine z-scores across features** - Single extreme values may be noise, but consistent deviations across FSC, WPS, and MDS are highly indicative of ctDNA.
+!!! tip
+    **Combine z-scores across features** - Single extreme values may be noise, but consistent deviations across FSC, WPS, and MDS are highly indicative of ctDNA.
 

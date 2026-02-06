@@ -142,7 +142,8 @@ krewlyzer fsc -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_d
 krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 ```
 
-> **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
+!!! note
+    Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
 
 ## PON and Z-Score Normalization
 
@@ -165,7 +166,8 @@ krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
 krewlyzer fsd -i sample.bed.gz -o out/ --skip-pon
 ```
 
-> **Warning:** `-P/--pon-model` and `--skip-pon` are mutually exclusive.
+!!! warning
+    `-P/--pon-model` and `--skip-pon` are mutually exclusive.
 
 ### PON Variant Selection (`--pon-variant`)
 
@@ -179,7 +181,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
 ```
 
-> **Note:** `--pon-variant` controls PON file selection, while `--duplex` (mFSD only) enables cD tag weighting.
+!!! note
+    `--pon-variant` controls PON file selection, while `--duplex` (mFSD only) enables cD tag weighting.
 
 ## Output Formats
 

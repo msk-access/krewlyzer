@@ -2,13 +2,14 @@
 
 **Command**: `krewlyzer region-entropy`
 
-> **Plain English**: Region Entropy calculates the diversity of fragment sizes at regulatory regions.
-> A high entropy value indicates many different fragment sizes; low entropy indicates uniform sizes.
->
-> **Use case**: Cancer detection and subtyping - tumor cfDNA shows altered nucleosome positioning at specific regulatory elements.
+!!! info "Plain English"
+    Region Entropy calculates the diversity of fragment sizes at regulatory regions.
+    A high entropy value indicates many different fragment sizes; low entropy indicates uniform sizes.
 
-> [!NOTE]
-> This feature is based on **Helzer KT, et al. (2025)** "Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels" published in *Nature Communications*.
+    **Use case**: Cancer detection and subtyping - tumor cfDNA shows altered nucleosome positioning at specific regulatory elements.
+
+!!! note
+    This feature is based on **Helzer KT, et al. (2025)** "Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels" published in *Nature Communications*.
 
 ---
 
@@ -75,7 +76,8 @@ flowchart LR
     TSV --> PON["PON Z-score"]
 ```
 
-> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of TFBS/ATAC regions.
+!!! tip "Performance"
+    Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of TFBS/ATAC regions.
 
 ---
 
@@ -226,8 +228,9 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
 | `{sample}.ATAC.tsv` | All 23 cancer types | Off-target GC model |
 | `{sample}.ATAC.ontarget.tsv` | Cancer types in panel | **On-target GC model** |
 
-> **Note**: On-target outputs use on-target GC correction factors when available,
-> providing better accuracy for capture-biased data.
+!!! note
+    On-target outputs use on-target GC correction factors when available,
+    providing better accuracy for capture-biased data.
 
 ---
 
@@ -345,7 +348,8 @@ Following the methodology from Helzer et al.:
 
 If you use this feature, please cite:
 
-> **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). https://doi.org/10.1038/s41467-025-64153-z
+!!! quote "Reference"
+    **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). https://doi.org/10.1038/s41467-025-64153-z
 
 **Data source:**
 - GitHub: [Zhao-Lab-UW-DHO/fragmentomics_metrics](https://github.com/Zhao-Lab-UW-DHO/fragmentomics_metrics/)

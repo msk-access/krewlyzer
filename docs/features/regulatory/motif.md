@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer motif`
 
-> **Plain English**: Motif analysis looks at the 4-letter DNA sequences at fragment ends.
-> Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
->
-> **Key metric**: MDS (Motif Diversity Score) - **higher MDS = more abnormal cutting = potential tumor signal**
+!!! info "Plain English"
+    Motif analysis looks at the 4-letter DNA sequences at fragment ends.
+    Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
+
+    **Key metric**: MDS (Motif Diversity Score) - **higher MDS = more abnormal cutting = potential tumor signal**
 
 ---
 
@@ -116,9 +117,9 @@ cfDNA fragmentation by DNASE1L3 produces fragments with single-stranded 5' overh
 - **~87.8% jagged ends** (vs lower in healthy)
 - **Higher C-end fraction** due to preferential C-terminal cutting
 
-> [!TIP]
-> The C-end fraction complements MDS for detecting tumor-derived cfDNA.
-> Use both metrics together for improved sensitivity.
+!!! tip
+    The C-end fraction complements MDS for detecting tumor-derived cfDNA.
+    Use both metrics together for improved sensitivity.
 
 ---
 
@@ -138,6 +139,7 @@ $$
 - Result range: $[0, 1]$
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
 | ~1.0 | Random/diverse (healthy-like) |
@@ -169,8 +171,8 @@ krewlyzer motif -i sample.bam -r hg19.fa -o output/ \
 | < -2 | **Abnormally low diversity** (possible tumor) |
 | > +2 | Rare (check data quality) |
 
-> [!TIP]
-> Lower MDS (negative z-score) indicates stereotyped cutting patterns often associated with tumor-derived cfDNA.
+!!! tip
+    Lower MDS (negative z-score) indicates stereotyped cutting patterns often associated with tumor-derived cfDNA.
 
 ---
 
@@ -191,9 +193,9 @@ krewlyzer motif -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.EndMotif.ontarget.tsv` | **On-target** fragments | Local capture region analysis |
 | `{sample}.MDS.tsv` | Off-target MDS | Primary biomarker |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
-> **On-target = capture-biased** – use cautiously; reflects library prep artifacts.
+!!! important
+    **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
+    **On-target = capture-biased** – use cautiously; reflects library prep artifacts.
 
 ### Why Split?
 

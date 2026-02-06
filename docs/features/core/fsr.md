@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer fsr`
 
-> **Plain English**: FSR measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
-> A higher `core_short_long_ratio` means more tumor-derived DNA in your sample.
->
-> **Example**: `core_short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
+!!! info "Plain English"
+    FSR measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
+    A higher `core_short_long_ratio` means more tumor-derived DNA in your sample.
+
+    **Example**: `core_short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
 
 ---
 
@@ -136,25 +137,25 @@ FSR uses the Rust backend's 5-channel size bins:
 
 ### Normalization Order (Critical)
 
-> [!IMPORTANT]
-> FSR normalizes counts to PoN **BEFORE** computing ratios.
+!!! important
+    FSR normalizes counts to PoN **BEFORE** computing ratios.
 
 **Step 1 - Normalize short:**
 
 $$
-\text{core\_short\_norm} = \frac{\text{core\_short\_count}}{\text{PoN\_core\_short\_mean}}
+\text{core_short_norm} = \frac{\text{core_short_count}}{\text{PoN_core_short_mean}}
 $$
 
 **Step 2 - Normalize long:**
 
 $$
-\text{long\_norm} = \frac{\text{long\_count}}{\text{PoN\_long\_mean}}
+\text{long_norm} = \frac{\text{long_count}}{\text{PoN_long_mean}}
 $$
 
 **Step 3 - Compute ratio:**
 
 $$
-\text{core\_short\_long\_ratio} = \frac{\text{core\_short\_norm}}{\text{long\_norm}}
+\text{core_short_long_ratio} = \frac{\text{core_short_norm}}{\text{long_norm}}
 $$
 
 This removes batch effects **before** ratio calculation, ensuring accurate cross-sample comparison.
@@ -162,7 +163,7 @@ This removes batch effects **before** ratio calculation, ensuring accurate cross
 **Step 4 - Log2 ratio (optional):**
 
 $$
-\text{short\_long\_log2} = \log_2(\text{core\_short\_long\_ratio})
+\text{short_long_log2} = \log_2(\text{core_short_long_ratio})
 $$
 
 | log2 Value | Meaning |
@@ -211,9 +212,9 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `{sample}.FSR.tsv` | **Off-target** fragments | Unbiased ratio (primary) |
 | `{sample}.FSR.ontarget.tsv` | **On-target** fragments | Gene-level ratio |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for tumor detection.  
-> **On-target = capture-biased** – reflects panel design, not true biology.
+!!! important
+    **Off-target = unbiased** – preferred for tumor detection.  
+    **On-target = capture-biased** – reflects panel design, not true biology.
 
 ---
 
@@ -236,7 +237,8 @@ flowchart TD
     Q2 -->|No| LOW[Low/no detectable tumor]
 ```
 
-> **Note**: Thresholds depend on your cohort and should be validated against known samples.
+!!! note
+    Thresholds depend on your cohort and should be validated against known samples.
 
 ---
 

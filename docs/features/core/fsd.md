@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer fsd`
 
-> **Plain English**: FSD creates a "histogram" of fragment sizes for each chromosome arm.
-> Healthy samples have a peak at ~166bp. Cancer samples show a left-shifted peak (~145bp).
->
-> **Use case**: Detect aneuploidy and copy number changes by comparing arm-level size distributions.
+!!! info "Plain English"
+    FSD creates a "histogram" of fragment sizes for each chromosome arm.
+    Healthy samples have a peak at ~166bp. Cancer samples show a left-shifted peak (~145bp).
+
+    **Use case**: Detect aneuploidy and copy number changes by comparing arm-level size distributions.
 
 ---
 
@@ -77,7 +78,8 @@ cfDNA fragment sizes reflect nucleosome positioning and chromatin state in sourc
 | 10bp periodicity | Clear | Often disrupted |
 | Arm-level variation | Minimal | Increased (correlates with CNAs) |
 
-> **Why arm-level?** Chromosome arms have distinct chromatin environments. Tumor-derived cfDNA shows arm-specific fragmentation shifts that correlate with copy number alterations.
+!!! note "Why arm-level?"
+    Chromosome arms have distinct chromatin environments. Tumor-derived cfDNA shows arm-specific fragmentation shifts that correlate with copy number alterations.
 
 ---
 
@@ -135,9 +137,9 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 
 Same schema as above, but for fragments overlapping target regions.
 
-> [!IMPORTANT]
-> **Off-target = unbiased** (preferred for biomarkers)  
-> **On-target = capture-biased** (use cautiously for local analysis only)
+!!! important
+    **Off-target = unbiased** (preferred for biomarkers)  
+    **On-target = capture-biased** (use cautiously for local analysis only)
 
 ---
 
@@ -156,7 +158,8 @@ Normalization Order:
 | Enabled | Corrects for PCR/capture GC bias |
 | Disabled (`--no-gc-correct`) | Raw counts (faster, biased) |
 
-> See [GC Correction Details](../../guides/gc-correction.md) for the LOESS algorithm.
+!!! tip
+    See [GC Correction Details](../../guides/gc-correction.md) for the LOESS algorithm.
 
 ---
 
@@ -174,7 +177,7 @@ With `--pon-model`, FSD outputs include log-ratio normalization:
 **Log-Ratio:**
 
 $$
-\text{logR} = \log_2 \left( \frac{\text{sample\_count} + 1}{\text{PoN\_expected} + 1} \right)
+\text{logR} = \log_2 \left( \frac{\text{sample_count} + 1}{\text{PoN_expected} + 1} \right)
 $$
 
 **PON Stability:**
@@ -188,7 +191,8 @@ $$
 2. Compute log-ratio with pseudocount (+1) for zero-handling
 3. Calculate stability from PoN variance (inverse weighting)
 
-> See [PON Models](../../reference/pon-models.md) for model structure and building.
+!!! tip
+    See [PON Models](../../reference/pon-models.md) for model structure and building.
 
 ---
 
@@ -224,7 +228,8 @@ $$
 | 51-86 | 320-499bp | Multi-nucleosomal |
 | 87-186 | 500-999bp | Extended range |
 
-> **Note**: The pipeline uses 5bp bins from 65bp to 999bp, yielding 187 columns. This extended range (up to 1000bp) captures multi-nucleosomal fragments for comprehensive FSD analysis.
+!!! note
+    The pipeline uses 5bp bins from 65bp to 999bp, yielding 187 columns. This extended range (up to 1000bp) captures multi-nucleosomal fragments for comprehensive FSD analysis.
 
 ---
 
@@ -242,8 +247,8 @@ krewlyzer fsd -i sample.bed.gz -o output/ \
 | `.FSD.tsv` | Off-target fragments | Unbiased arm-level biomarkers |
 | `.FSD.ontarget.tsv` | On-target fragments | Local context (capture-biased) |
 
-> [!WARNING]
-> On-target FSD has capture bias and should not be used for global fragmentomics.
+!!! warning
+    On-target FSD has capture bias and should not be used for global fragmentomics.
 
 ---
 

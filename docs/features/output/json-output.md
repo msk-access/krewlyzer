@@ -154,8 +154,8 @@ First exon (E1) per gene, filtered from `fsc_region`. E1 serves as a promoter-pr
 ]
 ```
 
-> [!TIP]
-> Use `fsc_region_e1` for **early cancer detection** models where promoter fragmentation changes are a primary signal.
+!!! tip
+    Use `fsc_region_e1` for **early cancer detection** models where promoter fragmentation changes are a primary signal.
 
 ### FSR (Fragment Size Ratios)
 
@@ -363,9 +363,9 @@ Fragment size entropy at ATAC-seq accessible regions.
 
 GC bias correction factors used internally during processing.
 
-> [!NOTE]
-> **Not recommended for ML features.** These are intermediate diagnostic data, not predictive features.
-> The GC correction is already applied to FSC/FSR/FSD counts. Use those corrected values instead.
+!!! note
+    **Not recommended for ML features.** These are intermediate diagnostic data, not predictive features.
+    The GC correction is already applied to FSC/FSR/FSD counts. Use those corrected values instead.
 
 ```json
 "gc_factors": {
@@ -494,8 +494,8 @@ out/
 └── sample.features.json             # All features (with --generate-json)
 ```
 
-> [!NOTE]
-> The `--generate-json` flag produces the unified JSON **in addition to** the standard TSV/Parquet outputs.
+!!! note
+    The `--generate-json` flag produces the unified JSON **in addition to** the standard TSV/Parquet outputs.
 
 ---
 

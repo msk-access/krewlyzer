@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer fsc`
 
-> **Plain English**: FSC counts how many DNA fragments of each size fall into each genomic region.
-> Think of it as a "heatmap" of fragment sizes across the genome.
->
-> **Use case**: Copy number detection - regions with more short fragments suggest tumor amplification.
+!!! info "Plain English"
+    FSC counts how many DNA fragments of each size fall into each genomic region.
+    Think of it as a "heatmap" of fragment sizes across the genome.
+
+    **Use case**: Copy number detection - regions with more short fragments suggest tumor amplification.
 
 ---
 
@@ -45,7 +46,8 @@ FSC partitions fragments into **non-overlapping** channels optimized for ML:
 | **long** | 261-400bp | Multi-nucleosomal | Necrosis-associated |
 | **ultra_long** | 401-1000bp | Extended fragments | Necrosis, fetal cfDNA, late apoptosis |
 
-> **Non-overlapping**: Each fragment is counted in exactly one channel. This prevents multicollinearity in ML models.
+!!! note "Non-overlapping"
+    Each fragment is counted in exactly one channel. This prevents multicollinearity in ML models.
 
 ---
 
@@ -108,7 +110,8 @@ flowchart TB
 
 ### Aggregation Strategy
 
-> **Critical**: Aggregation should match your analysis goal.
+!!! warning "Critical"
+    Aggregation should match your analysis goal.
 
 | Data Type | Bin Input | Aggregation | Use Case |
 |-----------|-----------|-------------|----------|
@@ -116,7 +119,8 @@ flowchart TB
 | **WGS focal** | 100kb genome tiles | **No aggregation** | Focal amps (EGFR, MYC) |
 | **Panel** | Exon/Gene targets | **No aggregation** | Gene-level resolution |
 
-> **Auto-detection**: When `--target-regions` is provided in `run-all`, aggregation is **automatically disabled** to preserve gene-level resolution for panel data.
+!!! tip "Auto-detection"
+    When `--target-regions` is provided in `run-all`, aggregation is **automatically disabled** to preserve gene-level resolution for panel data.
 
 **Why this matters:**
 - 5Mb aggregation is great for detecting **arm-level** events (e.g., 1p/19q co-deletion)
@@ -218,7 +222,8 @@ Output: `{sample}.FSC.tsv`
 | `*_log2` | float | log2(channel / PoN_mean) |
 | `*_reliability` | float | 1 / (PoN_variance + k) |
 
-> **Note**: Log2 ratios are signed: positive = above PoN mean, negative = below.
+!!! note
+    Log2 ratios are signed: positive = above PoN mean, negative = below.
 
 ---
 
@@ -281,7 +286,8 @@ Higher ratio = more short fragments = potential tumor signal
 2. **Window aggregation** (Python): 50 bins → 5Mb windows
 3. **PoN log-ratio** (Python): log2(sample / PoN mean) when PoN model provided
 
-> **Important**: GC correction is applied **first** in Rust, not after. This ensures all downstream features are GC-unbiased.
+!!! important
+    GC correction is applied **first** in Rust, not after. This ensures all downstream features are GC-unbiased.
 
 ---
 
@@ -315,9 +321,9 @@ flowchart TB
 | `{sample}.FSC.tsv` | **Off-target** fragments | Unbiased global signal (primary) |
 | `{sample}.FSC.ontarget.tsv` | **On-target** fragments | Gene-level local signal |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
-> **On-target = capture-biased** – reflects library prep + target selection.
+!!! important
+    **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
+    **On-target = capture-biased** – reflects library prep + target selection.
 
 ### When to Use On-Target FSC
 
@@ -379,15 +385,15 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2
 krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2 --disable-e1-aggregation
 ```
 
-> [!TIP]
-> E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
+!!! tip
+    E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
 
 ### Normalized Depth (RPKM-like)
 
 Both gene and region outputs include `normalized_depth`:
 
 $$
-\text{normalized\_depth} = \frac{\text{count} \times 10^9}{\text{region\_bp} \times \text{total\_fragments}}
+\text{normalized_depth} = \frac{\text{count} \times 10^9}{\text{region_bp} \times \text{total_fragments}}
 $$
 
 This enables cross-sample depth comparisons independent of library size and region size.
@@ -399,8 +405,8 @@ This enables cross-sample depth comparisons independent of library size and regi
 | MSK-ACCESS v1 | `--assay xs1` | 128 |
 | MSK-ACCESS v2 | `--assay xs2` | 146 |
 
-> [!TIP]
-> Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
+!!! tip
+    Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
 
 ### GC Correction for Gene FSC
 
@@ -425,8 +431,8 @@ Processed 2.4M fragments, 2.4M assigned to genes
   GC correction: avg_weight=1.898, missing_gc=0
 ```
 
-> [!NOTE]
-> On-target factors are automatically used when available. If not found, raw counting is used with a debug log message.
+!!! note
+    On-target factors are automatically used when available. If not found, raw counting is used with a debug log message.
 
 ---
 
@@ -442,7 +448,8 @@ Processed 2.4M fragments, 2.4M assigned to genes
 
 ## References
 
-> Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
+!!! quote "References"
+    Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
 
-> Cristiano et al. (2019). Genome-wide cell-free DNA fragmentation in patients with cancer. *Nature*, 570(7761), 385-389.
+    Cristiano et al. (2019). Genome-wide cell-free DNA fragmentation in patients with cancer. *Nature*, 570(7761), 385-389.
 

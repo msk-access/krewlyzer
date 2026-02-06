@@ -11,7 +11,7 @@
 process KREWLYZER_REGION_MDS {
     tag "$meta.id"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.5.2"
+    container "ghcr.io/msk-access/krewlyzer:0.5.3"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -76,7 +76,7 @@ process KREWLYZER_REGION_MDS {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.2
+        krewlyzer: 0.5.3
     END_VERSIONS
     """
 }

@@ -112,8 +112,8 @@ This is useful when:
 - Running validation without on/off-target splitting
 - Processing samples where target regions don't apply
 
-> [!NOTE]
-> `--skip-target-regions` only disables target region loading. The PON model is still loaded from `--assay` unless you also add `--skip-pon`.
+!!! note
+    `--skip-target-regions` only disables target region loading. The PON model is still loaded from `--assay` unless you also add `--skip-pon`.
 
 ### Flag Priority
 
@@ -161,9 +161,9 @@ In panel mode, each feature outputs two files:
 | TFBS | `.TFBS.tsv` (genome-wide) | `.TFBS.ontarget.tsv` (panel regions) |
 | ATAC | `.ATAC.tsv` (genome-wide) | `.ATAC.ontarget.tsv` (panel regions) |
 
-> [!NOTE]
-> On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
-> when available, providing better accuracy for capture-biased data.
+!!! note
+    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
+    when available, providing better accuracy for capture-biased data.
 
 **Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/regulatory/ocf.md#panel-mode) for details.
 
@@ -254,8 +254,8 @@ krewlyzer wps -i sample.bed.gz -o out/ \
 - **TSS anchors**: Transcription start sites for panel genes
 - **CTCF anchors**: CTCF binding sites within 100kb of panel TSS sites
 
-> [!TIP] 
-> Using panel-specific anchors reduces noise from irrelevant genome-wide signals and focuses WPS analysis on oncologically relevant regions.
+!!! tip
+    Using panel-specific anchors reduces noise from irrelevant genome-wide signals and focuses WPS analysis on oncologically relevant regions.
 
 
 ## PON Compatibility

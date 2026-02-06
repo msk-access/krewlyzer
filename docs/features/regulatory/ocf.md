@@ -2,10 +2,11 @@
 
 **Command**: `krewlyzer ocf`
 
-> **Plain English**: OCF detects where cfDNA fragments came from by looking at their "orientation" near regulatory regions.
-> Different tissues cut DNA in different directions—OCF captures this signal for tissue-of-origin detection.
->
-> **Use case**: Identify liver cancer vs. colon cancer based on cfDNA fragmentation patterns.
+!!! info "Plain English"
+    OCF detects where cfDNA fragments came from by looking at their "orientation" near regulatory regions.
+    Different tissues cut DNA in different directions—OCF captures this signal for tissue-of-origin detection.
+
+    **Use case**: Identify liver cancer vs. colon cancer based on cfDNA fragmentation patterns.
 
 ---
 
@@ -34,8 +35,8 @@ flowchart LR
     end
 ```
 
-> [!WARNING]
-> OCF regions are **only available for GRCh37/hg19**. For hg38, you must provide a custom OCR file with `-r/--ocr-input`.
+!!! warning
+    OCF regions are **only available for GRCh37/hg19**. For hg38, you must provide a custom OCR file with `-r/--ocr-input`.
 
 ### Python/Rust Architecture
 
@@ -203,9 +204,9 @@ Before the ontarget OCF run, the genome-wide OCR atlas (~50,000 regions) is filt
 | `{sample}.OCF.offtarget.tsv` | Off-target only | All ~50K | Off-target baseline |
 | `{sample}.OCF.offtarget.sync.tsv` | Off-target only | All ~50K | Off-target detail |
 
-> [!NOTE]
-> The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).
-> For OCF, ontarget means **both** on-target fragments **AND** panel-filtered OCR regions.
+!!! note
+    The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).
+    For OCF, ontarget means **both** on-target fragments **AND** panel-filtered OCR regions.
 
 ### Why Both Filters?
 
@@ -238,9 +239,9 @@ On-target fragments and panel OCR regions both focus on the same genomic space (
 | Placenta | -25.1 | -51.6 |
 | T-cell | 8.9 | 86.7 |
 
-> [!TIP]
-> **Genome-wide OCF** provides the unbiased baseline for tissue-of-origin analysis.
-> **Panel OCF** provides a focused view specific to your assay's target regions.
+!!! tip
+    **Genome-wide OCF** provides the unbiased baseline for tissue-of-origin analysis.
+    **Panel OCF** provides a focused view specific to your assay's target regions.
 
 ---
 

@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.3] - 2026-02-06
+
+### Documentation
+- **Admonition Formatting**: Converted blockquotes to proper MkDocs admonitions across 10+ docs files for consistent styling
+- **Table Rendering**: Fixed tables not rendering by adding required blank lines before table headers
+- **LaTeX Formulas**: Fixed underscore escaping in math blocks (mFSD, FSR, WPS formulas)
+- **Abbreviations**: Added glossary with auto-append for consistent acronym tooltips (cfDNA, WPS, etc.)
+- **Docs CI**: Added PR validation trigger with `mkdocs build --strict` to catch issues before deployment
+
 ## [0.5.2] - 2026-02-05
 
 ### Added
