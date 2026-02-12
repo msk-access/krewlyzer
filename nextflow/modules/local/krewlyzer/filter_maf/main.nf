@@ -26,23 +26,25 @@ process FILTER_MAF {
     """
     #!/usr/bin/env python3
     import sys
-    import re
-    
-    sample_pattern = re.compile(r'.*${prefix}.*', re.IGNORECASE)
+    import platform
+
+    sample_id = '${prefix}'
+    sample_id_lower = sample_id.lower()
     variant_count = 0
-    
+    total_rows = 0
+
     with open('${maf}', 'r') as infile, open('${prefix}.filtered.maf', 'w') as outfile:
         header_written = False
         tsb_col = None
-        
+
         for line in infile:
             # Handle comment lines (keep them)
             if line.startswith('#'):
                 outfile.write(line)
                 continue
-            
+
             fields = line.strip().split('\\t')
-            
+
             # First non-comment line is the header
             if not header_written:
                 outfile.write(line)
@@ -54,26 +56,28 @@ process FILTER_MAF {
                         break
                 if tsb_col is None:
                     print("WARNING: Tumor_Sample_Barcode column not found, keeping all rows", file=sys.stderr)
+                else:
+                    print(f"Found Tumor_Sample_Barcode at column {tsb_col}", file=sys.stderr)
                 continue
-            
-            # Filter data rows by sample pattern
+
+            total_rows += 1
+
+            # Filter: check if sample_id is a substring of Tumor_Sample_Barcode
             if tsb_col is not None:
-                if len(fields) > tsb_col and sample_pattern.match(fields[tsb_col]):
+                if len(fields) > tsb_col and sample_id_lower in fields[tsb_col].lower():
                     outfile.write(line)
                     variant_count += 1
             else:
                 # No TSB column found, keep all rows
                 outfile.write(line)
                 variant_count += 1
-    
-    # Log result
-    if variant_count == 0:
-        print(f"WARNING: No variants found for sample pattern '.*${prefix}.*' - MFSD will be skipped", file=sys.stderr)
-    else:
-        print(f"Filtered {variant_count} variants for sample pattern: .*${prefix}.*", file=sys.stderr)
 
-    # Write versions.yml (must be done in Python since the script shebang is python3)
-    import platform
+    # Log result
+    print(f"Sample ID: '{sample_id}' | Total MAF rows: {total_rows} | Matched: {variant_count}", file=sys.stderr)
+    if variant_count == 0:
+        print(f"WARNING: No variants found for '{sample_id}' in Tumor_Sample_Barcode - mFSD will be skipped", file=sys.stderr)
+
+    # Write versions.yml
     with open('versions.yml', 'w') as vf:
         vf.write('"${task.process}":\\n')
         vf.write(f'    python: {platform.python_version()}\\n')
