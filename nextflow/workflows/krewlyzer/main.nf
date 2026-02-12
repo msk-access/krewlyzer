@@ -89,7 +89,7 @@ workflow KREWLYZER {
         
         // Join and reconstruct the full tuple for RUNALL
         ch_runall = ch_runall_base
-            .join(ch_filtered_mafs, remainder: true)
+            .join(ch_filtered_mafs)
             .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, maf ->
                 [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
