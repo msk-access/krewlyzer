@@ -158,7 +158,16 @@ extra_javascript:
 extra_css:
   - stylesheets/extra.css
 
-copyright: >
+extra:
+  generator: false
+  version:
+    provider: mike
+    default: stable
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/msk-access/krewlyzer
+
+copyright: |
   Developed by <a href="https://github.com/rhshah">Ronak H Shah</a> @ 
   <a href="https://www.mskcc.org">MSKCC</a> | 
   Built with <a href="https://antigravity.google/">Antigravity</a> | 
