@@ -72,10 +72,11 @@ process FILTER_MAF {
     else:
         print(f"Filtered {variant_count} variants for sample pattern: .*${prefix}.*", file=sys.stderr)
 
-    cat <<-END_VERSIONS > versions.yml
-    "${task.process}":
-        python: \$(python3 --version | sed 's/Python //')
-    END_VERSIONS
+    # Write versions.yml (must be done in Python since the script shebang is python3)
+    import platform
+    with open('versions.yml', 'w') as vf:
+        vf.write('"${task.process}":\\n')
+        vf.write(f'    python: {platform.python_version()}\\n')
     """
 
     stub:
