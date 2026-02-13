@@ -17,6 +17,8 @@ process KREWLYZER_RUNALL {
 
     container "ghcr.io/msk-access/krewlyzer:0.5.3"
 
+    publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
     tuple val(meta), path(bam), path(bai), path(mfsd_bam), path(mfsd_bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)
     path fasta
