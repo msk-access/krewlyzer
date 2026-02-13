@@ -34,15 +34,34 @@ workflow KREWLYZER {
     
     if (params.use_runall) {
         // =====================================================
-        // RUN-ALL MODE: Direct pipe — each sample is independent
-        // MAF filtering is inlined in the RUNALL process script
+        // RUN-ALL MODE: FILTER_MAF → join → RUNALL (nf-core pattern)
+        // FILTER_MAF runs for every sample, then join re-attaches
+        // the filtered MAF to the full input tuple by meta.id
         // =====================================================
-        
-        ch_runall = INPUT_CHECK.out.runall
+
+        // --- FILTER_MAF: all samples (multi-MAF filters, single-MAF passes through, no-MAF creates placeholder) ---
+        FILTER_MAF(INPUT_CHECK.out.maf_for_filter)
+        ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
+
+        // --- Build base RUNALL channel keyed by meta.id ---
+        ch_runall_base = INPUT_CHECK.out.runall
             .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg ->
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], variants ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+                [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg]
             }
-        
+
+        // --- FILTER_MAF output keyed by meta.id ---
+        ch_filtered = FILTER_MAF.out.maf
+            .map { meta, filtered_maf -> [meta.id, filtered_maf] }
+
+        // --- Join: 1:1 by meta.id (nf-core Sarek/neoantigen pattern) ---
+        ch_runall = ch_runall_base
+            .join(ch_filtered, failOnDuplicate: true, failOnMismatch: true)
+            .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, filtered_maf ->
+                // Filter out header-only MAFs (< 100 bytes = no data rows)
+                def variants = filtered_maf.size() > 100 ? filtered_maf : []
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+            }
+
         KREWLYZER_RUNALL(ch_runall, fasta)
         ch_versions = ch_versions.mix(KREWLYZER_RUNALL.out.versions.first())
         

@@ -172,11 +172,19 @@ workflow INPUT_CHECK {
             [meta, bam, bai, maf]
         }
 
+    // ALL bam samples with MAF + single_sample flag for run-all mode FILTER_MAF
+    ch_maf_for_filter = ch_branched.bam_samples.map {
+        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+        def new_meta = meta + [single_sample: single ?: false]
+        [new_meta, maf ?: []]
+    }
+
     emit:
-    runall     = ch_runall      // For run-all module
-    extract    = ch_extract     // For tool_level extract
-    beds       = ch_beds        // Pre-extracted BEDs (tool_level only)
-    methyl     = ch_methyl      // Methylation samples
-    maf_multi  = ch_maf_multi   // MAFs needing filtering
-    maf_single = ch_maf_single  // MAFs bypassing filter
+    runall         = ch_runall          // For run-all module
+    extract        = ch_extract         // For tool_level extract
+    beds           = ch_beds            // Pre-extracted BEDs (tool_level only)
+    methyl         = ch_methyl          // Methylation samples
+    maf_multi      = ch_maf_multi       // MAFs needing filtering (tool-level mode)
+    maf_single     = ch_maf_single      // MAFs bypassing filter (tool-level mode)
+    maf_for_filter = ch_maf_for_filter  // ALL samples for run-all join
 }
