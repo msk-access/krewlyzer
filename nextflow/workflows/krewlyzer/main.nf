@@ -57,15 +57,12 @@ workflow KREWLYZER {
                 [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg]
             }
 
-        // Single join (remainder: true catches samples without MAFs)
-        // - Multi-MAF samples: FILTER_MAF output replaces original variants
-        // - Single-MAF samples: filtered_maf is null → use orig_variants
-        // - No-MAF samples: both null → final_maf = []
+        // Single join — emits per-sample as soon as FILTER_MAF completes
+        // Standard join (no remainder) emits matched items immediately for streaming
         ch_runall = ch_runall_base
-            .join(ch_filtered, remainder: true)
+            .join(ch_filtered)
             .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, orig_variants, pon, targets, wps_anchors, wps_bg, filtered_maf ->
-                def final_maf = filtered_maf != null ? filtered_maf : (orig_variants ?: [])
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], final_maf, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], filtered_maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
         
         KREWLYZER_RUNALL(ch_runall, fasta)
