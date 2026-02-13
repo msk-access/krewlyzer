@@ -39,6 +39,7 @@ nextflow run /usersoftware/shahr2/github/krewlyzer/nextflow/main.nf \
     --outdir $PWD/results/ \
     --generate_json true \
     --queue_size 100 \
+    -qs 100 \
     ${RESUME_FLAG}
 
 echo ">>> Pipeline completed at $(date)"
