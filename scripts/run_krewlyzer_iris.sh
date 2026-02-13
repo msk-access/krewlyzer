@@ -37,6 +37,7 @@ nextflow run /usersoftware/shahr2/github/krewlyzer/nextflow/main.nf \
     --samplesheet $PWD/samplesheet.csv \
     --ref /data1/core006/access/production/resources/reference/versions/hg19/Homo_sapiens_assembly19.fasta \
     --outdir $PWD/results/ \
+    --generate_json true \
     -qs 100 \
     ${RESUME_FLAG}
 
