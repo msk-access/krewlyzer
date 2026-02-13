@@ -57,9 +57,7 @@ workflow KREWLYZER {
         ch_runall = ch_runall_base
             .join(ch_filtered)
             .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, filtered_maf ->
-                // Filter out header-only MAFs (< 100 bytes = no data rows)
-                def variants = filtered_maf.size() > 100 ? filtered_maf : []
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], filtered_maf, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
 
         KREWLYZER_RUNALL(ch_runall, fasta)
