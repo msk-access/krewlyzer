@@ -10,6 +10,7 @@
 process FILTER_MAF {
     tag "$meta.id"
     label 'process_low'
+    maxForks 50  // Half of -qs to leave slots for RUNALL streaming
 
     input:
     tuple val(meta), path(maf)
