@@ -29,40 +29,18 @@ workflow KREWLYZER {
     INPUT_CHECK(samplesheet)
 
     // =====================================================
-    // 2. MAF FILTERING (for multi-sample MAFs only)
-    // =====================================================
-    
-    // Filter multi-sample MAFs
-    FILTER_MAF(INPUT_CHECK.out.maf_multi.map { meta, bam, bai, maf -> [meta, maf] })
-    ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
-
-    // =====================================================
-    // 3. MODE SELECTION
+    // 2. MODE SELECTION
     // =====================================================
     
     if (params.use_runall) {
         // =====================================================
-        // RUN-ALL MODE: Unified command per sample
+        // RUN-ALL MODE: Direct pipe — each sample is independent
+        // MAF filtering is inlined in the RUNALL process script
         // =====================================================
         
-        // Map FILTER_MAF output to [meta.id, filtered_maf]
-        // Pass ALL results through — no hasData() check, no dropping
-        ch_filtered = FILTER_MAF.out.maf.map { meta, filtered_maf ->
-            [meta.id, filtered_maf]
-        }
-
-        // Build base channel — keep original variants for non-filtered samples
-        ch_runall_base = INPUT_CHECK.out.runall
+        ch_runall = INPUT_CHECK.out.runall
             .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg ->
-                [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg]
-            }
-
-        // Single join — emits per-sample as soon as FILTER_MAF completes
-        // Standard join (no remainder) emits matched items immediately for streaming
-        ch_runall = ch_runall_base
-            .join(ch_filtered)
-            .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, orig_variants, pon, targets, wps_anchors, wps_bg, filtered_maf ->
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], filtered_maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], variants ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
         
         KREWLYZER_RUNALL(ch_runall, fasta)
@@ -82,7 +60,11 @@ workflow KREWLYZER {
         // TOOL-LEVEL MODE: Individual modules
         // =====================================================
         
-        // For tool-level, filter out empty MAFs (header-only files < 100 bytes)
+        // Filter multi-sample MAFs (only needed for tool-level mode)
+        FILTER_MAF(INPUT_CHECK.out.maf_multi.map { meta, bam, bai, maf -> [meta, maf] })
+        ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
+        
+        // Filter out empty MAFs (header-only files < 100 bytes)
         ch_filtered_valid = FILTER_MAF.out.maf
             .filter { meta, filtered_maf -> filtered_maf.size() > 100 }
         

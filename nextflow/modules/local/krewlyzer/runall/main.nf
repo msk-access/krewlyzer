@@ -105,7 +105,8 @@ process KREWLYZER_RUNALL {
     // Input file arguments
     def mfsd_bam_arg = mfsd_bam ? "--mfsd-bam ${mfsd_bam}" : ""
     def bisulfite_arg = bisulfite_bam ? "--bisulfite-bam ${bisulfite_bam}" : ""
-    def variant_arg = variants ? "--variants ${variants}" : ""
+    // variants will be filtered inline in the script block
+    def has_variants = variants ? true : false
     def targets_arg = targets ? "--target-regions ${targets}" : ""
     def pon_arg = pon ? "--pon-model ${pon}" : ""
     def wps_anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
@@ -138,6 +139,36 @@ process KREWLYZER_RUNALL {
     def debug_arg = params.verbose ? "--debug" : ""
 
     """
+    # --- Inline MAF filtering (replaces separate FILTER_MAF process) ---
+    VARIANT_ARG=""
+    if [ "${has_variants}" = "true" ] && [ -f "${variants}" ]; then
+        python3 -c "
+import sys
+sample_id = '${prefix}'.lower()
+with open('${variants}') as inf, open('${prefix}.filtered.maf', 'w') as out:
+    tsb_col = None
+    for line in inf:
+        if line.startswith('#'):
+            out.write(line); continue
+        fields = line.strip().split('\\t')
+        if tsb_col is None:
+            out.write(line)
+            tsb_col = next((i for i,c in enumerate(fields) if c == 'Tumor_Sample_Barcode'), None)
+            continue
+        if tsb_col is not None and len(fields) > tsb_col and sample_id in fields[tsb_col].lower():
+            out.write(line)
+print(f'Filtered MAF for ${prefix}', file=sys.stderr)
+"
+        # Check if filtered MAF has any data rows
+        DATA_LINES=\$(tail -n +2 ${prefix}.filtered.maf | grep -cv '^#' || true)
+        if [ "\$DATA_LINES" -gt "1" ]; then
+            VARIANT_ARG="--variants ${prefix}.filtered.maf"
+            echo "Found \$DATA_LINES variants for ${prefix}"
+        else
+            echo "WARNING: 0 variants for ${prefix} after filtering — skipping mFSD"
+        fi
+    fi
+
     krewlyzer run-all \\
         -i $bam \\
         -r $fasta \\
@@ -146,7 +177,7 @@ process KREWLYZER_RUNALL {
         --sample-name $prefix \\
         $mfsd_bam_arg \\
         $bisulfite_arg \\
-        $variant_arg \\
+        \$VARIANT_ARG \\
         $targets_arg \\
         $pon_arg \\
         $wps_anchors_arg \\
