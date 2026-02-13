@@ -43,30 +43,12 @@ workflow KREWLYZER {
     INPUT_CHECK(samplesheet)
 
     // =====================================================
-    // 2. MAF FILTERING (Shared for both modes)
+    // 2. MAF FILTERING (for multi-sample MAFs only)
     // =====================================================
     
     // Filter multi-sample MAFs
     FILTER_MAF(INPUT_CHECK.out.maf_multi.map { meta, bam, bai, maf -> [meta, maf] })
-    
-    // Validate filtered MAF has data
-    ch_filtered_valid = FILTER_MAF.out.maf
-        .filter { meta, filtered_maf ->
-            if (!hasData(filtered_maf)) {
-                log.warn "Sample ${meta.id}: No variants after MAF filtering - skipping mFSD"
-                return false
-            }
-            return true
-        }
-    
-    // Join filtered MAF back with BAM info
-    ch_mfsd_filtered = INPUT_CHECK.out.maf_multi
-        .map { meta, bam, bai, maf -> [meta.id, meta, bam, bai] }
-        .join(ch_filtered_valid.map { meta, filtered_maf -> [meta.id, filtered_maf] })
-        .map { id, meta, bam, bai, filtered_maf -> [meta, bam, bai, filtered_maf] }
-    
-    // Combine with single-sample MAFs (bypass filtering)
-    ch_mfsd_all = ch_mfsd_filtered.mix(INPUT_CHECK.out.maf_single)
+    ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
 
     // =====================================================
     // 3. MODE SELECTION
@@ -77,25 +59,56 @@ workflow KREWLYZER {
         // RUN-ALL MODE: Unified command per sample
         // =====================================================
         
-        // INPUT_CHECK.out.runall already has: [meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_background]
-        // For samples with multi-sample MAF, we need to replace the variants with the filtered MAF
+        // --- Build complete MAF channel covering ALL samples ---
+        
+        // Stream 1: Multi-sample MAFs (from FILTER_MAF)
+        // Fix: Do NOT drop empty files — map to [] so the join key still exists
+        ch_maf_multi_processed = FILTER_MAF.out.maf.map { meta, filtered_maf ->
+            if (hasData(filtered_maf)) {
+                return [meta.id, filtered_maf]
+            } else {
+                log.warn "Sample ${meta.id}: 0 variants after MAF filtering — mFSD will be skipped"
+                return [meta.id, []]
+            }
+        }
+
+        // Stream 2: Single-sample MAFs (bypass filtering)
+        ch_maf_single_processed = INPUT_CHECK.out.maf_single.map { meta, bam, bai, maf ->
+            [meta.id, maf]
+        }
+
+        // Stream 3: Samples with NO MAF at all
+        ch_maf_none = INPUT_CHECK.out.runall
+            .filter { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite, variants, pon, tgt, wps, bg ->
+                variants == [] || variants == null
+            }
+            .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite, variants, pon, tgt, wps, bg ->
+                [meta.id, []]
+            }
+
+        // Merge ALL streams — every sample ID is now covered
+        ch_all_mafs = ch_maf_multi_processed
+            .mix(ch_maf_single_processed)
+            .mix(ch_maf_none)
+
+        // --- Build RUNALL input with safe join ---
+        
+        // Base tuple (strip original variants — will be replaced by filtered version)
         ch_runall_base = INPUT_CHECK.out.runall
             .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg ->
                 [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg]
             }
         
-        // Get filtered MAFs by sample ID
-        ch_filtered_mafs = ch_mfsd_all.map { meta, bam, bai, maf -> [meta.id, maf] }
-        
-        // Join and reconstruct the full tuple for RUNALL
+        // Join is safe: every ID in runall_base exists in ch_all_mafs
+        // Emits per-sample as soon as FILTER_MAF completes (or immediately for no-MAF samples)
         ch_runall = ch_runall_base
-            .join(ch_filtered_mafs)
+            .join(ch_all_mafs)
             .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, maf ->
                 [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], maf ?: [], pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
             }
         
         KREWLYZER_RUNALL(ch_runall, fasta)
-        ch_versions = ch_versions.mix(KREWLYZER_RUNALL.out.versions)
+        ch_versions = ch_versions.mix(KREWLYZER_RUNALL.out.versions.first())
         
         // Map outputs
         ch_fsc = KREWLYZER_RUNALL.out.fsc
@@ -110,6 +123,17 @@ workflow KREWLYZER {
         // =====================================================
         // TOOL-LEVEL MODE: Individual modules
         // =====================================================
+        
+        // For tool-level, keep existing filtering logic (used by mFSD tool separately)
+        ch_filtered_valid = FILTER_MAF.out.maf
+            .filter { meta, filtered_maf -> hasData(filtered_maf) }
+        
+        ch_mfsd_filtered = INPUT_CHECK.out.maf_multi
+            .map { meta, bam, bai, maf -> [meta.id, meta, bam, bai] }
+            .join(ch_filtered_valid.map { meta, filtered_maf -> [meta.id, filtered_maf] })
+            .map { id, meta, bam, bai, filtered_maf -> [meta, bam, bai, filtered_maf] }
+        
+        ch_mfsd_all = ch_mfsd_filtered.mix(INPUT_CHECK.out.maf_single)
         
         TOOL_LEVEL(
             INPUT_CHECK.out.extract,
@@ -127,7 +151,7 @@ workflow KREWLYZER {
         ch_wps = TOOL_LEVEL.out.wps
         ch_ocf = TOOL_LEVEL.out.ocf
         ch_mds = TOOL_LEVEL.out.mds
-        ch_features_json = Channel.empty()  // Not available in tool-level mode
+        ch_features_json = Channel.empty()
     }
 
     emit:
