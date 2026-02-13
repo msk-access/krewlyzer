@@ -34,30 +34,25 @@ workflow KREWLYZER {
     
     if (params.use_runall) {
         // =====================================================
-        // RUN-ALL MODE: FILTER_MAF → join → RUNALL (nf-core pattern)
-        // FILTER_MAF runs for every sample, then join re-attaches
-        // the filtered MAF to the full input tuple by meta.id
+        // RUN-ALL MODE: FILTER_MAF → map → RUNALL (join-free)
+        // File paths ride through FILTER_MAF as meta fields,
+        // then .map() reconstructs the RUNALL tuple.
+        // Guaranteed streaming — no join operator blocking.
         // =====================================================
 
         // --- FILTER_MAF: all samples (multi-MAF filters, single-MAF passes through, no-MAF creates placeholder) ---
         FILTER_MAF(INPUT_CHECK.out.maf_for_filter)
         ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
 
-        // --- Build base RUNALL channel keyed by meta.id ---
-        ch_runall_base = INPUT_CHECK.out.runall
-            .map { meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_bg ->
-                [meta.id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg]
-            }
-
-        // --- FILTER_MAF output keyed by meta.id ---
-        ch_filtered = FILTER_MAF.out.maf
-            .map { meta, filtered_maf -> [meta.id, filtered_maf] }
-
-        // --- Join: 1:1 by meta.id (nf-core Sarek/neoantigen pattern) ---
-        ch_runall = ch_runall_base
-            .join(ch_filtered)
-            .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, filtered_maf ->
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], bisulfite_bam ?: [], filtered_maf, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
+        // --- Reconstruct RUNALL tuple from meta fields + filtered MAF ---
+        ch_runall = FILTER_MAF.out.maf
+            .map { meta, filtered_maf ->
+                [meta, meta._bam, meta._bai,
+                 meta._mfsd_bam ?: [], meta._mfsd_bai ?: [],
+                 meta._bisulfite ?: [],
+                 filtered_maf,
+                 meta._pon ?: [], meta._targets ?: [],
+                 meta._wps_anchors ?: [], meta._wps_bg ?: []]
             }
 
         KREWLYZER_RUNALL(ch_runall, fasta)

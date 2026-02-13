@@ -146,9 +146,16 @@ workflow INPUT_CHECK {
             extract:
                 [meta, bam, bai, pon ?: [], targets ?: []]
 
-            // run-all FILTER_MAF: meta with single_sample flag + MAF
+            // run-all FILTER_MAF: meta carries ALL paths so join is unnecessary
             maf_for_filter:
-                def new_meta = meta + [single_sample: single ?: false]
+                def new_meta = meta + [
+                    single_sample: single ?: false,
+                    _bam: bam, _bai: bai,
+                    _mfsd_bam: mfsd_bam, _mfsd_bai: mfsd_bai,
+                    _bisulfite: mbam,
+                    _pon: pon, _targets: targets,
+                    _wps_anchors: wps_anchors, _wps_bg: wps_bg
+                ]
                 [new_meta, maf ?: []]
         }
         .set { ch_bam_outputs }
