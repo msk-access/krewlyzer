@@ -55,7 +55,7 @@ workflow KREWLYZER {
 
         // --- Join: 1:1 by meta.id (nf-core Sarek/neoantigen pattern) ---
         ch_runall = ch_runall_base
-            .join(ch_filtered, failOnDuplicate: true, failOnMismatch: true)
+            .join(ch_filtered)
             .map { id, meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, pon, targets, wps_anchors, wps_bg, filtered_maf ->
                 // Filter out header-only MAFs (< 100 bytes = no data rows)
                 def variants = filtered_maf.size() > 100 ? filtered_maf : []
