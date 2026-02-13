@@ -50,18 +50,30 @@ process KREWLYZER_RUNALL {
     
     // OCF outputs
     tuple val(meta), path("*.OCF.tsv"),              emit: ocf, optional: true
+    tuple val(meta), path("*.OCF.sync.tsv"),         emit: ocf_sync, optional: true
     tuple val(meta), path("*.OCF.ontarget.tsv"),     emit: ocf_ontarget, optional: true
+    tuple val(meta), path("*.OCF.ontarget.sync.tsv"), emit: ocf_ontarget_sync, optional: true
+    tuple val(meta), path("*.OCF.offtarget.tsv"),    emit: ocf_offtarget, optional: true
+    tuple val(meta), path("*.OCF.offtarget.sync.tsv"), emit: ocf_offtarget_sync, optional: true
     
     // Motif outputs
     tuple val(meta), path("*.EndMotif.tsv"),         emit: end_motif, optional: true
-    tuple val(meta), path("*.BreakpointMotif.tsv"),  emit: bp_motif, optional: true
+    tuple val(meta), path("*.EndMotif.ontarget.tsv"), emit: end_motif_ontarget, optional: true
+    tuple val(meta), path("*.EndMotif1mer.tsv"),     emit: end_motif_1mer, optional: true
+    tuple val(meta), path("*.BreakPointMotif.tsv"),  emit: bp_motif, optional: true
+    tuple val(meta), path("*.BreakPointMotif.ontarget.tsv"), emit: bp_motif_ontarget, optional: true
     tuple val(meta), path("*.MDS.tsv"),              emit: mds, optional: true
+    tuple val(meta), path("*.MDS.ontarget.tsv"),     emit: mds_ontarget, optional: true
     
     // TFBS/ATAC outputs
     tuple val(meta), path("*.TFBS.tsv"),             emit: tfbs, optional: true
+    tuple val(meta), path("*.TFBS.sync.tsv"),        emit: tfbs_sync, optional: true
     tuple val(meta), path("*.TFBS.ontarget.tsv"),    emit: tfbs_ontarget, optional: true
+    tuple val(meta), path("*.TFBS.ontarget.sync.tsv"), emit: tfbs_ontarget_sync, optional: true
     tuple val(meta), path("*.ATAC.tsv"),             emit: atac, optional: true
+    tuple val(meta), path("*.ATAC.sync.tsv"),        emit: atac_sync, optional: true
     tuple val(meta), path("*.ATAC.ontarget.tsv"),    emit: atac_ontarget, optional: true
+    tuple val(meta), path("*.ATAC.ontarget.sync.tsv"), emit: atac_ontarget_sync, optional: true
     
     // Region MDS outputs
     tuple val(meta), path("*.MDS.exon.tsv"),         emit: mds_exon, optional: true
@@ -76,7 +88,7 @@ process KREWLYZER_RUNALL {
     
     // GC correction outputs
     tuple val(meta), path("*.correction_factors.tsv"), emit: gc_factors, optional: true
-    tuple val(meta), path("*.correction_factors.ontarget.csv"), emit: gc_factors_ontarget, optional: true
+    tuple val(meta), path("*.correction_factors.ontarget.tsv"), emit: gc_factors_ontarget, optional: true
     
     // Versions
     path "versions.yml", emit: versions
