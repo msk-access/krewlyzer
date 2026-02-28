@@ -377,3 +377,164 @@ def test_mfsd_llr_scoring(tmp_path):
     
     # Tumor-like ALT should have higher LLR than healthy-like REF
     assert alt_llr_f > ref_llr_f, f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
+
+
+# =============================================================================
+# MAF Input Tests (Regression tests for column-index mismatch bug)
+# =============================================================================
+
+def create_mock_maf(path, variants=None, include_consequence=False):
+    """Create MAF file with configurable column layout.
+    
+    Args:
+        path: Path to write MAF file
+        variants: list of tuples (chrom, pos, ref, alt, variant_type)
+                  Default: SNV at chr1:1001 A>T
+        include_consequence: If True, include extra Consequence column at index 8
+                            (cBioPortal/VEP format that caused the original bug)
+    """
+    if variants is None:
+        variants = [('chr1', 1001, 'A', 'T', 'SNP')]
+    
+    with open(path, "w") as f:
+        # Header
+        if include_consequence:
+            # cBioPortal MAF with extra Consequence column
+            f.write("Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\t"
+                    "Start_Position\tEnd_Position\tStrand\tConsequence\t"
+                    "Variant_Classification\tVariant_Type\tReference_Allele\t"
+                    "Tumor_Seq_Allele1\tTumor_Seq_Allele2\tTumor_Sample_Barcode\n")
+            for chrom, pos, ref, alt, vtype in variants:
+                f.write(f"TEST_GENE\t0\tMSKCC\tGRCh37\t{chrom}\t{pos}\t{pos}\t+\t"
+                        f"missense_variant\tMissense_Mutation\t{vtype}\t{ref}\t{ref}\t{alt}\tTEST_SAMPLE\n")
+        else:
+            # Standard GDC MAF (no Consequence column)
+            f.write("Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\t"
+                    "Start_Position\tEnd_Position\tStrand\t"
+                    "Variant_Classification\tVariant_Type\tReference_Allele\t"
+                    "Tumor_Seq_Allele1\tTumor_Seq_Allele2\tTumor_Sample_Barcode\n")
+            for chrom, pos, ref, alt, vtype in variants:
+                f.write(f"TEST_GENE\t0\tMSKCC\tGRCh37\t{chrom}\t{pos}\t{pos}\t+\t"
+                        f"Missense_Mutation\t{vtype}\t{ref}\t{ref}\t{alt}\tTEST_SAMPLE\n")
+
+
+def test_mfsd_maf_standard_format(tmp_path):
+    """Test mFSD with standard GDC MAF format (no Consequence column).
+    
+    Verifies that header-based column parsing correctly identifies
+    Reference_Allele and Tumor_Seq_Allele2 in standard MAF layout.
+    """
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+    
+    maf_file = tmp_path / "variants.maf"
+    create_mock_maf(maf_file, [('chr1', 1001, 'A', 'T', 'SNP')])
+    
+    output_dir = tmp_path / "output"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(maf_file), 
+        "-o", str(output_dir),
+        "-s", "test"
+    ])
+    
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+            traceback.print_exception(type(result.exception), result.exception, result.exception.__traceback__)
+    
+    assert result.exit_code == 0
+    
+    output_file = output_dir / "test.mFSD.tsv"
+    assert output_file.exists()
+    
+    df = pd.read_csv(output_file, sep='\t')
+    
+    # Key assertions: parsed alleles should be actual nucleotides, not MAF metadata
+    assert df.iloc[0]['Ref'] == 'A', f"Expected Ref='A', got '{df.iloc[0]['Ref']}'"
+    assert df.iloc[0]['Alt'] == 'T', f"Expected Alt='T', got '{df.iloc[0]['Alt']}'"
+    assert df.iloc[0]['VarType'] == 'SNV', f"Expected VarType='SNV', got '{df.iloc[0]['VarType']}'"
+
+
+def test_mfsd_maf_cbio_format(tmp_path):
+    """Regression test: cBioPortal MAF with extra Consequence column.
+    
+    This is the exact format that caused the original bug where:
+    - fields[10] read 'SNP' (Variant_Type) instead of Reference_Allele
+    - fields[12] read 'A' (Tumor_Seq_Allele1=ref) instead of Tumor_Seq_Allele2
+    
+    With header-based parsing, this should now work correctly.
+    """
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+    
+    maf_file = tmp_path / "variants.maf"
+    create_mock_maf(maf_file, [('chr1', 1001, 'A', 'T', 'SNP')], include_consequence=True)
+    
+    output_dir = tmp_path / "output"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(maf_file), 
+        "-o", str(output_dir),
+        "-s", "test"
+    ])
+    
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+            traceback.print_exception(type(result.exception), result.exception, result.exception.__traceback__)
+    
+    assert result.exit_code == 0
+    
+    output_file = output_dir / "test.mFSD.tsv"
+    assert output_file.exists()
+    
+    df = pd.read_csv(output_file, sep='\t')
+    
+    # The critical regression assertions:
+    # Before the fix, Ref was 'SNP' and Alt was 'A' (both wrong)
+    assert df.iloc[0]['Ref'] == 'A', f"Regression: Ref should be 'A', not '{df.iloc[0]['Ref']}' (was 'SNP' before fix)"
+    assert df.iloc[0]['Alt'] == 'T', f"Regression: Alt should be 'T', not '{df.iloc[0]['Alt']}' (was ref allele before fix)"
+    assert df.iloc[0]['VarType'] == 'SNV', f"Regression: VarType should be 'SNV', not '{df.iloc[0]['VarType']}' (was 'COMPLEX' before fix)"
+    
+    # With correct parsing, not everything should be NonREF
+    total = df.iloc[0]['Total_Count']
+    nonref = df.iloc[0]['NonREF_Count']
+    if total > 0:
+        error_rate = nonref / total
+        assert error_rate < 1.0, f"Regression: Error_Rate should be < 1.0, got {error_rate} (was 1.0 before fix)"
+
+
+def test_mfsd_maf_invalid_alleles_warns(tmp_path):
+    """Test that MAF with missing required columns raises an error.
+    
+    Verifies that the parser correctly detects and reports missing
+    required columns rather than silently using wrong indices.
+    """
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+    
+    # Create MAF with missing Tumor_Seq_Allele2 column
+    maf_file = tmp_path / "bad_variants.maf"
+    with open(maf_file, "w") as f:
+        f.write("Hugo_Symbol\tChromosome\tStart_Position\tReference_Allele\n")
+        f.write("KRAS\tchr1\t1001\tA\n")
+    
+    output_dir = tmp_path / "output"
+    
+    runner = CliRunner()
+    result = runner.invoke(app, [
+        "mfsd", "-i", str(bam_file), 
+        "-V", str(maf_file), 
+        "-o", str(output_dir),
+        "-s", "test"
+    ])
+    
+    # Should fail with informative error about missing column
+    assert result.exit_code != 0, "Should fail when MAF is missing Tumor_Seq_Allele2"

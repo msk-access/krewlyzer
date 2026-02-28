@@ -246,6 +246,87 @@ fn fetch_reference_gc(
 }
 
 // ============================================================================
+// PHASE 1b: MAF Header Parsing & Input Validation
+// ============================================================================
+
+/// Column index map resolved from MAF header.
+///
+/// MAF files can have variable column ordering (e.g., cBioPortal adds a
+/// `Consequence` column at index 8, shifting all subsequent indices).
+/// This struct resolves required columns by name from the header line,
+/// making the parser resilient to any column layout.
+#[derive(Debug, Clone)]
+struct MafColumnMap {
+    chrom: usize,
+    pos: usize,
+    ref_allele: usize,
+    alt_allele: usize,
+    max_idx: usize, // Maximum required index (for bounds checking)
+}
+
+/// Parse MAF header line to resolve column indices by name.
+///
+/// Required columns: Chromosome, Start_Position, Reference_Allele, Tumor_Seq_Allele2.
+/// Returns None with a warning if any required column is missing.
+fn parse_maf_header(header_line: &str) -> Option<MafColumnMap> {
+    let fields: Vec<&str> = header_line.split('\t').collect();
+    let col_map: std::collections::HashMap<&str, usize> = fields.iter()
+        .enumerate()
+        .map(|(i, &name)| (name, i))
+        .collect();
+
+    let chrom = match col_map.get("Chromosome") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Chromosome");
+            return None;
+        }
+    };
+
+    let pos = match col_map.get("Start_Position") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Start_Position");
+            return None;
+        }
+    };
+
+    let ref_allele = match col_map.get("Reference_Allele") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Reference_Allele");
+            return None;
+        }
+    };
+
+    let alt_allele = match col_map.get("Tumor_Seq_Allele2") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Tumor_Seq_Allele2");
+            return None;
+        }
+    };
+
+    let max_idx = *[chrom, pos, ref_allele, alt_allele].iter().max().unwrap();
+
+    debug!("MAF columns resolved: Chromosome={}, Start_Position={}, Reference_Allele={}, Tumor_Seq_Allele2={}",
+        chrom, pos, ref_allele, alt_allele);
+
+    Some(MafColumnMap { chrom, pos, ref_allele, alt_allele, max_idx })
+}
+
+/// Validate that an allele string contains only valid nucleotide characters.
+///
+/// Valid characters: A, C, G, T, N (case-insensitive) and `-` (MAF convention
+/// for empty alleles in insertions/deletions).
+///
+/// Rejects non-nucleotide strings like "SNP", "DEL", "Missense_Mutation", etc.
+/// which would indicate a MAF column mapping error.
+fn is_valid_allele(allele: &str) -> bool {
+    !allele.is_empty() && allele.chars().all(|c| "ACGTNacgtn-".contains(c))
+}
+
+// ============================================================================
 // PHASE 2: Variant Type Classification
 // ============================================================================
 
@@ -825,6 +906,10 @@ pub fn calculate_mfsd(
     
     info!("Parsing variants from {:?}...", input_file);
     
+    // MAF header-based column resolution (parsed from first non-comment data line)
+    let mut maf_cols: Option<MafColumnMap> = None;
+    let mut skipped_invalid_alleles: usize = 0;
+    
     for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') { continue; }
@@ -836,11 +921,53 @@ pub fn calculate_mfsd(
             let pos: i64 = fields[1].parse().unwrap_or(0) - 1;
             (fields[0].to_string(), pos, fields[3].to_string(), fields[4].to_string())
         } else {
-            // MAF Parsing
-            if fields.len() < 13 { continue; }
-            if fields[0] == "Hugo_Symbol" || fields[0].starts_with("Hugo_Symbol") { continue; }
-            let pos: i64 = fields[5].parse().unwrap_or(0) - 1;
-            (fields[4].to_string(), pos, fields[10].to_string(), fields[12].to_string())
+            // MAF Parsing: header-based column lookup
+            
+            // Detect and parse MAF header line
+            if maf_cols.is_none() {
+                if fields[0] == "Hugo_Symbol" || fields[0].starts_with("Hugo_Symbol") {
+                    maf_cols = parse_maf_header(&line);
+                    if maf_cols.is_none() {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "Failed to parse MAF header: missing required columns (Chromosome, Start_Position, Reference_Allele, Tumor_Seq_Allele2)"
+                        ));
+                    }
+                    info!("MAF header parsed: {} columns detected", fields.len());
+                    continue; // Header line, not a data row
+                } else {
+                    // No header found — fall back to error
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "MAF file missing header line (expected first non-comment line to start with Hugo_Symbol)"
+                    ));
+                }
+            }
+            
+            let cols = maf_cols.as_ref().unwrap();
+            
+            // Bounds check using resolved max index
+            if fields.len() <= cols.max_idx { continue; }
+            
+            let pos: i64 = fields[cols.pos].parse().unwrap_or(0) - 1;
+            let ref_allele = fields[cols.ref_allele].to_string();
+            let alt_allele = fields[cols.alt_allele].to_string();
+            
+            // Allele validation — catch column mapping errors early
+            if !is_valid_allele(&ref_allele) || !is_valid_allele(&alt_allele) {
+                if skipped_invalid_alleles == 0 {
+                    // Log first occurrence with details for debugging
+                    warn!("Invalid allele at {}:{}: REF='{}' ALT='{}' — skipping (possible MAF column mismatch)",
+                        fields[cols.chrom], fields[cols.pos], ref_allele, alt_allele);
+                }
+                skipped_invalid_alleles += 1;
+                continue;
+            }
+            
+            // Handle MAF dash convention: '-' represents empty allele for indels
+            // Convert to VCF-style representation for downstream processing
+            let ref_allele = if ref_allele == "-" { String::new() } else { ref_allele };
+            let alt_allele = if alt_allele == "-" { String::new() } else { alt_allele };
+            
+            (fields[cols.chrom].to_string(), pos, ref_allele, alt_allele)
         };
         
         let var_type = classify_variant(&ref_allele, &alt_allele);
@@ -852,6 +979,12 @@ pub fn calculate_mfsd(
             alt_allele,
             var_type,
         });
+    }
+    
+    // Log invalid allele summary
+    if skipped_invalid_alleles > 0 {
+        warn!("Skipped {} variants with invalid alleles (non-nucleotide characters in REF/ALT)", 
+            skipped_invalid_alleles);
     }
     
     let total_vars = variants.len();
@@ -1034,11 +1167,12 @@ pub fn calculate_mfsd(
     let mut total_n = 0usize;
     let mut variants_with_alt = 0usize;
     let mut variants_no_coverage = 0usize;
+    let mut variants_suspicious = 0usize; // 0 REF + 0 ALT + high NonREF = likely parsing error
     let mut total_skipped_proper_pair = 0usize;
     let mut total_skipped_size = 0usize;
     let mut total_skipped_extreme = 0usize;
     
-    for (_, res) in &results {
+    for (var, res) in &results {
         total_ref += res.ref_lengths.len();
         total_alt += res.alt_lengths.len();
         total_nonref += res.nonref_lengths.len();
@@ -1051,6 +1185,14 @@ pub fn calculate_mfsd(
         }
         if res.total_count() == 0 {
             variants_no_coverage += 1;
+        }
+        // Sanity check: 0 REF + 0 ALT but many NonREF strongly suggests allele parsing error
+        if res.ref_lengths.is_empty() && res.alt_lengths.is_empty() && res.nonref_lengths.len() > 10 {
+            if variants_suspicious == 0 {
+                warn!("Suspicious: variant {}:{} has {} NonREF but 0 REF/0 ALT — possible allele parsing error (REF='{}', ALT='{}')",
+                    var.chrom, var.pos + 1, res.nonref_lengths.len(), var.ref_allele, var.alt_allele);
+            }
+            variants_suspicious += 1;
         }
     }
     
@@ -1072,6 +1214,12 @@ pub fn calculate_mfsd(
     
     if variants_no_coverage > 0 {
         warn!("{} variants had no fragment coverage", variants_no_coverage);
+    }
+    
+    // Sanity: warn if many variants have 0 REF + 0 ALT (suggests systemic allele parsing issue)
+    if variants_suspicious > 0 {
+        warn!("{}/{} variants have 0 REF + 0 ALT but high NonREF — check MAF allele columns",
+            variants_suspicious, results.len());
     }
     
     // Duplex tag warning: alert user if --duplex was set but no tags were found
@@ -1246,4 +1394,166 @@ pub fn calculate_mfsd(
 
     info!("Done! Processed {} variants.", results.len());
     Ok(())
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ======================================================================
+    // MAF Header Parsing Tests
+    // ======================================================================
+
+    #[test]
+    fn test_parse_maf_header_standard() {
+        // Standard GDC MAF without Consequence column
+        let header = "Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\tStart_Position\tEnd_Position\tStrand\tVariant_Classification\tVariant_Type\tReference_Allele\tTumor_Seq_Allele1\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse standard MAF header");
+        assert_eq!(cols.chrom, 4, "Chromosome should be at index 4");
+        assert_eq!(cols.pos, 5, "Start_Position should be at index 5");
+        assert_eq!(cols.ref_allele, 10, "Reference_Allele should be at index 10");
+        assert_eq!(cols.alt_allele, 12, "Tumor_Seq_Allele2 should be at index 12");
+    }
+
+    #[test]
+    fn test_parse_maf_header_cbio() {
+        // cBioPortal MAF with extra Consequence column at index 8
+        // This is the exact format that caused the original bug
+        let header = "Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\tStart_Position\tEnd_Position\tStrand\tConsequence\tVariant_Classification\tVariant_Type\tReference_Allele\tTumor_Seq_Allele1\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse cBioPortal MAF header");
+        assert_eq!(cols.chrom, 4, "Chromosome should be at index 4");
+        assert_eq!(cols.pos, 5, "Start_Position should be at index 5");
+        assert_eq!(cols.ref_allele, 11, "Reference_Allele should be at index 11 (shifted by Consequence)");
+        assert_eq!(cols.alt_allele, 13, "Tumor_Seq_Allele2 should be at index 13 (shifted by Consequence)");
+    }
+
+    #[test]
+    fn test_parse_maf_header_minimal() {
+        // Minimal MAF with only required columns (in non-standard order)
+        let header = "Reference_Allele\tChromosome\tStart_Position\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse minimal MAF header");
+        assert_eq!(cols.chrom, 1);
+        assert_eq!(cols.pos, 2);
+        assert_eq!(cols.ref_allele, 0);
+        assert_eq!(cols.alt_allele, 3);
+    }
+
+    #[test]
+    fn test_parse_maf_header_missing_col() {
+        // Missing Tumor_Seq_Allele2
+        let header = "Hugo_Symbol\tChromosome\tStart_Position\tReference_Allele";
+        assert!(parse_maf_header(header).is_none(), "Should return None for missing required column");
+    }
+
+    // ======================================================================
+    // Allele Validation Tests
+    // ======================================================================
+
+    #[test]
+    fn test_validate_allele_valid() {
+        assert!(is_valid_allele("A"), "Single base A");
+        assert!(is_valid_allele("ATG"), "Multi-base ATG");
+        assert!(is_valid_allele("a"), "Lowercase base");
+        assert!(is_valid_allele("N"), "Ambiguous base N");
+        assert!(is_valid_allele("ACGTN"), "All valid bases");
+    }
+
+    #[test]
+    fn test_validate_allele_invalid() {
+        assert!(!is_valid_allele("SNP"), "Variant_Type value SNP");
+        assert!(!is_valid_allele("DEL"), "Variant_Type value DEL");
+        assert!(!is_valid_allele("123"), "Numeric string");
+        assert!(!is_valid_allele(""), "Empty string");
+        assert!(!is_valid_allele("Missense_Mutation"), "Classification value");
+        assert!(!is_valid_allele("A T"), "Contains space");
+    }
+
+    #[test]
+    fn test_validate_allele_maf_dash() {
+        // MAF uses '-' for empty alleles in indels
+        assert!(is_valid_allele("-"), "MAF dash for insertion REF or deletion ALT");
+        assert!(is_valid_allele("A-T"), "Should not appear but is technically valid chars");
+    }
+
+    // ======================================================================
+    // Variant Classification Tests
+    // ======================================================================
+
+    #[test]
+    fn test_classify_variant_snv() {
+        assert_eq!(classify_variant("A", "T"), VariantType::Snv);
+        assert_eq!(classify_variant("C", "G"), VariantType::Snv);
+    }
+
+    #[test]
+    fn test_classify_variant_mnv() {
+        assert_eq!(classify_variant("AT", "GC"), VariantType::Mnv);
+        assert_eq!(classify_variant("ATG", "CCT"), VariantType::Mnv);
+    }
+
+    #[test]
+    fn test_classify_variant_insertion() {
+        assert_eq!(classify_variant("A", "ATG"), VariantType::Insertion);
+        assert_eq!(classify_variant("T", "TCCG"), VariantType::Insertion);
+    }
+
+    #[test]
+    fn test_classify_variant_deletion() {
+        assert_eq!(classify_variant("ATG", "A"), VariantType::Deletion);
+        assert_eq!(classify_variant("TCCG", "T"), VariantType::Deletion);
+    }
+
+    #[test]
+    fn test_classify_variant_complex() {
+        assert_eq!(classify_variant("ATG", "CT"), VariantType::Complex);
+        assert_eq!(classify_variant("AT", "GCT"), VariantType::Complex);
+    }
+
+    // ======================================================================
+    // Fragment Classification Tests
+    // ======================================================================
+
+    #[test]
+    fn test_classify_fragment_snv_ref() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("A", &var), FragmentClass::Ref);
+    }
+
+    #[test]
+    fn test_classify_fragment_snv_alt() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("T", &var), FragmentClass::Alt);
+    }
+
+    #[test]
+    fn test_classify_fragment_snv_nonref() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("G", &var), FragmentClass::NonRef);
+    }
+
+    #[test]
+    fn test_classify_fragment_deletion_alt() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "ATG".to_string(), alt_allele: "A".to_string(),
+            var_type: VariantType::Deletion,
+        };
+        assert_eq!(classify_fragment("DEL2", &var), FragmentClass::Alt);
+    }
 }
