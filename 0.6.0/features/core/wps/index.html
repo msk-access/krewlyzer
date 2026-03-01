@@ -1,0 +1,2452 @@
+<!DOCTYPE html><html class="no-js" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width,initial-scale=1" name="viewport">
+<link href="https://msk-access.github.io/krewlyzer/0.6.0/features/core/wps/" rel="canonical">
+<link href="../fsr/" rel="prev">
+<link href="../../regulatory/motif/" rel="next">
+<link href="../../../assets/images/favicon.png" rel="icon">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.3" name="generator">
+<title>WPS - Krewlyzer</title>
+<link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
+<link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet">
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="../../../css/timeago.css" rel="stylesheet">
+<link href="../../../stylesheets/extra.css" rel="stylesheet">
+<link href="../../../assets/stylesheets/panzoom.css" rel="stylesheet">
+<script>__md_scope=new URL("../../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<meta content="website" property="og:type">
+<meta content="WPS - Krewlyzer" property="og:title">
+<meta content="https://msk-access.github.io/krewlyzer/0.6.0/assets/images/social/features/core/wps.png" property="og:image">
+<meta content="image/png" property="og:image:type">
+<meta content="1200" property="og:image:width">
+<meta content="630" property="og:image:height">
+<meta content="https://msk-access.github.io/krewlyzer/0.6.0/features/core/wps/" property="og:url">
+<meta content="summary_large_image" property="twitter:card">
+<meta content="WPS - Krewlyzer" property="twitter:title">
+<meta content="https://msk-access.github.io/krewlyzer/0.6.0/assets/images/social/features/core/wps.png" property="twitter:image">
+<link href="../../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style><meta name="panzoom-theme" content="material">
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#windowed-protection-score-wps">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<div data-md-color-scheme="default" data-md-component="outdated" hidden="">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="Krewlyzer" class="md-header__button md-logo" data-md-component="logo" href="../../.." title="Krewlyzer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            Krewlyzer
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              WPS
+            
+          </span>
+</div>
+</div>
+</div>
+<form class="md-header__option" data-md-component="palette">
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: light)" data-md-color-primary="custom" data-md-color-scheme="default" id="__palette_0" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to dark mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-primary="custom" data-md-color-scheme="slate" id="__palette_1" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to light mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+</form>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text">
+<label class="md-search__icon md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/msk-access/krewlyzer" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    msk-access/krewlyzer
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="Krewlyzer" class="md-nav__button md-logo" data-md-component="logo" href="../../.." title="Krewlyzer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+    Krewlyzer
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/msk-access/krewlyzer" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    msk-access/krewlyzer
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_2" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../../getting-started/">
+<span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../getting-started/installation/">
+<span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../getting-started/quickstart/">
+<span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../getting-started/concepts/">
+<span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_3" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../../cli/">
+<span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    CLI Reference
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../cli/run-all/">
+<span class="md-ellipsis">
+    
+  
+    run-all
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_4" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../../nextflow/">
+<span class="md-ellipsis">
+    
+  
+    Nextflow Pipeline
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Nextflow Pipeline
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../nextflow/samplesheet/">
+<span class="md-ellipsis">
+    
+  
+    Samplesheet
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../nextflow/parameters/">
+<span class="md-ellipsis">
+    
+  
+    Parameters
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../nextflow/outputs/">
+<span class="md-ellipsis">
+    
+  
+    Outputs
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../nextflow/examples/">
+<span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../">
+<span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="true" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--active md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_5_2" type="checkbox">
+<label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_5_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../extract/">
+<span class="md-ellipsis">
+    
+  
+    Fragment Extraction
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../fsc/">
+<span class="md-ellipsis">
+    
+  
+    FSC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../fsd/">
+<span class="md-ellipsis">
+    
+  
+    FSD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../fsr/">
+<span class="md-ellipsis">
+    
+  
+    FSR
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox">
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    WPS
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    WPS
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#purpose">
+<span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#biological-context">
+<span class="md-ellipsis">
+      
+        Biological Context
+      
+    </span>
+</a>
+<nav aria-label="Biological Context" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-is-wps">
+<span class="md-ellipsis">
+      
+        What is WPS?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#dual-stream-processing">
+<span class="md-ellipsis">
+      
+        Dual-Stream Processing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pythonrust-architecture">
+<span class="md-ellipsis">
+      
+        Python/Rust Architecture
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-vs-background">
+<span class="md-ellipsis">
+      
+        Foreground vs Background
+      
+    </span>
+</a>
+<nav aria-label="Foreground vs Background" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-samplewpsparquet">
+<span class="md-ellipsis">
+      
+        Foreground (sample.WPS.parquet)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#background-samplewps_backgroundparquet">
+<span class="md-ellipsis">
+      
+        Background (sample.WPS_background.parquet)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#post-processing-smoothing-and-fft">
+<span class="md-ellipsis">
+      
+        Post-Processing: Smoothing and FFT
+      
+    </span>
+</a>
+<nav aria-label="Post-Processing: Smoothing and FFT" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#savitzky-golay-smoothing">
+<span class="md-ellipsis">
+      
+        Savitzky-Golay Smoothing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fft-periodicity-extraction">
+<span class="md-ellipsis">
+      
+        FFT Periodicity Extraction
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#usage">
+<span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+</a>
+<nav aria-label="Usage" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#panel-specific-wps-anchors">
+<span class="md-ellipsis">
+      
+        Panel-Specific WPS Anchors
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#cli-options">
+<span class="md-ellipsis">
+      
+        CLI Options
+      
+    </span>
+</a>
+<nav aria-label="CLI Options" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#bait-padding-trade-off">
+<span class="md-ellipsis">
+      
+        Bait Padding Trade-Off
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#dual-wps-output-with-assay">
+<span class="md-ellipsis">
+      
+        Dual WPS Output (with --assay)
+      
+    </span>
+</a>
+<nav aria-label="Dual WPS Output (with --assay)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#output-files">
+<span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#why-dual-output">
+<span class="md-ellipsis">
+      
+        Why Dual Output?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-it-works">
+<span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#output-files_1">
+<span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+</a>
+<nav aria-label="Output Files" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-samplewpsparquet_1">
+<span class="md-ellipsis">
+      
+        Foreground: sample.WPS.parquet
+      
+    </span>
+</a>
+<nav aria-label="Foreground: sample.WPS.parquet" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pon-normalized-columns-v20">
+<span class="md-ellipsis">
+      
+        PON-Normalized Columns (v2.0)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#background-samplewps_backgroundparquet_1">
+<span class="md-ellipsis">
+      
+        Background: sample.WPS_background.parquet
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#wgs-vs-panel-data-msk-access">
+<span class="md-ellipsis">
+      
+        WGS vs Panel Data (MSK-ACCESS)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ml-feature-summary">
+<span class="md-ellipsis">
+      
+        ML Feature Summary
+      
+    </span>
+</a>
+<nav aria-label="ML Feature Summary" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#from-foreground">
+<span class="md-ellipsis">
+      
+        From Foreground
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#from-background">
+<span class="md-ellipsis">
+      
+        From Background
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#see-also">
+<span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_3" type="checkbox">
+<label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Regulatory
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_3_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Regulatory
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../regulatory/motif/">
+<span class="md-ellipsis">
+    
+  
+    End Motif
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../regulatory/ocf/">
+<span class="md-ellipsis">
+    
+  
+    OCF
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../regulatory/region-entropy/">
+<span class="md-ellipsis">
+    
+  
+    Region Entropy
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../regulatory/region-mds/">
+<span class="md-ellipsis">
+    
+  
+    Region MDS
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_4" type="checkbox">
+<label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Variant
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_4_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Variant
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../variant/mfsd/">
+<span class="md-ellipsis">
+    
+  
+    mFSD
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_5" type="checkbox">
+<label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Methylation
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Methylation
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../methylation/uxm/">
+<span class="md-ellipsis">
+    
+  
+    UXM
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_6" type="checkbox">
+<label class="md-nav__link" for="__nav_5_6" id="__nav_5_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Output
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_6_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Output
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../output/json-output/">
+<span class="md-ellipsis">
+    
+  
+    JSON Export
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_6" type="checkbox">
+<label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_6_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../guides/panel-mode/">
+<span class="md-ellipsis">
+    
+  
+    Panel Mode
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../guides/msk-access-quickstart/">
+<span class="md-ellipsis">
+    
+  
+    MSK-ACCESS Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../guides/building-pon/">
+<span class="md-ellipsis">
+    
+  
+    Building PON
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../guides/gc-correction/">
+<span class="md-ellipsis">
+    
+  
+    GC Correction
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_7" type="checkbox">
+<label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../reference/pon-models/">
+<span class="md-ellipsis">
+    
+  
+    PON Models
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../reference/input-formats/">
+<span class="md-ellipsis">
+    
+  
+    Input Formats
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../reference/architecture/">
+<span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../reference/glossary/">
+<span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_8" type="checkbox">
+<label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_8_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/developer-guide/">
+<span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/testing-guide/">
+<span class="md-ellipsis">
+    
+  
+    Testing Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/release-guide/">
+<span class="md-ellipsis">
+    
+  
+    Release Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/changelog/">
+<span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/contributing/">
+<span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../development/contributing-data/">
+<span class="md-ellipsis">
+    
+  
+    Contributing Data
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_9" type="checkbox">
+<label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Resources
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_9_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Resources
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../resources/overview/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../resources/citation/">
+<span class="md-ellipsis">
+    
+  
+    Citation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../../resources/troubleshooting/">
+<span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#purpose">
+<span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#biological-context">
+<span class="md-ellipsis">
+      
+        Biological Context
+      
+    </span>
+</a>
+<nav aria-label="Biological Context" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-is-wps">
+<span class="md-ellipsis">
+      
+        What is WPS?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#dual-stream-processing">
+<span class="md-ellipsis">
+      
+        Dual-Stream Processing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pythonrust-architecture">
+<span class="md-ellipsis">
+      
+        Python/Rust Architecture
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-vs-background">
+<span class="md-ellipsis">
+      
+        Foreground vs Background
+      
+    </span>
+</a>
+<nav aria-label="Foreground vs Background" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-samplewpsparquet">
+<span class="md-ellipsis">
+      
+        Foreground (sample.WPS.parquet)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#background-samplewps_backgroundparquet">
+<span class="md-ellipsis">
+      
+        Background (sample.WPS_background.parquet)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#post-processing-smoothing-and-fft">
+<span class="md-ellipsis">
+      
+        Post-Processing: Smoothing and FFT
+      
+    </span>
+</a>
+<nav aria-label="Post-Processing: Smoothing and FFT" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#savitzky-golay-smoothing">
+<span class="md-ellipsis">
+      
+        Savitzky-Golay Smoothing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fft-periodicity-extraction">
+<span class="md-ellipsis">
+      
+        FFT Periodicity Extraction
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#usage">
+<span class="md-ellipsis">
+      
+        Usage
+      
+    </span>
+</a>
+<nav aria-label="Usage" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#panel-specific-wps-anchors">
+<span class="md-ellipsis">
+      
+        Panel-Specific WPS Anchors
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#cli-options">
+<span class="md-ellipsis">
+      
+        CLI Options
+      
+    </span>
+</a>
+<nav aria-label="CLI Options" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#bait-padding-trade-off">
+<span class="md-ellipsis">
+      
+        Bait Padding Trade-Off
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#dual-wps-output-with-assay">
+<span class="md-ellipsis">
+      
+        Dual WPS Output (with --assay)
+      
+    </span>
+</a>
+<nav aria-label="Dual WPS Output (with --assay)" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#output-files">
+<span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#why-dual-output">
+<span class="md-ellipsis">
+      
+        Why Dual Output?
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#how-it-works">
+<span class="md-ellipsis">
+      
+        How It Works
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#output-files_1">
+<span class="md-ellipsis">
+      
+        Output Files
+      
+    </span>
+</a>
+<nav aria-label="Output Files" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#foreground-samplewpsparquet_1">
+<span class="md-ellipsis">
+      
+        Foreground: sample.WPS.parquet
+      
+    </span>
+</a>
+<nav aria-label="Foreground: sample.WPS.parquet" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pon-normalized-columns-v20">
+<span class="md-ellipsis">
+      
+        PON-Normalized Columns (v2.0)
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#background-samplewps_backgroundparquet_1">
+<span class="md-ellipsis">
+      
+        Background: sample.WPS_background.parquet
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#wgs-vs-panel-data-msk-access">
+<span class="md-ellipsis">
+      
+        WGS vs Panel Data (MSK-ACCESS)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ml-feature-summary">
+<span class="md-ellipsis">
+      
+        ML Feature Summary
+      
+    </span>
+</a>
+<nav aria-label="ML Feature Summary" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#from-foreground">
+<span class="md-ellipsis">
+      
+        From Foreground
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#from-background">
+<span class="md-ellipsis">
+      
+        From Background
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#references">
+<span class="md-ellipsis">
+      
+        References
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#see-also">
+<span class="md-ellipsis">
+      
+        See Also
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<nav aria-label="Navigation" class="md-path">
+<ol class="md-path__list">
+<li class="md-path__item">
+<a class="md-path__link" href="../../..">
+<span class="md-ellipsis">
+    Home
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="../../">
+<span class="md-ellipsis">
+    Features
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="../extract/">
+<span class="md-ellipsis">
+    Core
+  </span>
+</a>
+</li>
+</ol>
+</nav>
+<article class="md-content__inner md-typeset">
+<h1 id="windowed-protection-score-wps">Windowed Protection Score (<abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>)</h1>
+<p><strong>Command</strong>: <code>krewlyzer wps</code></p>
+<div class="admonition info">
+<p class="admonition-title">Plain English</p>
+<p><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> measures how well nucleosomes protect DNA from cutting.
+Healthy <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr> shows a regular ~190bp spacing pattern.
+Cancer disrupts this pattern - <strong>lower <code>nrl_quality</code> = more tumor burden</strong>.</p>
+<p><strong>Quick metric</strong>: <code>nrl_quality &gt; 0.7</code> = healthy, <code>&lt; 0.5</code> = potentially abnormal</p>
+</div>
+<hr>
+<h2 id="purpose">Purpose</h2>
+<p>Computes ML-ready nucleosome and transcription factor protection profiles from <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr> fragments around genomic anchors (<abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>, <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites) and global chromatin metrics from Alu elements.</p>
+<hr>
+<h2 id="biological-context">Biological Context</h2>
+<h3 id="what-is-wps">What is <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>?</h3>
+<p>When DNA wraps around a nucleosome, the histone core <strong>protects</strong> ~147bp from enzymatic digestion. In <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr>, fragments that span a nucleosome are "protected" (whole), while fragments that end at nucleosome boundaries are "fragmented" (cut).</p>
+<p><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Formula:</strong></p>
+<div class="arithmatex">\[
+\text{WPS} = \text{Fragments}_{\text{spanning}} - \text{Fragments}_{\text{ending}}
+\]</div>
+<table>
+<thead>
+<tr>
+<th><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Value</th>
+<th>Meaning</th>
+<th>Biological Interpretation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Positive</strong></td>
+<td>Protected</td>
+<td>Nucleosome present (stable chromatin)</td>
+</tr>
+<tr>
+<td><strong>Zero</strong></td>
+<td>Balanced</td>
+<td>Transition zone</td>
+</tr>
+<tr>
+<td><strong>Negative</strong></td>
+<td>Fragmented</td>
+<td>Open chromatin (accessible DNA)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="dual-stream-processing">Dual-Stream Processing</h3>
+<p>Krewlyzer separates fragments into two biological signals:</p>
+<table>
+<thead>
+<tr>
+<th>Stream</th>
+<th>Window</th>
+<th>Fragment Size</th>
+<th>Weight</th>
+<th>Biological Signal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>-Nuc</strong></td>
+<td>120bp</td>
+<td>[160-175bp]</td>
+<td>1.0 (primary)</td>
+<td><strong>Nucleosome positioning</strong></td>
+</tr>
+<tr>
+<td></td>
+<td></td>
+<td>[120-159] ∪ [176-180bp]</td>
+<td>0.5 (secondary)</td>
+<td>Flanking nucleosomes</td>
+</tr>
+<tr>
+<td><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>-TF</strong></td>
+<td>16bp</td>
+<td>[35-80bp]</td>
+<td>1.0</td>
+<td><strong>Transcription factor footprints</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The tiered weights for nucleosome fragments prioritize "perfect" mono-nucleosome sizes (~167bp) over edge cases.</p>
+<h3 id="pythonrust-architecture">Python/Rust Architecture</h3>
+<div class="panzoom-box" data-key="none" id="panzoom0" oncontextmenu="return false;">
+<nav class="panzoom-nav">
+<button class="panzoom-info panzoom-button">
+<svg class="panzoom-icon" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<path d="M464 256A208 208 0 1 0 48 256a208 208 0 1 0 416 0zM0 256a256 256 0 1 1 512 0A256 256 0 1 1 0 256zm169.8-90.7c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L280 264.4c-.2 13-10.9 23.6-24 23.6c-13.3 0-24-10.7-24-24l0-13.5c0-8.6 4.6-16.5 12.1-20.8l44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3l-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6l.4-1.2zM224 352a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"></path>
+</svg>
+</button><button class="panzoom-reset panzoom-button">
+<svg class="panzoom-icon" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<path d="M125.7 160l50.3 0c17.7 0 32 14.3 32 32s-14.3 32-32 32L48 224c-17.7 0-32-14.3-32-32L16 64c0-17.7 14.3-32 32-32s32 14.3 32 32l0 51.2L97.6 97.6c87.5-87.5 229.3-87.5 316.8 0s87.5 229.3 0 316.8s-229.3 87.5-316.8 0c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0c62.5 62.5 163.8 62.5 226.3 0s62.5-163.8 0-226.3s-163.8-62.5-226.3 0L125.7 160z"></path>
+</svg>
+</button><button class="panzoom-max panzoom-button">
+<svg class="panzoom-icon" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg">
+<path d="M32 32C14.3 32 0 46.3 0 64l0 96c0 17.7 14.3 32 32 32s32-14.3 32-32l0-64 64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L32 32zM64 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7 14.3 32 32 32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0 0-64zM320 32c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 0 64c0 17.7 14.3 32 32 32s32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-96 0zM448 352c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64-64 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l96 0c17.7 0 32-14.3 32-32l0-96z"></path>
+</svg>
+</button><button class="panzoom-min panzoom-button panzoom-hidden">
+<svg class="panzoom-icon" viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg">
+<path d="M160 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 64-64 0c-17.7 0-32 14.3-32 32s14.3 32 32 32l96 0c17.7 0 32-14.3 32-32l0-96zM32 320c-17.7 0-32 14.3-32 32s14.3 32 32 32l64 0 0 64c0 17.7 14.3 32 32 32s32-14.3 32-32l0-96c0-17.7-14.3-32-32-32l-96 0zM352 64c0-17.7-14.3-32-32-32s-32 14.3-32 32l0 96c0 17.7 14.3 32 32 32l96 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-64 0 0-64zM320 320c-17.7 0-32 14.3-32 32l0 96c0 17.7 14.3 32 32 32s32-14.3 32-32l0-64 64 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-96 0z"></path>
+</svg>
+</button>
+</nav>
+<pre class="mermaid"><code>flowchart TB
+    subgraph "Python (CLI)"
+        CLI["wps.py"] --&gt; UP["unified_processor.py"]
+        UP --&gt; ASSETS["AssetManager"]
+    end
+
+    subgraph "Rust Backend (Parallel)"
+        UP --&gt; RUST["_core.run_unified_pipeline()"]
+        RUST --&gt; GC["GC correction"]
+        GC --&gt; WPS_NUC["WPS foreground<br>(par_iter over regions)"]
+        GC --&gt; WPS_BG["WPS background (Alu)"]
+    end
+
+    subgraph "Python (Post-processing)"
+        WPS_NUC --&gt; PROC["wps_processor.py"]
+        WPS_BG --&gt; PROC
+        PROC --&gt; SMOOTH["Savitzky-Golay smoothing"]
+        SMOOTH --&gt; FFT["FFT periodicity (Rust)"]
+        FFT --&gt; PON["PON z-scores"]
+        PON --&gt; OUT["WPS.parquet"]
+    end
+</code></pre>
+<div class="panzoom-info-box panzoom-info-box-bottom panzoom-hidden">
+Use mouse to pan and zoom
+</div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Performance</p>
+<p>Region-level parallelization via Rayon <code>par_iter()</code> enables efficient multi-core processing of anchor regions.</p>
+</div>
+<hr>
+<h2 id="foreground-vs-background">Foreground vs Background</h2>
+<p><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> generates <strong>two complementary outputs</strong> that capture different biological scales:</p>
+<h3 id="foreground-samplewpsparquet">Foreground (<code>sample.WPS.parquet</code>)</h3>
+<p><strong>What it is</strong>: High-resolution <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles around specific genomic anchors (<abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>, <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites).</p>
+<p><strong>Why it matters</strong>: Gene promoters and <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites have characteristic nucleosome patterns:
+- <strong>Active promoters</strong>: Nucleosome-depleted region (NDR) upstream of <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>
+- <strong>Silent promoters</strong>: Packed nucleosomes across <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>
+- <strong><abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites</strong>: Sharp nucleosome boundaries (insulator function)</p>
+<p><strong>ML use</strong>: These 200-bin vectors are gene-specific signatures. Comparing them across cancer types reveals tissue-of-origin and tumor-specific disruptions.</p>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-0-1" id="__codelineno-0-1" name="__codelineno-0-1"></a>                          TSS
+<a href="#__codelineno-0-2" id="__codelineno-0-2" name="__codelineno-0-2"></a>                           |
+<a href="#__codelineno-0-3" id="__codelineno-0-3" name="__codelineno-0-3"></a>    ←───── -1kb ─────      ↓      ───── +1kb ─────→
+<a href="#__codelineno-0-4" id="__codelineno-0-4" name="__codelineno-0-4"></a>    [bin 0] ... [bin 99] [100] [bin 101] ... [bin 199]
+</code></pre></div>
+<h3 id="background-samplewps_backgroundparquet">Background (<code>sample.WPS_background.parquet</code>)</h3>
+<p><strong>What it is</strong>: Stacked <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles from ~770,000 Alu elements across the genome.</p>
+<p><strong>Why Alu elements?</strong></p>
+<ol>
+<li><strong>Ubiquitous</strong>: Alu elements are everywhere (~11% of human genome)</li>
+<li><strong>Consistent size</strong>: ~300bp (perfect for 2-nucleosome periodicity)</li>
+<li><strong>No gene bias</strong>: Not restricted to specific genes or pathways</li>
+<li><strong>Robust signal</strong>: Stacking 770K elements averages out noise</li>
+</ol>
+<p><strong>What it measures</strong>: When you stack all Alu <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles, a <strong>periodic wave</strong> emerges at ~190bp (nucleosome repeat length). This periodicity reflects <strong>global chromatin health</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Periodicity</th>
+<th>Meaning</th>
+<th>Cancer Implication</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strong (~190bp)</strong></td>
+<td>Regular nucleosome spacing</td>
+<td>Healthy chromatin</td>
+</tr>
+<tr>
+<td><strong>Weak/disrupted</strong></td>
+<td>Irregular chromatin</td>
+<td>Tumor burden, genomic instability</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Hierarchical Groups</strong>:
+- <code>Global_All</code>: All Alu (highest SNR, best for QC)
+- <code>Family_AluY/S/J</code>: Subfamily ages (~15M / ~35M / ~65M years)
+- <code>Chr1_All</code> ... <code>ChrY_All</code>: Per-chromosome (CNV context)</p>
+<hr>
+<h2 id="post-processing-smoothing-and-fft">Post-Processing: Smoothing and FFT</h2>
+<h3 id="savitzky-golay-smoothing">Savitzky-Golay Smoothing</h3>
+<p><strong>Purpose</strong>: Reduce high-frequency noise while preserving peak shapes.</p>
+<p><strong>How it works</strong>: Fits a polynomial (order=3) to sliding windows (size=11) and uses the fitted value. Unlike moving average, it preserves peak heights and widths.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wps_nuc_smooth</code></td>
+<td>Smoothed nucleosome profile</td>
+</tr>
+<tr>
+<td><code>wps_tf_smooth</code></td>
+<td>Smoothed TF profile</td>
+</tr>
+</tbody>
+</table>
+<p><strong>When to use</strong>: Always use smoothed columns for visualization. Raw columns for debugging.</p>
+<h3 id="fft-periodicity-extraction">FFT Periodicity Extraction</h3>
+<p><strong>Purpose</strong>: Quantify the ~190bp nucleosome repeat length (NRL) from Alu stacking.</p>
+<p><strong>How it works</strong>:
+1. <strong>Detrend</strong>: Remove linear trends from stacked profile
+2. <strong>Normalize</strong>: Z-score to make amplitude comparable across samples
+3. <strong>Window</strong>: Apply Hann window to reduce spectral leakage
+4. <strong>FFT</strong>: Find dominant frequency in 150-250bp range
+5. <strong>SNR</strong>: Compare peak amplitude to background</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nrl_period_bp</code></td>
+<td>Detected nucleosome repeat length</td>
+</tr>
+<tr>
+<td><code>nrl_amplitude</code></td>
+<td>FFT amplitude at dominant frequency</td>
+</tr>
+<tr>
+<td><code>nrl_snr</code></td>
+<td>Signal-to-noise ratio (peak vs background)</td>
+</tr>
+<tr>
+<td><code>nrl_quality</code></td>
+<td>0-1 quality score (SNR/3, capped)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Expected values</strong>:
+- Healthy samples: NRL ~190bp, quality &gt; 0.7
+- Cancer samples: NRL shifted, quality &lt; 0.5</p>
+<hr>
+<h2 id="usage">Usage</h2>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-1-1" id="__codelineno-1-1" name="__codelineno-1-1"></a><span class="c1"># Basic (auto-loads bundled assets)</span>
+<a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>output/<span class="w"> </span>--genome<span class="w"> </span>hg38
+<a href="#__codelineno-1-3" id="__codelineno-1-3" name="__codelineno-1-3"></a>
+<a href="#__codelineno-1-4" id="__codelineno-1-4" name="__codelineno-1-4"></a><span class="c1"># With explicit background override</span>
+<a href="#__codelineno-1-5" id="__codelineno-1-5" name="__codelineno-1-5"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>output/<span class="w"> </span>--background<span class="w"> </span>custom_alu.bed.gz
+<a href="#__codelineno-1-6" id="__codelineno-1-6" name="__codelineno-1-6"></a>
+<a href="#__codelineno-1-7" id="__codelineno-1-7" name="__codelineno-1-7"></a><span class="c1"># Panel data (MSK-ACCESS)</span>
+<a href="#__codelineno-1-8" id="__codelineno-1-8" name="__codelineno-1-8"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>output/<span class="w"> </span>--target-regions<span class="w"> </span>msk_access_baits.bed<span class="w"> </span>--bait-padding<span class="w"> </span><span class="m">20</span>
+<a href="#__codelineno-1-9" id="__codelineno-1-9" name="__codelineno-1-9"></a>
+<a href="#__codelineno-1-10" id="__codelineno-1-10" name="__codelineno-1-10"></a><span class="c1"># Panel data with panel-specific anchors (recommended for MSK-ACCESS)</span>
+<a href="#__codelineno-1-11" id="__codelineno-1-11" name="__codelineno-1-11"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>output/<span class="w"> </span><span class="se">\</span>
+<a href="#__codelineno-1-12" id="__codelineno-1-12" name="__codelineno-1-12"></a><span class="w">    </span>--wps-anchors<span class="w"> </span>/path/to/xs2.wps_anchors.bed.gz<span class="w"> </span><span class="se">\</span>
+<a href="#__codelineno-1-13" id="__codelineno-1-13" name="__codelineno-1-13"></a><span class="w">    </span>--target-regions<span class="w"> </span>msk_access_baits.bed
+</code></pre></div>
+<h3 id="panel-specific-wps-anchors">Panel-Specific <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Anchors</h3>
+<p>For targeted panels like MSK-ACCESS, genome-wide <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors include many regions with no coverage. Use <strong>panel-specific anchors</strong> for focused analysis:</p>
+<table>
+<thead>
+<tr>
+<th>Assay</th>
+<th>Bundled File</th>
+<th style="text-align: center;">Anchors</th>
+<th style="text-align: center;">Genes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MSK-ACCESS v1</td>
+<td><code>xs1.wps_anchors.bed.gz</code></td>
+<td style="text-align: center;">1,611</td>
+<td style="text-align: center;">128</td>
+</tr>
+<tr>
+<td>MSK-ACCESS v2</td>
+<td><code>xs2.wps_anchors.bed.gz</code></td>
+<td style="text-align: center;">1,820</td>
+<td style="text-align: center;">146</td>
+</tr>
+</tbody>
+</table>
+<p><strong>What's included:</strong>
+- <strong><abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> anchors</strong> for genes in the panel
+- <strong><abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> anchors</strong> within 100kb of panel genes</p>
+<p><strong>Benefits:</strong>
+- Reduced noise from off-target regions
+- Faster processing
+- More interpretable ML features</p>
+<h2 id="cli-options">CLI Options</h2>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Short</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input</code></td>
+<td><code>-i</code></td>
+<td>PATH</td>
+<td><em>required</em></td>
+<td>Input .bed.gz file (output from extract)</td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>-o</code></td>
+<td>PATH</td>
+<td><em>required</em></td>
+<td>Output directory</td>
+</tr>
+<tr>
+<td><code>--sample-name</code></td>
+<td><code>-s</code></td>
+<td>TEXT</td>
+<td></td>
+<td>Override sample name</td>
+</tr>
+<tr>
+<td><code>--wps-anchors</code></td>
+<td></td>
+<td>PATH</td>
+<td></td>
+<td><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> (<abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>+<abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr>) for dual-stream profiling</td>
+</tr>
+<tr>
+<td><code>--assay</code></td>
+<td><code>-A</code></td>
+<td>TEXT</td>
+<td></td>
+<td>Assay code (xs1/xs2) for bundled assets</td>
+</tr>
+<tr>
+<td><code>--target-regions</code></td>
+<td><code>-T</code></td>
+<td>PATH</td>
+<td></td>
+<td>Panel capture <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> (enables bait edge masking)</td>
+</tr>
+<tr>
+<td><code>--skip-target-regions</code></td>
+<td></td>
+<td>FLAG</td>
+<td></td>
+<td>Force WGS mode (ignore bundled targets)</td>
+</tr>
+<tr>
+<td><code>--bait-padding</code></td>
+<td></td>
+<td>INT</td>
+<td>50</td>
+<td>Bait edge padding in bp</td>
+</tr>
+<tr>
+<td><code>--background</code></td>
+<td><code>-B</code></td>
+<td>PATH</td>
+<td></td>
+<td>Background Alu <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> for hierarchical stacking</td>
+</tr>
+<tr>
+<td><code>--genome</code></td>
+<td><code>-G</code></td>
+<td>TEXT</td>
+<td>hg19</td>
+<td>Genome build (hg19/hg38)</td>
+</tr>
+<tr>
+<td><code>--pon-model</code></td>
+<td><code>-P</code></td>
+<td>PATH</td>
+<td></td>
+<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> model for z-score computation</td>
+</tr>
+<tr>
+<td><code>--pon-variant</code></td>
+<td></td>
+<td>TEXT</td>
+<td>all_unique</td>
+<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> variant: <code>all_unique</code> or <code>duplex</code></td>
+</tr>
+<tr>
+<td><code>--skip-pon</code></td>
+<td></td>
+<td>FLAG</td>
+<td></td>
+<td>Skip <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-score normalization</td>
+</tr>
+<tr>
+<td><code>--empty</code></td>
+<td></td>
+<td>FLAG</td>
+<td>False</td>
+<td>Include regions with no coverage</td>
+</tr>
+<tr>
+<td><code>--gc-correct</code></td>
+<td></td>
+<td>FLAG</td>
+<td>True</td>
+<td>Apply <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction</td>
+</tr>
+<tr>
+<td><code>--threads</code></td>
+<td><code>-t</code></td>
+<td>INT</td>
+<td>0</td>
+<td>Number of threads (0=all cores)</td>
+</tr>
+<tr>
+<td><code>--verbose</code></td>
+<td><code>-v</code></td>
+<td>FLAG</td>
+<td></td>
+<td>Enable verbose logging</td>
+</tr>
+</tbody>
+</table>
+<h3 id="bait-padding-trade-off">Bait Padding Trade-Off</h3>
+<p>The <code>--bait-padding</code> option controls how many bp to trim from bait edges to avoid capture artifacts.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Effect</th>
+<th>Best For</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>50</strong> (default)</td>
+<td>Maximum artifact removal</td>
+<td>WGS, large targets (&gt;200bp)</td>
+</tr>
+<tr>
+<td><strong>15-20</strong></td>
+<td>Preserves data in small exons</td>
+<td>Dense exon panels (MSK-ACCESS)</td>
+</tr>
+<tr>
+<td><strong>0</strong></td>
+<td>No trimming (not recommended)</td>
+<td>Debugging only</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Adaptive Safety</strong>: The tool automatically reduces padding for small targets:
+</p><div class="highlight"><pre><span></span><code><a href="#__codelineno-2-1" id="__codelineno-2-1" name="__codelineno-2-1"></a>effective_trim = min(user_trim, target_length / 4)
+</code></pre></div>
+This ensures you never mask more than 50% of a small exon (25% per side).<p></p>
+<hr>
+<h2 id="dual-wps-output-with-assay">Dual <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Output (with <code>--assay</code>)</h2>
+<p>When using <code>--assay</code> (e.g., for MSK-ACCESS), Krewlyzer generates <strong>two</strong> <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> output files:</p>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>output/<span class="w"> </span>--assay<span class="w"> </span>xs2
+</code></pre></div>
+<h3 id="output-files">Output Files</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Anchors</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{sample}.WPS.parquet</code></td>
+<td>Genome-wide (~15k)</td>
+<td>Global cancer detection signature</td>
+</tr>
+<tr>
+<td><code>{sample}.WPS.panel.parquet</code></td>
+<td>Panel genes (~2k)</td>
+<td>Targeted gene-level profiling</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-dual-output">Why Dual Output?</h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Pan-cancer detection</strong></td>
+<td>Use <code>WPS.parquet</code> (genome-wide)</td>
+</tr>
+<tr>
+<td><strong>Specific gene analysis</strong></td>
+<td>Use <code>WPS.panel.parquet</code> (focused)</td>
+</tr>
+<tr>
+<td><strong>Feature vectors for ML</strong></td>
+<td>Combine both via <a href="../../output/json-output/">JSON output</a></td>
+</tr>
+</tbody>
+</table>
+<h3 id="how-it-works">How It Works</h3>
+<ol>
+<li><strong>First pass</strong>: Genome-wide anchors (<abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>+<abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> for ~5,000 genes)</li>
+<li><strong>Second pass</strong>: Panel-specific anchors (genes in your assay)</li>
+</ol>
+<p>Both use the same pre-computed <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors for consistency.</p>
+<h2 id="output-files_1">Output Files</h2>
+<h3 id="foreground-samplewpsparquet_1">Foreground: <code>sample.WPS.parquet</code></h3>
+<p>Per-region profiles centered on <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>/<abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> anchors (±1kb, 200 bins × 10bp).</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>region_id</code></td>
+<td>string</td>
+<td>Anchor identifier</td>
+</tr>
+<tr>
+<td><code>chrom</code></td>
+<td>string</td>
+<td>Chromosome</td>
+</tr>
+<tr>
+<td><code>center</code></td>
+<td>int64</td>
+<td>Anchor center position</td>
+</tr>
+<tr>
+<td><code>strand</code></td>
+<td>string</td>
+<td>+/- strand</td>
+</tr>
+<tr>
+<td><code>region_type</code></td>
+<td>string</td>
+<td><abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>/<abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr></td>
+</tr>
+<tr>
+<td><code>wps_nuc</code></td>
+<td>float32[200]</td>
+<td>Nucleosome <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profile</td>
+</tr>
+<tr>
+<td><code>wps_tf</code></td>
+<td>float32[200]</td>
+<td>TF <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profile</td>
+</tr>
+<tr>
+<td><code>wps_nuc_smooth</code></td>
+<td>float32[200]</td>
+<td>Savitzky-Golay smoothed</td>
+</tr>
+<tr>
+<td><code>wps_tf_smooth</code></td>
+<td>float32[200]</td>
+<td>Savitzky-Golay smoothed</td>
+</tr>
+<tr>
+<td><code>prot_frac_nuc</code></td>
+<td>float32[200]</td>
+<td>Protection fraction (nuc)</td>
+</tr>
+<tr>
+<td><code>prot_frac_tf</code></td>
+<td>float32[200]</td>
+<td>Protection fraction (TF)</td>
+</tr>
+<tr>
+<td><code>capture_mask</code></td>
+<td>uint8[200]</td>
+<td>Panel mask (1=reliable, 0=edge/off-target)</td>
+</tr>
+<tr>
+<td><code>local_depth</code></td>
+<td>float32</td>
+<td>Local fragment coverage</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Strand Correction</p>
+<p>All profiles are strand-corrected.</p>
+<ul>
+<li>Genes on <code>+</code> strand are stored 5' → 3'</li>
+<li>Genes on <code>-</code> strand are <strong>reversed</strong> so they are also 5' → 3'</li>
+<li><strong>Result</strong>: Bin 100 is always the <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>, and Bin 110 is always "+100bp downstream", regardless of gene orientation.</li>
+</ul>
+</div>
+<h4 id="pon-normalized-columns-v20"><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-Normalized Columns (v2.0)</h4>
+<p>When using a v2.0 vector <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, these additional columns are computed:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>z_vector</code></td>
+<td>float32[200]</td>
+<td>Position-wise z-scores vs healthy baseline</td>
+</tr>
+<tr>
+<td><code>shape_score</code></td>
+<td>float32</td>
+<td>Pearson correlation with healthy shape [-1, 1]</td>
+</tr>
+<tr>
+<td><code>z_amplitude</code></td>
+<td>float32</td>
+<td>Mean of abs(z_vector) for backward compat</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p><strong>Shape Score Interpretation:</strong>
+- <strong>0.9-1.0</strong>: Healthy nucleosome positioning
+- <strong>0.5-0.9</strong>: Mild chromatin disorganization
+- <strong>&lt;0.5</strong>: Significant disruption (cancer signal)</p>
+</div>
+<p>See <a href="../../../reference/pon-models/#wps-baseline-wps_baseline"><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> v2.0</a> for baseline details.</p>
+<h3 id="background-samplewps_backgroundparquet_1">Background: <code>sample.WPS_background.parquet</code></h3>
+<p>Hierarchical stacking of ~770K Alu elements into 29 groups.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>group_id</code></td>
+<td>string</td>
+<td>Group name (e.g., Global_All, Chr1_H, AluJb)</td>
+</tr>
+<tr>
+<td><code>stacked_wps_nuc</code></td>
+<td>float32[30]</td>
+<td>Stacked nucleosome profile (200 bins)</td>
+</tr>
+<tr>
+<td><code>stacked_wps_tf</code></td>
+<td>float32[30]</td>
+<td>Stacked TF profile</td>
+</tr>
+<tr>
+<td><code>stacked_wps_nuc_smooth</code></td>
+<td>float32[30]</td>
+<td>Savitzky-Golay smoothed profile</td>
+</tr>
+<tr>
+<td><code>alu_count</code></td>
+<td>int64</td>
+<td>Number of Alu elements in group</td>
+</tr>
+<tr>
+<td><code>nrl_bp</code></td>
+<td>float32</td>
+<td>Nucleosome Repeat Length in bp (expected ~190bp)</td>
+</tr>
+<tr>
+<td><code>nrl_deviation_bp</code></td>
+<td>float32</td>
+<td><strong>NEW</strong>: Absolute deviation from expected 190bp</td>
+</tr>
+<tr>
+<td><code>periodicity_score</code></td>
+<td>float32</td>
+<td>Raw SNR-based quality score (0-1)</td>
+</tr>
+<tr>
+<td><code>adjusted_score</code></td>
+<td>float32</td>
+<td><strong>NEW</strong>: periodicity_score × deviation_penalty</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">NRL Deviation Scoring</p>
+<p>The <code>adjusted_score</code> penalizes samples with abnormal NRL values.
+A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower <code>adjusted_score</code>.</p>
+</div>
+<div class="arithmatex">\[
+\text{adjusted_score} = \text{periodicity_score} \times \max\left(0, 1 - \frac{|\text{nrl_bp} - 190|}{50}\right)
+\]</div>
+<hr>
+<h2 id="wgs-vs-panel-data-msk-access">WGS vs Panel Data (MSK-ACCESS)</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>WGS</th>
+<th>Panel (MSK-ACCESS)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Foreground coverage</strong></td>
+<td>All regions</td>
+<td>Sparse off-target</td>
+</tr>
+<tr>
+<td><strong>capture_mask</strong></td>
+<td>All 1s</td>
+<td>1=on-target, 0=off-target</td>
+</tr>
+<tr>
+<td><strong>Background Alu</strong></td>
+<td>Full stacking</td>
+<td><strong>Still works!</strong> (Alu is global)</td>
+</tr>
+<tr>
+<td><strong>Best ML features</strong></td>
+<td>Gene-specific vectors</td>
+<td>Global periodicity metrics</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key insight</strong>: Background Alu stacking works for panels because Alu elements are genome-wide, not restricted to capture regions.</p>
+<hr>
+<h2 id="ml-feature-summary">ML Feature Summary</h2>
+<h3 id="from-foreground">From Foreground</h3>
+<ul>
+<li>Gene-specific nucleosome disruption patterns</li>
+<li>TF binding footprints at promoters</li>
+<li>Tissue-of-origin signatures</li>
+</ul>
+<h3 id="from-background">From Background</h3>
+<ul>
+<li><strong>Global tumor burden</strong>: Loss of periodicity correlates with tumor fraction</li>
+<li><strong>Subfamily ratios</strong>: <code>Family_AluY / Family_AluJ</code> → Tissue context</li>
+<li><strong>Per-chromosome</strong>: Chromatin disruption → CNV context</li>
+</ul>
+<hr>
+<h2 id="references">References</h2>
+<div class="admonition quote">
+<p class="admonition-title">Reference</p>
+<p>Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. <em>Cell</em>, 164(1-2), 57-68.</p>
+</div>
+<h2 id="see-also">See Also</h2>
+<ul>
+<li><a href="../../../reference/input-formats/#wps-anchors">Input File Formats</a> - <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors BED6 format for <code>--wps-anchors</code></li>
+<li><a href="../../../reference/pon-models/"><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Models</a> - Building and using <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr></li>
+<li><a href="../../../resources/troubleshooting/">Troubleshooting</a> - Common issues</li>
+</ul>
+<!-- Abbreviation definitions for Krewlyzer documentation -->
+<!-- These provide hover tooltips for technical acronyms -->
+<aside class="md-source-file">
+<span class="md-source-file__fact">
+<span class="md-icon" title="Last update">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
+</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+</span>
+<span class="md-source-file__fact">
+<span class="md-icon" title="Created">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"></path></svg>
+</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 26, 2025 16:12:36 UTC"><span class="timeago" datetime="2025-11-26T16:12:36+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 26, 2025 16:12:36 UTC">2025-11-26</span>
+</span>
+</aside>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+<button class="md-top md-icon" data-md-component="top" hidden="" type="button">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+<div class="md-copyright__highlight">
+      Developed by <a href="https://github.com/rhshah">Ronak H Shah</a> @ 
+<a href="https://www.mskcc.org">MSKCC</a> | 
+Built with <a href="https://antigravity.google/">Antigravity</a> | 
+<a href="https://github.com/msk-access/krewlyzer/blob/main/LICENSE">AGPL-3.0</a>
+</div>
+</div>
+<div class="md-social">
+<a class="md-social__link" href="https://github.com/msk-access/krewlyzer" rel="noopener" target="_blank" title="github.com">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+</a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.path", "toc.follow", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "stable", "provider": "mike"}}</script>
+<script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../../js/timeago.min.js"></script>
+<script src="../../../js/timeago_mkdocs_material.js"></script>
+<script src="../../../javascripts/mathjax.js"></script>
+<script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="../../../assets/javascripts/panzoom.min.js"></script>
+<script src="../../../assets/javascripts/zoompan.js"></script>
+<script type="module">import mermaid from "https://unpkg.com/mermaid@11.4.0/dist/mermaid.esm.min.mjs";
+window.mermaidConfig = {default: {
+    startOnLoad: false
+}};</script>
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
