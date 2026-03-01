@@ -1681,7 +1681,7 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
             // Collect overlapping region indices first (avoids borrow conflict)
             let mut overlaps: Vec<usize> = Vec::new();
             tree.query(start as i32, end_closed as i32, |node| {
-                overlaps.push(*node.metadata);
+                overlaps.push(node.metadata.clone());
             });
             
             // Process each overlapping region
