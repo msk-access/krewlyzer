@@ -280,6 +280,23 @@ df['short_long_ratio'] = (df['ultra_short'] + df['core_short']) / (df['long'] + 
 
 Higher ratio = more short fragments = potential tumor signal
 
+!!! note "FSC ratios vs FSR — not redundant"
+    The `*_ratio` columns in `FSC.gene.tsv` and `FSC.regions.tsv` are **simple proportions**: `channel / total` per gene or exon. They answer *"what fraction of fragments at this gene are short?"*
+
+    [FSR](fsr.md) is different in two key ways:
+    
+    1. **PON-normalized BEFORE ratio**: `normalize(short) / normalize(long)` — removes batch effects and library size before dividing, so cross-sample comparisons are valid
+    2. **Window-level** (5 Mb genome tiles), not gene-level
+
+    **When to use which:**
+    
+    | Use case | Use |
+    |----------|-----|
+    | Gene-level copy-number composition | `FSC.gene.tsv` `*_ratio` columns |
+    | Tumor fraction / genome-wide cancer signal | `FSR.tsv` `short_long_ratio` (PON-normalized) |
+    | ML features for per-gene models | FSC gene ratios |
+    | ML features for pan-cancer models | FSR `short_long_log2` |
+
 ---
 
 ## Normalization Order
