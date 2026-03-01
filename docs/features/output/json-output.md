@@ -348,9 +348,11 @@ End motif (EDM) and breakpoint motif (BPM) 4-mer frequencies, plus MDS scores fo
   "bpm": { "AAAA": 0.0038, "AAAC": 0.0041, "...": "..." },
   "edm_1mer": { "A": 0.197, "C": 0.345, "G": 0.321, "T": 0.138 },
   "mds": 0.8234,
+  "mds_z": -1.23,
   "edm_on_target": { "AAAA": 0.0051, "...": "..." },
   "bpm_on_target": { "AAAA": 0.0043, "...": "..." },
-  "mds_on_target": 0.7918
+  "mds_on_target": 0.7918,
+  "mds_z_on_target": -0.91
 }
 ```
 
@@ -360,9 +362,11 @@ End motif (EDM) and breakpoint motif (BPM) 4-mer frequencies, plus MDS scores fo
 | `bpm` | dict | 256 4-mer frequencies at **breakpoints** (off-target) |
 | `edm_1mer` | dict | Single-base composition at fragment ends (A/C/G/T) |
 | `mds` | float | Motif Diversity Score (off-target) |
+| `mds_z` | float | MDS z-score vs PON (only with `--pon-model`) |
 | `edm_on_target` | dict | On-target EDM frequencies (panel mode only) |
 | `bpm_on_target` | dict | On-target BPM frequencies (panel mode only) |
 | `mds_on_target` | float | On-target MDS (panel mode only) |
+| `mds_z_on_target` | float | On-target MDS z-score vs PON (panel + `--pon-model`) |
 
 ---
 

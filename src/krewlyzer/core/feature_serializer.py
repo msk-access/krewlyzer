@@ -450,6 +450,11 @@ class FeatureSerializer:
                 if col.lower() == "mds":
                     motif_data["mds"] = float(mds_df[col].iloc[0])
                     break
+            # Also extract mds_z if PON normalization was applied
+            if "mds_z" in mds_df.columns:
+                val = mds_df["mds_z"].iloc[0]
+                if pd.notna(val):
+                    motif_data["mds_z"] = float(val)
 
         # On-target motifs
         if edm_on_path.exists():
@@ -472,6 +477,11 @@ class FeatureSerializer:
                 if col.lower() == "mds":
                     motif_data["mds_on_target"] = float(mds_on_df[col].iloc[0])
                     break
+            # Also extract mds_z for on-target if PON normalization was applied
+            if "mds_z" in mds_on_df.columns:
+                val = mds_on_df["mds_z"].iloc[0]
+                if pd.notna(val):
+                    motif_data["mds_z_on_target"] = float(val)
 
         if motif_data:
             serializer.features["motif"] = motif_data
