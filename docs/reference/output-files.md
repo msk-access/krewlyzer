@@ -37,7 +37,86 @@ Complete reference for every file Krewlyzer produces — what it contains, what 
 | [`{s}.metadata.json`](#metadata-json) | Meta | Global | Run parameters + QC |
 | [`{s}.features.json`](#features-json) | All | All | Unified ML feature export |
 
-> `{s}` = sample name. On-target variants of most files follow `{s}.*.ontarget.tsv`.
+> `{s}` = sample name.
+
+---
+
+## On-Target vs Off-Target Files
+
+Most fragmentomics features generate **two parallel outputs** in panel mode: a standard file (off-target reads) and an `.ontarget.tsv` variant (on-target reads). Understanding the difference is critical for choosing the right input to any ML model.
+
+### What "On-Target" and "Off-Target" Mean
+
+In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
+
+| Category | Reads | Depth | GC bias |
+|----------|-------|-------|---------|
+| **Off-target** | Do NOT overlap capture bait regions | Low (~1–5×) but genome-wide | Unbiased — not affected by probe GC |
+| **On-target** | Overlap the capture bait regions | High (~500–2000×) but only at panel genes | Biased — capture efficiency varies by probe GC content |
+
+### Why the Split Matters
+
+```
+          All cfDNA fragments in BAM
+                    │
+         ┌──────────┴──────────┐
+    Off-target             On-target
+  (genome-wide)         (panel genes only)
+         │                    │
+   FSC.tsv, FSR.tsv      FSC.ontarget.tsv
+   MDS.tsv, OCF.tsv      MDS.ontarget.tsv
+   FSD.tsv, ...          FSD.ontarget.tsv
+```
+
+**The off-target pool** is sampled uniformly across the genome, unaffected by probe GC, making it the **gold standard for fragmentation features** (FSR, FSC, FSD, MDS, OCF). The GC correction model is also trained exclusively on off-target fragments.
+
+**The on-target pool** has high depth at panel loci but is confounded by capture efficiency — probes with higher GC content capture more efficiently, making fragment size distributions at those loci appear artificially different. On-target reads are primarily useful for gene-level copy number and region-specific analysis, not genome-wide fragmentation.
+
+### Which to Use
+
+| Task | Use | Reason |
+|------|-----|--------|
+| Pan-cancer ML features (FSR, FSC, FSD, MDS, OCF) | **Off-target** (`.tsv`) | Unbiased, genome-wide, GC-corrected with unbiased model |
+| Gene-level copy number (FSC.gene.tsv) | **On-target** internally | Gene FSC already uses on-target correction factors |
+| Gene fragmentation composition (FSC.regions, E1) | On-target reads, but captured in gene/region TSVs | Not the raw `.ontarget.tsv` — use FSC.gene / FSC.regions |
+| Motif features for tissue-of-origin (MDS, EDM, BPM) | **Off-target** (`.tsv`) | On-target motifs are biased by probe sequence |
+| MDS on-target (when off-target too sparse) | `.ontarget.tsv` | Lower depth but gene-anchored signal |
+| OCF tissue-of-origin | **Off-target** (`.tsv`) | On-target OCF biased by capture regions' tissue specificity |
+| Building a PON | **Off-target** only | Must match what the sample uses |
+
+!!! warning "Do not mix off-target and on-target in the same model"
+    Features from `FSR.tsv` (off-target) and `FSR.ontarget.tsv` (on-target) are not on the same scale. The on-target pool has different GC bias, different fragment size distributions, and different effective depth. Always use the same variant consistently across all samples in a cohort.
+
+### Complete On-Target / Off-Target File Inventory
+
+| Base file | On-target variant | Off-target variant |
+|-----------|------------------|-------------------|
+| `{s}.FSD.tsv` | `{s}.FSD.ontarget.tsv` | — (base is off-target) |
+| `{s}.FSR.tsv` | `{s}.FSR.ontarget.tsv` | — |
+| `{s}.FSC.tsv` | `{s}.FSC.ontarget.tsv` | — |
+| `{s}.EndMotif.tsv` | `{s}.EndMotif.ontarget.tsv` | — |
+| `{s}.BreakPointMotif.tsv` | `{s}.BreakPointMotif.ontarget.tsv` | — |
+| `{s}.MDS.tsv` | `{s}.MDS.ontarget.tsv` | — |
+| `{s}.OCF.tsv` | `{s}.OCF.ontarget.tsv` | `{s}.OCF.offtarget.tsv` ⚠️ |
+| `{s}.OCF.sync.tsv` | `{s}.OCF.ontarget.sync.tsv` | `{s}.OCF.offtarget.sync.tsv` |
+| `{s}.TFBS.tsv` | `{s}.TFBS.ontarget.tsv` | — |
+| `{s}.TFBS.sync.tsv` | `{s}.TFBS.ontarget.sync.tsv` | — |
+| `{s}.ATAC.tsv` | `{s}.ATAC.ontarget.tsv` | — |
+| `{s}.ATAC.sync.tsv` | `{s}.ATAC.ontarget.sync.tsv` | — |
+| `{s}.correction_factors.tsv` | `{s}.correction_factors.ontarget.tsv` | — |
+
+> ⚠️ **OCF `offtarget`** is a special case: OCF computes 3 variants — all reads, on-target reads, and a panel-specific off-target score derived from regions near but not in the capture baits. The `OCF.offtarget.tsv` is the panel-off-target score, not the same concept as the base `OCF.tsv`.
+
+### GC Correction and On-Target
+
+GC correction is trained on **off-target reads only**, then applied to both pools:
+
+```
+Off-target reads → GC model training → correction_factors.tsv
+On-target reads  → correction_factors.ontarget.tsv (separate model)
+```
+
+The on-target GC model accounts for probe-specific capture bias. It is used internally when generating `FSC.gene.tsv` and `FSC.regions.tsv` — you do not need to apply it manually.
 
 ---
 
