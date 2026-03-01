@@ -5,7 +5,7 @@
 <link href="../" rel="prev">
 <link href="../../nextflow/" rel="next">
 <link href="../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.3" name="generator">
 <title>run-all - Krewlyzer</title>
 <link href="../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
 <link href="../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
@@ -399,15 +399,6 @@
 <span class="md-ellipsis">
       
         Unified JSON for ML
-      
-    </span>
-</a>
-</li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#format-override">
-<span class="md-ellipsis">
-      
-        Format Override
       
     </span>
 </a>
@@ -1242,15 +1233,6 @@
     </span>
 </a>
 </li>
-<li class="md-nav__item">
-<a class="md-nav__link" href="#format-override">
-<span class="md-ellipsis">
-      
-        Format Override
-      
-    </span>
-</a>
-</li>
 </ul>
 </nav>
 </li>
@@ -1307,7 +1289,7 @@
 </tr>
 <tr>
 <td><code>wps</code></td>
-<td>Windowed protection score (<code>.WPS.tsv.gz</code>)</td>
+<td>Windowed protection score (<code>.WPS.parquet</code>)</td>
 </tr>
 <tr>
 <td><code>ocf</code></td>
@@ -1365,6 +1347,12 @@
     PIPELINE --&gt; FSD["FSD.tsv"]
     PIPELINE --&gt; WPS["WPS.parquet"]
     PIPELINE --&gt; OCF["OCF.tsv"]
+
+    BED --&gt; ENTROPY["TFBS/ATAC Entropy"]
+    ENTROPY --&gt; TFBS["TFBS.tsv"]
+    ENTROPY --&gt; ATAC["ATAC.tsv"]
+
+    EXTRACT --&gt; META["metadata.json"]
 
     subgraph "With --variants"
         BAM --&gt; MFSD["mFSD.tsv"]
@@ -1467,13 +1455,12 @@ Use mouse to pan and zoom
 <a href="#__codelineno-1-2" id="__codelineno-1-2" name="__codelineno-1-2"></a>krewlyzer<span class="w"> </span>extract<span class="w"> </span>-i<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>output_dir
 <a href="#__codelineno-1-3" id="__codelineno-1-3" name="__codelineno-1-3"></a>
 <a href="#__codelineno-1-4" id="__codelineno-1-4" name="__codelineno-1-4"></a><span class="c1"># 2. Run feature tools using the BED file</span>
-<a href="#__codelineno-1-5" id="__codelineno-1-5" name="__codelineno-1-5"></a><span class="c1"># 2. Run feature tools using the BED file</span>
-<a href="#__codelineno-1-6" id="__codelineno-1-6" name="__codelineno-1-6"></a>krewlyzer<span class="w"> </span>fsc<span class="w"> </span>-i<span class="w"> </span>output_dir/sample.bed.gz<span class="w"> </span>--output<span class="w"> </span>output_dir/
-<a href="#__codelineno-1-7" id="__codelineno-1-7" name="__codelineno-1-7"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>output_dir/sample.bed.gz<span class="w"> </span>--output<span class="w"> </span>output_dir/
-<a href="#__codelineno-1-8" id="__codelineno-1-8" name="__codelineno-1-8"></a><span class="c1"># ... (fsd, ocf, etc.)</span>
-<a href="#__codelineno-1-9" id="__codelineno-1-9" name="__codelineno-1-9"></a>
-<a href="#__codelineno-1-10" id="__codelineno-1-10" name="__codelineno-1-10"></a><span class="c1"># 3. Motif analysis (Independent of BED, uses BAM directly)</span>
-<a href="#__codelineno-1-11" id="__codelineno-1-11" name="__codelineno-1-11"></a>krewlyzer<span class="w"> </span>motif<span class="w"> </span>-i<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>output_dir<span class="w"> </span>
+<a href="#__codelineno-1-5" id="__codelineno-1-5" name="__codelineno-1-5"></a>krewlyzer<span class="w"> </span>fsc<span class="w"> </span>-i<span class="w"> </span>output_dir/sample.bed.gz<span class="w"> </span>--output<span class="w"> </span>output_dir/
+<a href="#__codelineno-1-6" id="__codelineno-1-6" name="__codelineno-1-6"></a>krewlyzer<span class="w"> </span>wps<span class="w"> </span>-i<span class="w"> </span>output_dir/sample.bed.gz<span class="w"> </span>--output<span class="w"> </span>output_dir/
+<a href="#__codelineno-1-7" id="__codelineno-1-7" name="__codelineno-1-7"></a><span class="c1"># ... (fsd, ocf, etc.)</span>
+<a href="#__codelineno-1-8" id="__codelineno-1-8" name="__codelineno-1-8"></a>
+<a href="#__codelineno-1-9" id="__codelineno-1-9" name="__codelineno-1-9"></a><span class="c1"># 3. Motif analysis (Independent of BED, uses BAM directly)</span>
+<a href="#__codelineno-1-10" id="__codelineno-1-10" name="__codelineno-1-10"></a>krewlyzer<span class="w"> </span>motif<span class="w"> </span>-i<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>output_dir<span class="w"> </span>
 </code></pre></div>
 <h2 id="targeted-panel-usage-access-etc">Targeted Panel Usage (ACCESS, etc.)</h2>
 <p>For targeted sequencing panels (e.g., MSK-ACCESS), <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> require a custom regions <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> file instead of the default genome-wide 100kb bins:</p>
@@ -1482,9 +1469,8 @@ Use mouse to pan and zoom
 <a href="#__codelineno-2-3" id="__codelineno-2-3" name="__codelineno-2-3"></a><span class="w">  </span>--bin-input<span class="w"> </span>/path/to/MSK-ACCESS-v2_canonicaltargets.bed
 <a href="#__codelineno-2-4" id="__codelineno-2-4" name="__codelineno-2-4"></a>
 <a href="#__codelineno-2-5" id="__codelineno-2-5" name="__codelineno-2-5"></a><span class="c1"># Or run FSC/FSR individually with target regions</span>
-<a href="#__codelineno-2-6" id="__codelineno-2-6" name="__codelineno-2-6"></a><span class="c1"># Or run FSC/FSR individually with target regions</span>
-<a href="#__codelineno-2-7" id="__codelineno-2-7" name="__codelineno-2-7"></a>krewlyzer<span class="w"> </span>fsc<span class="w"> </span>-i<span class="w"> </span>motif_out/sample.bed.gz<span class="w"> </span>-b<span class="w"> </span>targets.bed<span class="w"> </span>-w<span class="w"> </span><span class="m">1</span><span class="w"> </span>-c<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>out_dir/
-<a href="#__codelineno-2-8" id="__codelineno-2-8" name="__codelineno-2-8"></a>krewlyzer<span class="w"> </span>fsr<span class="w"> </span>-i<span class="w"> </span>motif_out/sample.bed.gz<span class="w"> </span>-b<span class="w"> </span>targets.bed<span class="w"> </span>-w<span class="w"> </span><span class="m">1</span><span class="w"> </span>-c<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>out_dir/
+<a href="#__codelineno-2-6" id="__codelineno-2-6" name="__codelineno-2-6"></a>krewlyzer<span class="w"> </span>fsc<span class="w"> </span>-i<span class="w"> </span>motif_out/sample.bed.gz<span class="w"> </span>-b<span class="w"> </span>targets.bed<span class="w"> </span>-w<span class="w"> </span><span class="m">1</span><span class="w"> </span>-c<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>out_dir/
+<a href="#__codelineno-2-7" id="__codelineno-2-7" name="__codelineno-2-7"></a>krewlyzer<span class="w"> </span>fsr<span class="w"> </span>-i<span class="w"> </span>motif_out/sample.bed.gz<span class="w"> </span>-b<span class="w"> </span>targets.bed<span class="w"> </span>-w<span class="w"> </span><span class="m">1</span><span class="w"> </span>-c<span class="w"> </span><span class="m">1</span><span class="w"> </span>--output<span class="w"> </span>out_dir/
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -1527,13 +1513,11 @@ Use mouse to pan and zoom
 <a href="#__codelineno-6-2" id="__codelineno-6-2" name="__codelineno-6-2"></a>krewlyzer<span class="w"> </span>run-all<span class="w"> </span>sample.bam<span class="w"> </span>--reference<span class="w"> </span>hg19.fa<span class="w"> </span>--output<span class="w"> </span>out/<span class="w"> </span>--generate-json
 <a href="#__codelineno-6-3" id="__codelineno-6-3" name="__codelineno-6-3"></a><span class="c1"># Output: out/sample.features.json (contains FSD, FSR, WPS, Motif, OCF, etc.)</span>
 </code></pre></div>
-<h3 id="format-override">Format Override</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a><span class="c1"># Global format for all outputs</span>
-<a href="#__codelineno-7-2" id="__codelineno-7-2" name="__codelineno-7-2"></a>krewlyzer<span class="w"> </span>run-all<span class="w"> </span>...<span class="w"> </span>--output-format<span class="w"> </span>parquet
-<a href="#__codelineno-7-3" id="__codelineno-7-3" name="__codelineno-7-3"></a>
-<a href="#__codelineno-7-4" id="__codelineno-7-4" name="__codelineno-7-4"></a><span class="c1"># Per-tool format override</span>
-<a href="#__codelineno-7-5" id="__codelineno-7-5" name="__codelineno-7-5"></a>krewlyzer<span class="w"> </span>fsd<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>-o<span class="w"> </span>out/<span class="w"> </span>--format<span class="w"> </span>json
-</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Output format is determined automatically per feature (<abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> for tabular data, Parquet for <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles).
+There is no global <code>--output-format</code> flag. Use <code>--generate-json</code> to produce a unified JSON for ML pipelines.</p>
+</div>
 <p>See <a href="../../features/output/json-output/">JSON Output</a> for full documentation.</p>
 <!-- Abbreviation definitions for Krewlyzer documentation -->
 <!-- These provide hover tooltips for technical acronyms -->
@@ -1542,7 +1526,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 00:01:10 UTC"><span class="timeago" datetime="2026-03-01T00:01:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 00:01:10 UTC">2026-03-01</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

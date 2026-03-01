@@ -5,7 +5,7 @@
 <link href="../fsd/" rel="prev">
 <link href="../wps/" rel="next">
 <link href="../../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.3" name="generator">
 <title>FSR - Krewlyzer</title>
 <link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
 <link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
@@ -1402,10 +1402,6 @@ A higher <code>core_short_long_ratio</code> means more tumor-derived DNA in your
     end
 
     RATIO --&gt; FSR["FSR.tsv"]
-
-    subgraph "With --target-regions"
-        RUST --&gt; FSR_ON["FSR.ontarget.tsv"]
-    end
 </code></pre>
 <div class="panzoom-info-box panzoom-info-box-bottom panzoom-hidden">
 Use mouse to pan and zoom
@@ -1814,20 +1810,15 @@ Use mouse to pan and zoom
 <tbody>
 <tr>
 <td><code>{sample}.FSR.tsv</code></td>
-<td><strong>Off-target</strong> fragments</td>
-<td>Unbiased ratio (primary)</td>
-</tr>
-<tr>
-<td><code>{sample}.FSR.ontarget.tsv</code></td>
-<td><strong>On-target</strong> fragments</td>
-<td>Gene-level ratio</td>
+<td><strong>Off-target</strong> fragment ratios</td>
+<td>Unbiased ratio (primary biomarker)</td>
 </tr>
 </tbody>
 </table>
 <div class="admonition important">
 <p class="admonition-title">Important</p>
-<p><strong>Off-target = unbiased</strong> – preferred for tumor detection.<br>
-<strong>On-target = capture-biased</strong> – reflects panel design, not true biology.</p>
+<p><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> is computed from <strong>off-target <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> counts</strong> and does not produce a separate <code>.ontarget.tsv</code> file.
+Off-target fragments provide unbiased short/long ratios for tumor detection.</p>
 </div>
 <hr>
 <h2 id="clinical-interpretation">Clinical Interpretation</h2>
@@ -1909,7 +1900,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 00:01:10 UTC"><span class="timeago" datetime="2026-03-01T00:01:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 00:01:10 UTC">2026-03-01</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

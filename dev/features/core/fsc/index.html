@@ -5,7 +5,7 @@
 <link href="../extract/" rel="prev">
 <link href="../fsd/" rel="next">
 <link href="../../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.1" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.3" name="generator">
 <title>FSC - Krewlyzer</title>
 <link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
 <link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
@@ -737,19 +737,19 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#region-fsc-output-format-new">
+<a class="md-nav__link" href="#region-fsc-output-format">
 <span class="md-ellipsis">
       
-        Region FSC Output Format (NEW)
+        Region FSC Output Format
       
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#e1-only-fsc-output-new">
+<a class="md-nav__link" href="#e1-only-fsc-output">
 <span class="md-ellipsis">
       
-        E1-Only FSC Output (NEW)
+        E1-Only FSC Output
       
     </span>
 </a>
@@ -1653,19 +1653,19 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#region-fsc-output-format-new">
+<a class="md-nav__link" href="#region-fsc-output-format">
 <span class="md-ellipsis">
       
-        Region FSC Output Format (NEW)
+        Region FSC Output Format
       
     </span>
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#e1-only-fsc-output-new">
+<a class="md-nav__link" href="#e1-only-fsc-output">
 <span class="md-ellipsis">
       
-        E1-Only FSC Output (NEW)
+        E1-Only FSC Output
       
     </span>
 </a>
@@ -2206,9 +2206,14 @@ Use mouse to pan and zoom
 <td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted count (261-400bp)</td>
 </tr>
 <tr>
+<td><code>ultra_long</code></td>
+<td>float</td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted count (401-1000bp)</td>
+</tr>
+<tr>
 <td><code>total</code></td>
 <td>float</td>
-<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted total (65-400bp)</td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted total (65-1000bp)</td>
 </tr>
 </tbody>
 </table>
@@ -2464,13 +2469,13 @@ Use mouse to pan and zoom
 <a href="#__codelineno-7-2" id="__codelineno-7-2" name="__codelineno-7-2"></a>ATM     62         8432      1234         5678        9012       3456     789   20169  ...      1245.67
 <a href="#__codelineno-7-3" id="__codelineno-7-3" name="__codelineno-7-3"></a>BRCA2   42         5689      ...
 </code></pre></div>
-<h3 id="region-fsc-output-format-new">Region <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Output Format (NEW)</h3>
+<h3 id="region-fsc-output-format">Region <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Output Format</h3>
 <p>Per-exon/target output for fine-grained copy number analysis:</p>
 <div class="highlight"><pre><span></span><code><a href="#__codelineno-8-1" id="__codelineno-8-1" name="__codelineno-8-1"></a>chrom  start      end      gene  region_name     region_bp  ultra_short  ...  normalized_depth
 <a href="#__codelineno-8-2" id="__codelineno-8-2" name="__codelineno-8-2"></a>1      11168235  11168345  MTOR  MTOR_target_02  110        8.0          ...  1272.71
 <a href="#__codelineno-8-3" id="__codelineno-8-3" name="__codelineno-8-3"></a>1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
 </code></pre></div>
-<h3 id="e1-only-fsc-output-new">E1-Only <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Output (NEW)</h3>
+<h3 id="e1-only-fsc-output">E1-Only <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Output</h3>
 <p><strong>File</strong>: <code>{sample}.FSC.regions.e1only.tsv</code></p>
 <p>E1 (first exon) filtering extracts only the first exon per gene by genomic position. Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.</p>
 <p><strong>Usage</strong>:
@@ -2517,7 +2522,7 @@ Use mouse to pan and zoom
 <p>Gene-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> is useful for <strong>gene-specific amplification</strong> detection and <strong>integration with variant calling</strong> pipelines.</p>
 </div>
 <h3 id="gc-correction-for-gene-fsc"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction for Gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr></h3>
-<p>In panel mode, gene-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> uses <strong>on-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors</strong> (<code>.correction_factors.ontarget.csv</code>) for accurate copy number estimates.</p>
+<p>In panel mode, gene-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> uses <strong>on-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors</strong> (<code>.correction_factors.ontarget.tsv</code>) for accurate copy number estimates.</p>
 <p><strong>Why this matters:</strong>
 - Different genes have different <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> content
 - High-<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> genes (e.g., <em>EGFR</em>) capture with different efficiency than low-<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> genes
@@ -2560,7 +2565,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 00:01:10 UTC"><span class="timeago" datetime="2026-03-01T00:01:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 00:01:10 UTC">2026-03-01</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
