@@ -10,7 +10,7 @@
 process KREWLYZER_BUILD_PON {
     tag "$assay"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.5.3"
+    container "ghcr.io/msk-access/krewlyzer:0.6.0"
 
     input:
     path sample_list          // Text file with BAM/CRAM/BED.gz paths (one per line)
@@ -60,7 +60,7 @@ process KREWLYZER_BUILD_PON {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.3
+        krewlyzer: 0.6.0
     END_VERSIONS
     """
 }
