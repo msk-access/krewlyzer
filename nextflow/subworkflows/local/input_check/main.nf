@@ -128,27 +128,45 @@ workflow INPUT_CHECK {
         }
         .set { ch_branched }
 
-    // Format for run-all: [meta, bam, bai, mfsd_bam, mfsd_bai, bisulfite_bam, variants, pon, targets, wps_anchors, wps_background]
-    ch_runall = ch_branched.bam_samples.map { 
-        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-        // Use MAF if present, else VCF, else empty
-        def variants = maf ?: (vcf ?: [])
-        [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
-    }
+    // =====================================================
+    // MULTIMAP: Send every bam_sample to ALL output channels
+    // (Using separate .map() calls on a queue channel would
+    //  round-robin items, splitting them across consumers)
+    // =====================================================
+    ch_branched.bam_samples
+        .multiMap {
+            meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
 
-    // For tool_level: extract path
-    ch_extract = ch_branched.bam_samples.map {
-        meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-        [meta, bam, bai, pon ?: [], targets ?: []]
-    }
+            // run-all: full tuple for KREWLYZER_RUNALL
+            runall:
+                def variants = maf ?: (vcf ?: [])
+                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
 
-    // Pre-extracted BEDs (tool_level only)
+            // tool-level: extract path
+            extract:
+                [meta, bam, bai, pon ?: [], targets ?: []]
+
+            // run-all FILTER_MAF: meta carries ALL paths so join is unnecessary
+            maf_for_filter:
+                def new_meta = meta + [
+                    single_sample: single ?: false,
+                    _bam: bam, _bai: bai,
+                    _mfsd_bam: mfsd_bam, _mfsd_bai: mfsd_bai,
+                    _bisulfite: mbam,
+                    _pon: pon, _targets: targets,
+                    _wps_anchors: wps_anchors, _wps_bg: wps_bg
+                ]
+                [new_meta, maf ?: []]
+        }
+        .set { ch_bam_outputs }
+
+    // Pre-extracted BEDs (tool_level only — uses bed_samples, not bam_samples)
     ch_beds = ch_branched.bed_samples.map {
         meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
         [meta, bed, pon ?: [], targets ?: []]
     }
 
-    // Methylation samples
+    // Methylation samples (from ch_parsed, not affected by multiMap)
     ch_methyl = ch_parsed
         .filter { it[5] != null }  // mbam exists (index shifted by 2 for mfsd_bam)
         .map { 
@@ -156,27 +174,32 @@ workflow INPUT_CHECK {
             [meta, mbam, mbai]
         }
 
-    // MAF samples for filtering (multi-sample, not single_sample_maf)
+    // MAF samples for filtering (multi-sample, not single_sample_maf) — tool-level mode
     ch_maf_multi = ch_parsed
-        .filter { it[9] != null && !it[10] }  // maf exists AND not single_sample (indices shifted)
+        .filter { it[9] != null && !it[10] }  // maf exists AND not single_sample
         .map {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
             [meta, bam, bai, maf]
         }
 
-    // MAF samples bypass (single_sample_maf = true)
+    // MAF samples bypass (single_sample_maf = true) — tool-level mode
     ch_maf_single = ch_parsed
-        .filter { it[9] != null && it[10] }  // maf exists AND single_sample (indices shifted)
+        .filter { it[9] != null && it[10] }  // maf exists AND single_sample
         .map {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
             [meta, bam, bai, maf]
         }
+
+    ch_runall         = ch_bam_outputs.runall
+    ch_extract        = ch_bam_outputs.extract
+    ch_maf_for_filter = ch_bam_outputs.maf_for_filter
 
     emit:
-    runall     = ch_runall      // For run-all module
-    extract    = ch_extract     // For tool_level extract
-    beds       = ch_beds        // Pre-extracted BEDs (tool_level only)
-    methyl     = ch_methyl      // Methylation samples
-    maf_multi  = ch_maf_multi   // MAFs needing filtering
-    maf_single = ch_maf_single  // MAFs bypassing filter
+    runall         = ch_runall          // For run-all module
+    extract        = ch_extract         // For tool_level extract
+    beds           = ch_beds            // Pre-extracted BEDs (tool_level only)
+    methyl         = ch_methyl          // Methylation samples
+    maf_multi      = ch_maf_multi       // MAFs needing filtering (tool-level mode)
+    maf_single     = ch_maf_single      // MAFs bypassing filter (tool-level mode)
+    maf_for_filter = ch_maf_for_filter  // ALL samples for run-all join
 }

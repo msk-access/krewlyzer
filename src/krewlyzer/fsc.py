@@ -27,7 +27,11 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 console = Console(stderr=True)
-logging.basicConfig(level="INFO", handlers=[RichHandler(console=console, show_time=True, show_path=False)], format="%(message)s")
+logging.basicConfig(
+    level="INFO",
+    handlers=[RichHandler(console=console, show_time=True, show_path=False)],
+    format="%(message)s",
+)
 logger = logging.getLogger("fsc")
 
 # Import asset resolution functions
@@ -39,58 +43,99 @@ from . import __version__
 
 
 def fsc(
-    bedgz_input: Path = typer.Option(..., "--input", "-i", help="Input .bed.gz file (output from extract)"),
+    bedgz_input: Path = typer.Option(
+        ..., "--input", "-i", help="Input .bed.gz file (output from extract)"
+    ),
     output: Path = typer.Option(..., "--output", "-o", help="Output directory"),
-    sample_name: Optional[str] = typer.Option(None, "--sample-name", "-s", help="Sample name for output file"),
-    bin_input: Optional[Path] = typer.Option(None, "--bin-input", "-b", help="Path to bin file"),
-    pon_model: Optional[Path] = typer.Option(None, "--pon-model", "-P", help="PON model for hybrid GC correction"),
-    pon_variant: str = typer.Option("all_unique", "--pon-variant", help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)"),
-    skip_pon: bool = typer.Option(False, "--skip-pon", help="Skip PON z-score normalization"),
-    target_regions: Optional[Path] = typer.Option(None, "--target-regions", "-T", help="Target regions BED (for panel data: generates on/off-target FSC)"),
-    skip_target_regions: bool = typer.Option(False, "--skip-target-regions", help="Disable panel mode even when --assay has bundled targets"),
-    assay: Optional[str] = typer.Option(None, "--assay", "-A", help="Assay type (xs1/xs2) for gene-centric FSC aggregation"),
-    windows: int = typer.Option(100000, "--windows", "-w", help="Window size (default: 100000)"),
-    continue_n: int = typer.Option(50, "--continue-n", "-c", help="Consecutive window number"),
-    genome: str = typer.Option("hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"),
-    gc_correct: bool = typer.Option(True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"),
-    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),
-    threads: int = typer.Option(0, "--threads", "-t", help="Number of threads (0=all cores)"),
+    sample_name: Optional[str] = typer.Option(
+        None, "--sample-name", "-s", help="Sample name for output file"
+    ),
+    bin_input: Optional[Path] = typer.Option(
+        None, "--bin-input", "-b", help="Path to bin file"
+    ),
+    pon_model: Optional[Path] = typer.Option(
+        None, "--pon-model", "-P", help="PON model for hybrid GC correction"
+    ),
+    pon_variant: str = typer.Option(
+        "all_unique",
+        "--pon-variant",
+        help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)",
+    ),
+    skip_pon: bool = typer.Option(
+        False, "--skip-pon", help="Skip PON z-score normalization"
+    ),
+    target_regions: Optional[Path] = typer.Option(
+        None,
+        "--target-regions",
+        "-T",
+        help="Target regions BED (for panel data: generates on/off-target FSC)",
+    ),
+    skip_target_regions: bool = typer.Option(
+        False,
+        "--skip-target-regions",
+        help="Disable panel mode even when --assay has bundled targets",
+    ),
+    assay: Optional[str] = typer.Option(
+        None,
+        "--assay",
+        "-A",
+        help="Assay type (xs1/xs2) for gene-centric FSC aggregation",
+    ),
+    windows: int = typer.Option(
+        100000, "--windows", "-w", help="Window size (default: 100000)"
+    ),
+    continue_n: int = typer.Option(
+        50, "--continue-n", "-c", help="Consecutive window number"
+    ),
+    genome: str = typer.Option(
+        "hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"
+    ),
+    gc_correct: bool = typer.Option(
+        True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+    threads: int = typer.Option(
+        0, "--threads", "-t", help="Number of threads (0=all cores)"
+    ),
 ):
     """
     Calculate fragment size coverage (FSC) features for a single sample.
-    
+
     Input: .bed.gz file from extract step
     Output: {sample}.FSC.tsv file with z-scored fragment size coverage per window
     """
     from .core.unified_processor import run_features
     from .assets import AssetManager
-    
+
     # Configure verbose logging
     if verbose:
         logger.setLevel(logging.DEBUG)
         logging.getLogger("krewlyzer.core.unified_processor").setLevel(logging.DEBUG)
-    
+
     # Input validation
     if not bedgz_input.exists():
         logger.error(f"Input file not found: {bedgz_input}")
         raise typer.Exit(1)
-    
+
     # Validate user-provided override files
     from .core.asset_validation import validate_file, FileSchema
+
     if bin_input and bin_input.exists():
         logger.debug(f"Validating user-provided bin file: {bin_input}")
         validate_file(bin_input, FileSchema.BED3)
     if target_regions and target_regions.exists():
         logger.debug(f"Validating user-provided target regions: {target_regions}")
         validate_file(target_regions, FileSchema.BED3)
-    
+
     # Derive sample name
     if sample_name is None:
-        sample_name = bedgz_input.name.replace('.bed.gz', '').replace('.bed', '')
-    
+        sample_name = bedgz_input.name.replace(".bed.gz", "").replace(".bed", "")
+
     # Initialize AssetManager
     assets = AssetManager(genome)
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # ASSET RESOLUTION
     # ═══════════════════════════════════════════════════════════════════
@@ -102,12 +147,12 @@ def fsc(
             skip_pon=skip_pon,
             assets=assets,
             variant=pon_variant,
-            log=logger
+            log=logger,
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
-    
+
     # Resolve target regions
     try:
         resolved_target_path, target_source = resolve_target_regions(
@@ -115,14 +160,14 @@ def fsc(
             assay=assay,
             skip_target_regions=skip_target_regions,
             assets=assets,
-            log=logger
+            log=logger,
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
-    
+
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
-    
+
     # ═══════════════════════════════════════════════════════════════════
     # STARTUP BANNER
     # ═══════════════════════════════════════════════════════════════════
@@ -142,9 +187,9 @@ def fsc(
             ResolvedAsset("PON", resolved_pon_path, pon_source),
             ResolvedAsset("Targets", resolved_target_path, target_source),
         ],
-        logger=logger
+        logger=logger,
     )
-    
+
     try:
         # Call unified processor with FSC enabled
         outputs = run_features(
@@ -164,7 +209,7 @@ def fsc(
             threads=threads,
             verbose=verbose,
         )
-        
+
         # Report results
         if outputs.fsc and outputs.fsc.exists():
             logger.info(f"✅ FSC complete: {outputs.fsc}")
@@ -172,7 +217,7 @@ def fsc(
             logger.info(f"✅ FSC on-target: {outputs.fsc_ontarget}")
         if outputs.fsc_gene and outputs.fsc_gene.exists():
             logger.info(f"✅ FSC gene: {outputs.fsc_gene}")
-            
+
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)
@@ -180,5 +225,6 @@ def fsc(
         logger.error(f"FSC calculation failed: {e}")
         if verbose:
             import traceback
+
             traceback.print_exc()
         raise typer.Exit(1)

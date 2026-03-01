@@ -64,6 +64,9 @@ The performance-critical functions are implemented in Rust and exposed to Python
 | `gc_correction.rs` | 20KB | LOESS-based GC bias correction |
 | `pon_model.rs` | 7KB | PON model loading and hybrid correction |
 | `gc_reference.rs` | 20KB | Pre-computed GC reference generation |
+| `filters.rs` | 3KB | Fragment filtering logic |
+| `pon_builder.rs` | 15KB | PON model construction |
+| `uxm.rs` | 12KB | Fragment-level methylation (UXM) |
 
 ### BGZF-First File Reader (`bed.rs`)
 
@@ -128,11 +131,14 @@ _core.extract_motif.process_bam_parallel(
 
 # Unified pipeline
 _core.run_unified_pipeline(
-    bed_path, gc_ref, valid_regions, gc_factors_out,
-    gc_factors_in, bin_file, fsc_out, wps_anchors, wps_out,
-    wps_bg_anchors, wps_bg_out, wps_bg_flip,
-    arms_file, fsd_out, ocr_file, ocf_out_dir,
-    target_regions, bait_padding, silent
+    bed_path, gc_ref_path, valid_regions_path,
+    correction_out_path, correction_input_path,
+    fsc_bins, fsc_output,
+    wps_regions, wps_output,
+    wps_background_regions, wps_background_output, wps_empty,
+    fsd_arms, fsd_output,
+    ocf_regions, ocf_output,
+    target_regions_path, bait_padding, silent
 )
 
 # GC correction
@@ -143,24 +149,24 @@ _core.gc.compute_and_write_gc_factors(...)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `bed_path` | str | Input .bed.gz file path |
-| `gc_ref` | str/None | GC reference parquet for computing factors |
-| `valid_regions` | str/None | Valid regions BED for GC |
-| `gc_factors_out` | str/None | Output path for computed GC factors |
-| `gc_factors_in` | str/None | Pre-computed GC factors CSV |
-| `bin_file` | str/None | FSC/FSR bins BED |
-| `fsc_out` | str/None | FSC output TSV path |
-| `wps_anchors` | str/None | WPS foreground anchors BED |
-| `wps_out` | str/None | WPS foreground output parquet |
-| `wps_bg_anchors` | str/None | WPS background (Alu) BED |
-| `wps_bg_out` | str/None | WPS background output parquet |
-| `wps_bg_flip` | bool | Flip WPS vectors for strand awareness |
-| `arms_file` | str/None | Chromosome arms BED for FSD |
-| `fsd_out` | str/None | FSD output TSV path |
-| `ocr_file` | str/None | Open chromatin regions for OCF |
-| `ocf_out_dir` | str/None | OCF output directory |
-| `target_regions` | str/None | Panel target BED (on/off split) |
-| `bait_padding` | int | Bait edge padding in bp (default: 50) |
+| `bed_path` | PathBuf | Input .bed.gz file path |
+| `gc_ref_path` | Option<PathBuf> | GC reference parquet for computing factors |
+| `valid_regions_path` | Option<PathBuf> | Valid regions BED for GC |
+| `correction_out_path` | Option<PathBuf> | Output path for computed GC factors |
+| `correction_input_path` | Option<PathBuf> | Pre-computed GC factors TSV |
+| `fsc_bins` | Option<PathBuf> | FSC/FSR bins BED |
+| `fsc_output` | Option<PathBuf> | FSC output TSV path |
+| `wps_regions` | Option<PathBuf> | WPS foreground anchors BED |
+| `wps_output` | Option<PathBuf> | WPS foreground output parquet |
+| `wps_background_regions` | Option<PathBuf> | WPS background (Alu) BED |
+| `wps_background_output` | Option<PathBuf> | WPS background output parquet |
+| `wps_empty` | bool | Include empty WPS regions |
+| `fsd_arms` | Option<PathBuf> | Chromosome arms BED for FSD |
+| `fsd_output` | Option<PathBuf> | FSD output TSV path |
+| `ocf_regions` | Option<PathBuf> | Open chromatin regions for OCF |
+| `ocf_output` | Option<PathBuf> | OCF output directory |
+| `target_regions_path` | Option<PathBuf> | Panel target BED (on/off split) |
+| `bait_padding` | u64 | Bait edge padding in bp (default: 50) |
 | `silent` | bool | Suppress progress output |
 
 ---

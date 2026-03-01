@@ -112,7 +112,7 @@ If you see this warning, re-run with `--no-require-proper-pair`.
 ### Correction factors look wrong
 **Cause**: Insufficient coverage or extreme GC bias.
 
-**Diagnosis**: Check `correction_factors.csv`:
+**Diagnosis**: Check `correction_factors.tsv`:
 - Factors should be ~0.5-2.0 for most bins
 - Extreme factors (>10 or <0.1) indicate problems
 

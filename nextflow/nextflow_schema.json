@@ -10,9 +10,7 @@
       "type": "object",
       "fa_icon": "fas fa-terminal",
       "description": "Define where the pipeline should find input data and save output data.",
-      "required": [
-        "outdir"
-      ],
+      "required": ["outdir"],
       "properties": {
         "outdir": {
           "type": "string",
@@ -101,7 +99,8 @@
       "type": "boolean"
     },
     "generate_json": {
-      "type": "boolean"
+      "type": "boolean",
+      "default": true
     },
     "skip_target_regions": {
       "type": "boolean",
@@ -124,6 +123,32 @@
     },
     "test_data_base": {
       "type": "string"
+    },
+    "use_runall": {
+      "type": "boolean",
+      "default": true
+    },
+    "pon_variant": {
+      "type": "string",
+      "default": "all_unique"
+    },
+    "duplex": {
+      "type": "boolean",
+      "default": true
+    },
+    "disable_e1_aggregation": {
+      "type": "boolean"
+    },
+    "region_mds_e1_only": {
+      "type": "boolean"
+    },
+    "custom_config_version": {
+      "type": "string",
+      "default": "master"
+    },
+    "custom_config_base": {
+      "type": "string",
+      "default": "https://raw.githubusercontent.com/nf-core/configs/master"
     }
   }
 }

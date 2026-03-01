@@ -2,7 +2,7 @@
 
 ## Overview
 
-Krewlyzer has **245 tests** covering all features via pytest.
+Krewlyzer has **248 tests** covering all features via pytest.
 
 | Category | Tests | Speed | Location |
 |----------|:-----:|-------|----------|

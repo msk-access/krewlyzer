@@ -60,7 +60,7 @@ GC correction is **enabled by default** for most tools:
 
 ```bash
 krewlyzer extract -i sample.bam -r hg19.fa -o output/
-# Generates: sample.correction_factors.csv
+# Generates: sample.correction_factors.tsv
 ```
 
 ### Disable GC Correction
@@ -74,7 +74,7 @@ krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ```bash
 # mFSD can use factors from extract
 krewlyzer mfsd -i sample.bam -V variants.vcf \
-    --correction-factors output/sample.correction_factors.csv \
+    --correction-factors output/sample.correction_factors.tsv \
     -o output/
 ```
 
@@ -84,12 +84,14 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 
 | Tool | GC Option | Source | Notes |
 |------|-----------|--------|-------|
-| **extract** | `--gc-correct` | Computes factors | Generates `.correction_factors.csv` |
+| **extract** | `--gc-correct` | Computes factors | Generates `.correction_factors.tsv` |
 | **FSC** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **FSR** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **Region Entropy** | `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
 | **UXM** | N/A | N/A | No GC correction |
@@ -99,7 +101,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 When `--target-regions` is provided to `extract`:
 - GC model is built from **off-target** fragments only
 - Avoids capture bias contamination
-- Generates both `.correction_factors.csv` (off-target) and `.correction_factors.ontarget.csv` (on-target)
+- Generates both `.correction_factors.tsv` (off-target) and `.correction_factors.ontarget.tsv` (on-target)
 
 ---
 
@@ -136,7 +138,7 @@ krewlyzer build-gc-reference hg19.fa -o data/gc/ -T msk_targets.bed
 
 ## Correction Factors File
 
-The `extract` command generates `{sample}.correction_factors.csv`:
+The `extract` command generates `{sample}.correction_factors.tsv`:
 
 ```csv
 len_bin,gc_bin,factor,observed,expected,n_fragments
@@ -209,7 +211,7 @@ from krewlyzer import _core
 _core.gc.compute_and_write_gc_factors(
     bed_path="sample.bed.gz",
     gc_reference_path="gc_reference.parquet",
-    output_path="correction_factors.csv"
+    output_path="correction_factors.tsv"
 )
 ```
 

@@ -261,7 +261,7 @@ impl FragmentConsumer for FscConsumer {
                         };
                         
                         res.total_count += weight;
-                        res.gc_sum += fragment.gc as f64 * weight;
+                        res.gc_sum += fragment.gc * weight;
                         res.gc_count += weight;
                         
                         // 6 non-overlapping channels for ML features
@@ -368,7 +368,7 @@ pub fn count_fragments_by_bins(
     // Calculate mean GC (Logic ported from legacy struct handling)
     for bin in &mut final_consumer.counts {
         bin.mean_gc = if bin.gc_count > 0.0 {
-            bin.gc_sum / bin.gc_count as f64
+            bin.gc_sum / bin.gc_count
         } else {
             f64::NAN
         };

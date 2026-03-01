@@ -264,9 +264,8 @@ pub fn process_bam_parallel(
             if config.skip_duplicates && record.is_duplicate() { continue; }
             if record.mapq() < config.mapq { continue; }
             
-            if config.require_proper_pair {
-                 if !record.is_paired() || !record.is_proper_pair() { continue; }
-            }
+            if config.require_proper_pair
+                 && (!record.is_paired() || !record.is_proper_pair()) { continue; }
             
             // Note: We iterate ALL reads in the chunk.
             // But chunks overlap (boundary issues).
@@ -278,7 +277,7 @@ pub fn process_bam_parallel(
             // --- Extract Logic (BED Output) ---
             // Only process R1 for Fragment definition to avoid double counting
             if config.output_bed && record.is_first_in_template() {
-                 let tlen = record.insert_size().abs() as i64;
+                 let tlen = record.insert_size().abs();
                  if tlen >= config.min_len as i64 && tlen <= config.max_len as i64 {
                      let start = record.pos() as u64; // 0-based
                      let end = start + tlen as u64;
@@ -335,7 +334,7 @@ pub fn process_bam_parallel(
                 // R2 alignment: [pos, end]. The fragment end is `end`. The fragment start is `end - abs(tlen)`.
                 
                 let tlen = record.insert_size();
-                let abs_len = tlen.abs() as i64;
+                let abs_len = tlen.abs();
                 if abs_len < config.min_len as i64 || abs_len > config.max_len as i64 { continue; }
                 
                 // Reconstruct fragment coords for blacklist check

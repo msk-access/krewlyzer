@@ -1,6 +1,6 @@
 [project]
 name = "krewlyzer"
-version = "0.5.3"
+version = "0.6.0"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
 requires-python = ">=3.8"
@@ -65,3 +65,25 @@ filterwarnings = [
 [tool.coverage.run]
 source = ["krewlyzer"]
 omit = ["*/tests/*"]
+
+[tool.ruff]
+line-length = 88  # Match black
+target-version = "py310"
+
+[tool.ruff.lint]
+# E402: Module-level imports after code — deliberate pattern for CLI modules
+#       that require typer.Option() / Rich setup before importing submodules.
+# F821: Undefined name — forward-reference type annotations for baseline
+#       dataclasses that are only imported at runtime inside functions.
+ignore = ["E402", "F821"]
+
+[tool.ruff.lint.per-file-ignores]
+# Availability check pattern: `from krewlyzer import _core` is used to test
+# whether the Rust extension is installed, even though _core isn't referenced.
+"tests/unit/test_rust_python_equivalence.py" = ["F401"]
+"tests/unit/test_bgzf_reader.py" = ["F401"]
+"tests/integration/test_region_entropy.py" = ["F401"]
+
+[tool.black]
+line-length = 88
+target-version = ["py310"]

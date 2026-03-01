@@ -50,7 +50,7 @@ impl LengthBin {
     /// Get LengthBin from fragment length
     /// Returns None if length is outside tracked range (60-1000)
     pub fn from_len(len: u64) -> Option<Self> {
-        if len < 60 || len >= 1000 {
+        if !(60..1000).contains(&len) {
             return None;
         }
         // (len - 60) / 5 -> 0..187

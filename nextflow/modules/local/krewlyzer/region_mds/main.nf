@@ -11,7 +11,7 @@
 process KREWLYZER_REGION_MDS {
     tag "$meta.id"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.5.3"
+    container "ghcr.io/msk-access/krewlyzer:0.6.0"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -42,6 +42,7 @@ process KREWLYZER_REGION_MDS {
         $bam \\
         $fasta \\
         ./ \\
+        --sample-name $prefix \\
         $genome_arg \\
         $assay_arg \\
         $pon_arg \\
@@ -49,18 +50,6 @@ process KREWLYZER_REGION_MDS {
         $verbose_arg \\
         $silent_arg \\
         $args
-
-    # Rename outputs to include sample prefix if needed
-    if [ -f "*.MDS.exon.tsv" ] && [ ! -f "${prefix}.MDS.exon.tsv" ]; then
-        for f in *.MDS.exon.tsv; do
-            mv "\$f" "${prefix}.MDS.exon.tsv"
-        done
-    fi
-    if [ -f "*.MDS.gene.tsv" ] && [ ! -f "${prefix}.MDS.gene.tsv" ]; then
-        for f in *.MDS.gene.tsv; do
-            mv "\$f" "${prefix}.MDS.gene.tsv"
-        done
-    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
@@ -76,7 +65,7 @@ process KREWLYZER_REGION_MDS {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.3
+        krewlyzer: 0.6.0
     END_VERSIONS
     """
 }

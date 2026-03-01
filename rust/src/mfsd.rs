@@ -30,6 +30,8 @@ use rust_htslib::faidx;
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::time::Duration;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 use log::{info, warn, debug};
 
 // ============================================================================
@@ -94,8 +96,44 @@ struct VariantResult {
     skipped_proper_pair: usize,
     skipped_size: usize,
     skipped_extreme: usize,  // Discordant reads with TLEN > 10000
+    skipped_low_bq: usize,   // Fragments with base quality below min_baseq
     // Duplex tag tracking (for --duplex warning)
     duplex_tags_found: usize,
+}
+
+// ============================================================================
+// P4: Fragment-Level Evidence Tracking (inspired by py-gbcms FragmentEvidence)
+// ============================================================================
+
+/// Hash a QNAME to u64 for memory-efficient fragment tracking.
+/// Same approach as py-gbcms's `hash_qname` (fragment.rs:113-121).
+#[inline]
+fn hash_qname(qname: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    qname.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Per-fragment evidence for mFSD classification.
+///
+/// Tracks the best (highest base quality) allele classification across R1/R2
+/// reads of a fragment. When R1 and R2 agree, confidence is high. When they
+/// disagree, the read with higher base quality at the variant position wins.
+///
+/// Inspired by py-gbcms's `FragmentEvidence` but simplified for mFSD's needs:
+/// mFSD only needs fragment class + size, not per-allele strand orientation.
+#[derive(Debug, Clone)]
+struct FragmentMfsdEvidence {
+    /// Best classification seen so far
+    best_class: FragmentClass,
+    /// Base quality at variant position for the best classification
+    best_qual: u8,
+    /// Fragment length (same for R1/R2 of a pair)
+    frag_len: f64,
+    /// Whether any read had N at variant position
+    has_n: bool,
+    /// Combined weight (GC * duplex)
+    weight: f64,
 }
 
 impl VariantResult {
@@ -246,6 +284,87 @@ fn fetch_reference_gc(
 }
 
 // ============================================================================
+// PHASE 1b: MAF Header Parsing & Input Validation
+// ============================================================================
+
+/// Column index map resolved from MAF header.
+///
+/// MAF files can have variable column ordering (e.g., cBioPortal adds a
+/// `Consequence` column at index 8, shifting all subsequent indices).
+/// This struct resolves required columns by name from the header line,
+/// making the parser resilient to any column layout.
+#[derive(Debug, Clone)]
+struct MafColumnMap {
+    chrom: usize,
+    pos: usize,
+    ref_allele: usize,
+    alt_allele: usize,
+    max_idx: usize, // Maximum required index (for bounds checking)
+}
+
+/// Parse MAF header line to resolve column indices by name.
+///
+/// Required columns: Chromosome, Start_Position, Reference_Allele, Tumor_Seq_Allele2.
+/// Returns None with a warning if any required column is missing.
+fn parse_maf_header(header_line: &str) -> Option<MafColumnMap> {
+    let fields: Vec<&str> = header_line.split('\t').collect();
+    let col_map: std::collections::HashMap<&str, usize> = fields.iter()
+        .enumerate()
+        .map(|(i, &name)| (name, i))
+        .collect();
+
+    let chrom = match col_map.get("Chromosome") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Chromosome");
+            return None;
+        }
+    };
+
+    let pos = match col_map.get("Start_Position") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Start_Position");
+            return None;
+        }
+    };
+
+    let ref_allele = match col_map.get("Reference_Allele") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Reference_Allele");
+            return None;
+        }
+    };
+
+    let alt_allele = match col_map.get("Tumor_Seq_Allele2") {
+        Some(&idx) => idx,
+        None => {
+            warn!("MAF header missing required column: Tumor_Seq_Allele2");
+            return None;
+        }
+    };
+
+    let max_idx = *[chrom, pos, ref_allele, alt_allele].iter().max().unwrap();
+
+    debug!("MAF columns resolved: Chromosome={}, Start_Position={}, Reference_Allele={}, Tumor_Seq_Allele2={}",
+        chrom, pos, ref_allele, alt_allele);
+
+    Some(MafColumnMap { chrom, pos, ref_allele, alt_allele, max_idx })
+}
+
+/// Validate that an allele string contains only valid nucleotide characters.
+///
+/// Valid characters: A, C, G, T, N (case-insensitive) and `-` (MAF convention
+/// for empty alleles in insertions/deletions).
+///
+/// Rejects non-nucleotide strings like "SNP", "DEL", "Missense_Mutation", etc.
+/// which would indicate a MAF column mapping error.
+fn is_valid_allele(allele: &str) -> bool {
+    !allele.is_empty() && allele.chars().all(|c| "ACGTNacgtn-".contains(c))
+}
+
+// ============================================================================
 // PHASE 2: Variant Type Classification
 // ============================================================================
 
@@ -275,17 +394,33 @@ fn classify_variant(ref_allele: &str, alt_allele: &str) -> VariantType {
 // ============================================================================
 
 /// Extract sequence from a read at a variant position
-/// Returns: (extracted_sequence, has_n_base, spans_variant)
+/// Returns: (extracted_sequence, has_n_base, min_base_quality)
+///
+/// The quality returned is the minimum base quality across all extracted
+/// positions, following py-gbcms's min-BQ-across-block strategy for MNPs.
 fn extract_sequence_at_variant(
     record: &bam::Record,
     var: &Variant,
-) -> Option<(String, bool)> {
-    let read_start = record.pos() as i64;
+) -> Option<(String, bool, u8)> {
+    let read_start = record.pos();
     let seq = record.seq();
     
-    // For SNV/MNV: extract `ref_len` bases starting at variant position
-    // For insertions: check if read has insertion at position
-    // For deletions: check if read has deletion at position
+    // Quick check: does the read even overlap the variant?
+    let read_end = {
+        let mut end = read_start;
+        for op in record.cigar().iter() {
+            match op {
+                Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) | Cigar::Del(len) | Cigar::RefSkip(len) => {
+                    end += *len as i64;
+                },
+                _ => {},
+            }
+        }
+        end
+    };
+    if var.pos >= read_end || var.pos < read_start {
+        return None;
+    }
     
     match var.var_type {
         VariantType::Snv => {
@@ -308,12 +443,13 @@ fn extract_sequence_at_variant(
 }
 
 /// Extract single base for SNV
+/// Returns: (base, has_n, base_quality)
 fn extract_snv_sequence(
     record: &bam::Record,
     var_pos: i64,
     read_start: i64,
     seq: &rust_htslib::bam::record::Seq,
-) -> Option<(String, bool)> {
+) -> Option<(String, bool, u8)> {
     if var_pos < read_start { return None; }
     
     let target_offset = (var_pos - read_start) as usize;
@@ -330,7 +466,8 @@ fn extract_snv_sequence(
                     if q_idx < seq.len() {
                         let base = seq[q_idx] as char;
                         let has_n = base == 'N' || base == 'n';
-                        return Some((base.to_string().to_uppercase(), has_n));
+                        let qual = record.qual()[q_idx];
+                        return Some((base.to_string().to_uppercase(), has_n, qual));
                     }
                     return None;
                 }
@@ -354,90 +491,163 @@ fn extract_snv_sequence(
 }
 
 /// Extract multiple bases for MNV/Complex
+/// Returns min(base_quality) across the block (py-gbcms min-BQ strategy)
 fn extract_mnv_sequence(
     record: &bam::Record,
     var_pos: i64,
     ref_len: usize,
     read_start: i64,
     seq: &rust_htslib::bam::record::Seq,
-) -> Option<(String, bool)> {
+) -> Option<(String, bool, u8)> {
     if var_pos < read_start { return None; }
     
     let mut extracted = String::with_capacity(ref_len);
     let mut has_n = false;
+    let mut min_qual = u8::MAX;
     
     for offset in 0..ref_len as i64 {
         let pos = var_pos + offset;
-        if let Some((base, is_n)) = extract_snv_sequence(record, pos, read_start, seq) {
+        if let Some((base, is_n, qual)) = extract_snv_sequence(record, pos, read_start, seq) {
             extracted.push_str(&base);
             if is_n { has_n = true; }
+            min_qual = min_qual.min(qual);
         } else {
             return None; // Read doesn't span this position
         }
     }
     
-    Some((extracted, has_n))
+    Some((extracted, has_n, min_qual))
 }
 
-/// Check for insertion at variant position
+/// Check for insertion at variant position with windowed scanning.
+///
+/// Inspired by py-gbcms's `check_insertion` (variant_checks.rs:614-879):
+/// 1. **Strict match (fast path)**: Insertion immediately after anchor base —
+///    checks both length and inserted sequence match.
+/// 2. **Windowed scan**: Any insertion within ±5bp of expected position,
+///    validated by both length AND sequence content match. This handles
+///    aligners shifting insertions in repeat/homopolymer regions.
+///
+/// Returns anchor base quality for quality gating.
 fn extract_insertion_sequence(
     record: &bam::Record,
     var: &Variant,
     read_start: i64,
     seq: &rust_htslib::bam::record::Seq,
-) -> Option<(String, bool)> {
+) -> Option<(String, bool, u8)> {
     if var.pos < read_start { return None; }
     
     let target_offset = (var.pos - read_start) as usize;
     let expected_ins_len = var.alt_allele.len() - var.ref_allele.len();
+    let expected_ins_seq = &var.alt_allele.as_bytes()[1..]; // ALT without anchor base
+    let window: i64 = 5; // ±5bp scan window (matches py-gbcms default)
     
     let mut ref_offset = 0usize;
     let mut query_offset = 0usize;
+    let quals = record.qual();
+    let seq_bytes = seq.as_bytes();
     
-    // First, find the anchor base
+    // State tracked across the CIGAR walk
     let mut anchor_found = false;
     let mut anchor_query_pos = 0usize;
     
-    for op in record.cigar().iter() {
+    // Windowed scan: track best match (closest to expected position)
+    let mut best_windowed_result: Option<(String, bool, u8, i64)> = None; // (result, has_n, qual, distance)
+    
+    for (i, op) in record.cigar().iter().enumerate() {
         match op {
             Cigar::Match(len) | Cigar::Equal(len) | Cigar::Diff(len) => {
-                let len = *len as usize;
-                if !anchor_found && target_offset >= ref_offset && target_offset < ref_offset + len {
+                let len_usize = *len as usize;
+                let len_i64 = *len as i64;
+                let block_end_ref = ref_offset + len_usize;
+                
+                // Track anchor position
+                if !anchor_found && target_offset >= ref_offset && target_offset < block_end_ref {
                     let dist = target_offset - ref_offset;
                     anchor_query_pos = query_offset + dist;
                     anchor_found = true;
                 }
-                ref_offset += len;
-                query_offset += len;
-            },
-            Cigar::Ins(len) => {
-                let len = *len as usize;
-                // Check if this insertion is right after our anchor position
-                if anchor_found && len == expected_ins_len {
-                    // Extract anchor + inserted bases
-                    let mut result = String::new();
-                    let mut has_n = false;
+                
+                // Check if next CIGAR op is an insertion
+                if let Some(Cigar::Ins(ins_len)) = record.cigar().get(i + 1) {
+                    let ins_len_usize = *ins_len as usize;
+                    let ins_ref_pos = ref_offset as i64 + len_i64; // genomic position where insertion occurs
+                    let ins_read_start = query_offset + len_usize;
                     
-                    // Anchor base
-                    if anchor_query_pos < seq.len() {
-                        let b = seq[anchor_query_pos] as char;
-                        result.push(b.to_ascii_uppercase());
-                        if b == 'N' || b == 'n' { has_n = true; }
-                    }
-                    
-                    // Inserted bases
-                    for i in 0..len {
-                        let idx = query_offset + i;
-                        if idx < seq.len() {
-                            let b = seq[idx] as char;
-                            result.push(b.to_ascii_uppercase());
-                            if b == 'N' || b == 'n' { has_n = true; }
+                    if ins_len_usize == expected_ins_len {
+                        // Compute distance from expected anchor position
+                        let distance = ((ins_ref_pos - 1) - var.pos).abs();
+                        
+                        // Strict match: insertion is at the exact expected position
+                        let is_strict = ins_ref_pos - 1 == var.pos
+                            || target_offset + 1 == block_end_ref;
+                        
+                        // Windowed match: within ±5bp window
+                        let in_window = distance <= window;
+                        
+                        if (is_strict || in_window) && ins_read_start + ins_len_usize <= seq_bytes.len() {
+                            // Verify inserted sequence matches expected ALT bases
+                            let ins_seq = &seq_bytes[ins_read_start..ins_read_start + ins_len_usize];
+                            let seq_matches = ins_seq.iter().zip(expected_ins_seq.iter()).all(
+                                |(a, b)| a.eq_ignore_ascii_case(b)
+                            );
+                            
+                            if seq_matches {
+                                // Build the result string: anchor + inserted bases
+                                let shifted_anchor_pos = ins_ref_pos as usize - 1;
+                                let anchor_qpos = if shifted_anchor_pos >= ref_offset
+                                    && shifted_anchor_pos < block_end_ref {
+                                    let dist_in_block = shifted_anchor_pos - ref_offset;
+                                    Some(query_offset + dist_in_block)
+                                } else if anchor_found {
+                                    Some(anchor_query_pos)
+                                } else {
+                                    None
+                                };
+                                
+                                if let Some(aqp) = anchor_qpos {
+                                    let mut result = String::new();
+                                    let mut has_n = false;
+                                    let anchor_qual = if aqp < quals.len() { quals[aqp] } else { 0 };
+                                    
+                                    // Anchor base
+                                    if aqp < seq_bytes.len() {
+                                        let b = seq_bytes[aqp] as char;
+                                        result.push(b.to_ascii_uppercase());
+                                        if b == 'N' || b == 'n' { has_n = true; }
+                                    }
+                                    
+                                    // Inserted bases
+                                    for j in 0..ins_len_usize {
+                                        let idx = ins_read_start + j;
+                                        let b = seq_bytes[idx] as char;
+                                        result.push(b.to_ascii_uppercase());
+                                        if b == 'N' || b == 'n' { has_n = true; }
+                                    }
+                                    
+                                    // Strict match: return immediately (fast path)
+                                    if is_strict {
+                                        debug!("Insertion strict match at pos {} (distance={})", var.pos + 1, distance);
+                                        return Some((result, has_n, anchor_qual));
+                                    }
+                                    
+                                    // Windowed match: track closest
+                                    if best_windowed_result.as_ref().is_none_or(|prev| distance < prev.3) {
+                                        debug!("Insertion windowed match at pos {} (distance={}, shifted from {})", 
+                                            var.pos + 1, distance, ins_ref_pos);
+                                        best_windowed_result = Some((result, has_n, anchor_qual, distance));
+                                    }
+                                }
+                            }
                         }
                     }
-                    
-                    return Some((result, has_n));
                 }
-                query_offset += len;
+                
+                ref_offset += len_usize;
+                query_offset += len_usize;
+            },
+            Cigar::Ins(len) => {
+                query_offset += *len as usize;
             },
             Cigar::Del(len) | Cigar::RefSkip(len) => {
                 ref_offset += *len as usize;
@@ -447,30 +657,50 @@ fn extract_insertion_sequence(
         }
     }
     
+    // Return windowed match if found
+    if let Some((result, has_n, qual, _distance)) = best_windowed_result {
+        return Some((result, has_n, qual));
+    }
+    
     // No insertion found - extract just the REF base to compare
-    if anchor_found && anchor_query_pos < seq.len() {
+    if anchor_found && anchor_query_pos < seq.as_bytes().len() {
         let b = seq[anchor_query_pos] as char;
         let has_n = b == 'N' || b == 'n';
-        Some((b.to_ascii_uppercase().to_string(), has_n))
+        let qual = if anchor_query_pos < quals.len() { quals[anchor_query_pos] } else { 0 };
+        Some((b.to_ascii_uppercase().to_string(), has_n, qual))
     } else {
         None
     }
 }
 
-/// Check for deletion at variant position
+/// Check for deletion at variant position with windowed scanning.
+///
+/// Inspired by py-gbcms's `check_deletion` (variant_checks.rs:881-1199):
+/// 1. **Strict match (fast path)**: Deletion starts immediately after anchor
+///    with exact length match.
+/// 2. **Windowed scan**: Any deletion within ±5bp of expected position
+///    with matching length. Unlike insertions, deletions don't have
+///    inserted bases to verify — length within the window is sufficient.
+///
+/// Returns anchor base quality for quality gating.
 fn extract_deletion_sequence(
     record: &bam::Record,
     var: &Variant,
     read_start: i64,
     seq: &rust_htslib::bam::record::Seq,
-) -> Option<(String, bool)> {
+) -> Option<(String, bool, u8)> {
     if var.pos < read_start { return None; }
     
     let target_offset = (var.pos - read_start) as usize;
     let expected_del_len = var.ref_allele.len() - var.alt_allele.len();
+    let window: i64 = 5; // ±5bp scan window
+    let quals = record.qual();
     
     let mut ref_offset = 0usize;
     let mut query_offset = 0usize;
+    
+    // Windowed scan: track best match (closest to expected position)
+    let mut best_windowed: Option<(usize, i64)> = None; // (anchor_query_pos, distance)
     
     for op in record.cigar().iter() {
         match op {
@@ -481,24 +711,55 @@ fn extract_deletion_sequence(
             },
             Cigar::Ins(len) => { query_offset += *len as usize; },
             Cigar::Del(len) => {
-                let len = *len as usize;
-                // Check if this deletion starts at our variant position
-                if ref_offset == target_offset + 1 && len == expected_del_len {
-                    // This read has the deletion - it supports ALT
-                    // Return the anchor base only (represents ALT)
-                    let anchor_idx = query_offset.saturating_sub(1);
-                    if anchor_idx < seq.len() {
-                        let b = seq[anchor_idx] as char;
-                        let has_n = b == 'N' || b == 'n';
-                        return Some((format!("DEL{}", len), has_n));
+                let del_len = *len as usize;
+                
+                if del_len == expected_del_len {
+                    // Distance from expected position (VCF POS + 1 = start of deleted bases)
+                    let del_start_ref = ref_offset; // ref position where deletion starts
+                    let expected_del_start = target_offset + 1; // one past anchor
+                    let distance = (del_start_ref as i64 - expected_del_start as i64).abs();
+                    
+                    // Strict match: deletion at exact expected position
+                    let is_strict = del_start_ref == expected_del_start;
+                    
+                    // Windowed match: within ±5bp
+                    let in_window = distance <= window;
+                    
+                    if is_strict || in_window {
+                        let anchor_idx = query_offset.saturating_sub(1);
+                        if anchor_idx < seq.len() {
+                            if is_strict {
+                                // Fast path: exact position match
+                                let b = seq[anchor_idx] as char;
+                                let has_n = b == 'N' || b == 'n';
+                                let qual = if anchor_idx < quals.len() { quals[anchor_idx] } else { 0 };
+                                debug!("Deletion strict match at pos {} (len={})", var.pos + 1, del_len);
+                                return Some((format!("DEL{}", del_len), has_n, qual));
+                            }
+                            
+                            // Track closest windowed match
+                            if best_windowed.as_ref().is_none_or(|prev| distance < prev.1) {
+                                debug!("Deletion windowed match at pos {} (distance={}, shifted from ref_offset={})",
+                                    var.pos + 1, distance, del_start_ref);
+                                best_windowed = Some((anchor_idx, distance));
+                            }
+                        }
                     }
                 }
-                ref_offset += len;
+                ref_offset += del_len;
             },
             Cigar::RefSkip(len) => { ref_offset += *len as usize; },
             Cigar::SoftClip(len) => { query_offset += *len as usize; },
             Cigar::HardClip(_) | Cigar::Pad(_) => {},
         }
+    }
+    
+    // Return windowed match if found
+    if let Some((anchor_idx, _distance)) = best_windowed {
+        let b = seq[anchor_idx] as char;
+        let has_n = b == 'N' || b == 'n';
+        let qual = if anchor_idx < quals.len() { quals[anchor_idx] } else { 0 };
+        return Some((format!("DEL{}", expected_del_len), has_n, qual));
     }
     
     // No deletion found - extract REF-length sequence
@@ -761,11 +1022,17 @@ fn confidence_level(n: usize) -> &'static str {
 /// * `output_file` - Path to output TSV
 /// * `input_format` - "vcf" or "maf" (or "auto")
 /// * `map_quality` - Minimum mapping quality
+/// * `min_frag_len` - Minimum fragment length (filters discordant reads)
+/// * `max_frag_len` - Maximum fragment length
 /// * `output_distributions` - If true, write per-variant size distributions
 /// * `reference_path` - Optional path to reference FASTA (for GC computation)
 /// * `correction_factors_path` - Optional path to pre-computed correction_factors.csv
+/// * `require_proper_pair` - Require proper pairs (disable for duplex BAMs)
+/// * `duplex_mode` - Enable duplex weighting (fgbio cD tag / Marianas)
+/// * `silent` - Suppress progress bar output
+/// * `min_baseq` - Minimum base quality at variant position (P1: quality gating)
 #[pyfunction]
-#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false))]
+#[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false, min_baseq=20))]
 pub fn calculate_mfsd(
     bam_path: PathBuf,
     input_file: PathBuf,
@@ -780,6 +1047,7 @@ pub fn calculate_mfsd(
     require_proper_pair: bool,
     duplex_mode: bool,
     silent: bool,
+    min_baseq: u8,
 ) -> PyResult<()> {
     use crate::gc_correction::CorrectionFactors;
     use std::sync::Arc;
@@ -821,9 +1089,13 @@ pub fn calculate_mfsd(
     let reader = BufReader::new(file);
     
     let is_vcf = input_format == "vcf" || 
-        (input_format == "auto" && input_file.extension().map_or(false, |e| e == "vcf" || e == "gz"));
+        (input_format == "auto" && input_file.extension().is_some_and(|e| e == "vcf" || e == "gz"));
     
     info!("Parsing variants from {:?}...", input_file);
+    
+    // MAF header-based column resolution (parsed from first non-comment data line)
+    let mut maf_cols: Option<MafColumnMap> = None;
+    let mut skipped_invalid_alleles: usize = 0;
     
     for line in reader.lines() {
         let line = line?;
@@ -836,11 +1108,53 @@ pub fn calculate_mfsd(
             let pos: i64 = fields[1].parse().unwrap_or(0) - 1;
             (fields[0].to_string(), pos, fields[3].to_string(), fields[4].to_string())
         } else {
-            // MAF Parsing
-            if fields.len() < 13 { continue; }
-            if fields[0] == "Hugo_Symbol" || fields[0].starts_with("Hugo_Symbol") { continue; }
-            let pos: i64 = fields[5].parse().unwrap_or(0) - 1;
-            (fields[4].to_string(), pos, fields[10].to_string(), fields[12].to_string())
+            // MAF Parsing: header-based column lookup
+            
+            // Detect and parse MAF header line
+            if maf_cols.is_none() {
+                if fields[0] == "Hugo_Symbol" || fields[0].starts_with("Hugo_Symbol") {
+                    maf_cols = parse_maf_header(&line);
+                    if maf_cols.is_none() {
+                        return Err(pyo3::exceptions::PyValueError::new_err(
+                            "Failed to parse MAF header: missing required columns (Chromosome, Start_Position, Reference_Allele, Tumor_Seq_Allele2)"
+                        ));
+                    }
+                    info!("MAF header parsed: {} columns detected", fields.len());
+                    continue; // Header line, not a data row
+                } else {
+                    // No header found — fall back to error
+                    return Err(pyo3::exceptions::PyValueError::new_err(
+                        "MAF file missing header line (expected first non-comment line to start with Hugo_Symbol)"
+                    ));
+                }
+            }
+            
+            let cols = maf_cols.as_ref().unwrap();
+            
+            // Bounds check using resolved max index
+            if fields.len() <= cols.max_idx { continue; }
+            
+            let pos: i64 = fields[cols.pos].parse().unwrap_or(0) - 1;
+            let ref_allele = fields[cols.ref_allele].to_string();
+            let alt_allele = fields[cols.alt_allele].to_string();
+            
+            // Allele validation — catch column mapping errors early
+            if !is_valid_allele(&ref_allele) || !is_valid_allele(&alt_allele) {
+                if skipped_invalid_alleles == 0 {
+                    // Log first occurrence with details for debugging
+                    warn!("Invalid allele at {}:{}: REF='{}' ALT='{}' — skipping (possible MAF column mismatch)",
+                        fields[cols.chrom], fields[cols.pos], ref_allele, alt_allele);
+                }
+                skipped_invalid_alleles += 1;
+                continue;
+            }
+            
+            // Handle MAF dash convention: '-' represents empty allele for indels
+            // Convert to VCF-style representation for downstream processing
+            let ref_allele = if ref_allele == "-" { String::new() } else { ref_allele };
+            let alt_allele = if alt_allele == "-" { String::new() } else { alt_allele };
+            
+            (fields[cols.chrom].to_string(), pos, ref_allele, alt_allele)
         };
         
         let var_type = classify_variant(&ref_allele, &alt_allele);
@@ -852,6 +1166,12 @@ pub fn calculate_mfsd(
             alt_allele,
             var_type,
         });
+    }
+    
+    // Log invalid allele summary
+    if skipped_invalid_alleles > 0 {
+        warn!("Skipped {} variants with invalid alleles (non-nucleotide characters in REF/ALT)", 
+            skipped_invalid_alleles);
     }
     
     let total_vars = variants.len();
@@ -867,7 +1187,8 @@ pub fn calculate_mfsd(
         snv_count, mnv_count, ins_count, del_count, complex_count);
     
     // Log filter settings
-    info!("Fragment filters: length {}-{}bp, proper_pair={}, duplex_mode={}", min_frag_len, max_frag_len, require_proper_pair, duplex_mode);
+    info!("Fragment filters: length {}-{}bp, min_baseq={}, proper_pair={}, duplex_mode={}", 
+        min_frag_len, max_frag_len, min_baseq, require_proper_pair, duplex_mode);
 
     // Progress Bar (hidden when called from wrapper)
     let pb = if silent {
@@ -919,28 +1240,33 @@ pub fn calculate_mfsd(
                 }
             };
             
-            // Fetch region - extend to cover variant span
-            let var_end = var.pos + var.ref_allele.len().max(var.alt_allele.len()) as i64;
-            if bam.fetch((tid, var.pos as u64, var_end as u64 + 1)).is_err() {
+            // Fetch reads overlapping the variant anchor position only.
+            // For indels, any read carrying the variant in its CIGAR must
+            // overlap the anchor base (var.pos). Fetching the full REF span
+            // (e.g., 1500bp for a large deletion) would pull thousands of
+            // irrelevant reads that can't inform the classification.
+            if bam.fetch((tid, var.pos as u64, var.pos as u64 + 1)).is_err() {
                 return (var.clone(), result);
             }
             
-            // Process reads - ONLY R1 to count fragments, not reads
+            // P4: Process ALL reads (R1 and R2), track per-fragment evidence
+            // via QNAME hash, then resolve after the read loop.
+            // This replaces the old R1-only filter, recovering fragments where
+            // only R2 covers the variant position.
+            let mut fragment_evidence: HashMap<u64, FragmentMfsdEvidence> = HashMap::new();
+            
             for record_res in bam.records() {
                 let record = match record_res {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
                 
-                // Filters
+                // Filters (applied to both R1 and R2)
                 if record.mapq() < map_quality { continue; }
                 if record.is_duplicate() { continue; }
                 if record.is_unmapped() { continue; }
                 if record.is_secondary() { continue; }
                 if record.is_supplementary() { continue; }
-                
-                // Only process R1 for fragment counting (avoid double-counting)
-                if record.is_paired() && !record.is_first_in_template() { continue; }
                 
                 // Proper pair filter (optional - disabled by default for duplex BAMs)
                 if require_proper_pair && record.is_paired() && !record.is_proper_pair() {
@@ -964,11 +1290,20 @@ pub fn calculate_mfsd(
                 
                 let frag_len_f64 = frag_len as f64;
                 
-                // Extract sequence at variant
-                let (extracted, has_n) = match extract_sequence_at_variant(&record, var) {
-                    Some((s, n)) => (s, n),
+                // Extract sequence at variant (returns min base quality across extracted region)
+                let (extracted, has_n, base_qual) = match extract_sequence_at_variant(&record, var) {
+                    Some((s, n, q)) => (s, n, q),
                     None => continue, // Read doesn't span variant
                 };
+                
+                // P1: Base quality gating — skip fragments where the base quality
+                // at the variant position is below threshold. This prevents low-quality
+                // bases from corrupting REF/ALT classification. Inspired by py-gbcms's
+                // min_baseq check in check_snp/check_mnp.
+                if base_qual < min_baseq {
+                    result.skipped_low_bq += 1;
+                    continue;
+                }
                 
                 // Compute GC correction weight
                 let gc_weight = if let Some(ref factors_arc) = factors {
@@ -1010,14 +1345,46 @@ pub fn calculate_mfsd(
                 // Combined weight: GC correction * duplex confidence
                 let weight = gc_weight * duplex_weight;
                 
-                // Classify and add with combined weight
+                // Classify this read's evidence
                 let class = if has_n {
                     FragmentClass::N
                 } else {
                     classify_fragment(&extracted, var)
                 };
                 
-                result.add_fragment(class, frag_len_f64, weight);
+                // P4: QNAME-based fragment tracking — accumulate evidence from
+                // both R1 and R2. Higher base quality wins when they disagree.
+                let qname_hash = hash_qname(record.qname());
+                match fragment_evidence.entry(qname_hash) {
+                    std::collections::hash_map::Entry::Vacant(e) => {
+                        e.insert(FragmentMfsdEvidence {
+                            best_class: class,
+                            best_qual: base_qual,
+                            frag_len: frag_len_f64,
+                            has_n,
+                            weight,
+                        });
+                    }
+                    std::collections::hash_map::Entry::Occupied(mut e) => {
+                        let ev = e.get_mut();
+                        // Update classification if this read has higher base quality
+                        // (quality-weighted consensus, same principle as py-gbcms)
+                        if base_qual > ev.best_qual {
+                            ev.best_class = class;
+                            ev.best_qual = base_qual;
+                            ev.has_n = has_n;
+                            // Keep the higher GC/duplex weight
+                            if weight > ev.weight {
+                                ev.weight = weight;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // P4: Resolve fragments — each fragment contributes exactly one classification
+            for evidence in fragment_evidence.values() {
+                result.add_fragment(evidence.best_class, evidence.frag_len, evidence.weight);
             }
             
             pb.inc(1);
@@ -1034,11 +1401,13 @@ pub fn calculate_mfsd(
     let mut total_n = 0usize;
     let mut variants_with_alt = 0usize;
     let mut variants_no_coverage = 0usize;
+    let mut variants_suspicious = 0usize; // 0 REF + 0 ALT + high NonREF = likely parsing error
     let mut total_skipped_proper_pair = 0usize;
     let mut total_skipped_size = 0usize;
     let mut total_skipped_extreme = 0usize;
+    let mut total_skipped_low_bq = 0usize;
     
-    for (_, res) in &results {
+    for (var, res) in &results {
         total_ref += res.ref_lengths.len();
         total_alt += res.alt_lengths.len();
         total_nonref += res.nonref_lengths.len();
@@ -1046,23 +1415,33 @@ pub fn calculate_mfsd(
         total_skipped_proper_pair += res.skipped_proper_pair;
         total_skipped_size += res.skipped_size;
         total_skipped_extreme += res.skipped_extreme;
+        total_skipped_low_bq += res.skipped_low_bq;
         if !res.alt_lengths.is_empty() {
             variants_with_alt += 1;
         }
         if res.total_count() == 0 {
             variants_no_coverage += 1;
         }
+        // Sanity check: 0 REF + 0 ALT but many NonREF strongly suggests allele parsing error
+        if res.ref_lengths.is_empty() && res.alt_lengths.is_empty() && res.nonref_lengths.len() > 10 {
+            if variants_suspicious == 0 {
+                warn!("Suspicious: variant {}:{} has {} NonREF but 0 REF/0 ALT — possible allele parsing error (REF='{}', ALT='{}')",
+                    var.chrom, var.pos + 1, res.nonref_lengths.len(), var.ref_allele, var.alt_allele);
+            }
+            variants_suspicious += 1;
+        }
     }
     
     info!("Summary: {} REF, {} ALT, {} NonREF, {} N fragments", total_ref, total_alt, total_nonref, total_n);
     info!("Variants with ALT support: {}/{} ({:.1}%)", 
         variants_with_alt, results.len(), 
-        if results.len() > 0 { variants_with_alt as f64 / results.len() as f64 * 100.0 } else { 0.0 });
+        if !results.is_empty() { variants_with_alt as f64 / results.len() as f64 * 100.0 } else { 0.0 });
     
     // Log filter statistics
-    if total_skipped_proper_pair > 0 || total_skipped_size > 0 {
-        info!("Filtered: {} improper-pair, {} out-of-size-range ({}-{}bp)", 
-            total_skipped_proper_pair, total_skipped_size, min_frag_len, max_frag_len);
+    if total_skipped_proper_pair > 0 || total_skipped_size > 0 || total_skipped_low_bq > 0 {
+        info!("Filtered: {} improper-pair, {} out-of-size-range ({}-{}bp), {} low-baseq (<{})", 
+            total_skipped_proper_pair, total_skipped_size, min_frag_len, max_frag_len,
+            total_skipped_low_bq, min_baseq);
     }
     
     // Log extreme outliers if any (discordant reads with TLEN > 10000bp)
@@ -1072,6 +1451,12 @@ pub fn calculate_mfsd(
     
     if variants_no_coverage > 0 {
         warn!("{} variants had no fragment coverage", variants_no_coverage);
+    }
+    
+    // Sanity: warn if many variants have 0 REF + 0 ALT (suggests systemic allele parsing issue)
+    if variants_suspicious > 0 {
+        warn!("{}/{} variants have 0 REF + 0 ALT but high NonREF — check MAF allele columns",
+            variants_suspicious, results.len());
     }
     
     // Duplex tag warning: alert user if --duplex was set but no tags were found
@@ -1246,4 +1631,363 @@ pub fn calculate_mfsd(
 
     info!("Done! Processed {} variants.", results.len());
     Ok(())
+}
+
+// ============================================================================
+// TESTS
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ======================================================================
+    // MAF Header Parsing Tests
+    // ======================================================================
+
+    #[test]
+    fn test_parse_maf_header_standard() {
+        // Standard GDC MAF without Consequence column
+        let header = "Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\tStart_Position\tEnd_Position\tStrand\tVariant_Classification\tVariant_Type\tReference_Allele\tTumor_Seq_Allele1\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse standard MAF header");
+        assert_eq!(cols.chrom, 4, "Chromosome should be at index 4");
+        assert_eq!(cols.pos, 5, "Start_Position should be at index 5");
+        assert_eq!(cols.ref_allele, 10, "Reference_Allele should be at index 10");
+        assert_eq!(cols.alt_allele, 12, "Tumor_Seq_Allele2 should be at index 12");
+    }
+
+    #[test]
+    fn test_parse_maf_header_cbio() {
+        // cBioPortal MAF with extra Consequence column at index 8
+        // This is the exact format that caused the original bug
+        let header = "Hugo_Symbol\tEntrez_Gene_Id\tCenter\tNCBI_Build\tChromosome\tStart_Position\tEnd_Position\tStrand\tConsequence\tVariant_Classification\tVariant_Type\tReference_Allele\tTumor_Seq_Allele1\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse cBioPortal MAF header");
+        assert_eq!(cols.chrom, 4, "Chromosome should be at index 4");
+        assert_eq!(cols.pos, 5, "Start_Position should be at index 5");
+        assert_eq!(cols.ref_allele, 11, "Reference_Allele should be at index 11 (shifted by Consequence)");
+        assert_eq!(cols.alt_allele, 13, "Tumor_Seq_Allele2 should be at index 13 (shifted by Consequence)");
+    }
+
+    #[test]
+    fn test_parse_maf_header_minimal() {
+        // Minimal MAF with only required columns (in non-standard order)
+        let header = "Reference_Allele\tChromosome\tStart_Position\tTumor_Seq_Allele2";
+        let cols = parse_maf_header(header).expect("Should parse minimal MAF header");
+        assert_eq!(cols.chrom, 1);
+        assert_eq!(cols.pos, 2);
+        assert_eq!(cols.ref_allele, 0);
+        assert_eq!(cols.alt_allele, 3);
+    }
+
+    #[test]
+    fn test_parse_maf_header_missing_col() {
+        // Missing Tumor_Seq_Allele2
+        let header = "Hugo_Symbol\tChromosome\tStart_Position\tReference_Allele";
+        assert!(parse_maf_header(header).is_none(), "Should return None for missing required column");
+    }
+
+    // ======================================================================
+    // Allele Validation Tests
+    // ======================================================================
+
+    #[test]
+    fn test_validate_allele_valid() {
+        assert!(is_valid_allele("A"), "Single base A");
+        assert!(is_valid_allele("ATG"), "Multi-base ATG");
+        assert!(is_valid_allele("a"), "Lowercase base");
+        assert!(is_valid_allele("N"), "Ambiguous base N");
+        assert!(is_valid_allele("ACGTN"), "All valid bases");
+    }
+
+    #[test]
+    fn test_validate_allele_invalid() {
+        assert!(!is_valid_allele("SNP"), "Variant_Type value SNP");
+        assert!(!is_valid_allele("DEL"), "Variant_Type value DEL");
+        assert!(!is_valid_allele("123"), "Numeric string");
+        assert!(!is_valid_allele(""), "Empty string");
+        assert!(!is_valid_allele("Missense_Mutation"), "Classification value");
+        assert!(!is_valid_allele("A T"), "Contains space");
+    }
+
+    #[test]
+    fn test_validate_allele_maf_dash() {
+        // MAF uses '-' for empty alleles in indels
+        assert!(is_valid_allele("-"), "MAF dash for insertion REF or deletion ALT");
+        assert!(is_valid_allele("A-T"), "Should not appear but is technically valid chars");
+    }
+
+    // ======================================================================
+    // Variant Classification Tests
+    // ======================================================================
+
+    #[test]
+    fn test_classify_variant_snv() {
+        assert_eq!(classify_variant("A", "T"), VariantType::Snv);
+        assert_eq!(classify_variant("C", "G"), VariantType::Snv);
+    }
+
+    #[test]
+    fn test_classify_variant_mnv() {
+        assert_eq!(classify_variant("AT", "GC"), VariantType::Mnv);
+        assert_eq!(classify_variant("ATG", "CCT"), VariantType::Mnv);
+    }
+
+    #[test]
+    fn test_classify_variant_insertion() {
+        assert_eq!(classify_variant("A", "ATG"), VariantType::Insertion);
+        assert_eq!(classify_variant("T", "TCCG"), VariantType::Insertion);
+    }
+
+    #[test]
+    fn test_classify_variant_deletion() {
+        assert_eq!(classify_variant("ATG", "A"), VariantType::Deletion);
+        assert_eq!(classify_variant("TCCG", "T"), VariantType::Deletion);
+    }
+
+    #[test]
+    fn test_classify_variant_complex() {
+        assert_eq!(classify_variant("ATG", "CT"), VariantType::Complex);
+        assert_eq!(classify_variant("AT", "GCT"), VariantType::Complex);
+    }
+
+    // ======================================================================
+    // Fragment Classification Tests
+    // ======================================================================
+
+    #[test]
+    fn test_classify_fragment_snv_ref() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("A", &var), FragmentClass::Ref);
+    }
+
+    #[test]
+    fn test_classify_fragment_snv_alt() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("T", &var), FragmentClass::Alt);
+    }
+
+    #[test]
+    fn test_classify_fragment_snv_nonref() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        assert_eq!(classify_fragment("G", &var), FragmentClass::NonRef);
+    }
+
+    #[test]
+    fn test_classify_fragment_deletion_alt() {
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "ATG".to_string(), alt_allele: "A".to_string(),
+            var_type: VariantType::Deletion,
+        };
+        assert_eq!(classify_fragment("DEL2", &var), FragmentClass::Alt);
+    }
+
+    // ======================================================================
+    // P1: Base Quality Gating Tests
+    // ======================================================================
+
+    #[test]
+    fn test_hash_qname_deterministic() {
+        // Same QNAME should always produce the same hash
+        let qname = b"D00123:456:ABCDEF:1:1101:1234:5678";
+        let hash1 = hash_qname(qname);
+        let hash2 = hash_qname(qname);
+        assert_eq!(hash1, hash2, "hash_qname should be deterministic");
+    }
+
+    #[test]
+    fn test_hash_qname_different_names() {
+        // Different QNAMEs should produce different hashes (with high probability)
+        let hash1 = hash_qname(b"read1");
+        let hash2 = hash_qname(b"read2");
+        assert_ne!(hash1, hash2, "Different QNAMEs should produce different hashes");
+    }
+
+    // ======================================================================
+    // P4: Fragment Consensus Evidence Tests
+    // ======================================================================
+
+    #[test]
+    fn test_fragment_evidence_construction() {
+        let ev = FragmentMfsdEvidence {
+            best_class: FragmentClass::Alt,
+            best_qual: 30,
+            frag_len: 167.0,
+            has_n: false,
+            weight: 1.0,
+        };
+        assert_eq!(ev.best_class, FragmentClass::Alt);
+        assert_eq!(ev.best_qual, 30);
+        assert!((ev.frag_len - 167.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_fragment_evidence_quality_wins() {
+        // Simulates R1 sees REF (qual=20), R2 sees ALT (qual=35)
+        // Higher quality R2 should win
+        let mut ev = FragmentMfsdEvidence {
+            best_class: FragmentClass::Ref,
+            best_qual: 20,
+            frag_len: 150.0,
+            has_n: false,
+            weight: 1.0,
+        };
+
+        // R2 has higher quality → update
+        let r2_qual: u8 = 35;
+        let r2_class = FragmentClass::Alt;
+        if r2_qual > ev.best_qual {
+            ev.best_class = r2_class;
+            ev.best_qual = r2_qual;
+        }
+
+        assert_eq!(ev.best_class, FragmentClass::Alt, "Higher quality R2 should win");
+        assert_eq!(ev.best_qual, 35);
+    }
+
+    #[test]
+    fn test_fragment_evidence_same_quality_keeps_first() {
+        // R1 and R2 at same quality → keep R1's classification
+        let mut ev = FragmentMfsdEvidence {
+            best_class: FragmentClass::Ref,
+            best_qual: 30,
+            frag_len: 160.0,
+            has_n: false,
+            weight: 1.0,
+        };
+
+        let r2_qual: u8 = 30;
+        let r2_class = FragmentClass::Alt;
+        if r2_qual > ev.best_qual {
+            ev.best_class = r2_class;
+            ev.best_qual = r2_qual;
+        }
+
+        assert_eq!(ev.best_class, FragmentClass::Ref, "Equal quality should keep first read");
+    }
+
+    #[test]
+    fn test_fragment_evidence_low_quality_ignored() {
+        // R1 sees ALT (qual=35), R2 sees REF (qual=15 — below typical min_baseq)
+        // R1 should be kept
+        let mut ev = FragmentMfsdEvidence {
+            best_class: FragmentClass::Alt,
+            best_qual: 35,
+            frag_len: 145.0,
+            has_n: false,
+            weight: 1.0,
+        };
+
+        let r2_qual: u8 = 15;
+        let r2_class = FragmentClass::Ref;
+        if r2_qual > ev.best_qual {
+            ev.best_class = r2_class;
+            ev.best_qual = r2_qual;
+        }
+
+        assert_eq!(ev.best_class, FragmentClass::Alt, "Lower quality R2 should not override");
+    }
+
+    // ======================================================================
+    // P2/P3: Insertion & Deletion Classification Tests
+    // ======================================================================
+
+    #[test]
+    fn test_classify_fragment_insertion_alt() {
+        // Insertion: REF=A, ALT=ATG → extracted should be "ATG"
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "ATG".to_string(),
+            var_type: VariantType::Insertion,
+        };
+        assert_eq!(classify_fragment("ATG", &var), FragmentClass::Alt);
+    }
+
+    #[test]
+    fn test_classify_fragment_insertion_ref() {
+        // Insertion: REF=A, ALT=ATG → read shows just "A" (no insertion)
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "ATG".to_string(),
+            var_type: VariantType::Insertion,
+        };
+        assert_eq!(classify_fragment("A", &var), FragmentClass::Ref);
+    }
+
+    #[test]
+    fn test_classify_fragment_deletion_ref() {
+        // Deletion: REF=ATG, ALT=A → read shows "ATG" (no deletion = REF)
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "ATG".to_string(), alt_allele: "A".to_string(),
+            var_type: VariantType::Deletion,
+        };
+        assert_eq!(classify_fragment("ATG", &var), FragmentClass::Ref);
+    }
+
+    #[test]
+    fn test_classify_fragment_complex_ref() {
+        // Complex: REF=ATG, ALT=CT → read shows "ATG" = REF
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "ATG".to_string(), alt_allele: "CT".to_string(),
+            var_type: VariantType::Complex,
+        };
+        assert_eq!(classify_fragment("ATG", &var), FragmentClass::Ref);
+    }
+
+    #[test]
+    fn test_classify_fragment_mnv_alt() {
+        // MNV: REF=AT, ALT=GC → read shows "GC" = ALT
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "AT".to_string(), alt_allele: "GC".to_string(),
+            var_type: VariantType::Mnv,
+        };
+        assert_eq!(classify_fragment("GC", &var), FragmentClass::Alt);
+    }
+
+    #[test]
+    fn test_classify_fragment_case_handling() {
+        // classify_fragment compares to uppercase REF/ALT.
+        // extract_*_sequence() always uppercases, so classify_fragment
+        // normally only sees uppercase input. Verify uppercase works.
+        let var = Variant {
+            chrom: "chr1".to_string(), pos: 1000,
+            ref_allele: "A".to_string(), alt_allele: "T".to_string(),
+            var_type: VariantType::Snv,
+        };
+        // Uppercase inputs (normal path from extract functions)
+        assert_eq!(classify_fragment("A", &var), FragmentClass::Ref);
+        assert_eq!(classify_fragment("T", &var), FragmentClass::Alt);
+        // Lowercase would be NonRef since classify_fragment compares to
+        // uppercase REF/ALT — this is fine because extract functions
+        // always return uppercase sequences.
+        assert_eq!(classify_fragment("a", &var), FragmentClass::NonRef);
+    }
+
+    // ======================================================================
+    // Variant Classification Edge Cases
+    // ======================================================================
+
+    #[test]
+    fn test_classify_variant_empty_ref_insertion() {
+        // MAF-style where REF="-" → empty string after conversion
+        // Empty REF is prefix of any ALT → classified as Insertion
+        // (empty string ".starts_with(\"\")" is always true)
+        let result = classify_variant("", "ATG");
+        assert_eq!(result, VariantType::Insertion, "Empty REF + non-empty ALT = Insertion");
+    }
 }

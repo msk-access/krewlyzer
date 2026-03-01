@@ -8,7 +8,7 @@
 | `fsc`     | Fragment size coverage (`.FSC.tsv`)          |
 | `fsr`     | Fragment size ratio (`.FSR.tsv`)             |
 | `fsd`     | Fragment size distribution (`.FSD.tsv`)      |
-| `wps`     | Windowed protection score (`.WPS.tsv.gz`)    |
+| `wps`     | Windowed protection score (`.WPS.parquet`)    |
 | `ocf`     | Orientation-aware fragmentation (`.OCF.tsv`) |
 | `uxm`     | Fragment-level methylation (`.UXM.tsv`)      |
 | `mfsd`    | Mutant fragment size distribution (`.mFSD.tsv`)|
@@ -35,6 +35,12 @@ flowchart TB
     PIPELINE --> FSD["FSD.tsv"]
     PIPELINE --> WPS["WPS.parquet"]
     PIPELINE --> OCF["OCF.tsv"]
+    
+    BED --> ENTROPY["TFBS/ATAC Entropy"]
+    ENTROPY --> TFBS["TFBS.tsv"]
+    ENTROPY --> ATAC["ATAC.tsv"]
+    
+    EXTRACT --> META["metadata.json"]
     
     subgraph "With --variants"
         BAM --> MFSD["mFSD.tsv"]
@@ -118,7 +124,6 @@ Alternatively, you can run tools individually. Note that most tools require a fr
 krewlyzer extract -i sample.bam -r hg19.fa -o output_dir
 
 # 2. Run feature tools using the BED file
-# 2. Run feature tools using the BED file
 krewlyzer fsc -i output_dir/sample.bed.gz --output output_dir/
 krewlyzer wps -i output_dir/sample.bed.gz --output output_dir/
 # ... (fsd, ocf, etc.)
@@ -136,7 +141,6 @@ For targeted sequencing panels (e.g., MSK-ACCESS), FSC/FSR require a custom regi
 krewlyzer run-all sample.bam --reference hg19.fa --output out/ \
   --bin-input /path/to/MSK-ACCESS-v2_canonicaltargets.bed
 
-# Or run FSC/FSR individually with target regions
 # Or run FSC/FSR individually with target regions
 krewlyzer fsc -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
@@ -196,15 +200,9 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ --generate-json
 # Output: out/sample.features.json (contains FSD, FSR, WPS, Motif, OCF, etc.)
 ```
 
-### Format Override
-
-```bash
-# Global format for all outputs
-krewlyzer run-all ... --output-format parquet
-
-# Per-tool format override
-krewlyzer fsd -i sample.bed.gz -o out/ --format json
-```
+!!! note
+    Output format is determined automatically per feature (TSV for tabular data, Parquet for WPS profiles).
+    There is no global `--output-format` flag. Use `--generate-json` to produce a unified JSON for ML pipelines.
 
 See [JSON Output](../features/output/json-output.md) for full documentation.
 

@@ -33,7 +33,7 @@ include { KREWLYZER } from './workflows/krewlyzer/main'
 def helpMessage() {
     log.info """
     ================================================================
-     K R E W L Y Z E R   P I P E L I N E  (v${workflow.manifest.version ?: '0.5.3'})
+     K R E W L Y Z E R   P I P E L I N E  (v${workflow.manifest.version ?: '0.6.0'})
     ================================================================
      Usage:
      nextflow run main.nf --samplesheet samples.csv --ref hg19.fa [options]
@@ -53,6 +53,7 @@ def helpMessage() {
      --minlen          Min fragment length (default: 65)
      --maxlen          Max fragment length (default: 1000)
      --generate_json   Generate unified sample.features.json (default: true)
+     --min_baseq       Minimum base quality for mFSD (default: 20)
      
      Panel Mode:
      --skip_pon        Skip PON z-score normalization

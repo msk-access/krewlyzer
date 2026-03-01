@@ -15,7 +15,9 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.5.3"
+    container "ghcr.io/msk-access/krewlyzer:0.6.0"
+
+    publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
 
     input:
     tuple val(meta), path(bam), path(bai), path(mfsd_bam), path(mfsd_bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)
@@ -34,6 +36,7 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.FSC.gene.tsv"),         emit: fsc_gene, optional: true
     tuple val(meta), path("*.FSC.regions.tsv"),      emit: fsc_regions, optional: true
     tuple val(meta), path("*.FSC.regions.e1only.tsv"), emit: fsc_e1, optional: true
+    tuple val(meta), path("*.fsc_counts.tsv"),         emit: fsc_counts, optional: true
     
     // FSR outputs
     tuple val(meta), path("*.FSR.tsv"),              emit: fsr, optional: true
@@ -50,18 +53,30 @@ process KREWLYZER_RUNALL {
     
     // OCF outputs
     tuple val(meta), path("*.OCF.tsv"),              emit: ocf, optional: true
+    tuple val(meta), path("*.OCF.sync.tsv"),         emit: ocf_sync, optional: true
     tuple val(meta), path("*.OCF.ontarget.tsv"),     emit: ocf_ontarget, optional: true
+    tuple val(meta), path("*.OCF.ontarget.sync.tsv"), emit: ocf_ontarget_sync, optional: true
+    tuple val(meta), path("*.OCF.offtarget.tsv"),    emit: ocf_offtarget, optional: true
+    tuple val(meta), path("*.OCF.offtarget.sync.tsv"), emit: ocf_offtarget_sync, optional: true
     
     // Motif outputs
     tuple val(meta), path("*.EndMotif.tsv"),         emit: end_motif, optional: true
-    tuple val(meta), path("*.BreakpointMotif.tsv"),  emit: bp_motif, optional: true
+    tuple val(meta), path("*.EndMotif.ontarget.tsv"), emit: end_motif_ontarget, optional: true
+    tuple val(meta), path("*.EndMotif1mer.tsv"),     emit: end_motif_1mer, optional: true
+    tuple val(meta), path("*.BreakPointMotif.tsv"),  emit: bp_motif, optional: true
+    tuple val(meta), path("*.BreakPointMotif.ontarget.tsv"), emit: bp_motif_ontarget, optional: true
     tuple val(meta), path("*.MDS.tsv"),              emit: mds, optional: true
+    tuple val(meta), path("*.MDS.ontarget.tsv"),     emit: mds_ontarget, optional: true
     
     // TFBS/ATAC outputs
     tuple val(meta), path("*.TFBS.tsv"),             emit: tfbs, optional: true
+    tuple val(meta), path("*.TFBS.sync.tsv"),        emit: tfbs_sync, optional: true
     tuple val(meta), path("*.TFBS.ontarget.tsv"),    emit: tfbs_ontarget, optional: true
+    tuple val(meta), path("*.TFBS.ontarget.sync.tsv"), emit: tfbs_ontarget_sync, optional: true
     tuple val(meta), path("*.ATAC.tsv"),             emit: atac, optional: true
+    tuple val(meta), path("*.ATAC.sync.tsv"),        emit: atac_sync, optional: true
     tuple val(meta), path("*.ATAC.ontarget.tsv"),    emit: atac_ontarget, optional: true
+    tuple val(meta), path("*.ATAC.ontarget.sync.tsv"), emit: atac_ontarget_sync, optional: true
     
     // Region MDS outputs
     tuple val(meta), path("*.MDS.exon.tsv"),         emit: mds_exon, optional: true
@@ -76,7 +91,7 @@ process KREWLYZER_RUNALL {
     
     // GC correction outputs
     tuple val(meta), path("*.correction_factors.tsv"), emit: gc_factors, optional: true
-    tuple val(meta), path("*.correction_factors.ontarget.csv"), emit: gc_factors_ontarget, optional: true
+    tuple val(meta), path("*.correction_factors.ontarget.tsv"), emit: gc_factors_ontarget, optional: true
     
     // Versions
     path "versions.yml", emit: versions
@@ -108,6 +123,7 @@ process KREWLYZER_RUNALL {
     def skip_dup_arg = params.skip_duplicates == false ? "--no-skip-duplicates" : ""
     def proper_pair_arg = params.require_proper_pair == false ? "--no-require-proper-pair" : ""
     def duplex_arg = params.duplex ? "--duplex" : ""
+    def min_baseq_arg = params.min_baseq != 20 ? "--min-baseq ${params.min_baseq}" : ""
     def bait_padding_arg = params.bait_padding != 50 ? "--bait-padding ${params.bait_padding}" : ""
     
     // Skip/disable flags
@@ -145,6 +161,7 @@ process KREWLYZER_RUNALL {
         $skip_dup_arg \\
         $proper_pair_arg \\
         $duplex_arg \\
+        $min_baseq_arg \\
         $bait_padding_arg \\
         $skip_pon_arg \\
         $pon_variant_arg \\
@@ -174,15 +191,23 @@ process KREWLYZER_RUNALL {
     touch ${prefix}.WPS.parquet
     touch ${prefix}.WPS_background.parquet
     touch ${prefix}.OCF.tsv
+    touch ${prefix}.OCF.sync.tsv
     touch ${prefix}.EndMotif.tsv
-    touch ${prefix}.BreakpointMotif.tsv
+    touch ${prefix}.EndMotif1mer.tsv
+    touch ${prefix}.BreakPointMotif.tsv
     touch ${prefix}.MDS.tsv
+    touch ${prefix}.TFBS.tsv
+    touch ${prefix}.ATAC.tsv
     touch ${prefix}.correction_factors.tsv
+    touch ${prefix}.fsc_counts.tsv
+    touch ${prefix}.mFSD.tsv
+    touch ${prefix}.MDS.exon.tsv
+    touch ${prefix}.MDS.gene.tsv
     echo '{"sample_id":"${prefix}","total_fragments":0}' > ${prefix}.metadata.json
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.5.3
+        krewlyzer: 0.6.0
     END_VERSIONS
     """
 }

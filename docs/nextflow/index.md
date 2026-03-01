@@ -22,13 +22,13 @@ flowchart TB
     
     BED --> MOTIF["KREWLYZER_MOTIF"]
     BED --> FSC["KREWLYZER_FSC"]
+    BED --> FSR["KREWLYZER_FSR"]
     BED --> FSD["KREWLYZER_FSD"]
     BED --> WPS["KREWLYZER_WPS"]
     BED --> OCF["KREWLYZER_OCF"]
     BED --> ENTROPY["KREWLYZER_REGION_ENTROPY"]
-    BED --> RMDS["KREWLYZER_REGION_MDS"]
     
-    FSC --> FSR["KREWLYZER_FSR"]
+    BAM --> RMDS["KREWLYZER_REGION_MDS"]
     
     subgraph "Parallel Paths"
         METH_BAM["meth.bam"] --> UXM["KREWLYZER_UXM"]

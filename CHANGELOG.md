@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-02-28
+
+### Added
+- **mFSD Base Quality Filtering**: `--min-baseq` / `-Q` (default 20) gates variant evidence by base quality
+- **mFSD GC Correction**: Rust-native LOESS GC bias correction for variant fragment size distributions
+- **mFSD Duplex Weighting**: Proper consensus fragment handling via `--duplex`
+- **Region MDS `--sample-name`**: Consistent output naming without post-hoc rename
+- **Feature Serializer**: Auto-load `fsc_counts`, `region_mds`, `uxm` in `from_outputs()`
+- **IRIS Batch Submission**: `scripts/run_krewlyzer_iris.sh` for SLURM/IRIS cluster runs with `--generate_json`
+- **nf-core Institutional Configs**: `custom_config_base` param and IRIS profile support
+- **Versioned Documentation**: Implemented `mike` for dev/stable doc versions
+- **Nextflow mfsd Module**: Full standalone params (`--reference`, `--correction-factors`, `--mapq`, `--minlen`, `--maxlen`, `--min-baseq`, `--duplex`, `--no-skip-duplicates`)
+- **Nextflow runall**: `fsc_counts.tsv` output declaration, `--min-baseq` wired
+- **mFSD Integration Tests**: 161 lines of new test coverage
+
+### Fixed
+- **mFSD MAF Parsing**: Header-based column lookup (fixes column-index mismatch with different MAF flavors)
+- **Nextflow FILTER_MAF**: Complete overhaul — eliminated join operator blocking, replaced regex with substring match, fixed SyntaxError in versions.yml, dynamic maxForks for SLURM
+- **Nextflow Workflow Streaming**: Fixed RUNALL blocking from `remainder:true`, `failOnMismatch`, channel round-robin; used `multiMap` for proper routing
+- **Nextflow RUNALL Outputs**: Added 14 output declarations, fixed BreakPointMotif casing, explicit publishDir
+- **Region MDS Nextflow**: `--sample-name` replaces `mv` workaround
+- **Nextflow Config**: Executor queueSize placement, `-qs` CLI flag, global publishDir removal
+- **WPS CLI Tests**: Fixed `--input` flag (was positional arg) — recovered 2 skipped tests
+- **Pandas FutureWarning**: Fixed `pd.concat` with all-NA columns in PON test fixture
+
+### Changed
+- **Code Quality**: Black formatted 71 files, ruff fixed 129 lint errors, cargo clippy applied
+- **Ruff Config**: Added `[tool.ruff]` to `pyproject.toml` with documented E402/F821 ignores
+- **Agent Config**: `.agent/` → `.agent/rules/` with `alwaysApply` frontmatter
+
+### Documentation
+- **45-item Audit**: Corrections across 25 doc files including `.csv`→`.tsv` (7 files), `.WPS.tsv.gz`→`.parquet` (3 files), phantom `--output-format` removed, Docker versions→`X.Y.Z`, parameters.md 12→28, outputs.md 14→41, JSON schema corrected, developer guide Rust table 10→19, architecture pipeline signature updated
+- **PDF Embedding**: Fixed rendering with mkdocs-pdf plugin
+
 ## [0.5.3] - 2026-02-06
 
 ### Documentation

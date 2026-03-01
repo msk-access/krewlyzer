@@ -438,7 +438,7 @@ pub fn run_region_mds(
             }
 
             // Fragment length filter
-            let tlen = record.insert_size().abs() as u64;
+            let tlen = record.insert_size().unsigned_abs();
             if tlen < min_len as u64 || tlen > max_len as u64 {
                 continue;
             }

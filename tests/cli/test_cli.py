@@ -1,13 +1,14 @@
-import pytest
 import re
 from typer.testing import CliRunner
 from krewlyzer.cli import app
 
 runner = CliRunner()
 
+
 def strip_ansi(text):
-    ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-    return ansi_escape.sub('', text)
+    ansi_escape = re.compile(r"\x1b\[[0-9;]*m")
+    return ansi_escape.sub("", text)
+
 
 def test_cli_help():
     result = runner.invoke(app, ["--help"])
@@ -20,14 +21,18 @@ def test_cli_help():
     assert "fsd" in output
     assert "wps" in output
 
+
 def test_motif_help():
     result = runner.invoke(app, ["motif", "--help"])
     output = strip_ansi(result.output)
     assert result.exit_code == 0
     assert "motif" in output
-    assert "--kmer" in output  # Changed: motif now uses --kmer, --minlen moved to extract
+    assert (
+        "--kmer" in output
+    )  # Changed: motif now uses --kmer, --minlen moved to extract
     assert "-r" in output  # Reference flag
     assert "-o" in output
+
 
 def test_extract_help():
     result = runner.invoke(app, ["extract", "--help"])
@@ -39,6 +44,7 @@ def test_extract_help():
     assert "--skip-duplicates" in output
     assert "require-proper" in output  # Truncated in CLI output
 
+
 def test_fsc_help():
     result = runner.invoke(app, ["fsc", "--help"])
     output = strip_ansi(result.output)
@@ -47,15 +53,18 @@ def test_fsc_help():
     assert "--bin-input" in output
     assert "--output" in output
 
+
 def test_fsr_help():
     result = runner.invoke(app, ["fsr", "--help"])
     assert result.exit_code == 0
     assert "fragment size ratio" in result.output.lower()
 
+
 def test_fsd_help():
     result = runner.invoke(app, ["fsd", "--help"])
     assert result.exit_code == 0
     assert "fragment size distribution" in result.output.lower()
+
 
 def test_wps_help():
     result = runner.invoke(app, ["wps", "--help"])
@@ -65,13 +74,18 @@ def test_wps_help():
     assert "--wps-anchors" in output or "--bedgz-input" in output
     assert "--output" in output
 
+
 def test_ocf_help():
     result = runner.invoke(app, ["ocf", "--help"])
     output = strip_ansi(result.output)
     assert result.exit_code == 0
-    assert "orientation-aware cfDNA fragmentation" in output.lower() or "ocf" in output.lower()
+    assert (
+        "orientation-aware cfDNA fragmentation" in output.lower()
+        or "ocf" in output.lower()
+    )
     assert "--ocr-input" in output
     assert "--output" in output
+
 
 def test_uxm_help():
     """
@@ -84,6 +98,7 @@ def test_uxm_help():
     assert "--mark-input" in output
     assert "--output" in output
     assert "--sample-name" in output
+
 
 def test_run_all_help():
     """
@@ -100,6 +115,7 @@ def test_run_all_help():
     assert "--output" in output
     assert "--threads" in output
     assert "--bisulfite-bam" in output  # New optional for UXM
+
 
 # For real FSC runs, you would need to provide a small .bed.gz and bin file for testing.
 # Example (pseudo):

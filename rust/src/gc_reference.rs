@@ -69,7 +69,7 @@ pub const NUM_LENGTH_BINS: usize = 188;
 /// Get the length bin index for a given fragment length (5bp bins)
 /// Returns None if the length is outside the range [60, 1000)
 pub fn get_length_bin_index(length: u32) -> Option<usize> {
-    if length < 60 || length >= 1000 {
+    if !(60..1000).contains(&length) {
         return None;
     }
     // (length - 60) / 5 -> 0..187
@@ -86,6 +86,12 @@ pub struct GcCorrectionFactors {
     
     /// Number of fragments observed per (length_bin, gc_percent)
     pub counts: Vec<Vec<u64>>,
+}
+
+impl Default for GcCorrectionFactors {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl GcCorrectionFactors {
@@ -325,7 +331,7 @@ pub fn generate_valid_regions(
     // Build a map of chromosome name -> length from reference
     let mut chrom_lengths: HashMap<String, u64> = HashMap::new();
     for i in 0..n_seqs {
-        if let Some(name) = faidx.seq_name(i as i32).ok() {
+        if let Ok(name) = faidx.seq_name(i as i32) {
             // Normalize chromosome name (remove "chr" prefix if present)
             let normalized = name.trim_start_matches("chr").to_string();
             
@@ -434,7 +440,7 @@ fn load_exclude_regions(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>>
         let start: u64 = fields[1].parse().unwrap_or(0);
         let end: u64 = fields[2].parse().unwrap_or(0);
         
-        exclude_regions.entry(chrom).or_insert_with(Vec::new).push((start, end));
+        exclude_regions.entry(chrom).or_default().push((start, end));
     }
     
     // Sort intervals by start position

@@ -11,14 +11,14 @@ from typing import Optional
 
 def resolve_path(value) -> Optional[Path]:
     """Safely resolve a path value, handling typer.OptionInfo objects.
-    
+
     When a typer-decorated function is called directly (not via CLI),
     Optional[Path] parameters with defaults remain as OptionInfo objects.
     This helper handles that case.
-    
+
     Args:
         value: A Path, str, None, or typer.OptionInfo
-        
+
     Returns:
         Path if valid, None otherwise
     """
@@ -34,15 +34,15 @@ def resolve_path(value) -> Optional[Path]:
 
 def resolve_int(value, default: int) -> int:
     """Safely resolve an integer value, handling typer.OptionInfo objects.
-    
+
     When a typer-decorated function is called directly (not via CLI),
     parameters with defaults remain as OptionInfo objects.
     This helper handles that case.
-    
+
     Args:
         value: An int or typer.OptionInfo
         default: Default value if not int
-        
+
     Returns:
         int value or default
     """
@@ -53,11 +53,11 @@ def resolve_int(value, default: int) -> int:
 
 def resolve_bool(value, default: bool) -> bool:
     """Safely resolve a boolean value, handling typer.OptionInfo objects.
-    
+
     Args:
         value: A bool or typer.OptionInfo
         default: Default value if not bool
-        
+
     Returns:
         bool value or default
     """
@@ -68,10 +68,10 @@ def resolve_bool(value, default: bool) -> bool:
 
 def resolve_str(value) -> Optional[str]:
     """Safely resolve a string value, handling typer.OptionInfo objects.
-    
+
     Args:
         value: A str, None, or typer.OptionInfo
-        
+
     Returns:
         str if valid, None otherwise
     """

@@ -213,7 +213,8 @@ Output: `{sample}.FSC.tsv`
 | `mono_nucl` | float | GC-weighted count (150-220bp) |
 | `di_nucl` | float | GC-weighted count (221-260bp) |
 | `long` | float | GC-weighted count (261-400bp) |
-| `total` | float | GC-weighted total (65-400bp) |
+| `ultra_long` | float | GC-weighted count (401-1000bp) |
+| `total` | float | GC-weighted total (65-1000bp) |
 
 ### PoN Columns (when `--pon-model` provided)
 
@@ -360,7 +361,7 @@ ATM     62         8432      1234         5678        9012       3456     789   
 BRCA2   42         5689      ...
 ```
 
-### Region FSC Output Format (NEW)
+### Region FSC Output Format
 
 Per-exon/target output for fine-grained copy number analysis:
 
@@ -370,7 +371,7 @@ chrom  start      end      gene  region_name     region_bp  ultra_short  ...  no
 1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
 ```
 
-### E1-Only FSC Output (NEW)
+### E1-Only FSC Output
 
 **File**: `{sample}.FSC.regions.e1only.tsv`
 
@@ -410,7 +411,7 @@ This enables cross-sample depth comparisons independent of library size and regi
 
 ### GC Correction for Gene FSC
 
-In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.csv`) for accurate copy number estimates.
+In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.tsv`) for accurate copy number estimates.
 
 **Why this matters:**
 - Different genes have different GC content

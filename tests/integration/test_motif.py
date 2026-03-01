@@ -3,12 +3,11 @@ Integration tests for Motif extraction.
 
 Tests end-motif and breakpoint-motif extraction via CLI.
 """
+
 import pytest
-from pathlib import Path
 import pysam
 from typer.testing import CliRunner
 from krewlyzer.cli import app
-
 
 runner = CliRunner()
 
@@ -17,8 +16,8 @@ runner = CliRunner()
 def mock_bam_for_motif(tmp_path):
     """Create BAM with proper pairs for motif extraction."""
     bam = tmp_path / "test.bam"
-    header = {'HD': {'VN': '1.0'}, 'SQ': [{'LN': 2000, 'SN': 'chr1'}]}
-    
+    header = {"HD": {"VN": "1.0"}, "SQ": [{"LN": 2000, "SN": "chr1"}]}
+
     with pysam.AlignmentFile(str(bam), "wb", header=header) as outf:
         # Proper pair
         a = pysam.AlignedSegment()
@@ -33,7 +32,7 @@ def mock_bam_for_motif(tmp_path):
         a.next_reference_start = 200
         a.template_length = 167
         outf.write(a)
-        
+
         b = pysam.AlignedSegment()
         b.query_name = "read1"
         b.query_sequence = "TGCA" * 25
@@ -46,7 +45,7 @@ def mock_bam_for_motif(tmp_path):
         b.next_reference_start = 100
         b.template_length = -167
         outf.write(b)
-    
+
     pysam.index(str(bam))
     return bam
 
@@ -63,10 +62,11 @@ def mock_reference(tmp_path):
 
 import re
 
+
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from text."""
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    return ansi_escape.sub('', text)
+    ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+    return ansi_escape.sub("", text)
 
 
 @pytest.mark.integration
@@ -83,17 +83,26 @@ def test_motif_cli_help():
 def test_motif_extraction(tmp_path, mock_bam_for_motif, mock_reference):
     """Test basic motif extraction."""
     output_dir = tmp_path / "output"
-    
-    result = runner.invoke(app, [
-        "motif", "-i", str(mock_bam_for_motif),
-        "-r", str(mock_reference),
-        "-o", str(output_dir),
-        "-s", "test",
-        "--kmer", "4"
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "motif",
+            "-i",
+            str(mock_bam_for_motif),
+            "-r",
+            str(mock_reference),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+            "--kmer",
+            "4",
+        ],
+    )
+
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    
+
     # Check outputs exist
     assert (output_dir / "test.EndMotif.tsv").exists()
     assert (output_dir / "test.BreakPointMotif.tsv").exists()
@@ -104,21 +113,30 @@ def test_motif_extraction(tmp_path, mock_bam_for_motif, mock_reference):
 def test_motif_mds_score(tmp_path, mock_bam_for_motif, mock_reference):
     """Test MDS score calculation."""
     output_dir = tmp_path / "output"
-    
-    result = runner.invoke(app, [
-        "motif", "-i", str(mock_bam_for_motif),
-        "-r", str(mock_reference),
-        "-o", str(output_dir),
-        "-s", "test"
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "motif",
+            "-i",
+            str(mock_bam_for_motif),
+            "-r",
+            str(mock_reference),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+        ],
+    )
+
     assert result.exit_code == 0
-    
+
     mds_file = output_dir / "test.MDS.tsv"
     assert mds_file.exists()
-    
+
     # MDS should be between 0 and 1
     import pandas as pd
+
     df = pd.read_csv(mds_file, sep="\t")
     if "mds" in df.columns:
         mds = df["mds"].iloc[0]

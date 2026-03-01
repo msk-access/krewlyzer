@@ -6,7 +6,7 @@ Get running with Krewlyzer in 5 minutes.
 
 === "Docker (Recommended)"
     ```bash
-    docker pull ghcr.io/msk-access/krewlyzer:0.5.2
+    docker pull ghcr.io/msk-access/krewlyzer:X.Y.Z  # Replace X.Y.Z with latest release version
     ```
 
 === "Clone + Install"
@@ -40,13 +40,22 @@ krewlyzer run-all sample.bam \
 
 ```bash
 ls results/
-# sample.bed.gz            # Extracted fragments
-# sample.EndMotif.tsv      # End motif frequencies
-# sample.FSC.tsv           # Fragment size coverage
-# sample.FSR.tsv           # Fragment size ratios
-# sample.FSD.tsv           # Size distribution by arm
-# sample.WPS.tsv.gz        # Windowed protection scores
-# sample.OCF.tsv           # Orientation-aware fragmentation
+# sample.bed.gz                    # Extracted fragments
+# sample.metadata.json             # Run metadata and QC metrics
+# sample.correction_factors.tsv    # GC correction factors
+# sample.EndMotif.tsv              # End motif frequencies
+# sample.EndMotif1mer.tsv          # 1-mer motifs + Jagged Index
+# sample.BreakPointMotif.tsv       # Breakpoint motif frequencies
+# sample.MDS.tsv                   # Motif Diversity Score
+# sample.FSC.tsv                   # Fragment size coverage
+# sample.FSR.tsv                   # Fragment size ratios
+# sample.FSD.tsv                   # Size distribution by arm
+# sample.WPS.parquet               # Windowed protection scores
+# sample.WPS_background.parquet    # WPS background (Alu)
+# sample.OCF.tsv                   # Orientation-aware fragmentation
+# sample.TFBS.tsv                  # TFBS entropy (808 TFs)
+# sample.ATAC.tsv                  # ATAC entropy (23 cancer types)
+# sample.features.json             # Unified JSON for ML
 ```
 
 ## Common Workflows

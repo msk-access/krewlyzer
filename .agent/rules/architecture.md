@@ -1,3 +1,8 @@
+---
+description: Krewlyzer architecture reference — Rust/Python boundary, module table, PON patterns, parallelization
+alwaysApply: true
+---
+
 # Krewlyzer Architecture Reference
 
 ## Rust/Python Boundary Rules
@@ -12,19 +17,29 @@
 | Interval tree lookups | |
 | Fragment counting/aggregation | |
 
+## Rust Modules (19 total)
+
 | Module | Purpose |
 |--------|---------|
+| `lib.rs` | PyO3 module exports and thread config |
+| `pipeline.rs` | Single-pass FSC/FSD/WPS/OCF |
+| `engine.rs` | Core engine utilities |
+| `bed.rs` | BGZF/gzip BED reader |
 | `extract_motif.rs` | BAM parsing, fragment extraction |
 | `motif_utils.rs` | Shared 4-mer encoding, MDS calculation, GC content |
-| `region_mds.rs` | Per-region MDS at exon/gene level |
-| `region_entropy.rs` | TFBS/ATAC entropy + PON z-score |
-| `pipeline.rs` | Single-pass FSC/FSD/WPS/OCF |
-| `gc_correction.rs` | LOESS GC bias correction |
-| `gc_reference.rs` | Pre-computed GC reference generation |
 | `fsc.rs` | Fragment size coverage + gene aggregation |
 | `fsd.rs` | Size distribution + PON log-ratio |
 | `wps.rs` | Windowed protection score + PON z-score |
 | `ocf.rs` | Orientation-aware fragmentation + PON z-score |
+| `mfsd.rs` | Mutant fragment size distribution |
+| `region_mds.rs` | Per-region MDS at exon/gene level |
+| `region_entropy.rs` | TFBS/ATAC entropy + PON z-score |
+| `uxm.rs` | Fragment-level methylation |
+| `gc_correction.rs` | LOESS GC bias correction |
+| `gc_reference.rs` | Pre-computed GC reference generation |
+| `pon_model.rs` | PON model loading and hybrid correction |
+| `pon_builder.rs` | PON model construction |
+| `filters.rs` | Fragment filtering logic |
 
 ## PON Z-Score Pattern
 
@@ -76,10 +91,12 @@ with ProcessPoolExecutor(max_workers=parallel_samples) as executor:
 
 Within each sample, regions are processed in parallel using Rayon:
 
-| Module | Line | Pattern |
-|--------|------|---------|
-| `wps.rs` | 834 | `.par_iter()` over anchor regions |
-| `region_entropy.rs` | 222 | `.par_iter()` over TFBS/ATAC labels |
+| Module | Pattern |
+|--------|---------|
+| `wps.rs` | `.par_iter()` over anchor regions |
+| `region_entropy.rs` | `.par_iter()` over TFBS/ATAC labels |
+| `fsc.rs` | `.par_iter()` for gene aggregation |
+| `region_mds.rs` | `.par_iter()` over gene regions |
 
 ```rust
 // Example: WPS region parallelization
@@ -114,4 +131,3 @@ _core.configure_threads(num_threads)  # Sets Rayon thread pool size
 | `aggregate_by_gene()` | Counts fragments per gene/region with GC correction |
 | Output | `FSC.gene.tsv`, `FSC.regions.tsv` |
 | Uses | On-target GC factors for panel mode |
-

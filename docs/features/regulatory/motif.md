@@ -74,7 +74,7 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `{sample}.EndMotif.tsv` | K-mer frequencies at fragment 5' ends |
 | `{sample}.BreakPointMotif.tsv` | K-mer frequencies flanking breakpoints |
 | `{sample}.MDS.tsv` | Motif Diversity Score |
-| `{sample}.EndMotif1mer.tsv` | **NEW** 1-mer frequencies with C-end fraction (Jagged Index) |
+| `{sample}.EndMotif1mer.tsv` | 1-mer frequencies with C-end fraction (Jagged Index) |
 
 ---
 
