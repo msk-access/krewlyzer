@@ -222,7 +222,7 @@ impl FragmentConsumer for FsdConsumer {
     fn consume(&mut self, fragment: &Fragment) {
         // Length check [65, 400)
         let len = fragment.length;
-        if len >= 65 && len < 400 {
+        if (65..400).contains(&len) {
             let bin_idx = ((len - 65) / 5) as usize;
             if bin_idx >= 67 { return; }
             
@@ -251,11 +251,9 @@ impl FragmentConsumer for FsdConsumer {
                             hist[bin_idx] += weight;
                             self.totals_on[idx] += weight;
                         }
-                    } else {
-                        if let Some(hist) = self.histograms_off.get_mut(idx) {
-                            hist[bin_idx] += weight;
-                            self.totals_off[idx] += weight;
-                        }
+                    } else if let Some(hist) = self.histograms_off.get_mut(idx) {
+                        hist[bin_idx] += weight;
+                        self.totals_off[idx] += weight;
                     }
                 });
             }
@@ -525,7 +523,7 @@ fn load_fsd_baseline_from_parquet(path: &Path) -> Result<FsdBaseline> {
         
         let size_bin = row.get_int(
             row.get_column_iter().position(|(name, _)| name == "size_bin").unwrap_or(0)
-        ).unwrap_or(0) as i32;
+        ).unwrap_or(0);
         
         let expected = row.get_double(
             row.get_column_iter().position(|(name, _)| name == "expected").unwrap_or(0)

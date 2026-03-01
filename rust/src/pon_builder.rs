@@ -38,7 +38,7 @@ fn median(data: &mut Vec<f64>) -> f64 {
     }
     data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let mid = data.len() / 2;
-    if data.len() % 2 == 0 {
+    if data.len().is_multiple_of(2) {
         (data[mid - 1] + data[mid]) / 2.0
     } else {
         data[mid]
@@ -113,7 +113,7 @@ pub fn compute_gc_bias_model(py: Python<'_>, all_gc_data: Vec<pyo3::Bound<'_, Py
         
         // Bin by GC
         for (i, &gc_val) in gc_arr.iter().enumerate() {
-            if gc_val.is_nan() || gc_val <= 0.0 || gc_val < GC_BIN_START || gc_val >= GC_BIN_END {
+            if gc_val.is_nan() || gc_val <= 0.0 || !(GC_BIN_START..GC_BIN_END).contains(&gc_val) {
                 continue;
             }
             
@@ -240,9 +240,9 @@ pub fn compute_fsd_baseline(py: Python<'_>, fsd_paths: Vec<String>) -> PyResult<
                 
                 arm_data
                     .entry(arm.clone())
-                    .or_insert_with(HashMap::new)
+                    .or_default()
                     .entry(*size)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push(value);
             }
         }
@@ -427,7 +427,7 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
                 if let Some(idx) = nuc_idx {
                     if let Some(vec) = extract_wps_vector(batch.column(idx).as_ref(), i) {
                         region_nuc_vectors.entry(region_id.clone())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(vec);
                     }
                 }
@@ -436,7 +436,7 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
                 if let Some(idx) = tf_idx {
                     if let Some(vec) = extract_wps_vector(batch.column(idx).as_ref(), i) {
                         region_tf_vectors.entry(region_id)
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push(vec);
                     }
                 }
@@ -551,7 +551,7 @@ pub fn compute_region_mds_baseline(py: Python<'_>, mds_paths: Vec<String>) -> Py
                 if let Some(val_str) = fields.get(idx) {
                     if let Ok(val) = val_str.parse::<f64>() {
                         if !val.is_nan() && val > 0.0 {
-                            gene_mds.entry(gene.clone()).or_insert_with(Vec::new).push(val);
+                            gene_mds.entry(gene.clone()).or_default().push(val);
                         }
                     }
                 }
@@ -562,7 +562,7 @@ pub fn compute_region_mds_baseline(py: Python<'_>, mds_paths: Vec<String>) -> Py
                 if let Some(val_str) = fields.get(idx) {
                     if let Ok(val) = val_str.parse::<f64>() {
                         if !val.is_nan() && val > 0.0 {
-                            gene_mds_e1.entry(gene).or_insert_with(Vec::new).push(val);
+                            gene_mds_e1.entry(gene).or_default().push(val);
                         }
                     }
                 }

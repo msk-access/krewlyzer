@@ -3,12 +3,11 @@ Integration tests for FSR (Fragment Size Ratio) CLI.
 
 Tests the standalone fsr command.
 """
+
 import pytest
 import pysam
-from pathlib import Path
 from typer.testing import CliRunner
 from krewlyzer.cli import app
-
 
 runner = CliRunner()
 
@@ -29,7 +28,7 @@ def sample_bedgz(tmp_path):
             else:
                 length = 300  # long
             f.write(f"chr1\t{start}\t{start + length}\t0.50\n")
-    
+
     bedgz = tmp_path / "sample.bed.gz"
     pysam.tabix_compress(str(bed), str(bedgz), force=True)
     pysam.tabix_index(str(bedgz), preset="bed", force=True)
@@ -57,17 +56,24 @@ def test_fsr_cli_help():
 def test_fsr_basic_run(tmp_path, sample_bedgz, sample_bins):
     """Test basic FSR execution."""
     output_dir = tmp_path / "output"
-    
-    result = runner.invoke(app, [
-        "fsr", str(sample_bedgz),
-        "-b", str(sample_bins),
-        "-o", str(output_dir),
-        "-s", "test_sample",
-        "--no-gc-correct"  # Disable GC correction for testing
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "fsr",
+            str(sample_bedgz),
+            "-b",
+            str(sample_bins),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test_sample",
+            "--no-gc-correct",  # Disable GC correction for testing
+        ],
+    )
+
     assert result.exit_code == 0, f"CLI failed: {result.output}"
-    
+
     # Check output exists
     fsr_out = output_dir / "test_sample.FSR.tsv"
     assert fsr_out.exists(), "FSR output missing"
@@ -78,21 +84,28 @@ def test_fsr_basic_run(tmp_path, sample_bedgz, sample_bins):
 def test_fsr_output_format(tmp_path, sample_bedgz, sample_bins):
     """Test FSR output format."""
     import pandas as pd
-    
+
     output_dir = tmp_path / "output"
-    
-    result = runner.invoke(app, [
-        "fsr", str(sample_bedgz),
-        "-b", str(sample_bins),
-        "-o", str(output_dir),
-        "-s", "test_sample",
-        "--no-gc-correct"  # Disable GC correction for testing
-    ])
-    
+
+    result = runner.invoke(
+        app,
+        [
+            "fsr",
+            str(sample_bedgz),
+            "-b",
+            str(sample_bins),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test_sample",
+            "--no-gc-correct",  # Disable GC correction for testing
+        ],
+    )
+
     assert result.exit_code == 0
-    
+
     fsr_out = output_dir / "test_sample.FSR.tsv"
     df = pd.read_csv(fsr_out, sep="\t")
-    
+
     # FSR output should have rows
     assert len(df) > 0, "FSR output is empty"

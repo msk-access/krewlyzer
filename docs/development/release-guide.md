@@ -67,7 +67,7 @@ git branch --show-current
 
 ```bash
 VERSION="X.Y.Z"
-OLD_VERSION="0.3.2"  # Current version
+OLD_VERSION="A.B.C"  # Current version before bump
 
 # Python
 sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/g" src/krewlyzer/__init__.py
@@ -115,7 +115,8 @@ grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
 ```
 
 !!! warning "No :latest Tag"
-    We do NOT publish a `:latest` tag. Always use explicit version tags like `:0.5.2`.
+    We do NOT publish a `:latest` tag. Always use explicit version tags (e.g., `:0.5.3`).
+    Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
 
 ---
 

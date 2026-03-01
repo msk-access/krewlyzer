@@ -23,9 +23,9 @@ nextflow run msk-access/krewlyzer \
 
 With samplesheet:
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
-ACCESS_001,/data/sample1.bam,,,,,false,XS2,,
-ACCESS_002,/data/sample2.bam,,,,,false,XS2,,
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+ACCESS_001,/data/sample1.bam,,,,,,false,XS2,,
+ACCESS_002,/data/sample2.bam,,,,,,false,XS2,,
 ```
 
 ## With Variant Analysis
@@ -39,9 +39,9 @@ nextflow run msk-access/krewlyzer \
 
 With samplesheet:
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
-SAMPLE_001,/data/sample1.bam,,,/data/variants.vcf,,,XS2,,
-SAMPLE_002,/data/sample2.bam,,,,/data/cohort.maf,false,XS2,,
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+SAMPLE_001,/data/sample1.bam,,,/data/variants.vcf,,,,XS2,,
+SAMPLE_002,/data/sample2.bam,,,,,,/data/cohort.maf,false,XS2,,
 ```
 
 ## Using Docker

@@ -129,7 +129,9 @@ workflow TOOL_LEVEL {
     // =====================================================
     // 4. mFSD (Mutant Fragment Size Distribution)
     // =====================================================
-    KREWLYZER_MFSD(ch_mfsd)
+    // mFSD: pass FASTA for runtime GC correction; pre-computed factors are not
+    // available in tool-level mode (run-all generates them during extraction)
+    KREWLYZER_MFSD(ch_mfsd, fasta, [])
     ch_versions = ch_versions.mix(KREWLYZER_MFSD.out.versions)
 
     emit:
@@ -139,7 +141,7 @@ workflow TOOL_LEVEL {
     wps      = KREWLYZER_WPS.out.parquet
     ocf      = KREWLYZER_OCF.out.tsv
     mds      = KREWLYZER_MOTIF.out.mds
-    mfsd     = KREWLYZER_MFSD.out.tsv
+    mfsd     = KREWLYZER_MFSD.out.mfsd
     uxm      = KREWLYZER_UXM.out.tsv
     versions = ch_versions
 }

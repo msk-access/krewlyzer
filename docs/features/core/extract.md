@@ -25,7 +25,7 @@ flowchart LR
     
     RUST --> BED["sample.bed.gz"]
     RUST --> META["metadata.json"]
-    RUST --> FACTORS["correction_factors.csv"]
+    RUST --> FACTORS["correction_factors.tsv"]
     
     subgraph "With --target-regions"
         TARGETS[Target BED] --> RUST
@@ -77,16 +77,18 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `{sample}.bed.gz` | Block-gzipped BED with fragment coordinates + GC |
 | `{sample}.bed.gz.tbi` | Tabix index for random access |
 | `{sample}.metadata.json` | Run statistics and configuration |
-| `{sample}.correction_factors.csv` | GC correction factors (with --gc-correct) |
+| `{sample}.correction_factors.tsv` | GC correction factors (with --gc-correct) |
 
 ### GC Correction Factors Format
 
 | Column | Description |
 |--------|-------------|
-| gc_bin | GC content bin (0.00-1.00) |
-| short_factor | Correction for short fragments (65-149bp) |
-| intermediate_factor | Correction for intermediate (150-220bp) |
-| long_factor | Correction for long fragments (221-400bp) |
+| `len_bin` | Fragment length bin (0-16) |
+| `gc_bin` | GC content (0.00-1.00) |
+| `factor` | Correction multiplier |
+| `observed` | Raw fragment count |
+| `expected` | LOESS-predicted count |
+| `n_fragments` | Number of fragments in bin |
 
 ---
 
@@ -127,11 +129,11 @@ flowchart TB
 | Output | Description |
 |--------|-------------|
 | `correction_factors.tsv` | GC factors from **off-target only** (unbiased) |
-| `correction_factors.ontarget.csv` | GC factors from **on-target only** (for mFSD) |
+| `correction_factors.ontarget.tsv` | GC factors from **on-target only** (for mFSD) |
 | `sample.bed.gz` | All fragments (on + off-target) |
 
 !!! tip
-    Use `.correction_factors.ontarget.csv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
+    Use `.correction_factors.ontarget.tsv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
 
 !!! important
     The BED file contains all fragments. Target filtering happens **per-tool** using the same `--target-regions` flag in FSC, FSD, WPS, etc.

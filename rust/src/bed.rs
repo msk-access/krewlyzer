@@ -82,7 +82,7 @@ impl FragmentCounts {
     }
     
     pub fn add_fragment(&mut self, length: u32) {
-        if length >= 65 && length <= 400 {
+        if (65..=400).contains(&length) {
             self.total += 1;
             
             if length <= 150 {

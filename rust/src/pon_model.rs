@@ -162,7 +162,7 @@ impl FsdBaseline {
     pub fn get_stats(&self, arm: &str, size: i32) -> Option<(f64, f64)> {
         self.arms.get(arm).map(|baseline| {
             (baseline.get_expected(size), 
-             baseline.std.get(0).copied().unwrap_or(1.0))
+             baseline.std.first().copied().unwrap_or(1.0))
         })
     }
 }

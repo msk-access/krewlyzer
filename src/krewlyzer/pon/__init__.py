@@ -10,19 +10,19 @@ Provides unified PON model format for:
 
 from .model import PonModel, GcBiasModel, FsdBaseline, WpsBaseline
 from .validation import (
-    validate_panel_config, 
+    validate_panel_config,
     calculate_on_target_rate,
     ValidationResult,
     print_validation_warnings,
 )
 
 __all__ = [
-    "PonModel", 
-    "GcBiasModel", 
-    "FsdBaseline", 
+    "PonModel",
+    "GcBiasModel",
+    "FsdBaseline",
     "WpsBaseline",
     "validate_panel_config",
-    "calculate_on_target_rate", 
+    "calculate_on_target_rate",
     "ValidationResult",
     "print_validation_warnings",
 ]

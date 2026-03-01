@@ -26,6 +26,7 @@ See [run-all](run-all.md) for the unified command that runs all features.
 | `mfsd` | Mutant Fragment Size Distribution |
 | `uxm` | Fragment-level Methylation |
 | `build-pon` | Build Panel of Normals |
+| `build-gc-reference` | Build GC reference assets |
 
 ## See Also
 

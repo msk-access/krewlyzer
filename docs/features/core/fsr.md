@@ -31,10 +31,6 @@ flowchart LR
     end
     
     RATIO --> FSR["FSR.tsv"]
-    
-    subgraph "With --target-regions"
-        RUST --> FSR_ON["FSR.ontarget.tsv"]
-    end
 ```
 
 ### Python/Rust Architecture
@@ -209,12 +205,11 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 
 | File | Contents | Use Case |
 |------|----------|----------|
-| `{sample}.FSR.tsv` | **Off-target** fragments | Unbiased ratio (primary) |
-| `{sample}.FSR.ontarget.tsv` | **On-target** fragments | Gene-level ratio |
+| `{sample}.FSR.tsv` | **Off-target** fragment ratios | Unbiased ratio (primary biomarker) |
 
 !!! important
-    **Off-target = unbiased** – preferred for tumor detection.  
-    **On-target = capture-biased** – reflects panel design, not true biology.
+    FSR is computed from **off-target FSC counts** and does not produce a separate `.ontarget.tsv` file.
+    Off-target fragments provide unbiased short/long ratios for tumor detection.
 
 ---
 

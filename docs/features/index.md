@@ -11,11 +11,11 @@ Krewlyzer provides 11 standalone feature extraction commands plus a unified `run
 | [`fsc`](core/fsc.md) | BED.gz | `.FSC.tsv` | Copy number detection |
 | [`fsr`](core/fsr.md) | BED.gz | `.FSR.tsv` | Tumor fraction estimation |
 | [`fsd`](core/fsd.md) | BED.gz | `.FSD.tsv` | Size distribution analysis |
-| [`wps`](core/wps.md) | BED.gz | `.WPS.tsv.gz` | Nucleosome positioning |
+| [`wps`](core/wps.md) | BED.gz | `.WPS.parquet` | Nucleosome positioning |
 | [`ocf`](regulatory/ocf.md) | BED.gz | `.OCF.tsv` | Tissue of origin |
 | [`region-entropy`](regulatory/region-entropy.md) | BED.gz | `.TFBS.tsv`, `.ATAC.tsv` | Regulatory region analysis |
 | [`uxm`](methylation/uxm.md) | Bisulfite BAM | `.UXM.tsv` | Methylation deconvolution |
-| [`mfsd`](core/fsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
+| [`mfsd`](variant/mfsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
 | `run-all` | BAM | All outputs | Complete analysis |
 
 ---
@@ -43,7 +43,7 @@ flowchart LR
         fsc --> FSC[.FSC.tsv]
         fsr --> FSR[.FSR.tsv]
         fsd --> FSD[.FSD.tsv]
-        wps --> WPS[.WPS.tsv.gz]
+        wps --> WPS[.WPS.parquet]
         ocf --> OCF[.OCF.tsv]
         motif --> MOTIF[.EndMotif.tsv]
         mfsd --> MFSD[.mFSD.tsv]
@@ -51,7 +51,9 @@ flowchart LR
     end
     
     BED --> tfbs[region-entropy]
+    BAM --> rmds[region-mds]
     tfbs --> TFBS[.TFBS.tsv / .ATAC.tsv]
+    rmds --> RMDS2[.MDS.exon.tsv / .MDS.gene.tsv]
 ```
 
 ---
@@ -124,7 +126,6 @@ All feature commands share these core options:
 | `-G, --genome` | Genome build: hg19/hg38 |
 | `-t, --threads` | Thread count (0=all) |
 | `-v, --verbose` | Enable verbose logging |
-| `-f, --format` | Output format: tsv, parquet, json |
 
 See individual feature pages for command-specific options, or [JSON Output](output/json-output.md) for format details.
 

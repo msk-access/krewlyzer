@@ -68,6 +68,7 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `bam_input` | | PATH | *required* | Input BAM file (indexed) |
 | `reference` | | PATH | *required* | Reference genome FASTA |
 | `output` | | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name (default: derived from BAM filename) |
 | `--gene-bed` | `-g` | PATH | | Custom gene/exon BED file |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--assay` | `-a` | TEXT | | Assay code (xs1, xs2, wgs) for bundled gene BED |

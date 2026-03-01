@@ -1,3 +1,8 @@
+---
+description: Krewlyzer development guide — project structure, build commands, QC checklist, code quality standards
+alwaysApply: true
+---
+
 # Krewlyzer Development Guide
 
 ## Quick Start
@@ -32,8 +37,10 @@ krewlyzer/
 │   │   └── ...          # Other modules
 │   └── Cargo.toml
 ├── nextflow/            # Nextflow pipeline
-│   ├── workflows/
-│   └── modules/
+│   ├── main.nf
+│   ├── nextflow.config
+│   ├── modules/local/   # Per-tool NF modules
+│   └── subworkflows/    # Subworkflows
 ├── tests/               # Test suite
 └── docs/                # MkDocs documentation
 ```

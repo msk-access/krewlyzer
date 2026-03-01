@@ -42,6 +42,7 @@ process KREWLYZER_REGION_MDS {
         $bam \\
         $fasta \\
         ./ \\
+        --sample-name $prefix \\
         $genome_arg \\
         $assay_arg \\
         $pon_arg \\
@@ -49,18 +50,6 @@ process KREWLYZER_REGION_MDS {
         $verbose_arg \\
         $silent_arg \\
         $args
-
-    # Rename outputs to include sample prefix if needed
-    if [ -f "*.MDS.exon.tsv" ] && [ ! -f "${prefix}.MDS.exon.tsv" ]; then
-        for f in *.MDS.exon.tsv; do
-            mv "\$f" "${prefix}.MDS.exon.tsv"
-        done
-    fi
-    if [ -f "*.MDS.gene.tsv" ] && [ ! -f "${prefix}.MDS.gene.tsv" ]; then
-        for f in *.MDS.gene.tsv; do
-            mv "\$f" "${prefix}.MDS.gene.tsv"
-        done
-    fi
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

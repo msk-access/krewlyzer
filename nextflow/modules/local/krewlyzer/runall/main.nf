@@ -36,6 +36,7 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.FSC.gene.tsv"),         emit: fsc_gene, optional: true
     tuple val(meta), path("*.FSC.regions.tsv"),      emit: fsc_regions, optional: true
     tuple val(meta), path("*.FSC.regions.e1only.tsv"), emit: fsc_e1, optional: true
+    tuple val(meta), path("*.fsc_counts.tsv"),         emit: fsc_counts, optional: true
     
     // FSR outputs
     tuple val(meta), path("*.FSR.tsv"),              emit: fsr, optional: true
@@ -122,6 +123,7 @@ process KREWLYZER_RUNALL {
     def skip_dup_arg = params.skip_duplicates == false ? "--no-skip-duplicates" : ""
     def proper_pair_arg = params.require_proper_pair == false ? "--no-require-proper-pair" : ""
     def duplex_arg = params.duplex ? "--duplex" : ""
+    def min_baseq_arg = params.min_baseq != 20 ? "--min-baseq ${params.min_baseq}" : ""
     def bait_padding_arg = params.bait_padding != 50 ? "--bait-padding ${params.bait_padding}" : ""
     
     // Skip/disable flags
@@ -159,6 +161,7 @@ process KREWLYZER_RUNALL {
         $skip_dup_arg \\
         $proper_pair_arg \\
         $duplex_arg \\
+        $min_baseq_arg \\
         $bait_padding_arg \\
         $skip_pon_arg \\
         $pon_variant_arg \\
@@ -188,10 +191,18 @@ process KREWLYZER_RUNALL {
     touch ${prefix}.WPS.parquet
     touch ${prefix}.WPS_background.parquet
     touch ${prefix}.OCF.tsv
+    touch ${prefix}.OCF.sync.tsv
     touch ${prefix}.EndMotif.tsv
-    touch ${prefix}.BreakpointMotif.tsv
+    touch ${prefix}.EndMotif1mer.tsv
+    touch ${prefix}.BreakPointMotif.tsv
     touch ${prefix}.MDS.tsv
+    touch ${prefix}.TFBS.tsv
+    touch ${prefix}.ATAC.tsv
     touch ${prefix}.correction_factors.tsv
+    touch ${prefix}.fsc_counts.tsv
+    touch ${prefix}.mFSD.tsv
+    touch ${prefix}.MDS.exon.tsv
+    touch ${prefix}.MDS.gene.tsv
     echo '{"sample_id":"${prefix}","total_fragments":0}' > ${prefix}.metadata.json
 
     cat <<-END_VERSIONS > versions.yml

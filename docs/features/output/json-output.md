@@ -15,28 +15,37 @@ This generates `{sample}.features.json` alongside the standard TSV/Parquet outpu
 
 ```json
 {
+  "schema_version": "1.0",
   "sample_id": "sample_001",
+  "krewlyzer_version": "0.5.3",
+  "timestamp": "2024-01-20T00:00:00",
   "metadata": {
     "genome": "hg19",
     "assay": "xs2",
     "panel_mode": true,
-    "on_target_rate": 0.45,
-    "timestamp": "2024-01-20T00:00:00"
+    "on_target_rate": 0.45
   },
-  "fsc": { ... },
-  "fsc_gene": { ... },
-  "fsc_region": { ... },
-  "fsc_region_e1": { ... },
-  "fsr": { ... },
-  "fsd": { ... },
-  "wps": { ... },
-  "wps_panel": { ... },
-  "wps_background": { ... },
-  "motif": { ... },
-  "ocf": { ... },
-  "tfbs": { ... },
-  "atac": { ... },
-  "gc_factors": { ... }
+  "features": {
+    "fsc": { ... },
+    "fsc_gene": { ... },
+    "fsc_region": { ... },
+    "fsc_region_e1": { ... },
+    "fsc_counts": { ... },
+    "fsr": { ... },
+    "fsd": { ... },
+    "wps": { ... },
+    "wps_panel": { ... },
+    "wps_background": { ... },
+    "motif": { ... },
+    "ocf": { ... },
+    "tfbs": { ... },
+    "atac": { ... },
+    "gc_factors": { ... },
+    "mfsd": { ... },
+    "region_mds": { ... },
+    "uxm": { ... }
+  },
+  "qc": { ... }
 }
 ```
 
@@ -447,7 +456,6 @@ out/
 ├── sample.FSD.tsv                   # Fragment size distribution (arm-level)
 ├── sample.FSD.ontarget.tsv          # Panel mode: on-target FSD
 ├── sample.FSR.tsv                   # Fragment size ratio (short/long)
-├── sample.FSR.ontarget.tsv          # Panel mode: on-target FSR
 ├── sample.FSC.tsv                   # Fragment size coverage (bin-level)
 ├── sample.FSC.ontarget.tsv          # Panel mode: on-target FSC
 ├── sample.FSC.gene.tsv              # Gene-level FSC (with --assay)

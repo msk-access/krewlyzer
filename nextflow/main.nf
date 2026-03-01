@@ -53,6 +53,7 @@ def helpMessage() {
      --minlen          Min fragment length (default: 65)
      --maxlen          Max fragment length (default: 1000)
      --generate_json   Generate unified sample.features.json (default: true)
+     --min_baseq       Minimum base quality for mFSD (default: 20)
      
      Panel Mode:
      --skip_pon        Skip PON z-score normalization

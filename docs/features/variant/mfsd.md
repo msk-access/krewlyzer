@@ -72,7 +72,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output_dir/
 
 # With MAF file and GC correction
 krewlyzer mfsd -i sample.bam -V variants.maf -o output/ \
-    -r hg19.fa --correction-factors factors.csv
+    -r hg19.fa --correction-factors factors.tsv
 
 # With per-variant distributions
 krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
@@ -130,6 +130,12 @@ ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/
 | `--output-distributions` | `-d` | FLAG | | Output per-variant size distributions |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+
+---
+
+!!! note "Base Quality Filtering"
+    Base quality filtering (`--min-baseq`) is available when mFSD is invoked via `krewlyzer run-all --min-baseq <N>`.
+    The standalone `krewlyzer mfsd` command does not expose this flag directly.
 
 ---
 

@@ -27,14 +27,14 @@ from . import wps_processor
 from . import gene_bed
 
 __all__ = [
-    'get_logger',
-    'set_verbose',
-    'check_bam_compatibility',
-    'pon_integration',
-    'fsc_processor',
-    'fsr_processor',
-    'motif_processor',
-    'fsd_processor',
-    'wps_processor',
-    'gene_bed',
+    "get_logger",
+    "set_verbose",
+    "check_bam_compatibility",
+    "pon_integration",
+    "fsc_processor",
+    "fsr_processor",
+    "motif_processor",
+    "fsd_processor",
+    "wps_processor",
+    "gene_bed",
 ]

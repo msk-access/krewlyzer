@@ -7,26 +7,26 @@ Tests cover:
 - Savitzky-Golay smoothing
 - FFT periodicity extraction
 """
+
 import pytest
 import numpy as np
-from pathlib import Path
-
 
 # ============================================================================
 # WPS Formula Tests
 # ============================================================================
 
+
 @pytest.mark.unit
 def test_wps_calculation_formula():
     """Test WPS score calculation formula.
-    
+
     WPS = fragments_spanning_window - fragments_with_endpoint_in_window
     """
     spanning = 10
     endpoints = 3
-    
+
     wps = spanning - endpoints
-    
+
     assert wps == 7
 
 
@@ -35,9 +35,9 @@ def test_wps_negative_score():
     """Test WPS can be negative (more endpoints than spanning)."""
     spanning = 2
     endpoints = 5
-    
+
     wps = spanning - endpoints
-    
+
     assert wps == -3
     assert wps < 0
 
@@ -47,26 +47,26 @@ def test_wps_ratio_calculation():
     """Test WPS long/short ratio calculation."""
     wps_long = 100
     wps_short = 50
-    
+
     ratio = wps_long / wps_short if wps_short != 0 else 0
-    
+
     assert ratio == 2.0
 
 
 @pytest.mark.unit
 def test_wps_depth_normalization():
     """Test WPS depth normalization formula.
-    
+
     Formula: wps_norm = wps_raw / (total_fragments / 1_000_000)
     """
     wps_raw = 45
     total_fragments = 7_500_000
-    
+
     norm_factor = total_fragments / 1_000_000  # = 7.5
     wps_norm = wps_raw / norm_factor
-    
+
     expected = 45 / 7.5  # = 6.0
-    
+
     assert np.isclose(wps_norm, 6.0)
     assert np.isclose(wps_norm, expected)
 
@@ -75,9 +75,10 @@ def test_wps_depth_normalization():
 # Dual-Stream Weighted Fragment Classification Tests
 # ============================================================================
 
+
 def _nuc_weight(length: int) -> float:
     """Python reference implementation of nucleosome weight calculation.
-    
+
     Mirrors WpsConfig.nuc_weight() in Rust:
     - 1.0 for primary range [160, 175]
     - 0.5 for secondary range [120, 159] ∪ [176, 180]
@@ -93,7 +94,7 @@ def _nuc_weight(length: int) -> float:
 
 def _tf_weight(length: int) -> float:
     """Python reference implementation of TF weight calculation.
-    
+
     Mirrors WpsConfig.tf_weight() in Rust:
     - 1.0 for [35, 80]
     - 0.0 otherwise
@@ -119,7 +120,7 @@ def test_wps_nuc_weight_secondary_range():
     assert _nuc_weight(120) == 0.5
     assert _nuc_weight(140) == 0.5
     assert _nuc_weight(159) == 0.5
-    
+
     # Right secondary [176, 180]
     assert _nuc_weight(176) == 0.5
     assert _nuc_weight(180) == 0.5
@@ -156,11 +157,11 @@ def test_wps_fragment_dual_stream_independent():
     # Short fragments: TF only
     assert _nuc_weight(50) == 0.0
     assert _tf_weight(50) == 1.0
-    
+
     # Long fragments: Nuc only
     assert _nuc_weight(167) == 1.0
     assert _tf_weight(167) == 0.0
-    
+
     # Gap between ranges: neither stream
     assert _nuc_weight(100) == 0.0
     assert _tf_weight(100) == 0.0
@@ -177,9 +178,10 @@ def test_wps_fragment_dual_stream_independent():
 # Adaptive Bait Padding Tests
 # ============================================================================
 
+
 def _adaptive_trim(bait_start: int, bait_end: int, user_trim: int) -> int:
     """Python reference implementation of adaptive bait padding.
-    
+
     Mirrors the Rust check_position() logic:
     effective_trim = min(user_trim, bait_length / 4)
     """

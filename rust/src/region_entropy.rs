@@ -667,10 +667,8 @@ impl FragmentConsumer for TripleRegionEntropyConsumer {
             if let Some(ref mut on_target) = self.on_target {
                 on_target.consume(frag);
             }
-        } else {
-            if let Some(ref mut off_target) = self.off_target {
-                off_target.consume(frag);
-            }
+        } else if let Some(ref mut off_target) = self.off_target {
+            off_target.consume(frag);
         }
     }
 
