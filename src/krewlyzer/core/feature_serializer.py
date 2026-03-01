@@ -51,7 +51,7 @@ class FeatureSerializer:
     with complete data for ML pipelines.
     """
 
-    def __init__(self, sample_id: str, version: str = "0.5.3"):
+    def __init__(self, sample_id: str, version: str = "0.6.0"):
         self.sample_id = sample_id
         self.version = version
         self.metadata: Dict[str, Any] = {}
@@ -294,7 +294,7 @@ class FeatureSerializer:
 
     @classmethod
     def from_outputs(
-        cls, sample_id: str, output_dir: Path, version: str = "0.5.3"
+        cls, sample_id: str, output_dir: Path, version: str = "0.6.0"
     ) -> "FeatureSerializer":
         """
         Create FeatureSerializer by reading existing output files.
