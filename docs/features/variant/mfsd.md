@@ -389,12 +389,14 @@ $$
 
 | Column Group | Columns | Description |
 |--------------|---------|-------------|
-| **Variant Info** | Chrom, Pos, Ref, Alt, VarType | Variant details |
-| **Counts** | REF/ALT/NonREF/N_Count | Fragment counts per category |
-| **Mean Sizes** | REF/ALT/NonREF/N_MeanSize | Average fragment size |
-| **KS Tests** | Delta_*, KS_*, KS_Pval_* | Pairwise comparisons |
-| **Derived** | VAF_Proxy, Size_Ratio, Quality_Score | Computed metrics |
-| **Flags** | ALT_Confidence, KS_Valid | Quality indicators |
+| **Variant Info** (5) | `Chrom`, `Pos`, `Ref`, `Alt`, `VarType` | Variant coordinates and type |
+| **Raw Counts** (5) | `REF_Count`, `ALT_Count`, `NonREF_Count`, `N_Count`, `Total_Count` | Fragment counts per allele class |
+| **GC-Weighted Counts** (5) | `REF_Weighted`, `ALT_Weighted`, `NonREF_Weighted`, `N_Weighted`, `VAF_GC_Corrected` | GC-bias corrected counts and VAF |
+| **Log-Likelihood Ratio** (2) | `ALT_LLR`, `REF_LLR` | Log-likelihood ratios (useful for low-N duplex variants where KS unreliable) |
+| **Mean Sizes** (4) | `REF_MeanSize`, `ALT_MeanSize`, `NonREF_MeanSize`, `N_MeanSize` | Mean fragment size per allele class |
+| **KS Tests** (18) | `Delta_*/KS_*/KS_Pval_*` × 6 allele pairings | Kolmogorov–Smirnov distance + p-value for: ALT-REF, ALT-NonREF, REF-NonREF, ALT-N, REF-N, NonREF-N |
+| **Derived** (5) | `VAF_Proxy`, `Error_Rate`, `N_Rate`, `Size_Ratio`, `Quality_Score` | Computed summary biomarkers |
+| **Flags** (2) | `ALT_Confidence`, `KS_Valid` | Quality indicators (`HIGH`/`LOW`/`NONE`; TRUE/FALSE) |
 
 ### Optional: `{sample}.mFSD.distributions.tsv`
 
