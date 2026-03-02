@@ -19,13 +19,17 @@ sharing the expensive extraction logic.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, Any
 import logging
 import time
-import json
 from datetime import datetime
 
 import pandas as pd
+
+from .output_utils import (
+    read_table,
+    write_table,
+)  # Unified TSV/Parquet reader + writer for metadata
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
@@ -164,17 +168,20 @@ class SampleOutputs:
     # Feature outputs (paths from run_features)
     feature_outputs: Optional[FeatureOutputs] = None
 
-    # Motif data (in-memory for PON building)
+    # Motif data (in-memory for PON building).
+    # em_counts / bpm_counts: Dict[kmer_str, count] — e.g. {"ACGT": 1234, ...}
+    # gc_observations: Dict[gc_pct_bin, obs_count] — e.g. {0.45: 982, ...}
+    # These match the Dict types returned by the Rust ExtractionResult PyO3 object.
     mds_counts: Dict[str, float] = field(default_factory=dict)
     mds_score: float = 0.0
-    em_counts: List[int] = field(default_factory=list)
-    bpm_counts: List[int] = field(default_factory=list)
-    gc_observations: List[Any] = field(default_factory=list)
+    em_counts: Dict[str, int] = field(default_factory=dict)
+    bpm_counts: Dict[str, int] = field(default_factory=dict)
+    gc_observations: Dict[Any, Any] = field(default_factory=dict)
 
-    # On-target motif data (panel mode)
-    em_counts_ontarget: List[int] = field(default_factory=list)
-    bpm_counts_ontarget: List[int] = field(default_factory=list)
-    gc_observations_ontarget: List[Any] = field(default_factory=list)
+    # On-target motif data (panel mode) — same structure as off-target
+    em_counts_ontarget: Dict[str, int] = field(default_factory=dict)
+    bpm_counts_ontarget: Dict[str, int] = field(default_factory=dict)
+    gc_observations_ontarget: Dict[Any, Any] = field(default_factory=dict)
 
     # Region Entropy data (in-memory for PON building)
     # Dict[label, (count, mean_size, entropy)]
@@ -308,6 +315,9 @@ def extract_sample(
     )
 
     if is_panel_mode:
+        # target_regions is guaranteed non-None when is_panel_mode=True:
+        # is_panel_mode = target_regions is not None and target_regions.exists()
+        assert target_regions is not None  # narrows Optional[Path] → Path for mypy
         logger.info(f"  Panel mode: off-target GC from {target_regions.name}")
 
     # Note: exclude_regions is NOT auto-resolved here.
@@ -320,13 +330,13 @@ def extract_sample(
     bed_path = None
     bed_output_arg = None
     if write_bed:
+        assert output_dir is not None, "output_dir required when write_bed=True"
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         bed_path = output_dir / f"{sample_name}.bed.gz"
         bed_output_arg = str(bed_path)
 
     # Call Rust extraction engine
-    logger.debug("  Calling Rust extraction engine...")
     try:
         result = _core.extract_motif.process_bam_parallel(
             str(input_path),
@@ -428,6 +438,8 @@ def write_motif_outputs(
     *,
     pon: Optional[Any] = None,
     include_ontarget: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> Dict[str, Path]:
     """
     Write motif analysis files from extraction result.
@@ -436,21 +448,23 @@ def write_motif_outputs(
     from the extraction data. If a PON model is provided, computes and
     includes MDS z-score for comparison against healthy baseline.
 
-    Files written:
-    - {sample}.EndMotif.tsv: End motif k-mer frequencies
-    - {sample}.BreakPointMotif.tsv: Breakpoint motif frequencies
-    - {sample}.MDS.tsv: Motif Diversity Score (with z-score if PON)
+    Files written (extension determined by output_format):
+    - {sample}.EndMotif.tsv/.parquet: End motif k-mer frequencies
+    - {sample}.BreakPointMotif.tsv/.parquet: Breakpoint motif frequencies
+    - {sample}.MDS.tsv/.parquet: Motif Diversity Score (with z-score if PON)
 
     For panel mode (when include_ontarget=True and on-target data exists):
-    - {sample}.EndMotif.ontarget.tsv
-    - {sample}.BreakPointMotif.ontarget.tsv
-    - {sample}.MDS.ontarget.tsv
+    - {sample}.EndMotif.ontarget.tsv/.parquet
+    - {sample}.BreakPointMotif.ontarget.tsv/.parquet
+    - {sample}.MDS.ontarget.tsv/.parquet
 
     Args:
         result: ExtractionResult from extract_sample()
         output_dir: Output directory for files
         pon: Optional PonModel for MDS z-score computation
         include_ontarget: Write on-target files for panel mode
+        output_format: "tsv", "parquet", or "both" (default: "tsv")
+        compress: Gzip TSV output when True (default: False)
 
     Returns:
         Dict mapping output type to file path:
@@ -469,10 +483,18 @@ def write_motif_outputs(
     sample = result.sample_id
     outputs = {}
 
-    # Output file paths
-    edm_output = output_dir / f"{sample}.EndMotif.tsv"
-    bpm_output = output_dir / f"{sample}.BreakPointMotif.tsv"
-    mds_output = output_dir / f"{sample}.MDS.tsv"
+    # Output base paths (write_table adds the correct extension)
+    ext = (
+        ".parquet"
+        if output_format == "parquet"
+        else (".tsv.gz" if compress else ".tsv")
+    )
+    edm_base = output_dir / f"{sample}.EndMotif"
+    bpm_base = output_dir / f"{sample}.BreakPointMotif"
+    mds_base = output_dir / f"{sample}.MDS"
+    edm_output = edm_base.with_suffix(ext)
+    bpm_output = bpm_base.with_suffix(ext)
+    mds_output = mds_base.with_suffix(ext)
 
     logger.info(f"Writing motif outputs for {sample}")
 
@@ -480,12 +502,14 @@ def write_motif_outputs(
     total_em, total_bpm, mds = process_motif_outputs(
         em_counts=result.em_counts,
         bpm_counts=result.bpm_counts,
-        edm_output=edm_output,
-        bpm_output=bpm_output,
-        mds_output=mds_output,
+        edm_output=edm_base,
+        bpm_output=bpm_base,
+        mds_output=mds_base,
         sample_name=sample,
         kmer=result.kmer,
         include_headers=True,
+        output_format=output_format,
+        compress=compress,
     )
 
     outputs["edm"] = edm_output
@@ -499,12 +523,17 @@ def write_motif_outputs(
         mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
         logger.debug(f"  MDS z-score: {mds_z:.3f}")
 
-        # Append z-score to MDS file
+        # Append z-score to MDS file (Parquet-first read, same-format write)
         try:
-            mds_df = pd.read_csv(mds_output, sep="\t")
-            if "mds_z" not in mds_df.columns:
+            mds_df = read_table(mds_output)
+            if mds_df is not None and "mds_z" not in mds_df.columns:
                 mds_df["mds_z"] = mds_z
-                mds_df.to_csv(mds_output, sep="\t", index=False)
+                write_table(
+                    mds_df,
+                    Path(mds_output).with_suffix(""),
+                    output_format=output_format,
+                    compress=compress,
+                )
         except Exception as e:
             logger.debug(f"  Could not add MDS z-score: {e}")
 
@@ -514,24 +543,26 @@ def write_motif_outputs(
         and result.is_panel_mode
         and sum(result.em_counts_ontarget.values()) > 0
     ):
-        edm_on = output_dir / f"{sample}.EndMotif.ontarget.tsv"
-        bpm_on = output_dir / f"{sample}.BreakPointMotif.ontarget.tsv"
-        mds_on = output_dir / f"{sample}.MDS.ontarget.tsv"
+        edm_on_base = output_dir / f"{sample}.EndMotif.ontarget"
+        bpm_on_base = output_dir / f"{sample}.BreakPointMotif.ontarget"
+        mds_on_base = output_dir / f"{sample}.MDS.ontarget"
 
         total_em_on, total_bpm_on, mds_on_val = process_motif_outputs(
             em_counts=result.em_counts_ontarget,
             bpm_counts=result.bpm_counts_ontarget,
-            edm_output=edm_on,
-            bpm_output=bpm_on,
-            mds_output=mds_on,
+            edm_output=edm_on_base,
+            bpm_output=bpm_on_base,
+            mds_output=mds_on_base,
             sample_name=sample,
             kmer=result.kmer,
             include_headers=True,
+            output_format=output_format,
+            compress=compress,
         )
 
-        outputs["edm_ontarget"] = edm_on
-        outputs["bpm_ontarget"] = bpm_on
-        outputs["mds_ontarget"] = mds_on
+        outputs["edm_ontarget"] = edm_on_base.with_suffix(ext)
+        outputs["bpm_ontarget"] = bpm_on_base.with_suffix(ext)
+        outputs["mds_ontarget"] = mds_on_base.with_suffix(ext)
 
         logger.debug(
             f"  On-target: {total_em_on:,} EM, {total_bpm_on:,} BPM, MDS={mds_on_val:.4f}"
@@ -540,14 +571,16 @@ def write_motif_outputs(
     # Write 1-mer End Motif (Jagged Index / C-end fraction)
     from .motif_processor import write_end_motif_1mer
 
-    edm_1mer_output = output_dir / f"{sample}.EndMotif1mer.tsv"
+    edm_1mer_base = output_dir / f"{sample}.EndMotif1mer"
     c_end_metrics = write_end_motif_1mer(
         em_counts=result.em_counts,
-        output_path=edm_1mer_output,
+        output_path=edm_1mer_base,
         sample_name=sample,
         include_header=True,
+        output_format=output_format,
+        compress=compress,
     )
-    outputs["edm_1mer"] = edm_1mer_output
+    outputs["edm_1mer"] = edm_1mer_base.with_suffix(ext)
     logger.debug(f"  C-end fraction: {c_end_metrics['c_fraction']:.4f}")
 
     logger.info(f"  Wrote {len(outputs)} motif files")
@@ -561,6 +594,8 @@ def write_extraction_outputs(
     genome: str = "hg19",
     assay: Optional[str] = None,
     compute_gc_factors: bool = True,
+    output_format: str = "tsv",  # "tsv" | "parquet" | "both"
+    compress: bool = False,  # Gzip TSV when True
 ) -> Dict[str, Path]:
     """
     Write extraction outputs (BED index, metadata, GC factors).
@@ -610,29 +645,25 @@ def write_extraction_outputs(
         except Exception as e:
             logger.warning(f"  Tabix indexing failed: {e}")
 
-    # Write metadata JSON
-    meta_path = output_dir / f"{sample}.metadata.json"
-    metadata = {
+    # Write metadata as flat TSV/Parquet row (replaces legacy .metadata.json)
+    # Using a flat dict so write_table can produce TSV or Parquet at source
+    meta_base = output_dir / f"{sample}.metadata"
+    gc_correct_status = False  # Updated below if GC factors computed
+    meta_flat = {
         "sample_id": sample,
         "total_fragments": result.fragment_count,
         "genome": genome,
-        "assay": assay,
+        "assay": str(assay or ""),
         "panel_mode": result.is_panel_mode,
-        "target_regions": result.target_regions_path,
+        "target_regions": str(result.target_regions_path or ""),
         "extraction_time_seconds": round(result.extraction_time_seconds, 2),
         "mds_score": round(result.mds_score, 6),
-        "filters": {
-            "mapq": 20,
-            "min_length": 65,
-            "max_length": 1000,
-        },
+        "filters_mapq": 20,
+        "filters_min_length": 65,
+        "filters_max_length": 1000,
+        "gc_correction_computed": gc_correct_status,
         "timestamp": datetime.now().isoformat(),
     }
-
-    with open(meta_path, "w") as f:
-        json.dump(metadata, f, indent=2)
-    outputs["metadata"] = meta_path
-    logger.debug(f"  Wrote metadata: {meta_path.name}")
 
     # Compute GC correction factors
     if compute_gc_factors and result.gc_observations:
@@ -647,20 +678,37 @@ def write_extraction_outputs(
                 str(gc_ref),
                 str(valid_regions),
                 str(factors_path),
+                output_format=output_format,
+                compress=compress,
             )
 
             outputs["gc_factors"] = factors_path
-            # Update metadata with GC info
-            metadata["gc_correction_computed"] = True
-            with open(meta_path, "w") as f:
-                json.dump(metadata, f, indent=2)
-
+            gc_correct_status = True
+            meta_flat["gc_correction_computed"] = True
             logger.debug(
                 f"  Wrote GC factors: {factors_path.name} ({n_factors} regions)"
             )
         except Exception as e:
             logger.debug(f"  GC factor computation failed: {e}")
-            metadata["gc_correction_computed"] = False
+
+    # Write metadata (after GC compute so gc_correction_computed is accurate)
+    # TSV/Parquet only — consistent with all other feature outputs.
+    write_table(
+        pd.DataFrame([meta_flat]),
+        meta_base,
+        output_format=output_format,
+        compress=compress,
+    )
+    # Return path to the primary tabular metadata file (TSV unless parquet-only).
+    # Use parent/(name+ext) to avoid Python's with_suffix() compound-extension bug:
+    # Path('panel.metadata').with_suffix('.tsv') → 'panel.tsv' (replaces 'metadata').
+    meta_ext = (
+        ".parquet"
+        if output_format == "parquet"
+        else (".tsv.gz" if compress else ".tsv")
+    )
+    outputs["metadata"] = meta_base.parent / (meta_base.name + meta_ext)
+    logger.debug(f"  Wrote metadata: {outputs['metadata'].name}")
 
     logger.info(f"  Wrote {len(outputs)} extraction outputs")
     return outputs
@@ -692,6 +740,9 @@ def process_sample(
     pon_model: Optional[Path] = None,
     assay: Optional[str] = None,
     temp_dir: Optional[Path] = None,
+    # Output format (forwarded to GC factor writes; feature outputs use run_features params)
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> SampleOutputs:
     """
     Process a single sample through full feature extraction pipeline.
@@ -776,7 +827,11 @@ def process_sample(
             genome=params.genome,
         )
 
-        # Transfer to SampleOutputs
+        # Transfer to SampleOutputs — result fields come from Rust PyO3 ExtractionResult
+        # bed_path is always set when write_bed=True (asserted); None would indicate a Rust bug.
+        assert (
+            result.bed_path is not None
+        ), "Rust did not return bed_path despite write_bed=True"
         outputs.bed_path = result.bed_path
         outputs.fragment_count = result.fragment_count
         outputs.em_counts = result.em_counts
@@ -808,6 +863,8 @@ def process_sample(
                     str(gc_ref),
                     str(valid_regions),
                     str(factors_path),
+                    output_format=output_format,
+                    compress=compress,
                 )
                 logger.debug(
                     f"  Computed {n_factors} off-target GC factors: {factors_path.name}"
@@ -829,6 +886,8 @@ def process_sample(
                     str(gc_ref),
                     str(valid_regions),
                     str(factors_ontarget_path),
+                    output_format=output_format,
+                    compress=compress,
                 )
                 logger.info(
                     f"  Computed {n_factors_on} on-target GC factors: {factors_ontarget_path.name}"

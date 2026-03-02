@@ -16,13 +16,13 @@ import logging
 from pathlib import Path
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Dict, List, Optional, IO
+from typing import Generator, Dict, List, Optional, IO
 
 logger = logging.getLogger(__name__)
 
 
 @contextmanager
-def _open_bed(path: Path) -> IO[str]:
+def _open_bed(path: Path) -> Generator[IO[str], None, None]:
     """Open a BED file, handling gzip compression transparently."""
     path = Path(path)
     if str(path).endswith(".gz"):

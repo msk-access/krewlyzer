@@ -310,6 +310,16 @@ class FeatureSerializer:
         serializer = cls(sample_id, version)
         output_dir = Path(output_dir)
 
+        # Local helper: read_table returns DataFrame|None; callers here always
+        # check path.exists() first, so the result is never None. This narrows
+        # the type from DataFrame|None to DataFrame so mypy is satisfied.
+        import pandas as _pd
+
+        def _rt(p: Path) -> "_pd.DataFrame":
+            df = _rt(p)
+            assert df is not None, f"read_table returned None for existing file: {p}"
+            return df
+
         # =====================================================================
         # FSD - Fragment Size Distribution
         # =====================================================================
@@ -319,10 +329,10 @@ class FeatureSerializer:
         if fsd_path.exists() or fsd_on_path.exists():
             fsd_data = {}
             if fsd_path.exists():
-                fsd_df = pd.read_csv(fsd_path, sep="\t")
+                fsd_df = _rt(fsd_path)
                 fsd_data["off_target"] = cls._parse_fsd(fsd_df)
             if fsd_on_path.exists():
-                fsd_on_df = pd.read_csv(fsd_on_path, sep="\t")
+                fsd_on_df = _rt(fsd_on_path)
                 fsd_data["on_target"] = cls._parse_fsd(fsd_on_df)
             serializer.features["fsd"] = fsd_data
 
@@ -335,13 +345,9 @@ class FeatureSerializer:
         if fsr_path.exists() or fsr_on_path.exists():
             fsr_data = {}
             if fsr_path.exists():
-                fsr_data["off_target"] = pd.read_csv(fsr_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                fsr_data["off_target"] = _rt(fsr_path).to_dict(orient="records")
             if fsr_on_path.exists():
-                fsr_data["on_target"] = pd.read_csv(fsr_on_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                fsr_data["on_target"] = _rt(fsr_on_path).to_dict(orient="records")
             serializer.features["fsr"] = fsr_data
 
         # =====================================================================
@@ -353,13 +359,9 @@ class FeatureSerializer:
         if fsc_path.exists() or fsc_on_path.exists():
             fsc_data = {}
             if fsc_path.exists():
-                fsc_data["off_target"] = pd.read_csv(fsc_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                fsc_data["off_target"] = _rt(fsc_path).to_dict(orient="records")
             if fsc_on_path.exists():
-                fsc_data["on_target"] = pd.read_csv(fsc_on_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                fsc_data["on_target"] = _rt(fsc_on_path).to_dict(orient="records")
             serializer.features["fsc"] = fsc_data
 
         # =====================================================================
@@ -367,18 +369,18 @@ class FeatureSerializer:
         # =====================================================================
         fsc_gene_path = output_dir / f"{sample_id}.FSC.gene.tsv"
         if fsc_gene_path.exists():
-            serializer.features["fsc_gene"] = pd.read_csv(
-                fsc_gene_path, sep="\t"
-            ).to_dict(orient="records")
+            serializer.features["fsc_gene"] = _rt(fsc_gene_path).to_dict(
+                orient="records"
+            )
 
         # =====================================================================
         # FSC Regions - Per-Exon/Target Fragment Size Coverage (for panel mode)
         # =====================================================================
         fsc_region_path = output_dir / f"{sample_id}.FSC.regions.tsv"
         if fsc_region_path.exists():
-            serializer.features["fsc_region"] = pd.read_csv(
-                fsc_region_path, sep="\t"
-            ).to_dict(orient="records")
+            serializer.features["fsc_region"] = _rt(fsc_region_path).to_dict(
+                orient="records"
+            )
 
         # =====================================================================
         # FSC E1-Only - First Exon Per Gene (promoter-proximal sensitivity)
@@ -386,9 +388,9 @@ class FeatureSerializer:
         # =====================================================================
         fsc_e1_path = output_dir / f"{sample_id}.FSC.regions.e1only.tsv"
         if fsc_e1_path.exists():
-            serializer.features["fsc_region_e1"] = pd.read_csv(
-                fsc_e1_path, sep="\t"
-            ).to_dict(orient="records")
+            serializer.features["fsc_region_e1"] = _rt(fsc_e1_path).to_dict(
+                orient="records"
+            )
             logger.debug(f"  Loaded fsc_region_e1 from {fsc_e1_path.name}")
 
         # =====================================================================
@@ -431,21 +433,21 @@ class FeatureSerializer:
 
         # Off-target motifs
         if edm_path.exists():
-            edm_df = pd.read_csv(edm_path, sep="\t")
+            edm_df = _rt(edm_path)
             motif_data["edm"] = (
                 edm_df.iloc[0].to_dict()
                 if len(edm_df) == 1
                 else edm_df.to_dict(orient="records")
             )
         if bpm_path.exists():
-            bpm_df = pd.read_csv(bpm_path, sep="\t")
+            bpm_df = _rt(bpm_path)
             motif_data["bpm"] = (
                 bpm_df.iloc[0].to_dict()
                 if len(bpm_df) == 1
                 else bpm_df.to_dict(orient="records")
             )
         if mds_path.exists():
-            mds_df = pd.read_csv(mds_path, sep="\t")
+            mds_df = _rt(mds_path)
             for col in mds_df.columns:
                 if col.lower() == "mds":
                     motif_data["mds"] = float(mds_df[col].iloc[0])
@@ -458,21 +460,21 @@ class FeatureSerializer:
 
         # On-target motifs
         if edm_on_path.exists():
-            edm_on_df = pd.read_csv(edm_on_path, sep="\t")
+            edm_on_df = _rt(edm_on_path)
             motif_data["edm_on_target"] = (
                 edm_on_df.iloc[0].to_dict()
                 if len(edm_on_df) == 1
                 else edm_on_df.to_dict(orient="records")
             )
         if bpm_on_path.exists():
-            bpm_on_df = pd.read_csv(bpm_on_path, sep="\t")
+            bpm_on_df = _rt(bpm_on_path)
             motif_data["bpm_on_target"] = (
                 bpm_on_df.iloc[0].to_dict()
                 if len(bpm_on_df) == 1
                 else bpm_on_df.to_dict(orient="records")
             )
         if mds_on_path.exists():
-            mds_on_df = pd.read_csv(mds_on_path, sep="\t")
+            mds_on_df = _rt(mds_on_path)
             for col in mds_on_df.columns:
                 if col.lower() == "mds":
                     motif_data["mds_on_target"] = float(mds_on_df[col].iloc[0])
@@ -491,7 +493,7 @@ class FeatureSerializer:
         # =====================================================================
         edm1_path = output_dir / f"{sample_id}.EndMotif1mer.tsv"
         if edm1_path.exists():
-            edm1_df = pd.read_csv(edm1_path, sep="\t")
+            edm1_df = _rt(edm1_path)
             # Convert to dict: {"A": 0.197, "C": 0.345, ...}
             serializer.features.setdefault("motif", {})["edm_1mer"] = {
                 row["base"]: row["fraction"] for _, row in edm1_df.iterrows()
@@ -507,20 +509,16 @@ class FeatureSerializer:
         if ocf_path.exists() or ocf_on_path.exists():
             ocf_data = {}
             if ocf_path.exists():
-                ocf_data["off_target"] = pd.read_csv(ocf_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                ocf_data["off_target"] = _rt(ocf_path).to_dict(orient="records")
             if ocf_on_path.exists():
-                ocf_data["on_target"] = pd.read_csv(ocf_on_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                ocf_data["on_target"] = _rt(ocf_on_path).to_dict(orient="records")
             serializer.features["ocf"] = ocf_data
 
         # OCF off-target (panel-specific off-target scores)
         ocf_off_path = output_dir / f"{sample_id}.OCF.offtarget.tsv"
         if ocf_off_path.exists():
-            serializer.features.setdefault("ocf", {})["offtarget"] = pd.read_csv(
-                ocf_off_path, sep="\t"
+            serializer.features.setdefault("ocf", {})["offtarget"] = _rt(
+                ocf_off_path
             ).to_dict(orient="records")
             logger.debug(f"  Loaded ocf.offtarget from {ocf_off_path.name}")
 
@@ -532,9 +530,9 @@ class FeatureSerializer:
         ]:
             sync_path = output_dir / f"{sample_id}{suffix}"
             if sync_path.exists():
-                serializer.features.setdefault("ocf", {})[key] = pd.read_csv(
-                    sync_path, sep="\t"
-                ).to_dict(orient="records")
+                serializer.features.setdefault("ocf", {})[key] = _rt(sync_path).to_dict(
+                    orient="records"
+                )
                 logger.debug(f"  Loaded ocf.{key} from {sync_path.name}")
 
         # =====================================================================
@@ -542,14 +540,14 @@ class FeatureSerializer:
         # =====================================================================
         uxm_path = output_dir / f"{sample_id}.UXM.tsv"
         if uxm_path.exists():
-            serializer.add_uxm(pd.read_csv(uxm_path, sep="\t"))
+            serializer.add_uxm(_rt(uxm_path))
 
         # =====================================================================
         # mFSD - Mutant Fragment Size Distribution (optional)
         # =====================================================================
         mfsd_path = output_dir / f"{sample_id}.mFSD.tsv"
         if mfsd_path.exists():
-            mfsd_df = pd.read_csv(mfsd_path, sep="\t")
+            mfsd_df = _rt(mfsd_path)
             serializer.features["mfsd"] = {
                 "enabled": True,
                 "variants": mfsd_df.to_dict(orient="records"),
@@ -565,13 +563,9 @@ class FeatureSerializer:
         if tfbs_path.exists() or tfbs_on_path.exists():
             tfbs_data = {}
             if tfbs_path.exists():
-                tfbs_data["off_target"] = pd.read_csv(tfbs_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                tfbs_data["off_target"] = _rt(tfbs_path).to_dict(orient="records")
             if tfbs_on_path.exists():
-                tfbs_data["on_target"] = pd.read_csv(tfbs_on_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                tfbs_data["on_target"] = _rt(tfbs_on_path).to_dict(orient="records")
             serializer.features["tfbs"] = tfbs_data
 
         # TFBS sync files (per-TF × per-size fragment distributions)
@@ -581,8 +575,8 @@ class FeatureSerializer:
         ]:
             sync_path = output_dir / f"{sample_id}{suffix}"
             if sync_path.exists():
-                serializer.features.setdefault("tfbs", {})[key] = pd.read_csv(
-                    sync_path, sep="\t"
+                serializer.features.setdefault("tfbs", {})[key] = _rt(
+                    sync_path
                 ).to_dict(orient="records")
                 logger.debug(f"  Loaded tfbs.{key} from {sync_path.name}")
 
@@ -595,13 +589,9 @@ class FeatureSerializer:
         if atac_path.exists() or atac_on_path.exists():
             atac_data = {}
             if atac_path.exists():
-                atac_data["off_target"] = pd.read_csv(atac_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                atac_data["off_target"] = _rt(atac_path).to_dict(orient="records")
             if atac_on_path.exists():
-                atac_data["on_target"] = pd.read_csv(atac_on_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                atac_data["on_target"] = _rt(atac_on_path).to_dict(orient="records")
             serializer.features["atac"] = atac_data
 
         # ATAC sync files (per-tissue × per-size fragment distributions)
@@ -611,8 +601,8 @@ class FeatureSerializer:
         ]:
             sync_path = output_dir / f"{sample_id}{suffix}"
             if sync_path.exists():
-                serializer.features.setdefault("atac", {})[key] = pd.read_csv(
-                    sync_path, sep="\t"
+                serializer.features.setdefault("atac", {})[key] = _rt(
+                    sync_path
                 ).to_dict(orient="records")
                 logger.debug(f"  Loaded atac.{key} from {sync_path.name}")
 
@@ -625,13 +615,9 @@ class FeatureSerializer:
         if gc_factors_path.exists() or gc_factors_on_path.exists():
             gc_data = {}
             if gc_factors_path.exists():
-                gc_data["off_target"] = pd.read_csv(gc_factors_path, sep="\t").to_dict(
-                    orient="records"
-                )
+                gc_data["off_target"] = _rt(gc_factors_path).to_dict(orient="records")
             if gc_factors_on_path.exists():
-                gc_data["on_target"] = pd.read_csv(
-                    gc_factors_on_path, sep="\t"
-                ).to_dict(orient="records")
+                gc_data["on_target"] = _rt(gc_factors_on_path).to_dict(orient="records")
             serializer.features["gc_factors"] = gc_data
 
         # =====================================================================
@@ -639,9 +625,9 @@ class FeatureSerializer:
         # =====================================================================
         fsc_counts_path = output_dir / f"{sample_id}.fsc_counts.tsv"
         if fsc_counts_path.exists():
-            serializer.features["fsc_counts"] = pd.read_csv(
-                fsc_counts_path, sep="\t"
-            ).to_dict(orient="records")
+            serializer.features["fsc_counts"] = _rt(fsc_counts_path).to_dict(
+                orient="records"
+            )
             logger.debug(f"  Loaded fsc_counts from {fsc_counts_path.name}")
 
         # =====================================================================
@@ -654,7 +640,7 @@ class FeatureSerializer:
             region_mds_data = {}
 
             if mds_exon_path.exists():
-                exon_df = pd.read_csv(mds_exon_path, sep="\t")
+                exon_df = _rt(mds_exon_path)
                 region_mds_data["exon"] = exon_df.to_dict(orient="records")
                 region_mds_data["n_exons"] = len(exon_df)
 
@@ -664,7 +650,7 @@ class FeatureSerializer:
                     region_mds_data["mds_exon_std"] = float(exon_df["mds"].std())
 
             if mds_gene_path.exists():
-                gene_df = pd.read_csv(mds_gene_path, sep="\t")
+                gene_df = _rt(mds_gene_path)
                 region_mds_data["gene"] = gene_df.to_dict(orient="records")
                 region_mds_data["n_genes"] = len(gene_df)
 
@@ -675,13 +661,13 @@ class FeatureSerializer:
             serializer.features["region_mds"] = region_mds_data
 
         # =====================================================================
-        # Metadata
+        # Metadata — read from .metadata.tsv (Parquet-first, TSV fallback).
+        # .metadata.json was removed; metadata is now consistent TSV/Parquet.
         # =====================================================================
-        meta_path = output_dir / f"{sample_id}.metadata.json"
-        if meta_path.exists():
-            with open(meta_path) as f:
-                meta = json.load(f)
-                serializer.set_metadata(meta.get("metadata", meta))
+        meta_tsv_path = output_dir / f"{sample_id}.metadata.tsv"
+        meta_df = _rt(meta_tsv_path)
+        if meta_df is not None and not meta_df.empty:
+            serializer.set_metadata(meta_df.iloc[0].to_dict())
 
         return serializer
 

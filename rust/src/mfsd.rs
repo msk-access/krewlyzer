@@ -1052,19 +1052,22 @@ pub fn calculate_mfsd(
     use crate::gc_correction::CorrectionFactors;
     use std::sync::Arc;
     
-    // Load correction factors if provided
+    // Load correction factors if provided.
+    // Uses CorrectionFactors::load() for Parquet-first auto-detection:
+    // tries {path}.parquet first, falls back to TSV/legacy CSV if not found.
     let factors: Option<Arc<CorrectionFactors>> = if let Some(ref factors_path) = correction_factors_path {
-        match CorrectionFactors::load_csv(factors_path) {
+        match CorrectionFactors::load(factors_path) {
             Ok(f) => {
-                info!("Loaded GC correction factors from {:?}", factors_path);
+                info!("mfsd: loaded {} GC correction factor bins from {:?}", f.data.len(), factors_path);
                 Some(Arc::new(f))
             },
             Err(e) => {
-                warn!("Failed to load correction factors: {}. Proceeding without GC correction.", e);
+                warn!("mfsd: failed to load correction factors from {:?}: {}. Proceeding without GC correction.", factors_path, e);
                 None
             }
         }
     } else {
+        debug!("mfsd: no correction_factors_path provided — GC correction disabled");
         None
     };
     

@@ -6,11 +6,17 @@ This module defines the unified PON model format using Parquet storage.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 import logging
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    # RegionEntropyBaseline is defined in region_entropy_processor; imported here
+    # only for type checking to avoid a circular import at runtime. TfbsBaseline
+    # and AtacBaseline reference it for their .baseline field annotations.
+    from krewlyzer.core.region_entropy_processor import RegionEntropyBaseline
 
 logger = logging.getLogger("pon")
 
@@ -653,8 +659,16 @@ class TfbsBaseline:
     Used for z-score normalization of TFBS entropy values.
     """
 
-    # Wraps RegionEntropyBaseline from region_entropy_processor
-    baseline: "RegionEntropyBaseline" = None
+    # baseline wraps RegionEntropyBaseline from region_entropy_processor.
+    # Import is under TYPE_CHECKING to avoid circular deps at runtime.
+    baseline: Optional["RegionEntropyBaseline"] = None
+
+    @property
+    def labels(self) -> List[str]:
+        """Return list of TF labels available in this baseline."""
+        if self.baseline is None:
+            return []
+        return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
         """Compute z-score for observed entropy value."""
@@ -678,8 +692,16 @@ class AtacBaseline:
     Used for z-score normalization of ATAC entropy values.
     """
 
-    # Wraps RegionEntropyBaseline from region_entropy_processor
-    baseline: "RegionEntropyBaseline" = None
+    # baseline wraps RegionEntropyBaseline from region_entropy_processor.
+    # Import is under TYPE_CHECKING to avoid circular deps at runtime.
+    baseline: Optional["RegionEntropyBaseline"] = None
+
+    @property
+    def labels(self) -> List[str]:
+        """Return list of ATAC cancer-type labels available in this baseline."""
+        if self.baseline is None:
+            return []
+        return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
         """Compute z-score for observed entropy value."""
@@ -1097,7 +1119,7 @@ class PonModel:
                     ),
                     "n_samples": int(row.get("n_samples", 0)),
                 }
-            region_mds = RegionMdsBaseline(gene_baseline=gene_baseline)
+            region_mds = RegionMdsBaseline(gene_baseline=gene_baseline)  # type: ignore[arg-type]
             logger.debug(f"Loaded Region MDS baseline: {len(gene_baseline)} genes")
 
         # Parse WPS Background baseline

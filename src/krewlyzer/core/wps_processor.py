@@ -102,7 +102,7 @@ def post_process_wps(
                     compute_periodicity_zscore,
                 )
 
-                nrl_z = compute_nrl_zscore(result["nrl_bp"], pon)
+                nrl_z = compute_nrl_zscore(float(result["nrl_bp"]), pon)  # type: ignore[arg-type]
                 if nrl_z is not None:
                     result["nrl_z"] = nrl_z
                     if "nrl_z" not in df.columns:
@@ -112,8 +112,9 @@ def post_process_wps(
                     logger.info(f"NRL z-score: {nrl_z:.2f}")
 
                 if result["periodicity_score"] is not None:
-                    period_z = compute_periodicity_zscore(
-                        result["periodicity_score"], pon
+                    period_z = compute_periodicity_zscore(  # type: ignore[arg-type]
+                        float(result["periodicity_score"]),  # type: ignore[arg-type]
+                        pon,
                     )
                     if period_z is not None:
                         result["periodicity_z"] = period_z

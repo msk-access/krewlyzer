@@ -10,9 +10,12 @@ NO z-scores - the plan specifies GC-weighting (Rust) + PoN log-ratios (Python).
 """
 
 from pathlib import Path
+from typing import Optional
 import pandas as pd
 import numpy as np
 import logging
+
+from .output_utils import read_table, write_table  # Parquet-first I/O utilities
 
 logger = logging.getLogger("core.fsc_processor")
 
@@ -51,14 +54,16 @@ def load_correction_factors(factor_path: Path) -> dict:
         Dict[(len_bin, gc_pct), factor] for fast lookup
         Empty dict if loading fails (falls back to unweighted counting)
     """
-    factors = {}
+    # Dict type annotation required: mypy cannot infer types from empty dict literal
+    factors: dict = {}
 
     try:
-        # Sniff actual delimiter from first line (files may have wrong extension)
-        with open(factor_path, "r") as f:
-            first_line = f.readline()
-        sep = "," if "," in first_line else "\t"
-        df = pd.read_csv(factor_path, sep=sep)
+        # Use read_table() for Parquet-first auto-detection.
+        # Handles .parquet (new), .tsv, .tsv.gz, and legacy comma-delimited CSVs via fallback.
+        df = read_table(factor_path)
+        if df is None:
+            logger.warning(f"Correction factors file not found: {factor_path}")
+            return factors
 
         # Expected columns: length_bin (or similar), gc_percent, factor
         # Find the relevant columns
@@ -84,7 +89,9 @@ def load_correction_factors(factor_path: Path) -> dict:
         # Build lookup table
         # Note: length_bin column may contain length_bin_min values (e.g., 75, 80, ...)
         # or bin indices (e.g., 3, 4, ...). We detect which format and convert.
-        is_raw_lengths = len_col.lower().endswith("_min") or df[len_col].min() >= 60
+        is_raw_lengths = (len_col or "").lower().endswith("_min") or df[
+            len_col
+        ].min() >= 60
 
         for _, row in df.iterrows():
             try:
@@ -153,6 +160,8 @@ def process_fsc(
     windows: int = 100000,
     continue_n: int = 50,
     pon=None,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> Path:
     """
     Process GC-weighted fragment counts into FSC ML features.
@@ -218,7 +227,9 @@ def process_fsc(
 
     if not results:
         logger.warning("No valid windows found for FSC")
-        _write_empty_fsc(output_path, pon is not None)
+        _write_empty_fsc(
+            output_path, pon is not None, output_format=output_format, compress=compress
+        )
         return output_path
 
     final_df = pd.concat(results, ignore_index=True)
@@ -244,24 +255,45 @@ def process_fsc(
                 final_df[f"{ch}_reliability"] = 1.0
 
     # Write output
-    _write_fsc_output(final_df, output_path, pon is not None)
+    _write_fsc_output(
+        final_df,
+        output_path,
+        pon is not None,
+        output_format=output_format,
+        compress=compress,
+    )
 
     logger.info(f"FSC complete: {output_path}")
     return output_path
 
 
-def _write_empty_fsc(output_path: Path, with_pon: bool):
+def _write_empty_fsc(
+    output_path: Path,
+    with_pon: bool,
+    output_format: str = "tsv",
+    compress: bool = False,
+):
     """Write empty FSC file with appropriate headers."""
     cols = ["chrom", "start", "end"] + CHANNELS + ["total"]
     if with_pon:
         cols += [f"{ch}_log2" for ch in CHANNELS]
         cols += [f"{ch}_reliability" for ch in CHANNELS]
+    write_table(
+        pd.DataFrame(columns=cols),
+        output_path,
+        output_format=output_format,
+        compress=compress,
+    )
 
-    pd.DataFrame(columns=cols).to_csv(output_path, sep="\t", index=False)
 
-
-def _write_fsc_output(df: pd.DataFrame, output_path: Path, with_pon: bool):
-    """Write FSC output TSV matching the implementation plan schema."""
+def _write_fsc_output(
+    df: pd.DataFrame,
+    output_path: Path,
+    with_pon: bool,
+    output_format: str = "tsv",
+    compress: bool = False,
+):
+    """Write FSC output matching the implementation plan schema."""
     # Determine columns to output
     cols = ["chrom", "start", "end"] + CHANNELS + ["total"]
     if with_pon:
@@ -270,7 +302,13 @@ def _write_fsc_output(df: pd.DataFrame, output_path: Path, with_pon: bool):
 
     # Select and write
     output_df = df[cols].copy()
-    output_df.to_csv(output_path, sep="\t", index=False, float_format="%.4f")
+    write_table(
+        output_df,
+        output_path,
+        output_format=output_format,
+        compress=compress,
+        float_format="%.4f",
+    )
 
 
 def aggregate_by_gene(
@@ -278,9 +316,11 @@ def aggregate_by_gene(
     genes: dict,
     output_path: Path,
     pon=None,
-    correction_factors: dict = None,
+    correction_factors: Optional[dict] = None,
     aggregate_by: str = "gene",
-    gene_bed_path: Path = None,
+    gene_bed_path: Optional[Path] = None,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> Path:
     """
     Aggregate fragment counts for panel-specific FSC using Rust implementation.
@@ -291,31 +331,27 @@ def aggregate_by_gene(
     Args:
         fragments_bed: Path to fragment BED file from extract step
         genes: Dict[gene_name, List[Region]] from gene_bed.load_gene_bed() (used only if gene_bed_path not provided)
-        output_path: Path to write FSC output
+        output_path: Path to write FSC output (base name; extension added by write_table)
         pon: Optional PON model for normalization (legacy, not used in Rust)
         correction_factors: Optional dict or Path to GC correction factors
         aggregate_by: 'gene' (sum by gene) or 'region' (one row per exon/region)
         gene_bed_path: Path to gene BED file (if provided, used directly by Rust)
+        output_format: "tsv", "parquet", or "both" (default: "tsv")
+        compress: Gzip TSV output (only when output_format is tsv or both)
 
     Returns:
         Path to output file
-
-    Output columns (gene mode):
-        - gene, n_regions, total_bp, channels, *_ratio, normalized_depth
     """
     from krewlyzer import _core
-    import tempfile
+    import tempfile  # Used for temp gene BED and GC factors files
 
     logger.info(f"Aggregating FSC by {aggregate_by}: {len(genes)} genes")
 
     # Prepare gene BED for Rust
     if gene_bed_path and Path(gene_bed_path).exists():
-        # Use provided gene BED directly
         use_gene_bed = Path(gene_bed_path)
     else:
         # Write genes dict to temp BED for Rust
-        import tempfile
-
         with tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False) as f:
             for gene, regions in genes.items():
                 for region in regions:
@@ -340,41 +376,67 @@ def aggregate_by_gene(
                     f.write(f"{len_bin}\t{gc_pct}\t{factor}\n")
                 gc_factors_path = f.name
 
-    # Call Rust implementation
+    # Rust always writes TSV to output_path; we convert afterward if needed.
+    tsv_path = Path(
+        str(output_path)
+        if str(output_path).endswith(".tsv")
+        else str(output_path) + ".tsv"
+    )
     n_output = _core.aggregate_by_gene(
         str(fragments_bed),
         str(use_gene_bed),
-        str(output_path),
+        str(tsv_path),
         gc_factors_path,
         aggregate_by,
     )
 
-    # Cleanup temp file if we created one
+    # Cleanup temp files if we created them
     if not gene_bed_path or not Path(gene_bed_path).exists():
         try:
             use_gene_bed.unlink(missing_ok=True)
         except Exception:
             pass
 
-    logger.info(f"FSC {aggregate_by} complete: {output_path} ({n_output} rows)")
-    return output_path
+    logger.info(f"FSC {aggregate_by} complete: {tsv_path} ({n_output} rows)")
+
+    # Post-Rust format conversion: read TSV, write in selected format
+    base_path = Path(str(output_path).removesuffix(".tsv"))
+    if output_format != "tsv" or compress:
+        df = read_table(tsv_path)
+        if df is not None:
+            write_table(
+                df,
+                base_path,
+                output_format=output_format,
+                compress=compress,
+                float_format="%.4f",
+            )
+            logger.debug(
+                f"FSC {aggregate_by}: converted to format={output_format}, compress={compress}"
+            )
+
+    return tsv_path
 
 
 def apply_fsc_gene_pon(
     fsc_gene_path: Path,
     pon,
-    output_path: Path = None,
-) -> Path:
+    output_path: Optional[Path] = None,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Optional[Path]:
     """
     Apply FSC gene PON baseline z-score normalization.
 
-    Reads FSC.gene.tsv, computes z-score for each gene's normalized_depth
-    against the PON baseline, and adds a depth_zscore column.
+    Reads FSC.gene.tsv (or .parquet), computes z-score for each gene's
+    normalized_depth against the PON baseline, and adds a depth_zscore column.
 
     Args:
         fsc_gene_path: Path to FSC.gene.tsv file
         pon: PonModel with fsc_gene_baseline
         output_path: Output path (defaults to overwriting input)
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         Path to output file with depth_zscore column
@@ -385,8 +447,6 @@ def apply_fsc_gene_pon(
         - z-score << 0: Gene deletion
         - z-score ≈ 0: Normal copy number
     """
-    import pandas as pd
-
     if output_path is None:
         output_path = fsc_gene_path
 
@@ -398,7 +458,10 @@ def apply_fsc_gene_pon(
         logger.debug("No FSC gene baseline in PON, skipping z-score")
         return fsc_gene_path
 
-    df = pd.read_csv(fsc_gene_path, sep="\t")
+    df = read_table(fsc_gene_path)
+    if df is None:
+        logger.warning(f"FSC gene file could not be read: {fsc_gene_path}")
+        return fsc_gene_path
 
     if "gene" not in df.columns or "normalized_depth" not in df.columns:
         logger.warning(f"FSC gene file missing required columns: {fsc_gene_path}")
@@ -415,8 +478,9 @@ def apply_fsc_gene_pon(
 
     df["depth_zscore"] = z_scores
 
-    # Write output
-    df.to_csv(output_path, sep="\t", index=False)
+    # Write output using unified writer (TSV/Parquet/both)
+    out_base = Path(output_path).with_suffix("")
+    write_table(df, out_base, output_format=output_format, compress=compress)
     n_with_zscore = df["depth_zscore"].notna().sum()
     logger.debug(f"Applied FSC gene PON: {n_with_zscore}/{len(df)} genes with z-scores")
 
@@ -426,18 +490,22 @@ def apply_fsc_gene_pon(
 def apply_fsc_region_pon(
     fsc_region_path: Path,
     pon,
-    output_path: Path = None,
-) -> Path:
+    output_path: Optional[Path] = None,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Optional[Path]:
     """
     Apply FSC region (exon/probe) PON baseline z-score normalization.
 
-    Reads FSC.regions.tsv, computes z-score for each region's normalized_depth
-    against the PON baseline, and adds a depth_zscore column.
+    Reads FSC.regions.tsv (or .parquet), computes z-score for each region's
+    normalized_depth against the PON baseline, adds a depth_zscore column.
 
     Args:
         fsc_region_path: Path to FSC.regions.tsv file
         pon: PonModel with fsc_region_baseline
         output_path: Output path (defaults to overwriting input)
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         Path to output file with depth_zscore column
@@ -448,8 +516,6 @@ def apply_fsc_region_pon(
         - z-score << 0: Exon deletion
         - z-score >> 0: Exon amplification
     """
-    import pandas as pd
-
     if output_path is None:
         output_path = fsc_region_path
 
@@ -461,7 +527,10 @@ def apply_fsc_region_pon(
         logger.debug("No FSC region baseline in PON, skipping z-score")
         return fsc_region_path
 
-    df = pd.read_csv(fsc_region_path, sep="\t")
+    df = read_table(fsc_region_path)
+    if df is None:
+        logger.warning(f"FSC region file could not be read: {fsc_region_path}")
+        return fsc_region_path
 
     required_cols = ["chrom", "start", "end", "normalized_depth"]
     if not all(c in df.columns for c in required_cols):
@@ -488,11 +557,10 @@ def apply_fsc_region_pon(
 
     df["depth_zscore"] = z_scores
 
-    # Drop temporary column
+    # Drop temporary column, write output using unified writer
     df = df.drop(columns=["region_id"])
-
-    # Write output
-    df.to_csv(output_path, sep="\t", index=False)
+    out_base = Path(output_path).with_suffix("")
+    write_table(df, out_base, output_format=output_format, compress=compress)
     n_with_zscore = df["depth_zscore"].notna().sum()
     logger.debug(
         f"Applied FSC region PON: {n_with_zscore}/{len(df)} regions with z-scores"
@@ -517,18 +585,22 @@ def apply_fsc_region_pon(
 
 def filter_fsc_to_e1(
     fsc_regions_path: Path,
-    output_path: Path = None,
-) -> Path:
+    output_path: Optional[Path] = None,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Optional[Path]:
     """
     Filter FSC regions to E1 (first exon) per gene.
 
     Extracts the first exon by genomic position for each gene from the
-    full FSC.regions.tsv file. This focuses on promoter-proximal regions
-    where cancer fragmentation signal is strongest.
+    full FSC.regions.tsv (or .parquet) file. This focuses on
+    promoter-proximal regions where cancer fragmentation signal is strongest.
 
     Args:
-        fsc_regions_path: Path to FSC.regions.tsv file
-        output_path: Output path (defaults to input.e1only.tsv)
+        fsc_regions_path: Path to FSC.regions.tsv or .parquet file
+        output_path: Output base path (extension added by write_table)
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         Path to E1-only output file, or None if input doesn't exist
@@ -539,26 +611,30 @@ def filter_fsc_to_e1(
         at NDRs produces distinct fragment end motifs. Cancer signal is
         often stronger at E1 than averaging across all exons.
     """
-    import pandas as pd
-
     fsc_regions_path = Path(fsc_regions_path)
 
     if not fsc_regions_path.exists():
         logger.warning(f"FSC regions file not found: {fsc_regions_path}")
         return None
 
-    # Default output path: replace .tsv with .e1only.tsv
+    # Default output base path: strip suffix so write_table appends the right one
     if output_path is None:
         stem = fsc_regions_path.stem
+        # Strip existing extension (e.g., .tsv, .parquet) from stem
         if stem.endswith(".regions"):
             stem = stem.replace(".regions", ".regions.e1only")
         else:
             stem = f"{stem}.e1only"
-        output_path = fsc_regions_path.parent / f"{stem}.tsv"
-    output_path = Path(output_path)
+        output_base = fsc_regions_path.parent / stem
+    else:
+        # Strip suffix so write_table controls the final extension
+        output_base = Path(output_path).with_suffix("")
 
-    # Read input
-    df = pd.read_csv(fsc_regions_path, sep="\t")
+    # Read input with Parquet-first auto-detection
+    df = read_table(fsc_regions_path)
+    if df is None:
+        logger.warning(f"FSC regions file not found or unreadable: {fsc_regions_path}")
+        return None
 
     # Validate required columns
     required_cols = ["gene", "chrom", "start"]
@@ -580,15 +656,25 @@ def filter_fsc_to_e1(
     df_sorted = df.sort_values(["gene", "chrom", "start"])
     e1_df = df_sorted.groupby("gene", as_index=False).first()
 
-    # Preserve original column order
+    # Preserve original column order, write output
     original_cols = [c for c in df.columns if c in e1_df.columns]
     e1_df = e1_df[original_cols]
+    write_table(e1_df, output_base, output_format=output_format, compress=compress)
 
-    # Write output
-    e1_df.to_csv(output_path, sep="\t", index=False)
+    # Reconstruct return path with expected extension for caller.
+    # IMPORTANT: do NOT use output_base.with_suffix(ext) — Python's with_suffix()
+    # replaces only the last dot-segment, so 'test.FSC.regions.e1only'.with_suffix('.tsv')
+    # gives 'test.FSC.regions.tsv' (replaces '.e1only' with '.tsv').
+    # Instead, build the path by appending the extension to the full stem string.
+    ext = (
+        ".tsv.gz"
+        if compress
+        else (".parquet" if output_format == "parquet" else ".tsv")
+    )
+    result_path = output_base.parent / (output_base.name + ext)
 
     logger.info(
-        f"FSC E1-only filter: {n_input} regions → {len(e1_df)} E1 regions ({n_genes} genes) → {output_path.name}"
+        f"FSC E1-only filter: {n_input} regions → {len(e1_df)} E1 regions ({n_genes} genes) → {result_path.name}"
     )
 
-    return output_path
+    return result_path

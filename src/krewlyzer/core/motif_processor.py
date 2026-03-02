@@ -6,10 +6,13 @@ Used by both standalone motif.py and run-all wrapper.py.
 """
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 import numpy as np
 import itertools
 import logging
+import pandas as pd
+
+from .output_utils import write_table  # Unified TSV/Parquet I/O
 
 logger = logging.getLogger("core.motif_processor")
 
@@ -20,18 +23,22 @@ def _write_motif_helper(
     motif_type: str,
     kmer: int = 4,
     include_header: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> int:
     """
-    Write motif frequencies to TSV file (shared helper).
+    Write motif frequencies to TSV/Parquet file (shared helper).
 
     Only valid ACGT k-mers are included (256 for k=4).
 
     Args:
         counts: Dictionary of k-mer -> count
-        output_path: Path to write output TSV
+        output_path: Base path to write output (extension added by write_table)
         motif_type: Type name for logging (e.g., "End Motif", "Breakpoint Motif")
         kmer: K-mer size for initializing all possible k-mers
-        include_header: Whether to include header line
+        include_header: Whether to include header line (always True for Parquet)
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         Total fragment count
@@ -50,12 +57,18 @@ def _write_motif_helper(
         f"Writing {motif_type}: {output_path} ({len(all_kmers)} k-mers, {total:,} total)"
     )
 
-    with open(output_path, "w") as f:
-        if include_header:
-            f.write("Motif\tFrequency\n")
-        for k, v in all_kmers.items():
-            freq = v / total if total else 0
-            f.write(f"{k}\t{freq:.6f}\n")
+    # Build DataFrame and write via unified writer
+    rows = []
+    for k, v in all_kmers.items():
+        freq = v / total if total else 0
+        rows.append({"Motif": k, "Frequency": round(freq, 6)})
+    df = pd.DataFrame(rows)
+
+    # output_path is already the base (no extension); callers pass e.g. 'sample.EndMotif'.
+    # Do NOT call .with_suffix('') — that would strip the last dot-segment as an extension,
+    # e.g. Path('test.EndMotif').with_suffix('') → Path('test').
+    base = Path(output_path)
+    write_table(df, base, output_format=output_format, compress=compress)
 
     return total
 
@@ -65,10 +78,18 @@ def write_end_motif(
     output_path: Path,
     kmer: int = 4,
     include_header: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> int:
-    """Write End Motif frequencies to TSV file."""
+    """Write End Motif frequencies to TSV/Parquet file."""
     return _write_motif_helper(
-        em_counts, output_path, "End Motif", kmer, include_header
+        em_counts,
+        output_path,
+        "End Motif",
+        kmer,
+        include_header,
+        output_format=output_format,
+        compress=compress,
     )
 
 
@@ -77,10 +98,18 @@ def write_breakpoint_motif(
     output_path: Path,
     kmer: int = 4,
     include_header: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> int:
-    """Write Breakpoint Motif frequencies to TSV file."""
+    """Write Breakpoint Motif frequencies to TSV/Parquet file."""
     return _write_motif_helper(
-        bpm_counts, output_path, "Breakpoint Motif", kmer, include_header
+        bpm_counts,
+        output_path,
+        "Breakpoint Motif",
+        kmer,
+        include_header,
+        output_format=output_format,
+        compress=compress,
     )
 
 
@@ -129,38 +158,40 @@ def compute_mds(em_counts: Dict[str, int], kmer: int = 4) -> float:
 def write_mds(
     em_counts: Dict[str, int],
     output_path: Path,
-    sample_name: str = None,
+    sample_name: Optional[str] = None,
     kmer: int = 4,
     include_header: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> float:
     """
-    Calculate and write Motif Diversity Score to TSV file.
+    Calculate and write Motif Diversity Score to TSV/Parquet file.
 
     MDS is calculated as normalized Shannon entropy of end motif frequencies.
     Only valid ACGT k-mers are used (256 for k=4).
 
     Args:
         em_counts: Dictionary of k-mer -> count (End Motif)
-        output_path: Path to write output TSV
+        output_path: Base path to write output (extension added by write_table)
         sample_name: Optional sample name for output
         kmer: K-mer size
         include_header: Whether to include header line
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         MDS value (0.0 to 1.0, normalized by log2(4^k))
     """
-    # Use the canonical compute_mds function
     mds = compute_mds(em_counts, kmer)
-
     logger.info(f"Writing MDS: {output_path} (MDS={mds:.6f})")
 
-    with open(output_path, "w") as f:
-        if include_header:
-            f.write("Sample\tMDS\n")
-        if sample_name:
-            f.write(f"{sample_name}\t{mds:.6f}\n")
-        else:
-            f.write(f"{mds:.6f}\n")
+    row = {"Sample": sample_name or "", "MDS": round(mds, 6)}
+    df = pd.DataFrame([row])
+
+    # output_path is already the base (no extension); callers pass e.g. 'sample.MDS'.
+    # Do NOT call .with_suffix('') — that would strip the last dot-segment as an extension.
+    base = Path(output_path)
+    write_table(df, base, output_format=output_format, compress=compress)
 
     return mds
 
@@ -171,31 +202,57 @@ def process_motif_outputs(
     edm_output: Path,
     bpm_output: Path,
     mds_output: Path,
-    sample_name: str = None,
+    sample_name: Optional[str] = None,
     kmer: int = 4,
     include_headers: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> tuple:
     """
-    Write all motif outputs (EDM, BPM, MDS).
+    Write all motif outputs (EDM, BPM, MDS) in the selected format.
 
     This is the main entry point for both standalone and run-all.
 
     Args:
         em_counts: End motif k-mer counts
         bpm_counts: Breakpoint motif k-mer counts
-        edm_output: Path for End Motif TSV
-        bpm_output: Path for Breakpoint Motif TSV
-        mds_output: Path for MDS TSV
+        edm_output: Base path for End Motif output (extension added by write_table)
+        bpm_output: Base path for Breakpoint Motif output
+        mds_output: Base path for MDS output
         sample_name: Optional sample name for MDS output
         kmer: K-mer size (default 4)
-        include_headers: Include headers in all output files (default True)
+        include_headers: Include headers in TSV output files (default True)
+        output_format: "tsv", "parquet", or "both" (default "tsv")
+        compress: Gzip TSV output when True (default False)
 
     Returns:
         Tuple of (total_em, total_bpm, mds_value)
     """
-    total_em = write_end_motif(em_counts, edm_output, kmer, include_headers)
-    total_bpm = write_breakpoint_motif(bpm_counts, bpm_output, kmer, include_headers)
-    mds = write_mds(em_counts, mds_output, sample_name, kmer, include_headers)
+    total_em = write_end_motif(
+        em_counts,
+        edm_output,
+        kmer,
+        include_headers,
+        output_format=output_format,
+        compress=compress,
+    )
+    total_bpm = write_breakpoint_motif(
+        bpm_counts,
+        bpm_output,
+        kmer,
+        include_headers,
+        output_format=output_format,
+        compress=compress,
+    )
+    mds = write_mds(
+        em_counts,
+        mds_output,
+        sample_name,
+        kmer,
+        include_headers,
+        output_format=output_format,
+        compress=compress,
+    )
 
     return total_em, total_bpm, mds
 
@@ -294,27 +351,34 @@ def compute_c_end_fraction(em_counts: Dict[str, int]) -> Dict[str, float]:
 def write_end_motif_1mer(
     em_counts: Dict[str, int],
     output_path: Path,
-    sample_name: str = None,
+    sample_name: Optional[str] = None,
     include_header: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> Dict[str, float]:
     """
-    Write 1-mer end motif frequencies and C-end metrics to TSV file.
+    Write 1-mer end motif frequencies and C-end metrics to TSV/Parquet file.
 
-    Creates {sample}.EndMotif1mer.tsv with single base frequencies
-    and derived jagged end metrics.
+    Creates {sample}.EndMotif1mer.tsv (or .parquet) with single base
+    frequencies and derived jagged end metrics.
 
     Args:
         em_counts: Dictionary of k-mer -> count (4-mers)
-        output_path: Path to write output TSV
+        output_path: Base path to write output (extension added by write_table)
         sample_name: Optional sample name
         include_header: Whether to include header line
+        output_format: "tsv", "parquet", or "both"
+        compress: Gzip TSV output when True
 
     Returns:
         Dictionary of C-end fraction and related metrics
 
     Output columns:
         base, count, fraction
-        + summary row with c_fraction, entropy, c_bias
+    Note:
+        Summary metrics (c_fraction, entropy, c_bias) are appended as
+        comment rows in TSV; they are NOT included in the Parquet output
+        since Parquet is strongly typed. Access via the returned dict instead.
     """
     counts_1mer = compute_1mer_from_kmer(em_counts)
     metrics = compute_c_end_fraction(em_counts)
@@ -322,21 +386,32 @@ def write_end_motif_1mer(
     total = sum(counts_1mer.values())
     logger.info(f"Writing 1-mer End Motif: {output_path} ({total:,} fragments)")
 
-    with open(output_path, "w") as f:
-        if include_header:
-            f.write("base\tcount\tfraction\n")
+    rows = []
+    for nucl in "ACGT":
+        count = counts_1mer[nucl]
+        frac = count / total if total > 0 else 0.0
+        rows.append({"base": nucl, "count": count, "fraction": round(frac, 6)})
 
-        for base in "ACGT":
-            count = counts_1mer[base]
-            frac = count / total if total > 0 else 0.0
-            f.write(f"{base}\t{count}\t{frac:.6f}\n")
+    df = pd.DataFrame(rows)
+    # output_path is already the base (no extension); callers pass e.g. 'sample.EndMotif1mer'.
+    # Do NOT call .with_suffix('') — that would strip the last dot-segment as an extension.
+    base = Path(output_path)
+    write_table(df, base, output_format=output_format, compress=compress)
 
-        # Summary metrics
-        f.write(f"# c_fraction\t{metrics['c_fraction']:.6f}\n")
-        f.write(f"# entropy\t{metrics['entropy']:.6f}\n")
-        f.write(f"# c_bias\t{metrics['c_bias']:.6f}\n")
-        if sample_name:
-            f.write(f"# sample\t{sample_name}\n")
+    # For TSV: append comment-style summary metrics as extra rows
+    # (For Parquet: callers read metrics from the returned dict instead)
+    if output_format in ("tsv", "both"):
+        ext = ".tsv.gz" if compress else ".tsv"
+        tsv_path = base.parent / (base.name + ext)
+        try:
+            with open(tsv_path, "a") as f:
+                f.write(f"# c_fraction\t{metrics['c_fraction']:.6f}\n")
+                f.write(f"# entropy\t{metrics['entropy']:.6f}\n")
+                f.write(f"# c_bias\t{metrics['c_bias']:.6f}\n")
+                if sample_name:
+                    f.write(f"# sample\t{sample_name}\n")
+        except Exception as e:
+            logger.debug(f"  Could not append 1-mer metrics comment rows: {e}")
 
     logger.debug(
         f"  C-end fraction: {metrics['c_fraction']:.4f} (bias: {metrics['c_bias']:+.4f})"

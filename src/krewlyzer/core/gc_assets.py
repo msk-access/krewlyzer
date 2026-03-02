@@ -57,16 +57,16 @@ def resolve_gc_assets(
     if not gc_correct:
         return result
 
-    # First, check for pre-computed correction factors next to input
-    potential_factors = (
-        bedgz_input.parent
-        / f"{bedgz_input.stem.replace('.bed', '')}.correction_factors.tsv"
-    )
-    if potential_factors.exists():
-        result.factors_input = potential_factors
-        result.gc_correct_enabled = True
-        logger.info(f"Using pre-computed GC factors: {potential_factors.name}")
-        return result
+    # First, check for pre-computed correction factors adjacent to input.
+    # Try Parquet first (written when --output-format=parquet|both), then TSV.
+    sample_stem = bedgz_input.stem.replace(".bed", "")
+    for ext in (".correction_factors.parquet", ".correction_factors.tsv"):
+        potential_factors = bedgz_input.parent / f"{sample_stem}{ext}"
+        if potential_factors.exists():
+            result.factors_input = potential_factors
+            result.gc_correct_enabled = True
+            logger.info(f"Using pre-computed GC factors: {potential_factors.name}")
+            return result
 
     # Resolve bundled GC assets
     try:

@@ -20,12 +20,20 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
+from .core.output_utils import (
+    read_table,
+    write_table,
+)  # Unified I/O for Parquet support
+
 console = Console(stderr=True)
-logging.basicConfig(
-    level="INFO",
-    handlers=[RichHandler(console=console, show_time=True, show_path=False)],
-    format="%(message)s",
-)
+# Guard: only configure root logging if not already configured (e.g. by pytest or parent app).
+# This prevents double-logging when uxm is imported as a library rather than called as a CLI.
+if not logging.root.handlers:
+    logging.basicConfig(
+        level="INFO",
+        handlers=[RichHandler(console=console, show_time=True, show_path=False)],
+        format="%(message)s",
+    )
 logger = logging.getLogger("uxm")
 
 # Rust backend is required
@@ -54,6 +62,17 @@ def uxm(
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
     ),
 ):
     """
@@ -141,7 +160,36 @@ def uxm(
             "SE",  # pe_type (single-end default)
         )
 
-        logger.info(f"UXM complete: {output_file}")
+        # Rust always writes TSV; convert to Parquet/both afterward if requested.
+        # This two-step approach avoids re-implementing Arrow schema in Rust for UXM.
+        logger.info(f"UXM complete: {output_file} (raw TSV from Rust)")
+        logger.debug(
+            f"UXM post-process: output_format={output_format!r}, compress={compress}"
+        )
+        if output_format != "tsv":
+            logger.debug(
+                f"UXM: converting {output_file.name} → format={output_format!r}"
+            )
+            df = read_table(output_file)
+            if df is not None:
+                write_table(
+                    df,
+                    output_file.with_suffix(""),
+                    output_format=output_format,
+                    compress=compress,
+                )
+            else:
+                logger.warning(
+                    f"UXM: could not read {output_file.name} for format conversion"
+                )
+        elif compress:
+            # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
+            logger.debug(f"UXM: compressing {output_file.name} → .tsv.gz")
+            df = read_table(output_file)
+            if df is not None:
+                write_table(
+                    df, output_file.with_suffix(""), output_format="tsv", compress=True
+                )
 
     except Exception as e:
         logger.error(f"UXM calculation failed: {e}")

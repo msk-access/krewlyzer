@@ -41,9 +41,10 @@ def _get_cgroup_memory_limit_gb() -> Optional[float]:
     # Try cgroups v2 first
     try:
         with open("/sys/fs/cgroup/memory.max", "r") as f:
-            val = f.read().strip()
-            if val != "max":
-                return int(val) / (1024**3)
+            # Rename 'val' -> 'raw' (str) to avoid reuse with the int 'val' in cgroups v1 below
+            raw = f.read().strip()
+            if raw != "max":
+                return int(raw) / (1024**3)
     except (FileNotFoundError, PermissionError, ValueError):
         pass
 

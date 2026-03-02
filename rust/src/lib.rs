@@ -13,6 +13,7 @@
 //! - **uxm**: Fragment-level Methylation (bisulfite BAM analysis)
 //!
 //! ## Support Modules
+//! - **output_utils**: Shared write_parquet_batch / write_tsv_batch utilities (all modules use these)
 //! - **engine**: Generic fragment analysis engine with parallel processing
 //! - **pipeline**: Unified pipeline orchestration for run-all
 //! - **gc_correction**: LOESS-based GC bias correction
@@ -21,7 +22,11 @@
 
 use pyo3::prelude::*;
 
+// output_utils is a shared dependency — listed first so other `pub mod` declarations can use it
+pub mod output_utils;
+
 // fsc, wps, fsd, ocf, mfsd, uxm maintained for individual tool access via legacy-compatible APIs (using new engines internally)
+
 pub mod filters;
 pub mod bed;
 pub mod fsc;

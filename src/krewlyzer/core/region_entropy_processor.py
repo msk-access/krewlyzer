@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Optional, Dict, Tuple
 import logging
 
+from .output_utils import read_table, write_table  # Parquet-first I/O utilities
+
 logger = logging.getLogger("krewlyzer.core.region_entropy_processor")
 
 
@@ -89,17 +91,17 @@ class RegionEntropyBaseline:
 
 def load_entropy_tsv(path: Path) -> pd.DataFrame:
     """
-    Load region entropy TSV file.
+    Load region entropy file (TSV, TSV.gz, or Parquet).
 
     Columns: label, count, mean_size, entropy
 
     Args:
-        path: Path to TSV file
+        path: Path to TSV or Parquet file
 
     Returns:
         DataFrame with entropy data
     """
-    return pd.read_csv(path, sep="\t")
+    return read_table(path)
 
 
 def process_region_entropy(
@@ -107,6 +109,8 @@ def process_region_entropy(
     output_path: Path,
     pon_parquet_path: Optional[Path] = None,
     baseline_table: str = "tfbs_baseline",
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> int:
     """
     Apply PON normalization to region entropy output using Rust implementation.
@@ -129,10 +133,16 @@ def process_region_entropy(
         return 0
 
     if pon_parquet_path is None:
-        # No PON - just copy file and add z_score=0 column
+        # No PON — just copy file and add z_score=0 column
         df = load_entropy_tsv(raw_path)
         df["z_score"] = 0.0
-        df.to_csv(output_path, sep="\t", index=False, float_format="%.4f")
+        write_table(
+            df,
+            output_path,
+            output_format=output_format,
+            compress=compress,
+            float_format="%.4f",
+        )
         logger.debug(f"No PON baseline, wrote {len(df)} labels with z_score=0")
         return 0
 

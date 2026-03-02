@@ -15,7 +15,20 @@ import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
-from .model import PonModel, GcBiasModel, FsdBaseline, WpsBaseline
+from .model import (
+    PonModel,
+    GcBiasModel,
+    FsdBaseline,
+    WpsBaseline,
+    OcfBaseline,
+    MdsBaseline,
+    RegionMdsBaseline,
+    WpsBackgroundBaseline,
+    FscGeneBaseline,
+    FscRegionBaseline,
+    TfbsBaseline,
+    AtacBaseline,
+)
 
 console = Console(stderr=True)
 logging.basicConfig(
@@ -374,8 +387,8 @@ def build_pon(
         logger.warning(f"WPS regions file not found: {wps_regions}")
 
     # Default WPS background (Alu) file for NRL baseline
-    wps_bg_file = assets.wps_background
-    if wps_bg_file.exists():
+    wps_bg_file: Optional[Path] = assets.wps_background
+    if wps_bg_file is not None and wps_bg_file.exists():
         logger.debug(f"Using bundled WPS background: {wps_bg_file.name}")
     else:
         wps_bg_file = None
@@ -1016,7 +1029,11 @@ def build_pon(
         n_samples=len(all_gc_data),
         reference=reference.name.replace(".fa", "").replace(".fasta", ""),
         panel_mode=is_panel_mode,
-        target_regions_file=resolved_target_path.name if is_panel_mode else "",
+        target_regions_file=(
+            resolved_target_path.name  # type: ignore[union-attr]  # guarded by is_panel_mode
+            if is_panel_mode
+            else ""
+        ),
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
@@ -1227,7 +1244,7 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
 
 
 def _compute_fsd_baseline(
-    all_fsd_data: List[pd.DataFrame], fsd_paths: List[str] = None
+    all_fsd_data: List[pd.DataFrame], fsd_paths: Optional[List[str]] = None
 ) -> Optional[FsdBaseline]:
     """
     Compute FSD baseline from sample data.
@@ -1318,7 +1335,7 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
     return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0")
 
 
-def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":
+def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "Optional[OcfBaseline]":
     """
     Compute OCF baseline from sample data.
 
@@ -1344,7 +1361,7 @@ def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":
     return OcfBaseline(regions=stats)
 
 
-def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
+def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
     """
     Compute MDS baseline from sample data.
 
@@ -1392,7 +1409,9 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
     )
 
 
-def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaseline":
+def _compute_region_mds_baseline(
+    mds_gene_paths: List[str],
+) -> "Optional[RegionMdsBaseline]":
     """
     Compute Region MDS baseline from sample MDS.gene.tsv files.
 
@@ -1451,7 +1470,7 @@ def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaselin
 
 def _compute_wps_background_baseline(
     wps_background_paths: List[str],
-) -> "WpsBackgroundBaseline":
+) -> "Optional[WpsBackgroundBaseline]":
     """
     Compute WPS background (Alu) baseline from sample WPS_background.parquet files.
 
@@ -1545,7 +1564,9 @@ def _compute_wps_background_baseline(
         return None
 
 
-def _compute_fsc_gene_baseline(all_fsc_gene_data: List[Dict]) -> "FscGeneBaseline":
+def _compute_fsc_gene_baseline(
+    all_fsc_gene_data: List[Dict],
+) -> "Optional[FscGeneBaseline]":
     """
     Compute FSC gene depth baseline from sample FSC.gene.tsv data.
 
@@ -1602,7 +1623,7 @@ def _compute_fsc_gene_baseline(all_fsc_gene_data: List[Dict]) -> "FscGeneBaselin
 
 def _compute_fsc_region_baseline(
     all_fsc_region_data: List[Dict],
-) -> "FscRegionBaseline":
+) -> "Optional[FscRegionBaseline]":
     """
     Compute FSC region (exon/probe) depth baseline from sample FSC.regions.tsv data.
 
@@ -1663,7 +1684,7 @@ def _compute_fsc_region_baseline(
     return FscRegionBaseline(data=data) if data else None
 
 
-def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
+def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "Optional[TfbsBaseline]":
     """
     Compute TFBS entropy baseline from sample data.
 
@@ -1691,7 +1712,7 @@ def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
     return TfbsBaseline(baseline=baseline)
 
 
-def _compute_atac_baseline(all_atac_data: List[dict]) -> "AtacBaseline":
+def _compute_atac_baseline(all_atac_data: List[dict]) -> "Optional[AtacBaseline]":
     """
     Compute ATAC entropy baseline from sample data.
 
@@ -1949,7 +1970,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     # Build Region MDS baseline DataFrame
     region_mds_rows = []
     if model.region_mds and model.region_mds.gene_baseline:
-        for gene, data in model.region_mds.gene_baseline.items():
+        for gene, data in model.region_mds.gene_baseline.items():  # type: ignore[assignment]
             region_mds_rows.append(
                 {
                     "table": "region_mds",

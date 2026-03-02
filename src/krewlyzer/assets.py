@@ -14,7 +14,7 @@ Example:
 
 from pathlib import Path
 from enum import Enum
-from typing import Optional
+from typing import Optional, Dict
 import logging
 import os
 
@@ -115,7 +115,7 @@ class AssetManager:
         """Check if TFBS regions are available for this genome"""
         return self.tfbs_regions.exists()
 
-    def get_tfbs_regions(self, assay: str = None) -> Path:
+    def get_tfbs_regions(self, assay: Optional[str] = None) -> Path:
         """
         Get TFBS regions BED, optionally filtered for a specific assay.
 
@@ -147,7 +147,7 @@ class AssetManager:
         """Check if ATAC regions are available for this genome"""
         return self.atac_regions.exists()
 
-    def get_atac_regions(self, assay: str = None) -> Path:
+    def get_atac_regions(self, assay: Optional[str] = None) -> Path:
         """
         Get ATAC regions BED, optionally filtered for a specific assay.
 
@@ -220,7 +220,7 @@ class AssetManager:
         """Check if WGS gene BED is available for this genome."""
         return self.wgs_gene_bed.exists()
 
-    def get_gene_bed_for_mode(self, assay: str = None) -> Optional[Path]:
+    def get_gene_bed_for_mode(self, assay: Optional[str] = None) -> Optional[Path]:
         """
         Get gene BED file for the appropriate mode (panel or WGS).
 
@@ -266,7 +266,7 @@ class AssetManager:
             f"Target BED not found for assay '{assay}': tried {path_gz} and {path}"
         )
 
-    def get_wps_anchors(self, assay: str = None) -> Path:
+    def get_wps_anchors(self, assay: Optional[str] = None) -> Path:
         """
         Get WPS anchors BED, optionally filtered for a specific assay.
 
@@ -411,7 +411,7 @@ class AssetManager:
         """
         from .core.asset_validation import validate_file, FileSchema
 
-        results = {}
+        results: Dict[str, Optional[bool]] = {}
 
         # Define asset-to-schema mapping for bundled files
         genome_assets = [

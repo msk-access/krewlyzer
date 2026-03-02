@@ -102,7 +102,46 @@ docker build -t msk-access/krewlyzer:dev .
 - [ ] No unused variables
 - [ ] `__all__` exports match public API
 
+### 6. Output Format Enforcement (Cross-Cutting Rule)
+
+> **Every function that writes output files MUST accept and forward `output_format` and `compress` parameters.**
+
+This is enforced by a static analysis gate. **Run it before committing any change that touches output writers:**
+
+```bash
+python scripts/check_output_format.py
+# Exit 0 = all call sites correct
+# Exit 1 = lists exact file:line violations
+```
+
+**Functions covered by the gate:**
+
+| Function | File |
+|----------|------|
+| `write_table()` | `core/output_utils.py` |
+| `process_region_entropy()` | `core/region_entropy_processor.py` |
+| `compute_and_write_gc_factors()` | Rust via `_core.gc` |
+| `write_extraction_outputs()` | `core/sample_processor.py` |
+| `_core.run_unified_pipeline()` | Rust via `_core` |
+
+**If you add a new output-writing function**, update `scripts/check_output_format.py` to add it to `RULES` before implementing callers. This puts the gate in place before any call sites exist.
+
+**Known intentional out-of-scope exception:**
+- `pon/build.py` → `process_sample()`: PON building always writes TSV (no user-facing format choice). Excluded in the script via `RULES` exceptions.
+
 ---
+
+### 7. Cross-Cutting Parameter Discipline
+
+When a parameter (like `output_format`/`compress`) must propagate to every call site of a function across many files:
+
+1. **Write the enforcement script first**, before implementing call sites
+2. **Run the script after every change**, not just at the end
+3. **Add the script to the QC checklist** (this section)
+4. **Never rely on manual read-through alone** for cross-cutting concerns — human review misses things at scale
+
+This rule was introduced after discovering that manual verification passes consistently missed 1–3 call sites per pass across the codebase despite careful review.
+
 
 ## Feature Implementation Workflow
 

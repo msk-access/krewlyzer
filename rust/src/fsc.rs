@@ -729,15 +729,16 @@ pub fn aggregate_by_gene(
     
     let n_regions = gene_regions.len();
     
-    // 2. Load GC correction factors
+    // 2. Load GC correction factors — Parquet-first auto-detection via load()
     let factors = if let Some(ref path) = gc_factors_path {
-        match CorrectionFactors::load_csv(path) {
+        // CorrectionFactors::load() tries .parquet first, then TSV/legacy CSV
+        match CorrectionFactors::load(path) {
             Ok(f) => {
-                log::info!("GeneFSC: Loaded GC correction factors");
+                log::info!("GeneFSC: Loaded {} GC correction factor bins from {:?}", f.data.len(), path);
                 Some(Arc::new(f))
             }
             Err(e) => {
-                log::warn!("GeneFSC: Failed to load GC factors: {}", e);
+                log::warn!("GeneFSC: Failed to load GC factors from {:?}: {}", path, e);
                 None
             }
         }

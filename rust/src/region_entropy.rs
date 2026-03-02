@@ -408,7 +408,8 @@ pub fn run_region_entropy(
     // These factors correct for GC bias in off-target/genome-wide regions
     // -------------------------------------------------------------------------
     let factors_offtarget = if let Some(ref p) = gc_correction_path {
-        match CorrectionFactors::load_csv(p) {
+        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded OFF-TARGET GC factors: {} ({} bins)", 
                           p, f.data.len());
@@ -430,7 +431,8 @@ pub fn run_region_entropy(
     // Falls back to off-target factors if not provided
     // -------------------------------------------------------------------------
     let factors_ontarget = if let Some(ref p) = gc_correction_ontarget_path {
-        match CorrectionFactors::load_csv(p) {
+        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded ON-TARGET GC factors: {} ({} bins)", 
                           p, f.data.len());
