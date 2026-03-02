@@ -59,6 +59,46 @@ maturin build --release --out dist
 docker build -t msk-access/krewlyzer:dev .
 ```
 
+## Lint & Type Checking — Run Before Every Commit
+
+> **Agent rule:** Always run the full lint suite before committing. CI enforces exactly these
+> same commands as a blocking `lint` job. Fix all failures before pushing.
+
+```bash
+# 1. Auto-fix import order and style issues
+ruff check --fix src/krewlyzer/ tests/
+
+# 2. Format code (auto-reformat)
+black src/krewlyzer/ tests/
+
+# 3. Check formatting is clean (what CI runs — no auto-fix)
+black --check src/krewlyzer/ tests/
+
+# 4. Type checking — 0 non-_core errors is the baseline
+mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
+
+# 5. Rust lints — auto-fix all fixable warnings
+cargo clippy --fix --allow-dirty --manifest-path rust/Cargo.toml
+# Then verify remaining warnings match allowed categories only:
+cargo clippy --manifest-path rust/Cargo.toml -- \
+  -D warnings \
+  -A clippy::too_many_arguments \
+  -A clippy::type_complexity
+```
+
+**What each step enforces:**
+
+| Tool | Standard |
+|---|---|
+| `ruff` | PEP 8 + unused imports + undefined names |
+| `black` | Consistent formatting (line-length=88) |
+| `mypy` | Full type annotation compliance (0 non-`_core` errors) |
+| `cargo clippy` | Rust idioms; `-A too_many_arguments` deferred (large refactor) |
+
+**Baseline (as of 2026-03-02):** `pytest 244/4 ✅ · ruff 0 · black clean · mypy 0 non-_core ✅`
+
+---
+
 ## Code Quality Standards
 
 - All modules have `__all__` exports
