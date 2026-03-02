@@ -69,6 +69,18 @@ def _process_sample_subprocess(
     This wrapper configures the rayon thread pool for this subprocess,
     then calls process_sample. It's designed to be called via ProcessPoolExecutor.
 
+    NOTE on output format: process_sample() is always called with
+    output_format="tsv" and compress=False here. The intermediate files
+    written to temp_output_dir are read back by build-pon's aggregation
+    loop using pd.read_csv(sep="\t"). If output_format were "parquet",
+    Rust would write Parquet binary content into .FSD.tsv/.OCF.tsv paths
+    (paths are hardcoded with .tsv extension in unified_processor.py) and
+    pd.read_csv() would fail silently inside bare except blocks, causing
+    the PON to be built from partial/zero data with no loud error.
+
+    WPS outputs ({sample}.WPS.parquet etc.) are always Parquet regardless of
+    output_format — Rust hardcodes Parquet for WPS — and are not affected.
+
     Args:
         sample_path: Path to BAM/CRAM or BED.gz file.
         output_dir: Directory for sample outputs.
@@ -109,7 +121,13 @@ def _process_sample_subprocess(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process sample
+    # Process sample — intermediate files written to temp_output_dir.
+    # output_format is forced to "tsv" so FSD/OCF/FSC.gene outputs are always
+    # plain TSV, matching the pd.read_csv(sep="\t") calls in the aggregation
+    # loop. See docstring above for full failure-mode rationale.
+    proc_logger.debug(
+        f"[{short_id}] Calling process_sample (output_format=tsv, pon_mode=True)"
+    )
     outputs = process_sample(
         input_path=sample_path,
         output_dir=output_dir,
@@ -119,11 +137,13 @@ def _process_sample_subprocess(
         target_regions=target_regions,
         assay=assay,
         enable_fsc=True,
-        enable_fsr=False,  # Not needed for PON
+        enable_fsr=False,  # FSR not needed for PON building
         enable_fsd=True,
         enable_wps=True,
         enable_ocf=True,
-        pon_mode=True,  # Skip PON normalization (we're building the PON)
+        pon_mode=True,  # Skip PON normalization (we're building it)
+        output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
+        compress=False,  # Temp files only — no compression needed
     )
 
     # Log memory and time after sample processing
@@ -577,6 +597,9 @@ def build_pon(
                 logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")
 
                 try:
+                    # output_format forced to "tsv" — see _process_sample_subprocess
+                    # docstring for full rationale. FSD/OCF/FSC.gene outputs must be
+                    # TSV so the aggregation loop's pd.read_csv(sep="\t") calls succeed.
                     outputs = process_sample(
                         input_path=sample_path,
                         output_dir=Path(temp_output_dir) / sample_name,
@@ -586,11 +609,13 @@ def build_pon(
                         target_regions=resolved_target_path if is_panel_mode else None,
                         assay=assay,
                         enable_fsc=True,
-                        enable_fsr=False,
+                        enable_fsr=False,  # FSR not needed for PON building
                         enable_fsd=True,
                         enable_wps=True,
                         enable_ocf=True,
-                        pon_mode=True,
+                        pon_mode=True,  # Skip PON normalization (we're building it)
+                        output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
+                        compress=False,  # Temp files only — no compression needed
                     )
 
                     all_outputs.append(outputs)
