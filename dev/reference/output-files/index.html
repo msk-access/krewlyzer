@@ -1909,6 +1909,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#output-format-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Format Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output Format Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tsv-compression-compress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TSV Compression (--compress)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wps-always-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WPS — Always Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unified-json-generate-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unified JSON (--generate-json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#on-target-vs-off-target-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3158,10 +3208,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#metadata-json" class="md-nav__link">
+  <a href="#metadata-tsv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Metadata JSON
+        Metadata TSV
       
     </span>
   </a>
@@ -3712,6 +3762,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#output-format-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Format Options
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Output Format Options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tsv-compression-compress" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TSV Compression (--compress)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#wps-always-parquet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        WPS — Always Parquet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#unified-json-generate-json" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Unified JSON (--generate-json)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#on-target-vs-off-target-files" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -4961,10 +5061,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#metadata-json" class="md-nav__link">
+  <a href="#metadata-tsv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Metadata JSON
+        Metadata TSV
       
     </span>
   </a>
@@ -5248,7 +5348,7 @@
 <td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias weights</td>
 </tr>
 <tr>
-<td><a href="#metadata-json"><code>{s}.metadata.json</code></a></td>
+<td><a href="#metadata-tsv"><code>{s}.metadata.tsv</code></a></td>
 <td>Meta</td>
 <td>Global</td>
 <td>Run parameters + QC</td>
@@ -5264,6 +5364,58 @@
 <blockquote>
 <p><code>{s}</code> = sample name.</p>
 </blockquote>
+<hr>
+<h2 id="output-format-options">Output Format Options</h2>
+<p>All tabular outputs support three formats controlled by <code>--output-format</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Files produced</th>
+<th>How to read</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--output-format tsv</code> <strong>(default)</strong></td>
+<td><code>{s}.FSD.tsv</code>, <code>{s}.FSC.tsv</code>, etc.</td>
+<td><code>pd.read_csv(path, sep="\t")</code></td>
+</tr>
+<tr>
+<td><code>--output-format parquet</code></td>
+<td><code>{s}.FSD.parquet</code>, <code>{s}.FSC.parquet</code>, etc.</td>
+<td><code>pd.read_parquet(path)</code></td>
+</tr>
+<tr>
+<td><code>--output-format both</code></td>
+<td>Both <code>.tsv</code> <strong>and</strong> <code>.parquet</code> for every tabular file</td>
+<td>Either reader</td>
+</tr>
+</tbody>
+</table>
+<p>The file <strong>content</strong> (columns, rows, values) is identical across formats — only the encoding changes.</p>
+<h3 id="tsv-compression-compress"><abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> Compression (<code>--compress</code>)</h3>
+<p>When <code>--compress</code> is set alongside <code>tsv</code> or <code>both</code> output format, every <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> file is
+gzip-compressed and given a <code>.tsv.gz</code> extension:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>{s}.FSD.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>{s}.FSC.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+</code></pre></div>
+<h3 id="wps-always-parquet"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> — Always Parquet</h3>
+<p><code>*.WPS.parquet</code>, <code>*.WPS_background.parquet</code>, and <code>*.WPS.panel.parquet</code> are <strong>always Parquet</strong>
+regardless of <code>--output-format</code>. <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> stores thousands of 200-point per-anchor profiles — <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>
+at that scale would be hundreds of MB and functionally unusable. Use <code>pd.read_parquet()</code> for
+all <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> files.</p>
+<h3 id="unified-json-generate-json">Unified JSON (<code>--generate-json</code>)</h3>
+<p>The <code>--generate-json</code> flag produces <code>{s}.features.json</code> <strong>in addition to</strong> the standard
+<abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>/Parquet outputs. It aggregates every feature above into a single file for ML pipelines.
+JSON generation is independent of <code>--output-format</code> — you can use both together.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Example: Parquet outputs + unified JSON</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>krewlyzer<span class="w"> </span>run-all<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>out/<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span>--output-format<span class="w"> </span>parquet<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span>--generate-json
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># Produces: *.FSD.parquet, *.FSC.parquet ... AND sample.features.json</span>
+</code></pre></div>
+<p>See <a href="../../features/output/json-output/">JSON Export Reference</a> for the complete JSON schema.</p>
 <hr>
 <h2 id="on-target-vs-off-target-files">On-Target vs Off-Target Files</h2>
 <p>Most fragmentomics features generate <strong>two parallel outputs</strong> in panel mode: a standard file (off-target reads) and an <code>.ontarget.tsv</code> variant (on-target reads). Understanding the difference is critical for choosing the right input to any ML model.</p>
@@ -5294,15 +5446,15 @@
 </tbody>
 </table>
 <h3 id="why-the-split-matters">Why the Split Matters</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>          All cfDNA fragments in BAM
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>                    │
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>         ┌──────────┴──────────┐
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    Off-target             On-target
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  (genome-wide)         (panel genes only)
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>         │                    │
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>   FSC.tsv, FSR.tsv      FSC.ontarget.tsv
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>   MDS.tsv, OCF.tsv      MDS.ontarget.tsv
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>   FSD.tsv, ...          FSD.ontarget.tsv
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>          All cfDNA fragments in BAM
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>                    │
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>         ┌──────────┴──────────┐
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>    Off-target             On-target
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>  (genome-wide)         (panel genes only)
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>         │                    │
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>   FSC.tsv, FSR.tsv      FSC.ontarget.tsv
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>   MDS.tsv, OCF.tsv      MDS.ontarget.tsv
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>   FSD.tsv, ...          FSD.ontarget.tsv
 </code></pre></div>
 <p><strong>The off-target pool</strong> is sampled uniformly across the genome, unaffected by probe <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>, making it the <strong>gold standard for fragmentation features</strong> (<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>, <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>, <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>). The <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction model is also trained exclusively on off-target fragments.</p>
 <p><strong>The on-target pool</strong> has high depth at panel loci but is confounded by capture efficiency — probes with higher <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> content capture more efficiently, making fragment size distributions at those loci appear artificially different. On-target reads are primarily useful for gene-level copy number and region-specific analysis, not genome-wide fragmentation.</p>
@@ -5343,8 +5495,8 @@
 </tr>
 <tr>
 <td><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> tissue-of-origin</td>
-<td><strong>Off-target</strong> (<code>.tsv</code>)</td>
-<td>On-target <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> biased by capture regions' tissue specificity</td>
+<td><strong><code>OCF.tsv</code></strong> (WGS) or <strong><code>OCF.offtarget.tsv</code></strong> (panel)</td>
+<td><code>OCF.tsv</code> = all reads (WGS has no target split); in panel mode <code>OCF.offtarget.tsv</code> is the unbiased off-target score — use that instead of <code>OCF.tsv</code> to avoid contamination from capture-biased on-target reads</td>
 </tr>
 <tr>
 <td>Building a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr></td>
@@ -5435,12 +5587,41 @@
 </tbody>
 </table>
 <blockquote>
-<p>⚠️ <strong><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> <code>offtarget</code></strong> is a special case: <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> computes 3 variants — all reads, on-target reads, and a panel-specific off-target score derived from regions near but not in the capture baits. The <code>OCF.offtarget.tsv</code> is the panel-off-target score, not the same concept as the base <code>OCF.tsv</code>.</p>
+<p>⚠️ <strong><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> is a special case</strong> — it always computes <strong>three</strong> output variants:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Contains</th>
+<th>When generated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{s}.OCF.tsv</code></td>
+<td><strong>All reads</strong> (on + off combined)</td>
+<td>Always</td>
+</tr>
+<tr>
+<td><code>{s}.OCF.ontarget.tsv</code></td>
+<td>On-target reads only</td>
+<td>Panel mode</td>
+</tr>
+<tr>
+<td><code>{s}.OCF.offtarget.tsv</code></td>
+<td>Off-target reads only</td>
+<td>Panel mode</td>
+</tr>
+</tbody>
+</table>
+<p>In WGS mode, <code>OCF.tsv</code> = all reads ≈ off-target (no target split exists). In panel mode,
+<code>OCF.tsv</code> mixes on-target (capture-biased) and off-target reads — for unbiased tissue-of-origin
+signal, use <code>OCF.offtarget.tsv</code> instead.</p>
 </blockquote>
 <h3 id="gc-correction-and-on-target"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction and On-Target</h3>
 <p><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction is trained on <strong>off-target reads only</strong>, then applied to both pools:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Off-target reads → GC model training → correction_factors.tsv
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>On-target reads  → correction_factors.ontarget.tsv (separate model)
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>Off-target reads → GC model training → correction_factors.tsv
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>On-target reads  → correction_factors.ontarget.tsv (separate model)
 </code></pre></div>
 <p>The on-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> model accounts for probe-specific capture bias. It is used internally when generating <code>FSC.gene.tsv</code> and <code>FSC.regions.tsv</code> — you do not need to apply it manually.</p>
 <hr>
@@ -5482,19 +5663,19 @@
 <li><strong>Tumor-specific size shift</strong>: Cancer plasma shows a systematic shift toward shorter fragments genome-wide</li>
 </ul>
 <h4 id="ml-use-case">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSD.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="s2">"region"</span><span class="p">)</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="n">size_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="o">!=</span> <span class="s2">"total"</span><span class="p">]</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Feature vector: proportion of each size class per arm</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="n">props</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">size_cols</span><span class="p">]</span><span class="o">.</span><span class="n">div</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span> <span class="o">+</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># Reduce to 3-class: short (65-149), mono (150-259), long (260-400)</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="n">props</span><span class="p">[</span><span class="s2">"short_frac"</span><span class="p">]</span> <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mi">150</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="n">props</span><span class="p">[</span><span class="s2">"mono_frac"</span><span class="p">]</span>  <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="mi">150</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mi">260</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="n">props</span><span class="p">[</span><span class="s2">"long_frac"</span><span class="p">]</span>  <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&gt;=</span> <span class="mi">260</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSD.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">,</span> <span class="n">index_col</span><span class="o">=</span><span class="s2">"region"</span><span class="p">)</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">size_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">c</span> <span class="o">!=</span> <span class="s2">"total"</span><span class="p">]</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Feature vector: proportion of each size class per arm</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">props</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">size_cols</span><span class="p">]</span><span class="o">.</span><span class="n">div</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span> <span class="o">+</span> <span class="mf">1e-9</span><span class="p">,</span> <span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="c1"># Reduce to 3-class: short (65-149), mono (150-259), long (260-400)</span>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">props</span><span class="p">[</span><span class="s2">"short_frac"</span><span class="p">]</span> <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mi">150</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">props</span><span class="p">[</span><span class="s2">"mono_frac"</span><span class="p">]</span>  <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="mi">150</span> <span class="o">&lt;=</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mi">260</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="n">props</span><span class="p">[</span><span class="s2">"long_frac"</span><span class="p">]</span>  <span class="o">=</span> <span class="n">props</span><span class="p">[[</span><span class="n">c</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">size_cols</span> <span class="k">if</span> <span class="nb">int</span><span class="p">(</span><span class="n">c</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">"-"</span><span class="p">)[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&gt;=</span> <span class="mi">260</span><span class="p">]]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Arm-level <code>short_frac</code> as 46-feature input (2 arms × 23 chromosomes) per sample for pan-cancer models.</p>
 <div class="admonition note">
@@ -5578,18 +5759,18 @@
 <p><code>short_frac</code> is a raw proportion — it conflates true biology with library prep and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias. <code>short_long_ratio</code> divides <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized values, canceling technical noise. Use <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> for any cross-sample comparison.</p>
 </div>
 <h4 id="ml-use-case_1">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSR.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Primary feature vector: ~500 windows × 1 scalar</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="n">feature_vec</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># signed, mean ~0 in healthy</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="c1"># Genome-wide statistics as compact features</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>    <span class="s2">"fsr_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="s2">"fsr_std"</span><span class="p">:</span>    <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="s2">"fsr_q90"</span><span class="p">:</span>    <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.9</span><span class="p">),</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="s2">"fsr_n_elevated"</span><span class="p">:</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">0.3</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(),</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSR.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Primary feature vector: ~500 windows × 1 scalar</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">feature_vec</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># signed, mean ~0 in healthy</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Genome-wide statistics as compact features</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    <span class="s2">"fsr_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    <span class="s2">"fsr_std"</span><span class="p">:</span>    <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>    <span class="s2">"fsr_q90"</span><span class="p">:</span>    <span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span><span class="o">.</span><span class="n">quantile</span><span class="p">(</span><span class="mf">0.9</span><span class="p">),</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>    <span class="s2">"fsr_n_elevated"</span><span class="p">:</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"short_long_log2"</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mf">0.3</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(),</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="p">}</span>
 </code></pre></div>
 <p><strong>Typical range</strong>: healthy ~0.0 ± 0.15; high <abbr title="Circulating tumor DNA - Tumor-derived cfDNA fragments">ctDNA</abbr> &gt; +0.4 (more short frags than <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>)</p>
 <hr>
@@ -5680,18 +5861,18 @@
 <li><strong><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> log2 ratios</strong>: <code>core_short_log2</code>, <code>mono_nucl_log2</code> etc. are analogous to CNV log-ratio tracks</li>
 </ul>
 <h4 id="ml-use-case_2">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="c1"># 6-channel feature matrix: windows × channels</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="n">channels</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"ultra_short"</span><span class="p">,</span> <span class="s2">"core_short"</span><span class="p">,</span> <span class="s2">"mono_nucl"</span><span class="p">,</span> <span class="s2">"di_nucl"</span><span class="p">,</span> <span class="s2">"long"</span><span class="p">,</span> <span class="s2">"ultra_long"</span><span class="p">]</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">channels</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_windows, 6)</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Normalize to proportions (remove depth variation)</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="n">X_prop</span> <span class="o">=</span> <span class="n">X</span> <span class="o">/</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">+</span> <span class="mf">1e-9</span><span class="p">)</span>
-<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>
-<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="c1"># With PON: use log2 ratios directly (already depth-normalized)</span>
-<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="n">log2_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="o">+</span> <span class="s2">"_log2"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">channels</span> <span class="k">if</span> <span class="n">c</span> <span class="o">+</span> <span class="s2">"_log2"</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
-<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="n">X_pon</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">log2_cols</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_windows, 6) — centered near 0 in healthy</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># 6-channel feature matrix: windows × channels</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">channels</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"ultra_short"</span><span class="p">,</span> <span class="s2">"core_short"</span><span class="p">,</span> <span class="s2">"mono_nucl"</span><span class="p">,</span> <span class="s2">"di_nucl"</span><span class="p">,</span> <span class="s2">"long"</span><span class="p">,</span> <span class="s2">"ultra_long"</span><span class="p">]</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">channels</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_windows, 6)</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="c1"># Normalize to proportions (remove depth variation)</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">X_prop</span> <span class="o">=</span> <span class="n">X</span> <span class="o">/</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span><span class="p">[:,</span> <span class="kc">None</span><span class="p">]</span> <span class="o">+</span> <span class="mf">1e-9</span><span class="p">)</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>
+<a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a><span class="c1"># With PON: use log2 ratios directly (already depth-normalized)</span>
+<a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a><span class="n">log2_cols</span> <span class="o">=</span> <span class="p">[</span><span class="n">c</span> <span class="o">+</span> <span class="s2">"_log2"</span> <span class="k">for</span> <span class="n">c</span> <span class="ow">in</span> <span class="n">channels</span> <span class="k">if</span> <span class="n">c</span> <span class="o">+</span> <span class="s2">"_log2"</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span><span class="p">]</span>
+<a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="n">X_pon</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">log2_cols</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_windows, 6) — centered near 0 in healthy</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Input to CNV callers, genome-wide fragmentation classifiers, and tumor fraction regression.</p>
 <hr>
@@ -5753,17 +5934,17 @@
 <li><strong>Panel-level feature matrix</strong>: 146 genes × 6 channels = 876 features per sample</li>
 </ul>
 <h4 id="ml-use-case_3">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.gene.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="c1"># Gene-level short enrichment</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="n">df</span><span class="p">[</span><span class="s2">"tumor_signal"</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">]</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">]</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="c1"># Full channel composition feature matrix: 146 genes × 5 ratios</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="n">ratio_cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">,</span> <span class="s2">"core_short_ratio"</span><span class="p">,</span> <span class="s2">"mono_nucl_ratio"</span><span class="p">,</span> <span class="s2">"di_nucl_ratio"</span><span class="p">,</span> <span class="s2">"long_ratio"</span><span class="p">]</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">ratio_cols</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (146, 5) per sample</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="c1"># Normalized depth for CNV</span>
-<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="n">cnv_proxy</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"normalized_depth"</span><span class="p">]</span>  <span class="c1"># pivot across samples → CNV log-ratio</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.gene.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Gene-level short enrichment</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">df</span><span class="p">[</span><span class="s2">"tumor_signal"</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">]</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">]</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># Full channel composition feature matrix: 146 genes × 5 ratios</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">ratio_cols</span> <span class="o">=</span> <span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">,</span> <span class="s2">"core_short_ratio"</span><span class="p">,</span> <span class="s2">"mono_nucl_ratio"</span><span class="p">,</span> <span class="s2">"di_nucl_ratio"</span><span class="p">,</span> <span class="s2">"long_ratio"</span><span class="p">]</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">ratio_cols</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (146, 5) per sample</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="c1"># Normalized depth for CNV</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="n">cnv_proxy</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"normalized_depth"</span><span class="p">]</span>  <span class="c1"># pivot across samples → CNV log-ratio</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Gene-specific models, tissue-of-origin (which genes show altered fragmentation), copy number inference.</p>
 <hr>
@@ -5835,14 +6016,14 @@
 <li><strong>Input for <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> building</strong>: Use to compute exon-level expected depth profiles</li>
 </ul>
 <h4 id="ml-use-case_4">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.regions.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="c1"># Pivot: regions × channels, one row per region</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="n">pivot</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot_table</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="s2">"region_name"</span><span class="p">,</span> <span class="n">values</span><span class="o">=</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">,</span> <span class="s2">"mono_nucl_ratio"</span><span class="p">])</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="c1"># Filter to well-covered regions</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="n">well_covered</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">][</span><span class="s2">"region_name"</span><span class="p">]</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="n">df_filtered</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"region_name"</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">well_covered</span><span class="p">)]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.regions.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="c1"># Pivot: regions × channels, one row per region</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="n">pivot</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">pivot_table</span><span class="p">(</span><span class="n">index</span><span class="o">=</span><span class="s2">"region_name"</span><span class="p">,</span> <span class="n">values</span><span class="o">=</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">,</span> <span class="s2">"mono_nucl_ratio"</span><span class="p">])</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># Filter to well-covered regions</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="n">well_covered</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"total"</span><span class="p">]</span> <span class="o">&gt;</span> <span class="mi">50</span><span class="p">][</span><span class="s2">"region_name"</span><span class="p">]</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="n">df_filtered</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"region_name"</span><span class="p">]</span><span class="o">.</span><span class="n">isin</span><span class="p">(</span><span class="n">well_covered</span><span class="p">)]</span>
 </code></pre></div>
 <hr>
 <h3 id="fsc-e1-only"><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> E1-Only</h3>
@@ -5856,13 +6037,13 @@
 <li><strong>Compact feature set</strong>: 146 genes × 1 exon = compact, interpretable vector</li>
 </ul>
 <h4 id="ml-use-case_5">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.regions.e1only.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Primary cancer signal: promoter short enrichment</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="n">df</span><span class="p">[</span><span class="s2">"promoter_short"</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">]</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">]</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># 146-gene feature vector — best single FSC feature for early detection</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"promoter_short"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.FSC.regions.e1only.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># Primary cancer signal: promoter short enrichment</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">df</span><span class="p">[</span><span class="s2">"promoter_short"</span><span class="p">]</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ultra_short_ratio"</span><span class="p">]</span> <span class="o">+</span> <span class="n">df</span><span class="p">[</span><span class="s2">"core_short_ratio"</span><span class="p">]</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># 146-gene feature vector — best single FSC feature for early detection</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"promoter_short"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Use E1 over gene-level for early detection models</p>
@@ -5882,6 +6063,13 @@
 <h2 id="nucleosome-positioning">Nucleosome Positioning</h2>
 <h3 id="wps-windowed-protection-score"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> (Windowed Protection Score)</h3>
 <p><strong>File:</strong> <code>{sample}.WPS.parquet</code></p>
+<div class="admonition note">
+<p class="admonition-title"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> is always Parquet</p>
+<p><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> outputs (<code>*.WPS.parquet</code>, <code>*.WPS_background.parquet</code>, <code>*.WPS.panel.parquet</code>) are
+<strong>always written as Parquet</strong>, regardless of the <code>--output-format</code> flag. <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> vectors are
+thousands of 200-point profiles — <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> at that scale would be hundreds of MB and
+functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> files.</p>
+</div>
 <p>Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> or <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> site). <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> captures how protected (nucleosome-covered) a region is to fragments of two sizes.</p>
 <h4 id="columns-parquet">Columns (Parquet)</h4>
 <table>
@@ -5978,21 +6166,21 @@
 <li><strong>NRL (Nucleosome Repeat Length)</strong>: Computed in <code>WPS_background.parquet</code> from Alu stacking</li>
 </ul>
 <h4 id="ml-use-case_6">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.parquet"</span><span class="p">)</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># Feature vector per sample: mean WPS across all anchors</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>    <span class="s2">"wps_nuc_global_mean"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>    <span class="s2">"wps_nuc_global_std"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>    <span class="s2">"prot_frac_nuc_mean"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>    <span class="s2">"prot_frac_tf_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="p">}</span>
-<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a>
-<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="c1"># Per-anchor feature matrix for gene-level models</span>
-<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="c1"># shape: (~15,000 anchors, 4) — one row per TSS/CTCF</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.parquet"</span><span class="p">)</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Feature vector per sample: mean WPS across all anchors</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="s2">"wps_nuc_global_mean"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="s2">"wps_nuc_global_std"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="s2">"prot_frac_nuc_mean"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="s2">"prot_frac_tf_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">}</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Per-anchor feature matrix for gene-level models</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1"># shape: (~15,000 anchors, 4) — one row per TSS/CTCF</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Deep learning input (<abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles as 1D signals), nucleosome periodicity score, <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> accessibility classifier.</p>
 <hr>
@@ -6001,14 +6189,14 @@
 <strong>Requires:</strong> <code>--assay</code></p>
 <p>Same columns as <code>WPS.parquet</code>, filtered to panel gene anchors (~1,820 for xs2). Rows are panel-gene <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> and <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites.</p>
 <h4 id="ml-use-case_7">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.panel.parquet"</span><span class="p">)</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="c1"># Compact panel feature: 1820 anchors × 4 = 7280 features</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="c1"># Gene-indexed lookup</span>
-<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="n">df_gene</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region_id"</span><span class="p">)</span>
-<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="n">tp53_wps</span> <span class="o">=</span> <span class="n">df_gene</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="s2">"TP53_TSS"</span><span class="p">,</span> <span class="s2">"wps_nuc_mean"</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.panel.parquet"</span><span class="p">)</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Compact panel feature: 1820 anchors × 4 = 7280 features</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># Gene-indexed lookup</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">df_gene</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region_id"</span><span class="p">)</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">tp53_wps</span> <span class="o">=</span> <span class="n">df_gene</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="s2">"TP53_TSS"</span><span class="p">,</span> <span class="s2">"wps_nuc_mean"</span><span class="p">]</span>
 </code></pre></div>
 <hr>
 <h3 id="wps-background"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Background</h3>
@@ -6083,15 +6271,15 @@
 <li><strong>Background correction</strong>: Used to compute "global_pon" baseline for <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> z-scores</li>
 </ul>
 <h4 id="ml-use-case_8">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS_background.parquet"</span><span class="p">)</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">global_row</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"group_id"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"Global_All"</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>    <span class="s2">"nrl_bp"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"nrl_bp"</span><span class="p">],</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="s2">"periodicity_score"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"periodicity_score"</span><span class="p">],</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="s2">"adjusted_score"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"adjusted_score"</span><span class="p">],</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="s2">"fragment_ratio_bg"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"fragment_ratio"</span><span class="p">],</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS_background.parquet"</span><span class="p">)</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">global_row</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"group_id"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"Global_All"</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>    <span class="s2">"nrl_bp"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"nrl_bp"</span><span class="p">],</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>    <span class="s2">"periodicity_score"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"periodicity_score"</span><span class="p">],</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>    <span class="s2">"adjusted_score"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"adjusted_score"</span><span class="p">],</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>    <span class="s2">"fragment_ratio_bg"</span><span class="p">:</span> <span class="n">global_row</span><span class="p">[</span><span class="s2">"fragment_ratio"</span><span class="p">],</span>
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="p">}</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Global chromatin state features, cancer screening, NRL as continuous tumor fraction predictor.</p>
 <hr>
@@ -6121,12 +6309,12 @@
 <li><strong><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> input</strong>: Raw material for Motif Diversity Score calculation</li>
 </ul>
 <h4 id="ml-use-case_9">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.EndMotif.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># Single row: 256 4-mer frequencies</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># 256-dimensional feature vector</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># Reduce by GC content group (64 → 5 groups)</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">gc_groups</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"AT-rich"</span><span class="p">:</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">"A"</span><span class="p">)</span> <span class="o">+</span> <span class="n">k</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">"T"</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">],</span> <span class="o">...</span><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.EndMotif.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># Single row: 256 4-mer frequencies</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># 256-dimensional feature vector</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="c1"># Reduce by GC content group (64 → 5 groups)</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="n">gc_groups</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"AT-rich"</span><span class="p">:</span> <span class="p">[</span><span class="n">k</span> <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="n">df</span><span class="o">.</span><span class="n">columns</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">"A"</span><span class="p">)</span> <span class="o">+</span> <span class="n">k</span><span class="o">.</span><span class="n">count</span><span class="p">(</span><span class="s2">"T"</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span><span class="p">],</span> <span class="o">...</span><span class="p">}</span>
 </code></pre></div>
 <hr>
 <h3 id="endmotif-1-mer">EndMotif 1-mer</h3>
@@ -6177,8 +6365,8 @@
 <h4 id="columns-mds-float">Columns: <code>MDS</code> (float)</h4>
 <p><strong>Range</strong>: Healthy plasma ~0.80–0.85; cancer (DNASE1L3 suppressed) &lt; 0.75</p>
 <h4 id="ml-use-case_10">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="n">mds</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)[</span><span class="s2">"MDS"</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="c1"># Single scalar — highly interpretable cancer feature</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">mds</span> <span class="o">=</span> <span class="nb">float</span><span class="p">(</span><span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)[</span><span class="s2">"MDS"</span><span class="p">]</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="c1"># Single scalar — highly interpretable cancer feature</span>
 </code></pre></div>
 <hr>
 <h3 id="mds-exon-level"><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> Exon-Level</h3>
@@ -6225,13 +6413,13 @@
 </tbody>
 </table>
 <h4 id="ml-use-case_11">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.exon.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="c1"># Filter low-coverage exons</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="n">df_high</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"n_fragments"</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">20</span><span class="p">]</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>
-<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="c1"># Per-exon MDS as feature matrix (rows = exons)</span>
-<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df_high</span><span class="p">[[</span><span class="s2">"mds"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># or pivot into gene × exon matrix</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.exon.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># Filter low-coverage exons</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">df_high</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="n">df</span><span class="p">[</span><span class="s2">"n_fragments"</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="mi">20</span><span class="p">]</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="c1"># Per-exon MDS as feature matrix (rows = exons)</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df_high</span><span class="p">[[</span><span class="s2">"mds"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># or pivot into gene × exon matrix</span>
 </code></pre></div>
 <hr>
 <h3 id="mds-gene-level"><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> Gene-Level</h3>
@@ -6282,16 +6470,29 @@
 </tbody>
 </table>
 <h4 id="ml-use-case_12">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.gene.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="c1"># E1 MDS is highest-signal feature (promoter-proximal NDR)</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="n">X_e1</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mds_e1"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>           <span class="c1"># 146 features for panel</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">X_z</span>  <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mds_e1_z"</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># PON-normalized — zero-centered in healthy</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.MDS.gene.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"gene"</span><span class="p">)</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># E1 MDS is highest-signal feature (promoter-proximal NDR)</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">X_e1</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mds_e1"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>           <span class="c1"># 146 features for panel</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">X_z</span>  <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mds_e1_z"</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># PON-normalized — zero-centered in healthy</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Gene-level cancer classifiers, promoter aberration detection, combining with <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>-E1.</p>
 <hr>
 <h3 id="ocf-orientation-aware-cfdna-fragmentation"><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> (Orientation-aware <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr> Fragmentation)</h3>
 <p><strong>File:</strong> <code>{sample}.OCF.tsv</code> / <code>{sample}.OCF.ontarget.tsv</code> / <code>{sample}.OCF.offtarget.tsv</code></p>
+<div class="admonition note">
+<p class="admonition-title">Three <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> variants</p>
+<p><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> always produces three output files:</p>
+<ul>
+<li><strong><code>OCF.tsv</code></strong> — <strong>All reads</strong> (on + off combined). In WGS mode this is the only file and
+  equals the off-target signal. In panel mode it mixes capture-biased on-target reads with
+  off-target reads — use <code>OCF.offtarget.tsv</code> for unbiased tissue-of-origin in panel mode.</li>
+<li><strong><code>OCF.ontarget.tsv</code></strong> — On-target reads only (panel mode). Useful for gene-anchored <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>
+  but biased by capture efficiency at tissue-specific loci.</li>
+<li><strong><code>OCF.offtarget.tsv</code></strong> — Off-target reads only (panel mode). Preferred for ML features
+  as it is unbiased by capture probe <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> content.</li>
+</ul>
+</div>
 <p>Tissue-of-origin scores based on strand asymmetry of fragment ends at tissue-specific open chromatin regions.</p>
 <h4 id="columns_9">Columns</h4>
 <table>
@@ -6323,14 +6524,14 @@
 <li><strong><abbr title="Circulating tumor DNA - Tumor-derived cfDNA fragments">ctDNA</abbr> fraction proxy</strong>: Overall <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> magnitude correlates with <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr> purity</li>
 </ul>
 <h4 id="ml-use-case_13">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.OCF.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"tissue"</span><span class="p">)</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="c1"># OCF score vector across tissues (e.g. 10 tissues = 10 features)</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="n">X_ocf</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"OCF"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="n">X_z</span>   <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ocf_z"</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># zero-centered in healthy</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="c1"># Tissue with max signal</span>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="n">top_tissue</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ocf_z"</span><span class="p">]</span><span class="o">.</span><span class="n">idxmax</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.OCF.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"tissue"</span><span class="p">)</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># OCF score vector across tissues (e.g. 10 tissues = 10 features)</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">X_ocf</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"OCF"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">X_z</span>   <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ocf_z"</span><span class="p">]</span><span class="o">.</span><span class="n">fillna</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># zero-centered in healthy</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="c1"># Tissue with max signal</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="n">top_tissue</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"ocf_z"</span><span class="p">]</span><span class="o">.</span><span class="n">idxmax</span><span class="p">()</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Primary tumor site-of-origin classification, multi-class tissue deconvolution.</p>
 <hr>
@@ -6377,16 +6578,16 @@
 <li><strong>808-feature vector</strong>: One entropy value per TF = large, rich feature set</li>
 </ul>
 <h4 id="ml-use-case_14">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.TFBS.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"label"</span><span class="p">)</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="c1"># 808 TF entropy values — high-dimensional feature vector</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="n">X_tfbs</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"entropy"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
-<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="c1"># Mean size as complementary feature</span>
-<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="n">X_size</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mean_size"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>
-<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a><span class="c1"># Combine</span>
-<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">X_tfbs</span><span class="p">,</span> <span class="n">X_size</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># shape: (808, 2)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.TFBS.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"label"</span><span class="p">)</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="c1"># 808 TF entropy values — high-dimensional feature vector</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">X_tfbs</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"entropy"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1"># Mean size as complementary feature</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="n">X_size</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"mean_size"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="c1"># Combine</span>
+<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">X_tfbs</span><span class="p">,</span> <span class="n">X_size</span><span class="p">],</span> <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>  <span class="c1"># shape: (808, 2)</span>
 </code></pre></div>
 <hr>
 <h3 id="tfbs-sync"><abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> Sync</h3>
@@ -6407,13 +6608,13 @@
 <li><strong>Complementary to <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr></strong>: <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> uses strand asymmetry; <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> uses size entropy — different signal axis</li>
 </ul>
 <h4 id="ml-use-case_15">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.ATAC.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"label"</span><span class="p">)</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># 23 tissue entropy values — compact tissue-of-origin feature</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">X_atac</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"entropy"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="c1"># Combine OCF + ATAC tissue vectors for multimodal tissue classifier</span>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">X_combined</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">ocf_scores</span><span class="p">,</span> <span class="n">atac_entropy</span><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.ATAC.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"label"</span><span class="p">)</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># 23 tissue entropy values — compact tissue-of-origin feature</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="n">X_atac</span> <span class="o">=</span> <span class="n">df</span><span class="p">[</span><span class="s2">"entropy"</span><span class="p">]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="c1"># Combine OCF + ATAC tissue vectors for multimodal tissue classifier</span>
+<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="n">X_combined</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">concatenate</span><span class="p">([</span><span class="n">ocf_scores</span><span class="p">,</span> <span class="n">atac_entropy</span><span class="p">])</span>
 </code></pre></div>
 <hr>
 <h3 id="atac-sync"><abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> Sync</h3>
@@ -6486,17 +6687,17 @@
 <li><strong>Multi-variant aggregation</strong>: Combine evidence across many variants to estimate <abbr title="Circulating tumor DNA - Tumor-derived cfDNA fragments">ctDNA</abbr> fraction</li>
 </ul>
 <h4 id="ml-use-case_16">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.mFSD.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="c1"># Filter to high-quality variants</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="n">df_hq</span> <span class="o">=</span> <span class="n">df</span><span class="p">[(</span><span class="n">df</span><span class="p">[</span><span class="s2">"ALT_Confidence"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"HIGH"</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"KS_Valid"</span><span class="p">]</span> <span class="o">==</span> <span class="kc">True</span><span class="p">)]</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="c1"># Per-variant feature vector</span>
-<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="n">features</span> <span class="o">=</span> <span class="n">df_hq</span><span class="p">[[</span><span class="s2">"VAF_GC_Corrected"</span><span class="p">,</span> <span class="s2">"Delta_ALT_REF"</span><span class="p">,</span> <span class="s2">"KS_ALT_REF"</span><span class="p">,</span>
-<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>                   <span class="s2">"Size_Ratio"</span><span class="p">,</span> <span class="s2">"Quality_Score"</span><span class="p">,</span> <span class="s2">"ALT_LLR"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a>
-<a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="c1"># Sample-level aggregation: weighted average across variants</span>
-<a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="n">sample_vaf</span> <span class="o">=</span> <span class="p">(</span><span class="n">df_hq</span><span class="p">[</span><span class="s2">"VAF_GC_Corrected"</span><span class="p">]</span> <span class="o">*</span> <span class="n">df_hq</span><span class="p">[</span><span class="s2">"Quality_Score"</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">df_hq</span><span class="p">[</span><span class="s2">"Quality_Score"</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.mFSD.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="c1"># Filter to high-quality variants</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="n">df_hq</span> <span class="o">=</span> <span class="n">df</span><span class="p">[(</span><span class="n">df</span><span class="p">[</span><span class="s2">"ALT_Confidence"</span><span class="p">]</span> <span class="o">==</span> <span class="s2">"HIGH"</span><span class="p">)</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"KS_Valid"</span><span class="p">]</span> <span class="o">==</span> <span class="kc">True</span><span class="p">)]</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="c1"># Per-variant feature vector</span>
+<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="n">features</span> <span class="o">=</span> <span class="n">df_hq</span><span class="p">[[</span><span class="s2">"VAF_GC_Corrected"</span><span class="p">,</span> <span class="s2">"Delta_ALT_REF"</span><span class="p">,</span> <span class="s2">"KS_ALT_REF"</span><span class="p">,</span>
+<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a>                   <span class="s2">"Size_Ratio"</span><span class="p">,</span> <span class="s2">"Quality_Score"</span><span class="p">,</span> <span class="s2">"ALT_LLR"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a>
+<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="c1"># Sample-level aggregation: weighted average across variants</span>
+<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="n">sample_vaf</span> <span class="o">=</span> <span class="p">(</span><span class="n">df_hq</span><span class="p">[</span><span class="s2">"VAF_GC_Corrected"</span><span class="p">]</span> <span class="o">*</span> <span class="n">df_hq</span><span class="p">[</span><span class="s2">"Quality_Score"</span><span class="p">])</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">/</span> <span class="n">df_hq</span><span class="p">[</span><span class="s2">"Quality_Score"</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
 </code></pre></div>
 <p><strong>Best for</strong>: MRD detection models, <abbr title="Circulating tumor DNA - Tumor-derived cfDNA fragments">ctDNA</abbr> fraction estimation from targeted panels, variant-level cancer classifiers.</p>
 <hr>
@@ -6546,17 +6747,17 @@
 <li><strong>Multi-modal fusion</strong>: Combine with <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> and <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> for maximum sensitivity in early detection</li>
 </ul>
 <h4 id="ml-use-case_17">ML Use Case</h4>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.UXM.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region"</span><span class="p">)</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="c1"># 3-class methylation state per region</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"U"</span><span class="p">,</span> <span class="s2">"X"</span><span class="p">,</span> <span class="s2">"M"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_regions, 3); rows sum to 1.0</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="c1"># Sample-level statistics</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a>    <span class="s2">"global_U"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"U"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>   <span class="c1"># high = hypomethylation (cancer signal)</span>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a>    <span class="s2">"global_M"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"M"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>   <span class="c1"># varies by tissue</span>
-<a id="__codelineno-19-10" name="__codelineno-19-10" href="#__codelineno-19-10"></a>    <span class="s2">"U_std"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"U"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>       <span class="c1"># heterogeneity across regions</span>
-<a id="__codelineno-19-11" name="__codelineno-19-11" href="#__codelineno-19-11"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.UXM.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region"</span><span class="p">)</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="c1"># 3-class methylation state per region</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"U"</span><span class="p">,</span> <span class="s2">"X"</span><span class="p">,</span> <span class="s2">"M"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>  <span class="c1"># shape: (n_regions, 3); rows sum to 1.0</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="c1"># Sample-level statistics</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a>    <span class="s2">"global_U"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"U"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>   <span class="c1"># high = hypomethylation (cancer signal)</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a>    <span class="s2">"global_M"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"M"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>   <span class="c1"># varies by tissue</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a>    <span class="s2">"U_std"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"U"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>       <span class="c1"># heterogeneity across regions</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="p">}</span>
 </code></pre></div>
 <hr>
 <h2 id="diagnostic-qc-outputs">Diagnostic / QC Outputs</h2>
@@ -6609,35 +6810,84 @@
 <p><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction is already applied to <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>, <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>, <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>, and <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> outputs. Use those corrected values. <code>correction_factors.tsv</code> is diagnostic data.</p>
 </div>
 <hr>
-<h3 id="metadata-json">Metadata JSON</h3>
-<p><strong>File:</strong> <code>{sample}.metadata.json</code></p>
-<p>Run parameters, QC metrics, and processing provenance.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="p">{</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="w">  </span><span class="nt">"sample_id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"sample_001"</span><span class="p">,</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="w">  </span><span class="nt">"krewlyzer_version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"0.6.0"</span><span class="p">,</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="w">  </span><span class="nt">"genome"</span><span class="p">:</span><span class="w"> </span><span class="s2">"hg19"</span><span class="p">,</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="w">  </span><span class="nt">"assay"</span><span class="p">:</span><span class="w"> </span><span class="s2">"xs2"</span><span class="p">,</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="w">  </span><span class="nt">"total_fragments"</span><span class="p">:</span><span class="w"> </span><span class="mi">8234567</span><span class="p">,</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="w">  </span><span class="nt">"on_target_rate"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.44</span><span class="p">,</span>
-<a id="__codelineno-20-8" name="__codelineno-20-8" href="#__codelineno-20-8"></a><span class="w">  </span><span class="nt">"mean_fragment_size"</span><span class="p">:</span><span class="w"> </span><span class="mf">168.3</span><span class="p">,</span>
-<a id="__codelineno-20-9" name="__codelineno-20-9" href="#__codelineno-20-9"></a><span class="w">  </span><span class="nt">"duplication_rate"</span><span class="p">:</span><span class="w"> </span><span class="mf">0.12</span><span class="p">,</span>
-<a id="__codelineno-20-10" name="__codelineno-20-10" href="#__codelineno-20-10"></a><span class="w">  </span><span class="nt">"processing_time_s"</span><span class="p">:</span><span class="w"> </span><span class="mf">342.1</span>
-<a id="__codelineno-20-11" name="__codelineno-20-11" href="#__codelineno-20-11"></a><span class="p">}</span>
+<h3 id="metadata-tsv">Metadata <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></h3>
+<p><strong>File:</strong> <code>{sample}.metadata.tsv</code></p>
+<p>Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
+for easy ingestion into <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> pipelines and pandas workflows.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">meta</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.metadata.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s2">"total_fragments"</span><span class="p">],</span> <span class="n">meta</span><span class="p">[</span><span class="s2">"on_target_rate"</span><span class="p">])</span>
 </code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sample_id</code></td>
+<td>str</td>
+<td>Sample identifier</td>
+</tr>
+<tr>
+<td><code>krewlyzer_version</code></td>
+<td>str</td>
+<td>Version string</td>
+</tr>
+<tr>
+<td><code>genome</code></td>
+<td>str</td>
+<td>Genome build used (<code>hg19</code>, <code>hg38</code>)</td>
+</tr>
+<tr>
+<td><code>assay</code></td>
+<td>str</td>
+<td>Assay name (or empty for WGS)</td>
+</tr>
+<tr>
+<td><code>total_fragments</code></td>
+<td>int</td>
+<td>Total fragments extracted</td>
+</tr>
+<tr>
+<td><code>on_target_rate</code></td>
+<td>float</td>
+<td>Fraction of fragments overlapping targets</td>
+</tr>
+<tr>
+<td><code>mean_fragment_size</code></td>
+<td>float</td>
+<td>Mean fragment length (bp)</td>
+</tr>
+<tr>
+<td><code>duplication_rate</code></td>
+<td>float</td>
+<td>Estimated duplicate fraction</td>
+</tr>
+<tr>
+<td><code>processing_time_s</code></td>
+<td>float</td>
+<td>Wall-clock processing time in seconds</td>
+</tr>
+</tbody>
+</table>
 <p><strong>Use</strong>: Filter samples by QC thresholds before ML training (e.g. <code>total_fragments &gt; 5M</code>, <code>on_target_rate &gt; 0.3</code>).</p>
 <hr>
 <h3 id="features-json">Features JSON</h3>
 <p><strong>File:</strong> <code>{sample}.features.json</code><br>
 <strong>Requires:</strong> <code>--generate-json</code></p>
 <p>Unified export of all features above in a single JSON file for ML pipelines. See <a href="../../features/output/json-output/">JSON Output Reference</a> for the complete schema.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">"sample.features.json"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a>    <span class="n">features</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="c1"># Access any output without reading individual TSVs</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="n">fsr_windows</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"fsr"</span><span class="p">][</span><span class="s2">"off_target"</span><span class="p">]</span>
-<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="n">mds</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"motif"</span><span class="p">][</span><span class="s2">"mds"</span><span class="p">]</span>
-<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="n">region_mds</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"region_mds"</span><span class="p">][</span><span class="s2">"gene"</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="s2">"sample.features.json"</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a>    <span class="n">features</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">f</span><span class="p">)</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="c1"># Access any output without reading individual TSVs</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="n">fsr_windows</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"fsr"</span><span class="p">][</span><span class="s2">"off_target"</span><span class="p">]</span>
+<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="n">mds</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"motif"</span><span class="p">][</span><span class="s2">"mds"</span><span class="p">]</span>
+<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="n">region_mds</span> <span class="o">=</span> <span class="n">features</span><span class="p">[</span><span class="s2">"region_mds"</span><span class="p">][</span><span class="s2">"gene"</span><span class="p">]</span>
 </code></pre></div>
 <hr>
 <h2 id="feature-selection-guide-for-ml-models">Feature Selection Guide for ML Models</h2>
@@ -6724,7 +6974,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 03:31:25 UTC"><span class="timeago" datetime="2026-03-01T03:31:25+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 03:31:25 UTC">2026-03-01</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 3, 2026 03:32:45 UTC"><span class="timeago" datetime="2026-03-03T03:32:45+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 3, 2026 03:32:45 UTC">2026-03-03</span>
   </span>
 
     
