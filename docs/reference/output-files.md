@@ -81,7 +81,7 @@ In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
 | Gene fragmentation composition (FSC.regions, E1) | On-target reads, but captured in gene/region TSVs | Not the raw `.ontarget.tsv` — use FSC.gene / FSC.regions |
 | Motif features for tissue-of-origin (MDS, EDM, BPM) | **Off-target** (`.tsv`) | On-target motifs are biased by probe sequence |
 | MDS on-target (when off-target too sparse) | `.ontarget.tsv` | Lower depth but gene-anchored signal |
-| OCF tissue-of-origin | **Off-target** (`.tsv`) | On-target OCF biased by capture regions' tissue specificity |
+| OCF tissue-of-origin | **`OCF.tsv`** (WGS) or **`OCF.offtarget.tsv`** (panel) | `OCF.tsv` = all reads (WGS has no target split); in panel mode `OCF.offtarget.tsv` is the unbiased off-target score — use that instead of `OCF.tsv` to avoid contamination from capture-biased on-target reads |
 | Building a PON | **Off-target** only | Must match what the sample uses |
 
 !!! warning "Do not mix off-target and on-target in the same model"
@@ -105,7 +105,17 @@ In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
 | `{s}.ATAC.sync.tsv` | `{s}.ATAC.ontarget.sync.tsv` | — |
 | `{s}.correction_factors.tsv` | `{s}.correction_factors.ontarget.tsv` | — |
 
-> ⚠️ **OCF `offtarget`** is a special case: OCF computes 3 variants — all reads, on-target reads, and a panel-specific off-target score derived from regions near but not in the capture baits. The `OCF.offtarget.tsv` is the panel-off-target score, not the same concept as the base `OCF.tsv`.
+> ⚠️ **OCF is a special case** — it always computes **three** output variants:
+>
+> | File | Contains | When generated |
+> |------|----------|----------------|
+> | `{s}.OCF.tsv` | **All reads** (on + off combined) | Always |
+> | `{s}.OCF.ontarget.tsv` | On-target reads only | Panel mode |
+> | `{s}.OCF.offtarget.tsv` | Off-target reads only | Panel mode |
+>
+> In WGS mode, `OCF.tsv` = all reads ≈ off-target (no target split exists). In panel mode,
+> `OCF.tsv` mixes on-target (capture-biased) and off-target reads — for unbiased tissue-of-origin
+> signal, use `OCF.offtarget.tsv` instead.
 
 ### GC Correction and On-Target
 
@@ -687,6 +697,17 @@ X_z  = df["mds_e1_z"].fillna(0).values  # PON-normalized — zero-centered in he
 ### OCF (Orientation-aware cfDNA Fragmentation)
 
 **File:** `{sample}.OCF.tsv` / `{sample}.OCF.ontarget.tsv` / `{sample}.OCF.offtarget.tsv`
+
+!!! note "Three OCF variants"
+    OCF always produces three output files:
+
+    - **`OCF.tsv`** — **All reads** (on + off combined). In WGS mode this is the only file and
+      equals the off-target signal. In panel mode it mixes capture-biased on-target reads with
+      off-target reads — use `OCF.offtarget.tsv` for unbiased tissue-of-origin in panel mode.
+    - **`OCF.ontarget.tsv`** — On-target reads only (panel mode). Useful for gene-anchored OCF
+      but biased by capture efficiency at tissue-specific loci.
+    - **`OCF.offtarget.tsv`** — Off-target reads only (panel mode). Preferred for ML features
+      as it is unbiased by capture probe GC content.
 
 Tissue-of-origin scores based on strand asymmetry of fragment ends at tissue-specific open chromatin regions.
 
