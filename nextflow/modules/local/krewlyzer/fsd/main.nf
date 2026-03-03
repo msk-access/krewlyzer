@@ -10,7 +10,7 @@
 process KREWLYZER_FSD {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.6.0"
+    container "ghcr.io/msk-access/krewlyzer:0.7.0"
 
     input:
     tuple val(meta), path(bed)
@@ -57,7 +57,7 @@ process KREWLYZER_FSD {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.6.0
+        krewlyzer: 0.7.0
     END_VERSIONS
     """
 }
