@@ -561,7 +561,7 @@ use pyo3::exceptions::PyRuntimeError;
 pub fn compute_and_write_gc_factors(
     observations: HashMap<(u8, u8), u64>,
     gc_ref_path: &str,
-    valid_regions_path: &str,
+    _valid_regions_path: &str,
     output_path: &str,
     output_format: &str,
     compress: bool,
