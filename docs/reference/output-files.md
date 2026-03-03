@@ -41,6 +41,53 @@ Complete reference for every file Krewlyzer produces — what it contains, what 
 
 ---
 
+## Output Format Options
+
+All tabular outputs support three formats controlled by `--output-format`:
+
+| Flag | Files produced | How to read |
+|------|---------------|-------------|
+| `--output-format tsv` **(default)** | `{s}.FSD.tsv`, `{s}.FSC.tsv`, etc. | `pd.read_csv(path, sep="\t")` |
+| `--output-format parquet` | `{s}.FSD.parquet`, `{s}.FSC.parquet`, etc. | `pd.read_parquet(path)` |
+| `--output-format both` | Both `.tsv` **and** `.parquet` for every tabular file | Either reader |
+
+The file **content** (columns, rows, values) is identical across formats — only the encoding changes.
+
+### TSV Compression (`--compress-tsv`)
+
+When `--compress-tsv` is set alongside `tsv` or `both` output format, every TSV file is
+gzip-compressed and given a `.tsv.gz` extension:
+
+```
+{s}.FSD.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+{s}.FSC.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+```
+
+### WPS — Always Parquet
+
+`*.WPS.parquet`, `*.WPS_background.parquet`, and `*.WPS.panel.parquet` are **always Parquet**
+regardless of `--output-format`. WPS stores thousands of 200-point per-anchor profiles — TSV
+at that scale would be hundreds of MB and functionally unusable. Use `pd.read_parquet()` for
+all WPS files.
+
+### Unified JSON (`--generate-json`)
+
+The `--generate-json` flag produces `{s}.features.json` **in addition to** the standard
+TSV/Parquet outputs. It aggregates every feature above into a single file for ML pipelines.
+JSON generation is independent of `--output-format` — you can use both together.
+
+```bash
+# Example: Parquet outputs + unified JSON
+krewlyzer run-all sample.bam -r hg19.fa -o out/ \
+    --output-format parquet \
+    --generate-json
+# Produces: *.FSD.parquet, *.FSC.parquet ... AND sample.features.json
+```
+
+See [JSON Export Reference](../features/output/json-output.md) for the complete JSON schema.
+
+---
+
 ## On-Target vs Off-Target Files
 
 Most fragmentomics features generate **two parallel outputs** in panel mode: a standard file (off-target reads) and an `.ontarget.tsv` variant (on-target reads). Understanding the difference is critical for choosing the right input to any ML model.
