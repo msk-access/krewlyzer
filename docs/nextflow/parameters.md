@@ -70,6 +70,8 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--generate_json` | `true` | Generate unified `features.json` for ML pipelines |
+| `--output_format` | `tsv` | Feature output format: `tsv`, `parquet`, or `both`. WPS outputs are always Parquet regardless of this setting. |
+| `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. |
 
 ## See Also
 

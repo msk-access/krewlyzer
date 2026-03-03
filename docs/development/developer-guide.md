@@ -54,7 +54,7 @@ krewlyzer/
 │       ├── bed.rs          # BGZF/gzip BED reader
 │       ├── filters.rs      # Fragment filtering logic
 │       └── (feature modules: see table below)
-├── tests/                  # Test suite (248 tests)
+├── tests/                  # Test suite (244 tests, 4 skipped)
 ├── docs/                   # MkDocs documentation
 └── nextflow/               # Nextflow pipeline
     ├── main.nf
@@ -219,7 +219,7 @@ serializer = FeatureSerializer.from_outputs(
 
 ## Testing
 
-Krewlyzer has **248 tests** across unit, integration, and e2e categories.
+Krewlyzer has **244 tests** (4 skipped) across unit, integration, and e2e categories.
 
 **→ [Testing Guide](testing-guide.md)** for complete documentation including:
 - Feature → test file mapping
@@ -268,7 +268,7 @@ maturin develop --release
 cargo test
 
 # Check before committing
-cargo clippy
+cargo clippy -- -D warnings
 cargo fmt --check
 ```
 
@@ -312,8 +312,18 @@ from krewlyzer import _core
 - [ ] Code follows existing patterns
 - [ ] Added/updated tests
 - [ ] Updated documentation
-- [ ] Ran `pytest tests/`
-- [ ] Ran `cargo fmt && cargo clippy`
+- [ ] Ran `pytest tests/` — 244 pass, 4 skipped
+- [ ] Ran Python lint (matches CI lint job):
+    ```bash
+    ruff check src/krewlyzer/
+    black --check src/krewlyzer/
+    python -m mypy src/krewlyzer/
+    python scripts/check_output_format.py
+    ```
+- [ ] Ran Rust lint:
+    ```bash
+    cargo fmt && cargo clippy -- -D warnings
+    ```
 - [ ] Updated CHANGELOG.md
 
 See [CONTRIBUTING.md](contributing.md) for full guidelines.

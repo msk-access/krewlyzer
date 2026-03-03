@@ -24,7 +24,7 @@ flowchart LR
     GC_REF[GC Reference] --> RUST
     
     RUST --> BED["sample.bed.gz"]
-    RUST --> META["metadata.json"]
+    RUST --> META["metadata.tsv"]
     RUST --> FACTORS["correction_factors.tsv"]
     
     subgraph "With --target-regions"
@@ -76,7 +76,7 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 |------|-------------|
 | `{sample}.bed.gz` | Block-gzipped BED with fragment coordinates + GC |
 | `{sample}.bed.gz.tbi` | Tabix index for random access |
-| `{sample}.metadata.json` | Run statistics and configuration |
+| `{sample}.metadata.tsv`  | Run statistics and configuration (tabular) |
 | `{sample}.correction_factors.tsv` | GC correction factors (with --gc-correct) |
 
 ### GC Correction Factors Format

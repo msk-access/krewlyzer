@@ -696,7 +696,7 @@ out/
 
 ```
 out/
-├── sample.metadata.json             # Run metadata and QC metrics
+├── sample.metadata.tsv              # Run metadata and QC metrics (tabular)
 └── sample.features.json             # All features (with --generate-json)
 ```
 

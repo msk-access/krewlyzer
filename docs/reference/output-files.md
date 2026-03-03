@@ -34,7 +34,7 @@ Complete reference for every file Krewlyzer produces — what it contains, what 
 | [`{s}.mFSD.distributions.tsv`](#mfsd-distributions) | mFSD | Per variant × size | Raw size histograms |
 | [`{s}.UXM.tsv`](#uxm-methylation) | UXM | Per region | U/X/M methylation fractions |
 | [`{s}.correction_factors.tsv`](#gc-correction-factors) | GC | Per (len, GC) bin | GC bias weights |
-| [`{s}.metadata.json`](#metadata-json) | Meta | Global | Run parameters + QC |
+| [`{s}.metadata.tsv`](#metadata-tsv) | Meta | Global | Run parameters + QC |
 | [`{s}.features.json`](#features-json) | All | All | Unified ML feature export |
 
 > `{s}` = sample name.
@@ -405,6 +405,12 @@ Raw bin-level fragment counts before GC correction — used internally for GC mo
 ### WPS (Windowed Protection Score)
 
 **File:** `{sample}.WPS.parquet`
+
+!!! note "WPS is always Parquet"
+    WPS outputs (`*.WPS.parquet`, `*.WPS_background.parquet`, `*.WPS.panel.parquet`) are
+    **always written as Parquet**, regardless of the `--output-format` flag. WPS vectors are
+    thousands of 200-point profiles — TSV at that scale would be hundreds of MB and
+    functionally unusable. Use `pd.read_parquet()` to load WPS files.
 
 Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene TSS or CTCF site). WPS captures how protected (nucleosome-covered) a region is to fragments of two sizes.
 
@@ -951,25 +957,30 @@ GC-bias correction weights per (fragment length bin, GC content) pair.
 
 ---
 
-### Metadata JSON
+### Metadata TSV
 
-**File:** `{sample}.metadata.json`
+**File:** `{sample}.metadata.tsv`
 
-Run parameters, QC metrics, and processing provenance.
+Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
+for easy ingestion into PON pipelines and pandas workflows.
 
-```json
-{
-  "sample_id": "sample_001",
-  "krewlyzer_version": "0.6.0",
-  "genome": "hg19",
-  "assay": "xs2",
-  "total_fragments": 8234567,
-  "on_target_rate": 0.44,
-  "mean_fragment_size": 168.3,
-  "duplication_rate": 0.12,
-  "processing_time_s": 342.1
-}
+```python
+import pandas as pd
+meta = pd.read_csv("sample.metadata.tsv", sep="\t").iloc[0].to_dict()
+print(meta["total_fragments"], meta["on_target_rate"])
 ```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sample_id` | str | Sample identifier |
+| `krewlyzer_version` | str | Version string |
+| `genome` | str | Genome build used (`hg19`, `hg38`) |
+| `assay` | str | Assay name (or empty for WGS) |
+| `total_fragments` | int | Total fragments extracted |
+| `on_target_rate` | float | Fraction of fragments overlapping targets |
+| `mean_fragment_size` | float | Mean fragment length (bp) |
+| `duplication_rate` | float | Estimated duplicate fraction |
+| `processing_time_s` | float | Wall-clock processing time in seconds |
 
 **Use**: Filter samples by QC thresholds before ML training (e.g. `total_fragments > 5M`, `on_target_rate > 0.3`).
 
