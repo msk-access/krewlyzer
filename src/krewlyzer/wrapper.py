@@ -981,7 +981,7 @@ def run_all(
             from .core.feature_serializer import FeatureSerializer
 
             logger.info("Generating unified features JSON...")
-            serializer = FeatureSerializer.from_outputs(sample, output, version="0.6.0")
+            serializer = FeatureSerializer.from_outputs(sample, output, version="0.7.0")
 
             # Add runtime metadata
             serializer.add_metadata("bam_path", str(bam_input))

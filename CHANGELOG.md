@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-03-02
+
+### Added
+- **Configurable Output Formats**: `--output-format tsv|parquet|both` (default: `tsv`) controls
+  all tabular feature outputs. `--compress` gzip-compresses TSV outputs (`.tsv.gz`).
+  WPS outputs remain always-Parquet regardless of setting.
+
+### Fixed
+- **build-pon Intermediate Files**: Explicitly force `output_format="tsv"` and `compress=False`
+  in all `process_sample()` calls within `build-pon` (both parallel and sequential paths).
+  Prevents silent failure if default output format changes — intermediate files are internal
+  scratch consumed by `pd.read_csv(sep="\t")`.
+- **Feature Serializer**: Include `mds_z` in JSON output for the `from_outputs()` code path.
+- **OCF Base File**: `OCF.tsv` = all reads (on + off combined), not off-target.
+  `OCF.offtarget.tsv` is the true panel off-target score. Corrected in docs and code comments.
+- **Rust wps.rs**: Remove erroneous `*` dereference on `node.metadata` (E0614 — `usize` is Copy).
+- **Rust gc_correction.rs**: Prefix unused `valid_regions_path` param with `_` to silence
+  compiler warning; parameter retained for API symmetry.
+- **MkDocs Snippets**: Fix `--8<-- "CHANGELOG.md"` / `--8<-- "CONTRIBUTING.md"` broken includes
+  by changing `pymdownx.snippets.base_path` from scalar `docs` to list `['.', 'docs']` so
+  repo-root files resolve without path traversal blocked by CI deploy sandbox.
+
+### Documentation
+- **Post-0.6.0 Docs Audit** (12 files, 7 issue categories):
+  - Fixed broken `--8<-- "../CHANGELOG.md"` / `--8<-- "../CONTRIBUTING.md"` snippet includes
+  - Corrected outdated "no global `--output-format` flag" note in `cli/run-all.md`
+  - Updated `metadata.json` → `metadata.tsv` across 7 files (8 references total)
+  - Added WPS always-Parquet exception note to `reference/output-files.md`
+  - Added build-pon intermediate TSV format note to `guides/building-pon.md`
+  - Updated test count (248 → 244 + 4 skipped) and added CI lint steps to `developer-guide.md`
+  - Added `--output_format` and `--compress` parameters to `nextflow/parameters.md`
+- **Output Format Options section**: New section in `reference/output-files.md` documenting
+  `--output-format`, `--compress`, WPS always-Parquet exception, and `--generate-json`
+- **OCF Variant Clarification**: Added 3-variant table and note block in `reference/output-files.md`
+  explaining `OCF.tsv` (all reads) vs `OCF.ontarget.tsv` vs `OCF.offtarget.tsv`
+- **docs/index.md**: Replaced `:latest` Docker tag with explicit `:0.7.0` per release policy
+
+### CI
+- **Lint Job**: Added parallel `lint` job (`ruff · black · mypy · cargo clippy -- -D warnings`)
+  running alongside tests on all push/PR events
+
 ## [0.6.0] - 2026-02-28
 
 ### Added
