@@ -74,7 +74,7 @@ black src/krewlyzer/ tests/
 # 3. Check formatting is clean (what CI runs — no auto-fix)
 black --check src/krewlyzer/ tests/
 
-# 4. Type checking — 0 non-_core errors is the baseline
+# 4. Type checking — full 0-error baseline (stub covers _core)
 mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
 
 # 5. Rust lints — auto-fix all fixable warnings
@@ -92,10 +92,16 @@ cargo clippy --manifest-path rust/Cargo.toml -- \
 |---|---|
 | `ruff` | PEP 8 + unused imports + undefined names |
 | `black` | Consistent formatting (line-length=88) |
-| `mypy` | Full type annotation compliance (0 non-`_core` errors) |
+| `mypy` | Full type annotation compliance (0 errors — `_core.pyi` stub covers Rust extension) |
 | `cargo clippy` | Rust idioms; `-A too_many_arguments` deferred (large refactor) |
 
-**Baseline (as of 2026-03-02):** `pytest 244/4 ✅ · ruff 0 · black clean · mypy 0 non-_core ✅`
+**Baseline (as of 2026-03-02):** `pytest 244/4 ✅ · ruff 0 · black clean · mypy 0 errors ✅`
+
+> [!IMPORTANT]
+> **`_core.pyi` must be kept in sync with the Rust extension.**
+> When adding or changing a `#[pyfunction]` in `rust/src/*.rs`, update
+> `src/krewlyzer/_core.pyi` with the matching Python signature. Run
+> `mypy src/krewlyzer/` to confirm 0 errors before committing.
 
 ---
 
