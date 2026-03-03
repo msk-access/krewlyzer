@@ -53,9 +53,9 @@ All tabular outputs support three formats controlled by `--output-format`:
 
 The file **content** (columns, rows, values) is identical across formats — only the encoding changes.
 
-### TSV Compression (`--compress-tsv`)
+### TSV Compression (`--compress`)
 
-When `--compress-tsv` is set alongside `tsv` or `both` output format, every TSV file is
+When `--compress` is set alongside `tsv` or `both` output format, every TSV file is
 gzip-compressed and given a `.tsv.gz` extension:
 
 ```

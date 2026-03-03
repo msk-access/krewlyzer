@@ -202,7 +202,7 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ --generate-json
 
 !!! note "Output format"
     The `--output-format` flag controls output format for tabular features: `tsv` (default),
-    `parquet`, or `both`. Use `--compress-tsv` to gzip-compress TSV outputs.
+    `parquet`, or `both`. Use `--compress` to gzip-compress TSV outputs.
 
     **WPS exception:** `*.WPS.parquet`, `*.WPS_background.parquet`, and `*.WPS.panel.parquet`
     are **always Parquet** regardless of `--output-format`. WPS vectors are high-dimensional
