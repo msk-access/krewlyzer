@@ -558,10 +558,11 @@ use pyo3::exceptions::PyRuntimeError;
 /// Number of correction factor bins written.
 #[pyfunction]
 #[pyo3(signature = (observations, gc_ref_path, valid_regions_path, output_path, output_format="tsv", compress=false))]
+#[allow(unused_variables)] // valid_regions_path reserved for API symmetry; not used in Rust body
 pub fn compute_and_write_gc_factors(
     observations: HashMap<(u8, u8), u64>,
     gc_ref_path: &str,
-    _valid_regions_path: &str,
+    valid_regions_path: &str,
     output_path: &str,
     output_format: &str,
     compress: bool,
