@@ -86,6 +86,11 @@ def load_correction_factors(factor_path: Path) -> dict:
             )
             return factors
 
+        # Narrow types: all([...]) confirmed all three are non-None above
+        assert len_col is not None
+        assert gc_col is not None
+        assert factor_col is not None
+
         # Build lookup table
         # Note: length_bin column may contain length_bin_min values (e.g., 75, 80, ...)
         # or bin indices (e.g., 3, 4, ...). We detect which format and convert.
@@ -210,15 +215,19 @@ def process_fsc(
         # Aggregate each channel
         channel_sums = {}
         for ch in CHANNELS:
-            mat = group[ch].values[:trunc_len].reshape(n_windows, continue_n)
+            mat = group[ch].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
             channel_sums[ch] = mat.sum(axis=1)
 
-        totals_mat = group["total"].values[:trunc_len].reshape(n_windows, continue_n)
+        totals_mat = (
+            group["total"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
+        )
         channel_sums["total"] = totals_mat.sum(axis=1)
 
         # Get window coordinates from first and last bin in each window
-        starts = group["start"].values[:trunc_len].reshape(n_windows, continue_n)[:, 0]
-        ends = group["end"].values[:trunc_len].reshape(n_windows, continue_n)[:, -1]
+        starts = (
+            group["start"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)[:, 0]
+        )
+        ends = group["end"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)[:, -1]
 
         window_df = pd.DataFrame(
             {"chrom": chrom, "start": starts, "end": ends, **channel_sums}

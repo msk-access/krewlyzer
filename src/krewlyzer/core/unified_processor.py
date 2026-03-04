@@ -461,6 +461,7 @@ def run_features(
     if enable_fsc and out_fsc_counts and out_fsc_counts.exists():
         # Use read_table() for Parquet-first auto-detection (handles .tsv, .tsv.gz, .parquet)
         df_counts = read_table(out_fsc_counts)
+        assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSC: --skip-pon active, outputting raw values (no z-scores)")
         # outputs.fsc is always set before this block (assigned earlier in run_features)
@@ -483,6 +484,9 @@ def run_features(
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
             df_counts_on = read_table(out_fsc_counts_on)
+            assert (
+                df_counts_on is not None
+            ), "fsc_counts_on file missing after existence check"
             process_fsc(
                 df_counts_on,
                 outputs.fsc_ontarget,
@@ -498,6 +502,7 @@ def run_features(
     if enable_fsr and out_fsc_counts and out_fsc_counts.exists():
         # Use read_table() for Parquet-first auto-detection
         df_counts = read_table(out_fsc_counts)
+        assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSR: --skip-pon active, outputting raw values (no z-scores)")
         # outputs.fsr is always set before this block

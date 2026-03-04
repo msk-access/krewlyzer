@@ -74,7 +74,7 @@ def process_fsr(
         # Aggregate all channels
         channel_sums = {}
         for ch in CHANNELS:
-            mat = group[ch].values[:trunc_len].reshape(n_windows, continue_n)
+            mat = group[ch].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
             channel_sums[ch] = mat.sum(axis=1).astype(float)
 
         # For FSR, "short" = ultra_short + core_short (65-149bp)
@@ -82,7 +82,7 @@ def process_fsr(
         short_counts = channel_sums["ultra_short"] + channel_sums["core_short"]
         long_counts = channel_sums["di_nucl"] + channel_sums["long"]
 
-        total_mat = group["total"].values[:trunc_len].reshape(n_windows, continue_n)
+        total_mat = group["total"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
         total_counts = total_mat.sum(axis=1).astype(float)
 
         for i in range(n_windows):

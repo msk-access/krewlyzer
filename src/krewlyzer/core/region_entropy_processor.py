@@ -101,7 +101,9 @@ def load_entropy_tsv(path: Path) -> pd.DataFrame:
     Returns:
         DataFrame with entropy data
     """
-    return read_table(path)
+    df = read_table(path)
+    assert df is not None, f"read_table returned None for existing file: {path}"
+    return df
 
 
 def process_region_entropy(
