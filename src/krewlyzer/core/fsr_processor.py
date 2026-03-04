@@ -11,6 +11,8 @@ import pandas as pd
 import numpy as np
 import logging
 
+from .output_utils import write_table  # TSV/Parquet unified writer
+
 logger = logging.getLogger("core.fsr_processor")
 
 # Using FSC channels for consistent terminology
@@ -23,6 +25,8 @@ def process_fsr(
     windows: int = 100000,
     continue_n: int = 50,
     pon=None,
+    output_format: str = "tsv",
+    compress: bool = False,
 ) -> Path:
     """
     Process fragment counts into FSR ratios.
@@ -70,7 +74,7 @@ def process_fsr(
         # Aggregate all channels
         channel_sums = {}
         for ch in CHANNELS:
-            mat = group[ch].values[:trunc_len].reshape(n_windows, continue_n)
+            mat = group[ch].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
             channel_sums[ch] = mat.sum(axis=1).astype(float)
 
         # For FSR, "short" = ultra_short + core_short (65-149bp)
@@ -78,7 +82,7 @@ def process_fsr(
         short_counts = channel_sums["ultra_short"] + channel_sums["core_short"]
         long_counts = channel_sums["di_nucl"] + channel_sums["long"]
 
-        total_mat = group["total"].values[:trunc_len].reshape(n_windows, continue_n)
+        total_mat = group["total"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)
         total_counts = total_mat.sum(axis=1).astype(float)
 
         for i in range(n_windows):
@@ -139,7 +143,7 @@ def process_fsr(
 
     if not results:
         logger.warning("No valid windows found for FSR")
-        pd.DataFrame(
+        empty_df = pd.DataFrame(
             columns=[
                 "region",
                 "short_count",
@@ -152,11 +156,20 @@ def process_fsr(
                 "short_frac",
                 "long_frac",
             ]
-        ).to_csv(output_path, sep="\t", index=False)
+        )
+        write_table(
+            empty_df, output_path, output_format=output_format, compress=compress
+        )
         return output_path
 
     results_df = pd.DataFrame(results)
-    results_df.to_csv(output_path, sep="\t", index=False, float_format="%.6f")
+    write_table(
+        results_df,
+        output_path,
+        output_format=output_format,
+        compress=compress,
+        float_format="%.6f",
+    )
 
     logger.info(f"FSR complete: {len(results_df)} windows → {output_path}")
     return output_path

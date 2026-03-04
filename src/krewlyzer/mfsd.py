@@ -16,12 +16,20 @@ import logging
 from rich.console import Console
 from rich.logging import RichHandler
 
+from .core.output_utils import (
+    read_table,
+    write_table,
+)  # Unified I/O for Parquet support
+
 console = Console(stderr=True)
-logging.basicConfig(
-    level="INFO",
-    handlers=[RichHandler(console=console, show_time=True, show_path=False)],
-    format="%(message)s",
-)
+# Guard: only configure root logging if not already configured (e.g. by pytest or parent app).
+# This prevents double-logging when mfsd is imported as a library rather than called as a CLI.
+if not logging.root.handlers:
+    logging.basicConfig(
+        level="INFO",
+        handlers=[RichHandler(console=console, show_time=True, show_path=False)],
+        format="%(message)s",
+    )
 logger = logging.getLogger("mfsd")
 
 # Rust backend is required
@@ -91,6 +99,16 @@ def mfsd(
     ),
     threads: int = typer.Option(
         0, "--threads", "-t", help="Number of threads (0=all cores)"
+    ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
     ),
 ):
     """
@@ -198,10 +216,56 @@ def mfsd(
             min_baseq=min_baseq,
         )
 
-        logger.info(f"mFSD complete: {output_file}")
+        # Rust always writes TSV; convert to Parquet/both afterward if requested.
+        # This two-step approach avoids re-implementing Arrow schema in Rust for mFSD.
+        logger.info(f"mFSD complete: {output_file} (raw TSV from Rust)")
+        logger.debug(
+            f"mFSD post-process: output_format={output_format!r}, compress={compress}"
+        )
+        if output_format != "tsv":
+            logger.debug(
+                f"mFSD: converting {output_file.name} → format={output_format!r}"
+            )
+            df = read_table(output_file)
+            if df is not None:
+                write_table(
+                    df,
+                    output_file.with_suffix(""),
+                    output_format=output_format,
+                    compress=compress,
+                )
+            else:
+                logger.warning(
+                    f"mFSD: could not read {output_file.name} for format conversion"
+                )
+        elif compress:
+            # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
+            logger.debug(f"mFSD: compressing {output_file.name} → .tsv.gz")
+            df = read_table(output_file)
+            if df is not None:
+                write_table(
+                    df, output_file.with_suffix(""), output_format="tsv", compress=True
+                )
+
         if output_distributions:
             dist_file = output_file.with_suffix(".distributions.tsv")
             logger.info(f"Distributions: {dist_file}")
+            if output_format != "tsv":
+                logger.debug(
+                    f"mFSD: converting {dist_file.name} → format={output_format!r}"
+                )
+                df_dist = read_table(dist_file)
+                if df_dist is not None:
+                    write_table(
+                        df_dist,
+                        dist_file.with_suffix(""),
+                        output_format=output_format,
+                        compress=compress,
+                    )
+                else:
+                    logger.warning(
+                        f"mFSD: could not read {dist_file.name} for format conversion"
+                    )
 
     except Exception as e:
         logger.error(f"mFSD calculation failed: {e}")

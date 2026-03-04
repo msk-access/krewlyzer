@@ -98,7 +98,7 @@ def log_startup_banner(
     config: Dict[str, str],
     assets: List[ResolvedAsset],
     features: Optional[List[str]] = None,
-    logger: logging.Logger = None,
+    logger: Optional[logging.Logger] = None,
 ) -> None:
     """
     Log a comprehensive startup banner for any krewlyzer CLI tool.

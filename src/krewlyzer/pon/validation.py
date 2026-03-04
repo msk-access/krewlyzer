@@ -7,7 +7,7 @@ including on-target rate calculation and config compatibility checks.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Tuple
 import logging
 
 logger = logging.getLogger("pon.validation")
@@ -104,8 +104,9 @@ def validate_skip_pon(
     Returns:
         ValidationResult with error if both flags are provided
     """
-    warnings = []
-    errors = []
+    # Type annotations required: mypy cannot infer type from empty list/empty dict literals.
+    warnings: List[str] = []
+    errors: List[str] = []
 
     if skip_pon and pon_model is not None:
         errors.append(
@@ -137,7 +138,9 @@ def calculate_on_target_rate(
     import gzip
 
     # Load target regions into interval dict
-    targets = {}  # chrom -> [(start, end), ...]
+    # chrom -> [(start, end), ...] for fast interval lookups
+    # Dict type annotation required: mypy cannot infer from empty dict literal.
+    targets: Dict[str, List[Tuple[int, int]]] = {}
 
     with open(target_regions, "r") as f:
         for line in f:

@@ -15,7 +15,7 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.6.0"
+    container "ghcr.io/msk-access/krewlyzer:0.7.0"
 
     publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
 
@@ -27,71 +27,105 @@ process KREWLYZER_RUNALL {
     // Core outputs
     tuple val(meta), path("*.bed.gz"),               emit: bed
     tuple val(meta), path("*.bed.gz.tbi"),           emit: bed_index, optional: true
-    tuple val(meta), path("*.metadata.json"),        emit: metadata, optional: true
+    tuple val(meta), path("*.metadata.tsv"),          emit: metadata, optional: true
+    tuple val(meta), path("*.metadata.parquet"),      emit: metadata_parquet, optional: true
     tuple val(meta), path("*.features.json"),        emit: features_json, optional: true
     
-    // FSC outputs
+    // FSC outputs — TSV and/or Parquet (controlled by --output-format)
     tuple val(meta), path("*.FSC.tsv"),              emit: fsc, optional: true
+    tuple val(meta), path("*.FSC.parquet"),          emit: fsc_parquet, optional: true
     tuple val(meta), path("*.FSC.ontarget.tsv"),     emit: fsc_ontarget, optional: true
+    tuple val(meta), path("*.FSC.ontarget.parquet"), emit: fsc_ontarget_parquet, optional: true
     tuple val(meta), path("*.FSC.gene.tsv"),         emit: fsc_gene, optional: true
+    tuple val(meta), path("*.FSC.gene.parquet"),     emit: fsc_gene_parquet, optional: true
     tuple val(meta), path("*.FSC.regions.tsv"),      emit: fsc_regions, optional: true
+    tuple val(meta), path("*.FSC.regions.parquet"),  emit: fsc_regions_parquet, optional: true
     tuple val(meta), path("*.FSC.regions.e1only.tsv"), emit: fsc_e1, optional: true
-    tuple val(meta), path("*.fsc_counts.tsv"),         emit: fsc_counts, optional: true
+    tuple val(meta), path("*.FSC.regions.e1only.parquet"), emit: fsc_e1_parquet, optional: true
+    tuple val(meta), path("*.fsc_counts.tsv"),       emit: fsc_counts, optional: true
     
-    // FSR outputs
+    // FSR outputs — TSV and/or Parquet
     tuple val(meta), path("*.FSR.tsv"),              emit: fsr, optional: true
+    tuple val(meta), path("*.FSR.parquet"),          emit: fsr_parquet, optional: true
     tuple val(meta), path("*.FSR.ontarget.tsv"),     emit: fsr_ontarget, optional: true
+    tuple val(meta), path("*.FSR.ontarget.parquet"), emit: fsr_ontarget_parquet, optional: true
     
-    // FSD outputs
+    // FSD outputs — TSV and/or Parquet
     tuple val(meta), path("*.FSD.tsv"),              emit: fsd, optional: true
+    tuple val(meta), path("*.FSD.parquet"),          emit: fsd_parquet, optional: true
     tuple val(meta), path("*.FSD.ontarget.tsv"),     emit: fsd_ontarget, optional: true
+    tuple val(meta), path("*.FSD.ontarget.parquet"), emit: fsd_ontarget_parquet, optional: true
     
-    // WPS outputs
+    // WPS outputs — always Parquet (ML-ready vectors)
     tuple val(meta), path("*.WPS.parquet"),          emit: wps, optional: true
     tuple val(meta), path("*.WPS.panel.parquet"),    emit: wps_panel, optional: true
     tuple val(meta), path("*.WPS_background.parquet"), emit: wps_background, optional: true
     
-    // OCF outputs
+    // OCF outputs — TSV and/or Parquet
     tuple val(meta), path("*.OCF.tsv"),              emit: ocf, optional: true
+    tuple val(meta), path("*.OCF.parquet"),          emit: ocf_parquet, optional: true
     tuple val(meta), path("*.OCF.sync.tsv"),         emit: ocf_sync, optional: true
+    tuple val(meta), path("*.OCF.sync.parquet"),     emit: ocf_sync_parquet, optional: true
     tuple val(meta), path("*.OCF.ontarget.tsv"),     emit: ocf_ontarget, optional: true
+    tuple val(meta), path("*.OCF.ontarget.parquet"), emit: ocf_ontarget_parquet, optional: true
     tuple val(meta), path("*.OCF.ontarget.sync.tsv"), emit: ocf_ontarget_sync, optional: true
+    tuple val(meta), path("*.OCF.ontarget.sync.parquet"), emit: ocf_ontarget_sync_parquet, optional: true
     tuple val(meta), path("*.OCF.offtarget.tsv"),    emit: ocf_offtarget, optional: true
+    tuple val(meta), path("*.OCF.offtarget.parquet"), emit: ocf_offtarget_parquet, optional: true
     tuple val(meta), path("*.OCF.offtarget.sync.tsv"), emit: ocf_offtarget_sync, optional: true
+    tuple val(meta), path("*.OCF.offtarget.sync.parquet"), emit: ocf_offtarget_sync_parquet, optional: true
     
-    // Motif outputs
+    // Motif outputs — TSV and/or Parquet
     tuple val(meta), path("*.EndMotif.tsv"),         emit: end_motif, optional: true
+    tuple val(meta), path("*.EndMotif.parquet"),     emit: end_motif_parquet, optional: true
     tuple val(meta), path("*.EndMotif.ontarget.tsv"), emit: end_motif_ontarget, optional: true
+    tuple val(meta), path("*.EndMotif.ontarget.parquet"), emit: end_motif_ontarget_parquet, optional: true
     tuple val(meta), path("*.EndMotif1mer.tsv"),     emit: end_motif_1mer, optional: true
+    tuple val(meta), path("*.EndMotif1mer.parquet"), emit: end_motif_1mer_parquet, optional: true
     tuple val(meta), path("*.BreakPointMotif.tsv"),  emit: bp_motif, optional: true
+    tuple val(meta), path("*.BreakPointMotif.parquet"), emit: bp_motif_parquet, optional: true
     tuple val(meta), path("*.BreakPointMotif.ontarget.tsv"), emit: bp_motif_ontarget, optional: true
+    tuple val(meta), path("*.BreakPointMotif.ontarget.parquet"), emit: bp_motif_ontarget_parquet, optional: true
     tuple val(meta), path("*.MDS.tsv"),              emit: mds, optional: true
+    tuple val(meta), path("*.MDS.parquet"),          emit: mds_parquet, optional: true
     tuple val(meta), path("*.MDS.ontarget.tsv"),     emit: mds_ontarget, optional: true
+    tuple val(meta), path("*.MDS.ontarget.parquet"), emit: mds_ontarget_parquet, optional: true
     
-    // TFBS/ATAC outputs
+    // TFBS/ATAC outputs — TSV and/or Parquet
     tuple val(meta), path("*.TFBS.tsv"),             emit: tfbs, optional: true
+    tuple val(meta), path("*.TFBS.parquet"),         emit: tfbs_parquet, optional: true
     tuple val(meta), path("*.TFBS.sync.tsv"),        emit: tfbs_sync, optional: true
     tuple val(meta), path("*.TFBS.ontarget.tsv"),    emit: tfbs_ontarget, optional: true
+    tuple val(meta), path("*.TFBS.ontarget.parquet"), emit: tfbs_ontarget_parquet, optional: true
     tuple val(meta), path("*.TFBS.ontarget.sync.tsv"), emit: tfbs_ontarget_sync, optional: true
     tuple val(meta), path("*.ATAC.tsv"),             emit: atac, optional: true
+    tuple val(meta), path("*.ATAC.parquet"),         emit: atac_parquet, optional: true
     tuple val(meta), path("*.ATAC.sync.tsv"),        emit: atac_sync, optional: true
     tuple val(meta), path("*.ATAC.ontarget.tsv"),    emit: atac_ontarget, optional: true
+    tuple val(meta), path("*.ATAC.ontarget.parquet"), emit: atac_ontarget_parquet, optional: true
     tuple val(meta), path("*.ATAC.ontarget.sync.tsv"), emit: atac_ontarget_sync, optional: true
     
-    // Region MDS outputs
+    // Region MDS outputs — TSV and/or Parquet
     tuple val(meta), path("*.MDS.exon.tsv"),         emit: mds_exon, optional: true
+    tuple val(meta), path("*.MDS.exon.parquet"),     emit: mds_exon_parquet, optional: true
     tuple val(meta), path("*.MDS.gene.tsv"),         emit: mds_gene, optional: true
+    tuple val(meta), path("*.MDS.gene.parquet"),     emit: mds_gene_parquet, optional: true
     
-    // mFSD outputs
+    // mFSD outputs — TSV and/or Parquet
     tuple val(meta), path("*.mFSD.tsv"),             emit: mfsd, optional: true
+    tuple val(meta), path("*.mFSD.parquet"),         emit: mfsd_parquet, optional: true
     tuple val(meta), path("*.mFSD.distributions.tsv"), emit: mfsd_dist, optional: true
+    tuple val(meta), path("*.mFSD.distributions.parquet"), emit: mfsd_dist_parquet, optional: true
     
-    // UXM outputs
+    // UXM outputs — TSV and/or Parquet
     tuple val(meta), path("*.UXM.tsv"),              emit: uxm, optional: true
+    tuple val(meta), path("*.UXM.parquet"),          emit: uxm_parquet, optional: true
     
-    // GC correction outputs
+    // GC correction outputs — TSV and/or Parquet
     tuple val(meta), path("*.correction_factors.tsv"), emit: gc_factors, optional: true
+    tuple val(meta), path("*.correction_factors.parquet"), emit: gc_factors_parquet, optional: true
     tuple val(meta), path("*.correction_factors.ontarget.tsv"), emit: gc_factors_ontarget, optional: true
+    tuple val(meta), path("*.correction_factors.ontarget.parquet"), emit: gc_factors_ontarget_parquet, optional: true
     
     // Versions
     path "versions.yml", emit: versions
@@ -138,6 +172,8 @@ process KREWLYZER_RUNALL {
     // Output flags
     def json_arg = params.generate_json ? "--generate-json" : ""
     def debug_arg = params.verbose ? "--debug" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
 
     """
     krewlyzer run-all \\
@@ -171,6 +207,8 @@ process KREWLYZER_RUNALL {
         $e1_disable_arg \\
         $e1_mds_arg \\
         $json_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $debug_arg \\
         $args
 
@@ -203,11 +241,12 @@ process KREWLYZER_RUNALL {
     touch ${prefix}.mFSD.tsv
     touch ${prefix}.MDS.exon.tsv
     touch ${prefix}.MDS.gene.tsv
-    echo '{"sample_id":"${prefix}","total_fragments":0}' > ${prefix}.metadata.json
+    echo -e "sample_id\ttotal_fragments" > ${prefix}.metadata.tsv
+    echo -e "${prefix}\t0" >> ${prefix}.metadata.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.6.0
+        krewlyzer: 0.7.0
     END_VERSIONS
     """
 }

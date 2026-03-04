@@ -20,12 +20,12 @@ def detect_available_cpus() -> int:
     Returns:
         Number of available CPU cores.
     """
-    try:
-        # sched_getaffinity respects cgroups/SLURM task allocation
-        return len(os.sched_getaffinity(0))
-    except AttributeError:
-        # macOS doesn't have sched_getaffinity
-        pass
+    # sched_getaffinity respects cgroups/SLURM task allocation.
+    # Use getattr to avoid a mypy attr-defined error on macOS where
+    # the symbol isn't present in the typeshed os stub.
+    _sched_getaffinity = getattr(os, "sched_getaffinity", None)
+    if _sched_getaffinity is not None:
+        return len(_sched_getaffinity(0))
 
     # Fallback to os.cpu_count()
     return os.cpu_count() or 4
@@ -41,9 +41,10 @@ def _get_cgroup_memory_limit_gb() -> Optional[float]:
     # Try cgroups v2 first
     try:
         with open("/sys/fs/cgroup/memory.max", "r") as f:
-            val = f.read().strip()
-            if val != "max":
-                return int(val) / (1024**3)
+            # Rename 'val' -> 'raw' (str) to avoid reuse with the int 'val' in cgroups v1 below
+            raw = f.read().strip()
+            if raw != "max":
+                return int(raw) / (1024**3)
     except (FileNotFoundError, PermissionError, ValueError):
         pass
 

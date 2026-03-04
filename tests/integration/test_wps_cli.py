@@ -145,7 +145,9 @@ def test_wps_cli_smooth_columns(tmp_path, sample_bedgz, sample_anchors):
     # not by the standalone wps CLI. Verify they're absent in standalone mode.
     # If smoothing is ever integrated into standalone wps, update this test.
     if "wps_nuc_smooth" in df.columns:
-        assert "wps_tf_smooth" in df.columns, "Missing wps_tf_smooth if smoothing applied"
+        assert (
+            "wps_tf_smooth" in df.columns
+        ), "Missing wps_tf_smooth if smoothing applied"
 
 
 @pytest.mark.integration

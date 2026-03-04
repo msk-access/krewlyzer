@@ -208,13 +208,14 @@ Output: `{sample}.FSC.tsv`
 | `chrom` | str | Chromosome |
 | `start` | int | Window start (0-based) |
 | `end` | int | Window end |
-| `ultra_short` | float | GC-weighted count (65-100bp) |
-| `core_short` | float | GC-weighted count (101-149bp) |
-| `mono_nucl` | float | GC-weighted count (150-220bp) |
-| `di_nucl` | float | GC-weighted count (221-260bp) |
-| `long` | float | GC-weighted count (261-400bp) |
-| `ultra_long` | float | GC-weighted count (401-1000bp) |
-| `total` | float | GC-weighted total (65-1000bp) |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
+| `total` | float | GC-weighted total (65–1000 bp) |
+| `mean_gc` | float | Mean GC fraction of fragments in this window |
 
 ### PoN Columns (when `--pon-model` provided)
 
@@ -278,6 +279,23 @@ df['short_long_ratio'] = (df['ultra_short'] + df['core_short']) / (df['long'] + 
 ```
 
 Higher ratio = more short fragments = potential tumor signal
+
+!!! note "FSC ratios vs FSR — not redundant"
+    The `*_ratio` columns in `FSC.gene.tsv` and `FSC.regions.tsv` are **simple proportions**: `channel / total` per gene or exon. They answer *"what fraction of fragments at this gene are short?"*
+
+    [FSR](fsr.md) is different in two key ways:
+    
+    1. **PON-normalized BEFORE ratio**: `normalize(short) / normalize(long)` — removes batch effects and library size before dividing, so cross-sample comparisons are valid
+    2. **Window-level** (5 Mb genome tiles), not gene-level
+
+    **When to use which:**
+    
+    | Use case | Use |
+    |----------|-----|
+    | Gene-level copy-number composition | `FSC.gene.tsv` `*_ratio` columns |
+    | Tumor fraction / genome-wide cancer signal | `FSR.tsv` `short_long_ratio` (PON-normalized) |
+    | ML features for per-gene models | FSC gene ratios |
+    | ML features for pan-cancer models | FSR `short_long_log2` |
 
 ---
 
@@ -353,23 +371,50 @@ krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
 | `{sample}.FSC.gene.tsv` | Gene-level FSC | 146 (xs2) |
 | `{sample}.FSC.regions.tsv` | Per-exon/target FSC | ~1,000 |
 
-### Gene FSC Output Format
+### Gene FSC Output Format (`{sample}.FSC.gene.tsv`)
 
-```
-gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  *_ratio  normalized_depth
-ATM     62         8432      1234         5678        9012       3456     789   20169  ...      1245.67
-BRCA2   42         5689      ...
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `gene` | str | HGNC gene symbol |
+| `n_regions` | int | Number of exons/targets for this gene |
+| `total_bp` | int | Total covered base pairs |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `total` | float | GC-weighted total count |
+| `ultra_short_ratio` | float | `ultra_short / total` |
+| `core_short_ratio` | float | `core_short / total` |
+| `mono_nucl_ratio` | float | `mono_nucl / total` |
+| `di_nucl_ratio` | float | `di_nucl / total` |
+| `long_ratio` | float | `long / total` |
+| `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
 
-### Region FSC Output Format
+### Region FSC Output Format (`{sample}.FSC.regions.tsv`)
 
 Per-exon/target output for fine-grained copy number analysis:
 
-```
-chrom  start      end      gene  region_name     region_bp  ultra_short  ...  normalized_depth
-1      11168235  11168345  MTOR  MTOR_target_02  110        8.0          ...  1272.71
-1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `chrom` | str | Chromosome |
+| `start` | int | Region start (0-based) |
+| `end` | int | Region end |
+| `gene` | str | Gene symbol |
+| `region_name` | str | Exon/target identifier |
+| `region_bp` | int | Region length in bp |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `total` | float | GC-weighted total count |
+| `ultra_short_ratio` | float | `ultra_short / total` |
+| `core_short_ratio` | float | `core_short / total` |
+| `mono_nucl_ratio` | float | `mono_nucl / total` |
+| `di_nucl_ratio` | float | `di_nucl / total` |
+| `long_ratio` | float | `long / total` |
+| `normalized_depth` | float | RPKM-like depth |
 
 ### E1-Only FSC Output
 

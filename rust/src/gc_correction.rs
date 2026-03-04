@@ -2,6 +2,17 @@
 //!
 //! Provides LOESS-based GC bias correction for cfDNA fragment counts.
 //! Supports both within-sample correction and PON-based correction.
+//!
+//! ## Output format
+//! Correction factors can be written as tab-separated TSV (`.correction_factors.tsv`)
+//! or Parquet (`.correction_factors.parquet`) depending on the `--output-format` flag.
+//! Use [`CorrectionFactors::load`] to read either format transparently (Parquet-first).
+//!
+//! ## On-target vs off-target
+//! Two independent write sites exist:
+//! - **Off-target**: `pipeline.rs` calls `write_tsv`/`write_parquet` after `compute_gcfix_factors`.
+//! - **On-target**: `compute_and_write_gc_factors` PyO3 fn called from Python (`sample_processor.py`)
+//!   with the on-target observation dict and a `*.correction_factors.ontarget.tsv` path.
 
 use anyhow::{Result, anyhow};
 use log::{info, debug};
@@ -150,6 +161,8 @@ pub struct CorrectionFactors {
 }
 
 impl CorrectionFactors {
+    /// Return the GC correction factor for a fragment of given length and GC content.
+    /// Returns `1.0` (no correction) when the bin is outside the tracked range.
     pub fn get_factor(&self, len: u64, gc: u8) -> f64 {
         if let Some(bin) = LengthBin::from_len(len) {
             if let Some(stats) = self.data.get(&(bin, gc)) {
@@ -158,69 +171,181 @@ impl CorrectionFactors {
         }
         1.0
     }
-    
-    /// Write correction factors and stats to CSV
-    pub fn write_csv<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let mut file = File::create(path)
-            .with_context(|| "Failed to create correction factors CSV")?;
-            
-        writeln!(file, "length_bin_min,length_bin_max,gc_percent,observed,expected,correction_factor")?;
-        
+
+    // -----------------------------------------------------------------------
+    // Writers
+    // -----------------------------------------------------------------------
+
+    /// Write correction factors to a **tab-separated** TSV file.
+    ///
+    /// Columns: `length_bin_min`, `length_bin_max`, `gc_percent`, `observed`,
+    /// `expected`, `correction_factor`.
+    ///
+    /// This fixes the historical bug where the file had a `.tsv` extension but
+    /// used comma separators.  All new code should call this method; the old
+    /// `write_csv` name is gone.
+    pub fn write_tsv<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        use std::io::BufWriter;
+        let path = path.as_ref();
+        debug!("gc_correction: writing TSV → {:?}", path);
+        let file = File::create(path)
+            .with_context(|| format!("Failed to create correction factors TSV: {:?}", path))?;
+        let mut w = BufWriter::new(file);
+        writeln!(w, "length_bin_min\tlength_bin_max\tgc_percent\tobserved\texpected\tcorrection_factor")?;
         let mut keys: Vec<_> = self.data.keys().collect();
         keys.sort();
-        
-        for key in keys {
+        for key in &keys {
             let (bin, gc) = key;
             let stats = self.data.get(key).unwrap();
             let (min, max) = bin.range();
-            
-            writeln!(file, "{},{},{},{},{},{:.4}", 
+            writeln!(w, "{}\t{}\t{}\t{}\t{}\t{:.4}",
                 min, max, gc, stats.observed, stats.expected, stats.factor)?;
         }
-        info!("Written GC correction factors to CSV");
+        info!("gc_correction: wrote {} factor rows → {:?}", keys.len(), path);
         Ok(())
     }
-    
-    /// Load correction factors from CSV (reverse of write_csv)
-    pub fn load_csv<P: AsRef<Path>>(path: P) -> Result<Self> {
+
+    /// Write correction factors to a Parquet file using the shared utility.
+    ///
+    /// Schema: `length_bin_min` (u64), `length_bin_max` (u64), `gc_percent` (u8),
+    /// `observed` (u64), `expected` (u64), `correction_factor` (f64).
+    pub fn write_parquet<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        use arrow::array::{ArrayRef, Float64Array, UInt8Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        use crate::output_utils::write_parquet_batch;
+        let path = path.as_ref();
+        debug!("gc_correction: writing Parquet → {:?}", path);
+        let mut keys: Vec<_> = self.data.keys().collect();
+        keys.sort();
+        let mut bin_mins: Vec<u64> = Vec::with_capacity(keys.len());
+        let mut bin_maxs: Vec<u64> = Vec::with_capacity(keys.len());
+        let mut gc_pcts: Vec<u8>   = Vec::with_capacity(keys.len());
+        let mut obs: Vec<u64>      = Vec::with_capacity(keys.len());
+        let mut exp: Vec<u64>      = Vec::with_capacity(keys.len());
+        let mut factors: Vec<f64>  = Vec::with_capacity(keys.len());
+        for key in &keys {
+            let (bin, gc) = key;
+            let stats = self.data.get(key).unwrap();
+            let (min, max) = bin.range();
+            bin_mins.push(min); bin_maxs.push(max); gc_pcts.push(*gc);
+            obs.push(stats.observed); exp.push(stats.expected); factors.push(stats.factor);
+        }
+        let schema = Schema::new(vec![
+            Field::new("length_bin_min",    DataType::UInt64, false),
+            Field::new("length_bin_max",    DataType::UInt64, false),
+            Field::new("gc_percent",        DataType::UInt8,  false),
+            Field::new("observed",          DataType::UInt64, false),
+            Field::new("expected",          DataType::UInt64, false),
+            Field::new("correction_factor", DataType::Float64, false),
+        ]);
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from(bin_mins)),
+            Arc::new(UInt64Array::from(bin_maxs)),
+            Arc::new(UInt8Array::from(gc_pcts)),
+            Arc::new(UInt64Array::from(obs)),
+            Arc::new(UInt64Array::from(exp)),
+            Arc::new(Float64Array::from(factors)),
+        ];
+        write_parquet_batch(path, Arc::new(schema), arrays)?;
+        info!("gc_correction: wrote {} factor rows → {:?}", keys.len(), path);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // Readers
+    // -----------------------------------------------------------------------
+
+    /// Load correction factors from a **tab-separated** TSV file.
+    ///
+    /// This is the updated loader matching [`write_tsv`].  It parses tab-separated
+    /// fields and handles both the new TSV format and any legacy comma-separated
+    /// files by auto-detecting the delimiter on the first data line.
+    pub fn load_tsv<P: AsRef<Path>>(path: P) -> Result<Self> {
         use std::io::{BufRead, BufReader};
-        
-        let file = File::open(path.as_ref())
-            .with_context(|| format!("Failed to open correction factors CSV: {:?}", path.as_ref()))?;
-        let reader = BufReader::new(file);
-        
+        let path = path.as_ref();
+        debug!("gc_correction: loading TSV → {:?}", path);
+        let file = File::open(path)
+            .with_context(|| format!("Failed to open correction factors TSV: {:?}", path))?;
+        let mut reader = BufReader::new(file);
         let mut data = HashMap::new();
-        
-        for (i, line) in reader.lines().enumerate() {
+        // Detect delimiter from header line
+        let mut header = String::new();
+        reader.read_line(&mut header)?;
+        let delim = if header.contains('\t') { '\t' } else { ',' };
+        for line in reader.lines() {
             let line = line?;
-            if i == 0 { continue; } // Skip header
             if line.trim().is_empty() { continue; }
-            
-            let fields: Vec<&str> = line.split(',').collect();
+            let fields: Vec<&str> = line.split(delim).collect();
             if fields.len() < 6 { continue; }
-            
-            // Parse: length_bin_min,length_bin_max,gc_percent,observed,expected,correction_factor
-            let len_min: u64 = fields[0].parse().unwrap_or(0);
-            let gc: u8 = fields[2].parse().unwrap_or(0);
-            let observed: u64 = fields[3].parse().unwrap_or(0);
-            let expected: u64 = fields[4].parse().unwrap_or(0);
-            let factor: f64 = fields[5].parse().unwrap_or(1.0);
-            
-            // Map len_min back to LengthBin
+            let len_min: u64 = fields[0].trim().parse().unwrap_or(0);
+            let gc: u8       = fields[2].trim().parse().unwrap_or(0);
+            let observed: u64 = fields[3].trim().parse().unwrap_or(0);
+            let expected: u64 = fields[4].trim().parse().unwrap_or(0);
+            let factor: f64   = fields[5].trim().parse().unwrap_or(1.0);
             if len_min >= 60 {
                 let bin_idx = ((len_min - 60) / 5) as u8;
                 if bin_idx < LengthBin::NUM_BINS {
-                    data.insert((LengthBin(bin_idx), gc), CorrectionBinStats {
-                        observed,
-                        expected,
-                        factor,
-                    });
+                    data.insert((LengthBin(bin_idx), gc), CorrectionBinStats { observed, expected, factor });
                 }
             }
         }
-        
-        info!("Loaded {} correction factors from CSV", data.len());
+        info!("gc_correction: loaded {} correction factors from {:?}", data.len(), path);
         Ok(Self { data })
+    }
+
+    /// Load correction factors from a Parquet file.
+    pub fn load_parquet<P: AsRef<Path>>(path: P) -> Result<Self> {
+        use parquet::file::reader::{FileReader, SerializedFileReader};
+        use parquet::record::RowAccessor;
+        let path = path.as_ref();
+        debug!("gc_correction: loading Parquet → {:?}", path);
+        let file = File::open(path)
+            .with_context(|| format!("Failed to open correction factors Parquet: {:?}", path))?;
+        let reader = SerializedFileReader::new(file)
+            .map_err(|e| anyhow!("Parquet reader error: {}", e))?;
+        let mut data = HashMap::new();
+        for row in reader.get_row_iter(None)
+            .map_err(|e| anyhow!("Row iterator error: {}", e))?
+        {
+            let row = row.map_err(|e| anyhow!("Row read error: {}", e))?;
+            let len_min: u64 = row.get_ulong(0).unwrap_or(0);
+            let gc: u8       = row.get_ubyte(2).or_else(|_| row.get_uint(2).map(|v| v as u8)).unwrap_or(0);
+            let observed: u64 = row.get_ulong(3).unwrap_or(0);
+            let expected: u64 = row.get_ulong(4).unwrap_or(0);
+            let factor: f64   = row.get_double(5).unwrap_or(1.0);
+            if len_min >= 60 {
+                let bin_idx = ((len_min - 60) / 5) as u8;
+                if bin_idx < LengthBin::NUM_BINS {
+                    data.insert((LengthBin(bin_idx), gc), CorrectionBinStats { observed, expected, factor });
+                }
+            }
+        }
+        info!("gc_correction: loaded {} correction factors from Parquet {:?}", data.len(), path);
+        Ok(Self { data })
+    }
+
+    /// **Parquet-first** auto-detect loader.  Used by all internal consumers
+    /// (`mfsd.rs`, `pipeline.rs` input path, `fsc_processor.py`).
+    ///
+    /// Priority:
+    /// 1. `{path}.parquet` (replace extension)
+    /// 2. `{path}` as-is (TSV or legacy CSV — delimiter auto-detected)
+    ///
+    /// Returns an error only if both candidates fail to load.
+    pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let p = path.as_ref();
+        let parquet_candidate = p.with_extension("parquet");
+        if parquet_candidate.exists() {
+            debug!("gc_correction::load: found Parquet candidate {:?}", parquet_candidate);
+            Self::load_parquet(&parquet_candidate)
+        } else if p.exists() {
+            debug!("gc_correction::load: falling back to TSV {:?}", p);
+            Self::load_tsv(p)
+        } else {
+            Err(anyhow!("Correction factors file not found: {:?} (tried {:?} and {:?})",
+                p, parquet_candidate, p))
+        }
     }
 }
 
@@ -409,48 +534,84 @@ pub fn correct_gc_bias_wps(
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 
-/// Compute GC correction factors from observations and write to CSV.
-/// Python-exposed function for inline factor computation during extract.
-/// 
+/// Compute GC correction factors from fragment observations and write to TSV and/or Parquet.
+///
+/// Python-exposed function called during the extract step to produce
+/// `*.correction_factors.tsv` / `*.correction_factors.parquet`.
+///
+/// Called from Python for **both** the off-target path (via `pipeline.rs`) and the
+/// on-target path (from `sample_processor.py` with
+/// `*.correction_factors.ontarget.tsv`).
+///
 /// # Arguments
-/// * `observations` - HashMap<(u8, u8), u64> from extract_motif (length_bin, gc_pct) -> count
-/// * `gc_ref_path` - Path to GC reference parquet file
-/// * `valid_regions_path` - Path to valid regions BED file  
-/// * `output_path` - Path to write correction_factors.csv
+/// * `observations` - `HashMap<(u8, u8), u64>` from `extract_motif`
+///   where the key is `(length_bin_index, gc_percent_0_100)` and the value is the
+///   fragment count.
+/// * `gc_ref_path` - Path to the pre-computed GC reference Parquet file.
+/// * `_valid_regions_path` - Reserved; not currently used (passed for API symmetry).
+/// * `output_path` - Base output path **without** extension.  Extensions are appended
+///   automatically based on `output_format`/`compress`.
+/// * `output_format` - `"tsv"`, `"parquet"`, or `"both"`.  Defaults to `"tsv"`.
+/// * `compress` - When `true` and writing TSV, gzip the output (`.tsv.gz`).
+///
+/// # Returns
+/// Number of correction factor bins written.
 #[pyfunction]
+#[pyo3(signature = (observations, gc_ref_path, valid_regions_path, output_path, output_format="tsv", compress=false))]
+#[allow(unused_variables)] // valid_regions_path reserved for API symmetry; not used in Rust body
 pub fn compute_and_write_gc_factors(
     observations: HashMap<(u8, u8), u64>,
     gc_ref_path: &str,
-    _valid_regions_path: &str,
+    valid_regions_path: &str,
     output_path: &str,
+    output_format: &str,
+    compress: bool,
 ) -> PyResult<u64> {
-    info!("Computing GC correction factors from {} observation bins...", observations.len());
-    
+    use crate::output_utils::{should_write_tsv, should_write_parquet, tsv_path, validated_output_format};
+    let fmt = validated_output_format(output_format);
+    info!(
+        "gc_correction: computing factors from {} observations (format={}, compress={})",
+        observations.len(), fmt, compress
+    );
+
     // Convert observations from (u8, u8) keys to (LengthBin, u8) keys
     let mut obs_converted: HashMap<(LengthBin, u8), u64> = HashMap::new();
     for ((len_bin, gc_pct), count) in observations {
         obs_converted.insert((LengthBin(len_bin), gc_pct), count);
     }
-    
+
     // Load reference data
     let ref_data = ReferenceData::load(Path::new(gc_ref_path))
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to load GC reference: {}", e)))?;
-    
-    debug!("Loaded GC reference with {} entries", ref_data.counts.len());
-    
+    debug!("gc_correction: GC reference loaded ({} entries)", ref_data.counts.len());
+
     // Compute factors
     let factors = compute_gcfix_factors(&obs_converted, &ref_data, None)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to compute factors: {}", e)))?;
-    
+        .map_err(|e| PyRuntimeError::new_err(format!("Failed to compute GC factors: {}", e)))?;
     let n_factors = factors.data.len() as u64;
-    info!("Computed {} correction factors", n_factors);
-    
-    // Write to CSV
-    factors.write_csv(output_path)
-        .map_err(|e| PyRuntimeError::new_err(format!("Failed to write factors CSV: {}", e)))?;
-    
-    info!("Written correction factors to {}", output_path);
-    
+    info!("gc_correction: computed {} correction factor bins", n_factors);
+
+    // Write outputs
+    let base = Path::new(output_path);
+    if should_write_tsv(fmt) {
+        // Strip .tsv extension if caller already included it, then re-add with compress awareness
+        let base_no_ext = if base.extension().map(|e| e == "tsv").unwrap_or(false) {
+            base.with_extension("")
+        } else {
+            base.to_path_buf()
+        };
+        let tsv_out = tsv_path(&base_no_ext.with_extension("tsv"), compress);
+        factors.write_tsv(&tsv_out)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
+        info!("gc_correction: wrote {:?}", tsv_out);
+    }
+    if should_write_parquet(fmt) {
+        let parquet_out = base.with_extension("parquet");
+        factors.write_parquet(&parquet_out)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
+        info!("gc_correction: wrote {:?}", parquet_out);
+    }
+
     Ok(n_factors)
 }
 

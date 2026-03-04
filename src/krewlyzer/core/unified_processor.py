@@ -49,6 +49,7 @@ from .utils import resolve_int as _resolve_int
 from .utils import resolve_path as _resolve_path
 from .utils import resolve_bool as _resolve_bool
 from .utils import resolve_str as _resolve_str
+from .output_utils import read_table  # Parquet-first table reader
 
 logger = logging.getLogger("krewlyzer.core.unified_processor")
 
@@ -128,6 +129,9 @@ def run_features(
     gc_correct: bool = True,
     threads: int = 0,
     verbose: bool = False,
+    # Output format control
+    output_format: str = "tsv",  # "tsv" | "parquet" | "both"
+    compress: bool = False,  # Gzip TSV outputs when True
 ) -> FeatureOutputs:
     """
     Run unified feature extraction pipeline.
@@ -162,6 +166,11 @@ def run_features(
         gc_correct: Apply GC bias correction
         threads: Number of threads (0=all cores)
         verbose: Enable debug logging
+        output_format: Output format for feature tables ("tsv", "parquet", or "both").
+            TSV is the default for broad compatibility. Parquet is preferred for
+            ML pipelines (faster IO, typed columns, ~5x smaller). "both" writes both.
+        compress: When True and writing TSV, gzip-compress the output (`.tsv.gz`).
+            Has no effect when output_format="parquet" (Parquet uses Snappy internally).
 
     Returns:
         FeatureOutputs dataclass with paths to all generated files
@@ -172,6 +181,15 @@ def run_features(
     """
     start_time = time.time()
     outputs = FeatureOutputs()
+
+    # Resolve and validate output format
+    _valid_formats = {"tsv", "parquet", "both"}
+    resolved_output_format = output_format if output_format in _valid_formats else "tsv"
+    resolved_compress = bool(compress)
+    if resolved_output_format == "parquet" and resolved_compress:
+        # Parquet compresses internally; gzip flag is irrelevant but harmless
+        logger.debug("compress flag ignored for parquet output_format")
+        resolved_compress = False
 
     # =========================================================================
     # 1. SETUP AND VALIDATION
@@ -243,6 +261,8 @@ def run_features(
         resolved_target_regions is not None and resolved_target_regions.exists()
     )
     if is_panel_mode:
+        # resolved_target_regions is guaranteed non-None: is_panel_mode checks it above
+        assert resolved_target_regions is not None
         logger.info("Panel mode: on/off-target split enabled")
         logger.info(f"  Target regions: {resolved_target_regions.name}")
 
@@ -400,7 +420,12 @@ def run_features(
             str(ocf_tmp_dir) if enable_ocf else None,
             # Target regions for on/off-target split
             str(resolved_target_regions) if is_panel_mode else None,
+            # Bait edge padding
             resolved_wps_bait_padding,
+            # Output format control — MUST come before silent
+            resolved_output_format,
+            resolved_compress,
+            # Progress control
             not verbose,  # silent = not verbose
         )
     except Exception as e:
@@ -434,17 +459,23 @@ def run_features(
 
     # Process FSC
     if enable_fsc and out_fsc_counts and out_fsc_counts.exists():
-        import pandas as pd
-
-        df_counts = pd.read_csv(out_fsc_counts, sep="\t")
+        # Use read_table() for Parquet-first auto-detection (handles .tsv, .tsv.gz, .parquet)
+        df_counts = read_table(out_fsc_counts)
+        assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSC: --skip-pon active, outputting raw values (no z-scores)")
+        # outputs.fsc is always set before this block (assigned earlier in run_features)
+        assert (
+            outputs.fsc is not None
+        ), "outputs.fsc must be set before process_fsc call"
         process_fsc(
             df_counts,
             outputs.fsc,
             resolved_fsc_windows,
             resolved_fsc_continue_n,
             pon=pon_for_zscore,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
         )
         logger.info(f"✓ FSC: {outputs.fsc.name}")
 
@@ -452,29 +483,40 @@ def run_features(
         out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
-            df_counts_on = pd.read_csv(out_fsc_counts_on, sep="\t")
+            df_counts_on = read_table(out_fsc_counts_on)
+            assert (
+                df_counts_on is not None
+            ), "fsc_counts_on file missing after existence check"
             process_fsc(
                 df_counts_on,
                 outputs.fsc_ontarget,
                 resolved_fsc_windows,
                 resolved_fsc_continue_n,
                 pon=pon_for_zscore,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
             )
             logger.info(f"✓ FSC on-target: {outputs.fsc_ontarget.name}")
 
-    # Process FSR (same counts, different output)
+    # Process FSR (same fsc_counts input, different normalization → ratio output)
     if enable_fsr and out_fsc_counts and out_fsc_counts.exists():
-        import pandas as pd
-
-        df_counts = pd.read_csv(out_fsc_counts, sep="\t")
+        # Use read_table() for Parquet-first auto-detection
+        df_counts = read_table(out_fsc_counts)
+        assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSR: --skip-pon active, outputting raw values (no z-scores)")
+        # outputs.fsr is always set before this block
+        assert (
+            outputs.fsr is not None
+        ), "outputs.fsr must be set before process_fsr call"
         process_fsr(
             df_counts,
             outputs.fsr,
             resolved_fsc_windows,
             resolved_fsc_continue_n,
             pon=pon_for_zscore,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
         )
         logger.info(f"✓ FSR: {outputs.fsr.name}")
 
@@ -524,6 +566,8 @@ def run_features(
                 pon=pon_for_zscore,
                 correction_factors=gene_fsc_factors,
                 aggregate_by="gene",
+                output_format=resolved_output_format,
+                compress=resolved_compress,
             )
 
             # Apply FSC gene PON z-score normalization (unless --skip-pon)
@@ -533,7 +577,12 @@ def run_features(
                 and pon.fsc_gene_baseline
                 and not skip_pon_zscore
             ):
-                apply_fsc_gene_pon(outputs.fsc_gene, pon)
+                apply_fsc_gene_pon(
+                    outputs.fsc_gene,
+                    pon,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
                 logger.info(
                     f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, with PON z-scores)"
                 )
@@ -553,6 +602,8 @@ def run_features(
                 pon=pon_for_zscore,
                 correction_factors=gene_fsc_factors,
                 aggregate_by="region",
+                output_format=resolved_output_format,
+                compress=resolved_compress,
             )
 
             # Apply FSC region PON z-score normalization (unless --skip-pon)
@@ -562,7 +613,12 @@ def run_features(
                 and pon.fsc_region_baseline
                 and not skip_pon_zscore
             ):
-                apply_fsc_region_pon(outputs.fsc_region, pon)
+                apply_fsc_region_pon(
+                    outputs.fsc_region,
+                    pon,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
                 logger.info(
                     f"✓ FSC regions: {outputs.fsc_region.name} (with PON z-scores)"
                 )
@@ -582,7 +638,11 @@ def run_features(
             ):
                 from .fsc_processor import filter_fsc_to_e1
 
-                outputs.fsc_region_e1 = filter_fsc_to_e1(outputs.fsc_region)
+                outputs.fsc_region_e1 = filter_fsc_to_e1(
+                    outputs.fsc_region,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
                 if outputs.fsc_region_e1:
                     logger.info(f"✓ FSC E1-only: {outputs.fsc_region_e1.name}")
         except Exception as e:
@@ -644,6 +704,9 @@ def run_features(
                     None,  # No OCF
                     str(resolved_target_regions) if is_panel_mode else None,
                     resolved_wps_bait_padding,
+                    # Output format control — consistent with primary pipeline call
+                    resolved_output_format,
+                    resolved_compress,
                     True,  # silent
                 )
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")
@@ -664,6 +727,10 @@ def run_features(
 
         if rust_ocf.exists():
             shutil.move(str(rust_ocf), str(outputs.ocf))
+            # outputs.ocf is always set before this block (assigned during output path setup)
+            assert (
+                outputs.ocf is not None
+            ), "outputs.ocf must be set before OCF processing"
             logger.info(f"✓ OCF: {outputs.ocf.name}")
 
             # Apply OCF PON normalization (z-scores) if PON is available and not skipped
@@ -794,9 +861,15 @@ def run_features(
                 )
 
                 # Process output with z-score normalization
+                # Path base: write_table() will append .tsv/.parquet depending on format
                 outputs.tfbs = output_dir / f"{sample_name}.TFBS.tsv"
                 process_region_entropy(
-                    out_tfbs_raw, outputs.tfbs, entropy_pon_parquet, "tfbs_baseline"
+                    out_tfbs_raw,
+                    outputs.tfbs,
+                    entropy_pon_parquet,
+                    "tfbs_baseline",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
                 out_tfbs_raw.unlink(missing_ok=True)
                 logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_all} TFs)")
@@ -845,6 +918,8 @@ def run_features(
                             outputs.tfbs_ontarget,
                             entropy_pon_parquet,
                             "tfbs_baseline_ontarget",
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
                         )
                         out_tfbs_ont_raw.unlink(missing_ok=True)
                         logger.info(
@@ -889,9 +964,15 @@ def run_features(
                 )
 
                 # Process output with z-score normalization
+                # Path base: write_table() will append .tsv/.parquet depending on format
                 outputs.atac = output_dir / f"{sample_name}.ATAC.tsv"
                 process_region_entropy(
-                    out_atac_raw, outputs.atac, entropy_pon_parquet, "atac_baseline"
+                    out_atac_raw,
+                    outputs.atac,
+                    entropy_pon_parquet,
+                    "atac_baseline",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
                 out_atac_raw.unlink(missing_ok=True)
                 logger.info(
@@ -942,6 +1023,8 @@ def run_features(
                             outputs.atac_ontarget,
                             entropy_pon_parquet,
                             "atac_baseline_ontarget",
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
                         )
                         out_atac_ont_raw.unlink(missing_ok=True)
                         logger.info(

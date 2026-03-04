@@ -54,7 +54,7 @@ krewlyzer/
 │       ├── bed.rs          # BGZF/gzip BED reader
 │       ├── filters.rs      # Fragment filtering logic
 │       └── (feature modules: see table below)
-├── tests/                  # Test suite (248 tests)
+├── tests/                  # Test suite (244 tests, 4 skipped)
 ├── docs/                   # MkDocs documentation
 └── nextflow/               # Nextflow pipeline
     ├── main.nf
@@ -219,7 +219,7 @@ serializer = FeatureSerializer.from_outputs(
 
 ## Testing
 
-Krewlyzer has **248 tests** across unit, integration, and e2e categories.
+Krewlyzer has **244 tests** (4 skipped) across unit, integration, and e2e categories.
 
 **→ [Testing Guide](testing-guide.md)** for complete documentation including:
 - Feature → test file mapping
@@ -268,7 +268,7 @@ maturin develop --release
 cargo test
 
 # Check before committing
-cargo clippy
+cargo clippy -- -D warnings
 cargo fmt --check
 ```
 
@@ -307,13 +307,49 @@ from krewlyzer import _core
 
 ---
 
+### `_core.pyi` — Rust Extension Stub Maintenance
+
+`src/krewlyzer/_core.pyi` is a **type stub** for the compiled Rust/PyO3 extension
+(`krewlyzer._core`). It tells mypy what functions and submodules exist without
+inspecting the binary `.so` — following the same pattern as
+[py-gbcms `_rs.pyi`](https://github.com/msk-access/py-gbcms/blob/main/src/gbcms/_rs.pyi).
+
+**Update this file whenever you:**
+
+- Add a new `#[pyfunction]` to any `rust/src/*.rs` file
+- Add a new sub-PyModule registered in `rust/src/lib.rs`
+- Change the signature (parameters or return type) of an existing exported function
+
+```bash
+# After updating rust/src/*.rs, update the stub and verify:
+python -m mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
+# Must exit 0 with no output. Commit .rs and .pyi changes together.
+```
+
+!!! warning "Stub drift causes CI failures"
+    If `_core.pyi` is out of sync, mypy will report `attr-defined` errors in
+    Python files that call the Rust functions, even if the code runs correctly at runtime.
+
+---
+
 ## Contributing Checklist
 
 - [ ] Code follows existing patterns
 - [ ] Added/updated tests
 - [ ] Updated documentation
-- [ ] Ran `pytest tests/`
-- [ ] Ran `cargo fmt && cargo clippy`
+- [ ] Ran `pytest tests/` — 244 pass, 4 skipped
+- [ ] If Rust functions changed: updated `src/krewlyzer/_core.pyi` stub
+- [ ] Ran Python lint (matches CI lint job):
+    ```bash
+    ruff check src/krewlyzer/
+    black --check src/krewlyzer/
+    python -m mypy src/krewlyzer/
+    python scripts/check_output_format.py
+    ```
+- [ ] Ran Rust lint:
+    ```bash
+    cargo fmt && cargo clippy -- -D warnings
+    ```
 - [ ] Updated CHANGELOG.md
 
 See [CONTRIBUTING.md](contributing.md) for full guidelines.

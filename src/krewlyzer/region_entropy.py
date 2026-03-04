@@ -242,6 +242,7 @@ def region_entropy(
                     str(tfbs_path_gw),
                     str(out_raw),
                     gc_str,
+                    None,  # gc_correction_ontarget_path
                     target_regions_str,
                     not verbose,
                 )
@@ -274,8 +275,9 @@ def region_entropy(
                         str(tfbs_path_panel),
                         str(out_raw_ont),
                         gc_str,
-                        None,
-                        not verbose,  # No target split for panel-specific
+                        None,  # gc_correction_ontarget_path
+                        None,  # target_regions_path (no split for panel-specific)
+                        not verbose,
                     )
 
                     process_region_entropy(
@@ -307,6 +309,7 @@ def region_entropy(
                     str(atac_path_gw),
                     str(out_raw),
                     gc_str,
+                    None,  # gc_correction_ontarget_path
                     target_regions_str,
                     not verbose,
                 )
@@ -339,8 +342,9 @@ def region_entropy(
                         str(atac_path_panel),
                         str(out_raw_ont),
                         gc_str,
-                        None,
-                        not verbose,  # No target split for panel-specific
+                        None,  # gc_correction_ontarget_path
+                        None,  # target_regions_path (no split for panel-specific)
+                        not verbose,
                     )
 
                     process_region_entropy(

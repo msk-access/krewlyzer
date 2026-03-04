@@ -236,26 +236,12 @@ impl OcfConsumer {
         false
     }
     
+    /// Write OCF output (TSV format — delegates to write_output_format).
+    ///
+    /// # Deprecated
+    /// Use `write_output_format(output_dir, "tsv", false)` for explicit format control.
     pub fn write_output(&self, output_dir: &Path) -> Result<()> {
-        // Write primary stats (ALL fragments - WGS-comparable)
-        self.write_stats(&self.stats_all, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
-        log::info!("OCF: Wrote primary output files (all fragments)");
-        
-        // Write on-target stats if we have any data (panel mode)
-        let has_on_target_data = self.stats_on.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
-        if has_on_target_data {
-            self.write_stats(&self.stats_on, output_dir, "all.ocf.ontarget.tsv", "all.sync.ontarget.tsv")?;
-            log::info!("OCF: Wrote on-target output files");
-        }
-        
-        // Write off-target stats if we have any data (panel mode)
-        let has_off_target_data = self.stats_off.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
-        if has_off_target_data {
-            self.write_stats(&self.stats_off, output_dir, "all.ocf.offtarget.tsv", "all.sync.offtarget.tsv")?;
-            log::info!("OCF: Wrote off-target output files");
-        }
-        
-        Ok(())
+        self.write_output_format(output_dir, "tsv", false)
     }
     
     fn write_stats(&self, stats: &[LabelStats], output_dir: &Path, summary_name: &str, sync_name: &str) -> Result<()> {
@@ -310,6 +296,164 @@ impl OcfConsumer {
             writeln!(summary_file, "{}\t{:.6}", label, ocf_score)?;
         }
         
+        Ok(())
+    }
+
+    /// Write OCF stats sets to Parquet (summary + sync files).
+    ///
+    /// Produces two Parquet files per call:
+    /// - `{name}.parquet`: tissue | OCF (Float64)
+    /// - `{name}.sync.parquet`: tissue | position | left_count | left_norm | right_count | right_norm
+    fn write_parquet_stats(&self, stats: &[LabelStats], output_dir: &Path, summary_name: &str, sync_name: &str) -> Result<()> {
+        use arrow::array::{ArrayRef, Float64Array, Int64Array, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use crate::output_utils::write_parquet_batch;
+        use std::sync::Arc;
+
+        // ── Summary Parquet: tissue | OCF ────────────────────────────────────
+        let mut sum_tissues: Vec<String> = Vec::new();
+        let mut sum_ocf: Vec<f64>       = Vec::new();
+
+        let mut label_indices: Vec<usize> = (0..self.labels.len()).collect();
+        label_indices.sort_by_key(|&i| &self.labels[i]);
+
+        for &id in &label_indices {
+            let label = &self.labels[id];
+            let s = &stats[id];
+            let ts = if s.total_starts > 0.0 { s.total_starts / 10000.0 } else { 1.0 };
+            let te = if s.total_ends   > 0.0 { s.total_ends   / 10000.0 } else { 1.0 };
+            let peak = 60i64;
+            let bin_width = 10i64;
+            let mut trueends = 0.0_f64;
+            let mut background = 0.0_f64;
+            for k in 0..2000usize {
+                let loc = k as i64 - 1000;
+                let l_norm = s.left_pos[k] / ts;
+                let r_norm = s.right_pos[k] / te;
+                if loc >= -peak - bin_width && loc <= -peak + bin_width {
+                    trueends  += r_norm;
+                    background += l_norm;
+                } else if loc >= peak - bin_width && loc <= peak + bin_width {
+                    trueends  += l_norm;
+                    background += r_norm;
+                }
+            }
+            sum_tissues.push(label.clone());
+            sum_ocf.push(trueends - background);
+        }
+
+        let sum_schema = Arc::new(Schema::new(vec![
+            Field::new("tissue", DataType::Utf8, false),
+            Field::new("OCF",    DataType::Float64, false),
+        ]));
+        write_parquet_batch(
+            &output_dir.join(summary_name.replace(".tsv", ".parquet")),
+            sum_schema,
+            vec![
+                Arc::new(StringArray::from(sum_tissues)) as ArrayRef,
+                Arc::new(Float64Array::from(sum_ocf)) as ArrayRef,
+            ],
+        )?;
+
+        // ── Sync Parquet: tissue | position | ... ────────────────────────────
+        let mut syn_tissues: Vec<String> = Vec::new();
+        let mut syn_positions: Vec<i64>  = Vec::new();
+        let mut syn_l_count: Vec<f64>    = Vec::new();
+        let mut syn_l_norm:  Vec<f64>    = Vec::new();
+        let mut syn_r_count: Vec<f64>    = Vec::new();
+        let mut syn_r_norm:  Vec<f64>    = Vec::new();
+
+        for &id in &label_indices {
+            let label = &self.labels[id];
+            let s = &stats[id];
+            let ts = if s.total_starts > 0.0 { s.total_starts / 10000.0 } else { 1.0 };
+            let te = if s.total_ends   > 0.0 { s.total_ends   / 10000.0 } else { 1.0 };
+            for k in 0..2000usize {
+                let loc = k as i64 - 1000;
+                syn_tissues.push(label.clone());
+                syn_positions.push(loc);
+                syn_l_count.push(s.left_pos[k]);
+                syn_l_norm.push(s.left_pos[k] / ts);
+                syn_r_count.push(s.right_pos[k]);
+                syn_r_norm.push(s.right_pos[k] / te);
+            }
+        }
+
+        let syn_schema = Arc::new(Schema::new(vec![
+            Field::new("tissue",     DataType::Utf8,    false),
+            Field::new("position",   DataType::Int64,   false),
+            Field::new("left_count", DataType::Float64, false),
+            Field::new("left_norm",  DataType::Float64, false),
+            Field::new("right_count",DataType::Float64, false),
+            Field::new("right_norm", DataType::Float64, false),
+        ]));
+        write_parquet_batch(
+            &output_dir.join(sync_name.replace(".tsv", ".parquet")),
+            syn_schema,
+            vec![
+                Arc::new(StringArray::from(syn_tissues))   as ArrayRef,
+                Arc::new(Int64Array::from(syn_positions))  as ArrayRef,
+                Arc::new(Float64Array::from(syn_l_count))  as ArrayRef,
+                Arc::new(Float64Array::from(syn_l_norm))   as ArrayRef,
+                Arc::new(Float64Array::from(syn_r_count))  as ArrayRef,
+                Arc::new(Float64Array::from(syn_r_norm))   as ArrayRef,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Write OCF output in the requested format (TSV, Parquet, or both).
+    ///
+    /// Dispatches by `output_format` for all three OCF stat sets (all, on-target, off-target).
+    pub fn write_output_format(&self, output_dir: &Path, output_format: &str, compress: bool) -> Result<()> {
+        use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
+        let fmt = validated_output_format(output_format);
+
+        // ── primary (ALL fragments) ───────────────────────────────────────────
+        if should_write_tsv(fmt) {
+            self.write_stats(&self.stats_all, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
+        }
+        if should_write_parquet(fmt) {
+            self.write_parquet_stats(&self.stats_all, output_dir, "all.ocf.tsv", "all.sync.tsv")?;
+        }
+        log::info!("OCF: Wrote primary output files (all fragments)");
+
+        // ── on-target ─────────────────────────────────────────────────────────
+        let has_on_target = self.stats_on.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
+        if has_on_target {
+            if should_write_tsv(fmt) {
+                self.write_stats(&self.stats_on, output_dir, "all.ocf.ontarget.tsv", "all.sync.ontarget.tsv")?;
+            }
+            if should_write_parquet(fmt) {
+                self.write_parquet_stats(&self.stats_on, output_dir, "all.ocf.ontarget.tsv", "all.sync.ontarget.tsv")?;
+            }
+            log::info!("OCF: Wrote on-target output files");
+        }
+
+        // ── off-target ────────────────────────────────────────────────────────
+        let has_off_target = self.stats_off.iter().any(|s| s.total_starts > 0.0 || s.total_ends > 0.0);
+        if has_off_target {
+            if should_write_tsv(fmt) {
+                self.write_stats(&self.stats_off, output_dir, "all.ocf.offtarget.tsv", "all.sync.offtarget.tsv")?;
+            }
+            if should_write_parquet(fmt) {
+                self.write_parquet_stats(&self.stats_off, output_dir, "all.ocf.offtarget.tsv", "all.sync.offtarget.tsv")?;
+            }
+            log::info!("OCF: Wrote off-target output files");
+        }
+
+        // `compress` is accepted in the signature to keep the API consistent with fsd.rs
+        // and write_output_format() callers in pipeline.rs.
+        // TSV gzip at Rust level is not yet implemented for OCF (the many-file fan-out
+        // makes atomic gzip awkward).  Python callers can pipe through write_table()
+        // with compress=True after reading the TSV back.
+        // TODO(future): implement GzEncoder fan-out for OCF TSV if needed.
+        let _ = compress;
+
+        log::debug!("OCF: write_output_format complete (fmt={}, has_on={}, has_off={})",
+            fmt, has_on_target, has_off_target);
+
         Ok(())
     }
 }

@@ -15,7 +15,20 @@ import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
-from .model import PonModel, GcBiasModel, FsdBaseline, WpsBaseline
+from .model import (
+    PonModel,
+    GcBiasModel,
+    FsdBaseline,
+    WpsBaseline,
+    OcfBaseline,
+    MdsBaseline,
+    RegionMdsBaseline,
+    WpsBackgroundBaseline,
+    FscGeneBaseline,
+    FscRegionBaseline,
+    TfbsBaseline,
+    AtacBaseline,
+)
 
 console = Console(stderr=True)
 logging.basicConfig(
@@ -55,6 +68,18 @@ def _process_sample_subprocess(
 
     This wrapper configures the rayon thread pool for this subprocess,
     then calls process_sample. It's designed to be called via ProcessPoolExecutor.
+
+    NOTE on output format: process_sample() is always called with
+    output_format="tsv" and compress=False here. The intermediate files
+    written to temp_output_dir are read back by build-pon's aggregation
+    loop using pd.read_csv(sep="\t"). If output_format were "parquet",
+    Rust would write Parquet binary content into .FSD.tsv/.OCF.tsv paths
+    (paths are hardcoded with .tsv extension in unified_processor.py) and
+    pd.read_csv() would fail silently inside bare except blocks, causing
+    the PON to be built from partial/zero data with no loud error.
+
+    WPS outputs ({sample}.WPS.parquet etc.) are always Parquet regardless of
+    output_format — Rust hardcodes Parquet for WPS — and are not affected.
 
     Args:
         sample_path: Path to BAM/CRAM or BED.gz file.
@@ -96,7 +121,13 @@ def _process_sample_subprocess(
     # Create output directory
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Process sample
+    # Process sample — intermediate files written to temp_output_dir.
+    # output_format is forced to "tsv" so FSD/OCF/FSC.gene outputs are always
+    # plain TSV, matching the pd.read_csv(sep="\t") calls in the aggregation
+    # loop. See docstring above for full failure-mode rationale.
+    proc_logger.debug(
+        f"[{short_id}] Calling process_sample (output_format=tsv, pon_mode=True)"
+    )
     outputs = process_sample(
         input_path=sample_path,
         output_dir=output_dir,
@@ -106,11 +137,13 @@ def _process_sample_subprocess(
         target_regions=target_regions,
         assay=assay,
         enable_fsc=True,
-        enable_fsr=False,  # Not needed for PON
+        enable_fsr=False,  # FSR not needed for PON building
         enable_fsd=True,
         enable_wps=True,
         enable_ocf=True,
-        pon_mode=True,  # Skip PON normalization (we're building the PON)
+        pon_mode=True,  # Skip PON normalization (we're building it)
+        output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
+        compress=False,  # Temp files only — no compression needed
     )
 
     # Log memory and time after sample processing
@@ -374,8 +407,8 @@ def build_pon(
         logger.warning(f"WPS regions file not found: {wps_regions}")
 
     # Default WPS background (Alu) file for NRL baseline
-    wps_bg_file = assets.wps_background
-    if wps_bg_file.exists():
+    wps_bg_file: Optional[Path] = assets.wps_background
+    if wps_bg_file is not None and wps_bg_file.exists():
         logger.debug(f"Using bundled WPS background: {wps_bg_file.name}")
     else:
         wps_bg_file = None
@@ -564,6 +597,9 @@ def build_pon(
                 logger.info(f"[{i}/{n_samples}] Processing: {sample_name}")
 
                 try:
+                    # output_format forced to "tsv" — see _process_sample_subprocess
+                    # docstring for full rationale. FSD/OCF/FSC.gene outputs must be
+                    # TSV so the aggregation loop's pd.read_csv(sep="\t") calls succeed.
                     outputs = process_sample(
                         input_path=sample_path,
                         output_dir=Path(temp_output_dir) / sample_name,
@@ -573,11 +609,13 @@ def build_pon(
                         target_regions=resolved_target_path if is_panel_mode else None,
                         assay=assay,
                         enable_fsc=True,
-                        enable_fsr=False,
+                        enable_fsr=False,  # FSR not needed for PON building
                         enable_fsd=True,
                         enable_wps=True,
                         enable_ocf=True,
-                        pon_mode=True,
+                        pon_mode=True,  # Skip PON normalization (we're building it)
+                        output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
+                        compress=False,  # Temp files only — no compression needed
                     )
 
                     all_outputs.append(outputs)
@@ -1016,7 +1054,11 @@ def build_pon(
         n_samples=len(all_gc_data),
         reference=reference.name.replace(".fa", "").replace(".fasta", ""),
         panel_mode=is_panel_mode,
-        target_regions_file=resolved_target_path.name if is_panel_mode else "",
+        target_regions_file=(
+            resolved_target_path.name  # type: ignore[union-attr]  # guarded by is_panel_mode
+            if is_panel_mode
+            else ""
+        ),
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
@@ -1227,7 +1269,7 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
 
 
 def _compute_fsd_baseline(
-    all_fsd_data: List[pd.DataFrame], fsd_paths: List[str] = None
+    all_fsd_data: List[pd.DataFrame], fsd_paths: Optional[List[str]] = None
 ) -> Optional[FsdBaseline]:
     """
     Compute FSD baseline from sample data.
@@ -1318,7 +1360,7 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
     return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0")
 
 
-def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":
+def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "Optional[OcfBaseline]":
     """
     Compute OCF baseline from sample data.
 
@@ -1344,7 +1386,7 @@ def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "OcfBaseline":
     return OcfBaseline(regions=stats)
 
 
-def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
+def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
     """
     Compute MDS baseline from sample data.
 
@@ -1392,7 +1434,9 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "MdsBaseline":
     )
 
 
-def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaseline":
+def _compute_region_mds_baseline(
+    mds_gene_paths: List[str],
+) -> "Optional[RegionMdsBaseline]":
     """
     Compute Region MDS baseline from sample MDS.gene.tsv files.
 
@@ -1451,7 +1495,7 @@ def _compute_region_mds_baseline(mds_gene_paths: List[str]) -> "RegionMdsBaselin
 
 def _compute_wps_background_baseline(
     wps_background_paths: List[str],
-) -> "WpsBackgroundBaseline":
+) -> "Optional[WpsBackgroundBaseline]":
     """
     Compute WPS background (Alu) baseline from sample WPS_background.parquet files.
 
@@ -1545,7 +1589,9 @@ def _compute_wps_background_baseline(
         return None
 
 
-def _compute_fsc_gene_baseline(all_fsc_gene_data: List[Dict]) -> "FscGeneBaseline":
+def _compute_fsc_gene_baseline(
+    all_fsc_gene_data: List[Dict],
+) -> "Optional[FscGeneBaseline]":
     """
     Compute FSC gene depth baseline from sample FSC.gene.tsv data.
 
@@ -1602,7 +1648,7 @@ def _compute_fsc_gene_baseline(all_fsc_gene_data: List[Dict]) -> "FscGeneBaselin
 
 def _compute_fsc_region_baseline(
     all_fsc_region_data: List[Dict],
-) -> "FscRegionBaseline":
+) -> "Optional[FscRegionBaseline]":
     """
     Compute FSC region (exon/probe) depth baseline from sample FSC.regions.tsv data.
 
@@ -1663,7 +1709,7 @@ def _compute_fsc_region_baseline(
     return FscRegionBaseline(data=data) if data else None
 
 
-def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
+def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "Optional[TfbsBaseline]":
     """
     Compute TFBS entropy baseline from sample data.
 
@@ -1691,7 +1737,7 @@ def _compute_tfbs_baseline(all_tfbs_data: List[dict]) -> "TfbsBaseline":
     return TfbsBaseline(baseline=baseline)
 
 
-def _compute_atac_baseline(all_atac_data: List[dict]) -> "AtacBaseline":
+def _compute_atac_baseline(all_atac_data: List[dict]) -> "Optional[AtacBaseline]":
     """
     Compute ATAC entropy baseline from sample data.
 
@@ -1949,7 +1995,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
     # Build Region MDS baseline DataFrame
     region_mds_rows = []
     if model.region_mds and model.region_mds.gene_baseline:
-        for gene, data in model.region_mds.gene_baseline.items():
+        for gene, data in model.region_mds.gene_baseline.items():  # type: ignore[assignment]
             region_mds_rows.append(
                 {
                     "table": "region_mds",

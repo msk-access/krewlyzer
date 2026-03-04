@@ -6,7 +6,7 @@ Krewlyzer provides 11 standalone feature extraction commands plus a unified `run
 
 | Command | Input | Output | Primary Use Case |
 |---------|-------|--------|------------------|
-| [`extract`](core/extract.md) | BAM | `.bed.gz`, `.metadata.json` | Fragment extraction & GC factors |
+| [`extract`](core/extract.md) | BAM | `.bed.gz`, `.metadata.tsv` | Fragment extraction & GC factors |
 | [`motif`](regulatory/motif.md) | BAM | `.EndMotif.tsv`, `.MDS.tsv` | Fragmentation patterns |
 | [`fsc`](core/fsc.md) | BED.gz | `.FSC.tsv` | Copy number detection |
 | [`fsr`](core/fsr.md) | BED.gz | `.FSR.tsv` | Tumor fraction estimation |

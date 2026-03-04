@@ -244,14 +244,15 @@ def test_extract_target_regions_panel_mode(tmp_path):
     assert result.exit_code == 0, f"CLI failed: {result.output}"
 
     # Verify metadata shows panel mode
-    import json
+    import pandas as pd
 
-    meta_file = output_dir / "panel.metadata.json"
-    assert meta_file.exists()
+    meta_file = output_dir / "panel.metadata.tsv"
+    assert (
+        meta_file.exists()
+    ), f"Metadata TSV missing; files: {list(output_dir.iterdir())}"
 
-    with open(meta_file) as f:
-        metadata = json.load(f)
+    metadata = pd.read_csv(meta_file, sep="\t").iloc[0].to_dict()
 
-    assert metadata["panel_mode"]
-    assert "targets.bed" in metadata["target_regions"]
-    assert metadata["total_fragments"] == 3  # All 3 fragments extracted
+    assert metadata["panel_mode"]  # True (bool stored as True/False string in TSV)
+    assert "targets.bed" in str(metadata["target_regions"])
+    assert int(metadata["total_fragments"]) == 3  # All 3 fragments extracted

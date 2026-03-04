@@ -206,6 +206,18 @@ def run_all(
         "--generate-json",
         help="Generate unified sample.features.json with ALL data for ML pipelines",
     ),
+    # Output format options
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format for all feature tables: tsv, parquet, or both",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress all TSV outputs (produces .tsv.gz files). Only applies when output-format is 'tsv' or 'both'.",
+    ),
     # Observability
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging"),
     validate_assets: bool = typer.Option(
@@ -235,6 +247,26 @@ def run_all(
     resolved_pon_model = _resolve_path(pon_model)
     resolved_bait_padding = _resolve_int(bait_padding, 50)
     resolved_assay = _resolve_str(assay)
+    # Validate output format; default to 'tsv' for unknown values
+    _valid_formats = {"tsv", "parquet", "both"}
+    resolved_output_format = _resolve_str(output_format) or "tsv"
+    if resolved_output_format not in _valid_formats:
+        logger.warning(
+            f"Unknown --output-format '{resolved_output_format}'; defaulting to 'tsv'. "
+            f"Valid: {_valid_formats}"
+        )
+        resolved_output_format = "tsv"
+    resolved_compress = _resolve_bool(compress, False)
+    # Parquet doesn't benefit from gzip (it compresses internally with Snappy)
+    if resolved_output_format == "parquet" and resolved_compress:
+        logger.warning(
+            "--compress is ignored when --output-format=parquet (Parquet uses Snappy internally)."
+        )
+        resolved_compress = False
+    logger.info(
+        f"Output format: {resolved_output_format}"
+        + (" (gzip compressed)" if resolved_compress else "")
+    )
 
     # Configure Logging
     if debug:
@@ -505,6 +537,8 @@ def run_all(
         console.print()
 
     if is_panel_mode:
+        # resolved_target_path is guaranteed non-None when is_panel_mode=True
+        assert resolved_target_path is not None
         logger.info(
             f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_path.name})"
         )
@@ -563,7 +597,8 @@ def run_all(
             or not mds_output.exists()
         )
 
-        extraction_result: ExtractionResult = None
+        # extraction_result is initially None; set below if engine runs or cache is valid
+        extraction_result: Optional[ExtractionResult] = None
 
         if not should_run_engine:
             progress.update(
@@ -603,6 +638,8 @@ def run_all(
                         genome=genome,
                         assay=resolved_assay,
                         compute_gc_factors=True,
+                        output_format=resolved_output_format,
+                        compress=resolved_compress,
                     )
                     bedgz_file = extraction_result.bed_path
 
@@ -626,6 +663,8 @@ def run_all(
                                 str(gc_ref),
                                 str(valid_regions),
                                 str(factors_ontarget),
+                                output_format=resolved_output_format,
+                                compress=resolved_compress,
                             )
                             logger.info(
                                 f"Wrote {n_factors_on} on-target GC factors: {factors_ontarget.name}"
@@ -641,6 +680,8 @@ def run_all(
                     output_dir=output,
                     pon=pon,
                     include_ontarget=is_panel_mode,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
 
                 fragment_count = extraction_result.fragment_count
@@ -710,6 +751,8 @@ def run_all(
                 gc_correct=True,
                 threads=threads,
                 verbose=debug,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
             )
 
             # Report WPS periodicity if available
@@ -769,7 +812,17 @@ def run_all(
             try:
                 from .uxm import uxm
 
-                uxm(resolved_bisulfite_bam, output, sample, None, 0)
+                # resolved_bisulfite_bam is guaranteed non-None: has_uxm checks it above
+                assert resolved_bisulfite_bam is not None
+                uxm(
+                    resolved_bisulfite_bam,
+                    output,
+                    sample,
+                    None,
+                    genome,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
                 progress.update(task_uxm, description="[4/5] UXM ✓", completed=100)
             except Exception as e:
                 progress.update(
@@ -795,22 +848,29 @@ def run_all(
                 # Variants are in captured regions (exons/promoters), which have different
                 # GC bias than off-target genome-wide fragments
                 if is_panel_mode:
-                    # On-target factors are generated by extract.py as .ontarget.tsv
-                    ontarget_factors = (
-                        output / f"{sample}.correction_factors.ontarget.tsv"
-                    )
-                    if ontarget_factors.exists():
-                        correction_factors_path = ontarget_factors
-                        logger.info(
-                            f"mFSD: Using on-target GC factors ({ontarget_factors.name})"
-                        )
+                    # On-target factors: check Parquet first, then TSV fallback
+                    for ext in (
+                        ".correction_factors.ontarget.parquet",
+                        ".correction_factors.ontarget.tsv",
+                    ):
+                        candidate = output / f"{sample}{ext}"
+                        if candidate.exists():
+                            correction_factors_path = candidate
+                            logger.info(
+                                f"mFSD: Using on-target GC factors ({candidate.name})"
+                            )
+                            break
                     else:
-                        correction_factors_path = gc.factors_input or gc.factors_out
+                        _cfp = gc.factors_input or gc.factors_out
+                        assert _cfp is not None, "correction_factors must be set"
+                        correction_factors_path = _cfp
                         logger.warning(
                             "mFSD: On-target factors not found, using global factors"
                         )
                 else:
-                    correction_factors_path = gc.factors_input or gc.factors_out
+                    _cfp2 = gc.factors_input or gc.factors_out
+                    assert _cfp2 is not None, "correction_factors must be set"
+                    correction_factors_path = _cfp2
 
                 # Resolve which BAM to use for mFSD
                 mfsd_bam_path = (
@@ -831,6 +891,11 @@ def run_all(
                             "Duplex weighting auto-enabled for dedicated mFSD BAM"
                         )
 
+                # resolved_variants may be None only if no variant file provided.
+                # mfsd requires it — guard here matches the outer has_mfsd check.
+                assert (
+                    resolved_variants is not None
+                ), "mfsd called without resolved_variants — check has_mfsd guard"
                 mfsd(
                     bam_input=mfsd_bam_path,
                     input_file=resolved_variants,
@@ -852,6 +917,8 @@ def run_all(
                     min_baseq=min_baseq,
                     verbose=debug,
                     threads=threads,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
                 progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
             except Exception as e:
@@ -876,19 +943,21 @@ def run_all(
                     bam_input=bam_input,
                     reference=reference,
                     output=output,
-                    sample_name=sample,  # Use consistent sample ID (not BAM stem)
+                    sample_name=sample,
                     gene_bed=gene_bed,
                     genome=genome,
                     assay=resolved_assay,
                     e1_only=region_mds_e1_only,
                     mapq=mapq,
                     minlen=minlen,
-                    maxlen=maxlen,  # Use same maxlen as other tools for consistency
-                    pon_model=resolved_pon_path,  # Pass already-resolved PON
-                    skip_pon=skip_pon,  # Pass skip_pon flag
-                    threads=threads,  # Pass threads for parallel processing
-                    verbose=debug,  # Pass verbose flag
+                    maxlen=maxlen,
+                    pon_model=resolved_pon_path,
+                    skip_pon=skip_pon,
+                    threads=threads,
+                    verbose=debug,
                     silent=not debug,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
                 logger.info(
                     f"Region-MDS complete: {n_regions} regions, {n_genes} genes"
@@ -912,7 +981,7 @@ def run_all(
             from .core.feature_serializer import FeatureSerializer
 
             logger.info("Generating unified features JSON...")
-            serializer = FeatureSerializer.from_outputs(sample, output, version="0.6.0")
+            serializer = FeatureSerializer.from_outputs(sample, output, version="0.7.0")
 
             # Add runtime metadata
             serializer.add_metadata("bam_path", str(bam_input))

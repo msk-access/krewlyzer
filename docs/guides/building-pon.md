@@ -162,6 +162,12 @@ Both BAM/CRAM and BED.gz inputs are supported:
 
 ## Output
 
+!!! note "Intermediate file format"
+    `build-pon` always uses **TSV format** for per-sample intermediate scratch files written
+    to `--temp-dir`, regardless of any global `--output-format` setting. This is by design:
+    the aggregation loop reads these files with `pd.read_csv(sep="\t")` and they are deleted
+    after aggregation completes. The final output (`*.pon.parquet`) is always Parquet.
+
 The output is a Parquet file containing:
 
 | Component | Description | Used By |

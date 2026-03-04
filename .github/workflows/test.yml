@@ -3,8 +3,17 @@ name: Run Unit Tests
 on:
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'mkdocs.yml'
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'mkdocs.yml'
+  workflow_dispatch:
 
 jobs:
   test:
@@ -44,12 +53,12 @@ jobs:
           before-script-linux: |
             # Use system OpenSSL instead of building from source
             export OPENSSL_NO_VENDOR=1
-            
+
             SUDO=""
             if [ "$(id -u)" -ne 0 ] && command -v sudo &> /dev/null; then
               SUDO="sudo"
             fi
-            
+
             if command -v yum &> /dev/null; then
               $SUDO yum install -y zlib-devel bzip2-devel xz-devel libcurl-devel openssl-devel clang llvm-devel
             elif command -v apt-get &> /dev/null; then
@@ -69,3 +78,62 @@ jobs:
       - name: Build Docker Image (Dry Run)
         run: |
           docker build .
+
+  lint:
+    name: Lint (ruff · black · mypy · clippy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang libclang-dev \
+            zlib1g-dev libbz2-dev liblzma-dev \
+            libcurl4-openssl-dev libssl-dev
+
+      - name: Install uv
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install Python dependencies
+        run: |
+          # Build the Rust extension first — mypy needs to import krewlyzer._core
+          uv pip install --system maturin
+          maturin build --release --manifest-path rust/Cargo.toml --out dist
+          uv pip install --system dist/*.whl
+          # Install lint tools from dev extras
+          uv pip install --system ".[dev]"
+
+      - name: Run black
+        run: |
+          black --check src/krewlyzer/ tests/
+
+      - name: Run ruff
+        run: |
+          ruff check src/krewlyzer/ tests/
+
+      - name: Run mypy
+        run: |
+          mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
+
+      - name: Run cargo clippy
+        run: |
+          cargo clippy --manifest-path rust/Cargo.toml -- \
+            -D warnings \
+            -A clippy::too_many_arguments \
+            -A clippy::type_complexity

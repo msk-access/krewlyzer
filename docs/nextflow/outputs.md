@@ -8,7 +8,7 @@ Output files produced by the Krewlyzer Nextflow pipeline.
 results/
 ├── {sample}.bed.gz                         # Extracted fragments
 ├── {sample}.bed.gz.tbi                     # Tabix index
-├── {sample}.metadata.json                  # Run metadata and QC metrics
+├── {sample}.metadata.tsv                   # Run metadata and QC metrics (tabular)
 ├── {sample}.correction_factors.tsv         # GC correction factors
 ├── {sample}.EndMotif.tsv                   # 4-mer end motif frequencies
 ├── {sample}.EndMotif1mer.tsv               # 1-mer end motif + Jagged Index

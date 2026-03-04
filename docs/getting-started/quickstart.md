@@ -41,7 +41,7 @@ krewlyzer run-all sample.bam \
 ```bash
 ls results/
 # sample.bed.gz                    # Extracted fragments
-# sample.metadata.json             # Run metadata and QC metrics
+# sample.metadata.tsv              # Run metadata and QC metrics (tabular)
 # sample.correction_factors.tsv    # GC correction factors
 # sample.EndMotif.tsv              # End motif frequencies
 # sample.EndMotif1mer.tsv          # 1-mer motifs + Jagged Index

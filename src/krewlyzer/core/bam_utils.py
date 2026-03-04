@@ -5,7 +5,17 @@ Provides filter compatibility checking and BAM statistics.
 """
 
 from pathlib import Path
+from typing import Any, Dict, List
+import logging
 import pysam
+
+# Module-level logger so callers can set verbosity independently of this file.
+logger = logging.getLogger("core.bam_utils")
+
+# Fraction thresholds for issuing filter compatibility warnings.
+_PROPER_PAIR_WARN_THRESHOLD = 0.1  # < 10% proper pairs → flag for duplex BAMs
+_DUPLICATE_WARN_THRESHOLD = 0.5  # > 50% duplicates → flag for investigation
+_MAPQ_FAIL_WARN_THRESHOLD = 0.5  # > 50% low MAPQ → suggest threshold change
 
 
 def check_bam_compatibility(
@@ -14,7 +24,7 @@ def check_bam_compatibility(
     skip_duplicates: bool,
     mapq_threshold: int,
     sample_size: int = 10000,
-) -> dict:
+) -> Dict[str, Any]:
     """
     Sample reads from BAM to check filter compatibility.
 
@@ -23,33 +33,44 @@ def check_bam_compatibility(
     for detecting duplex/consensus BAMs that have 0% proper pairs.
 
     Args:
-        bam_path: Path to the input BAM file
-        require_proper_pair: Whether proper-pair filter is enabled
-        skip_duplicates: Whether duplicate filter is enabled
-        mapq_threshold: Minimum MAPQ threshold
-        sample_size: Number of reads to sample (default: 10000)
+        bam_path: Path to the input BAM file.
+        require_proper_pair: Whether proper-pair filter is enabled.
+        skip_duplicates: Whether duplicate filter is enabled.
+        mapq_threshold: Minimum MAPQ threshold.
+        sample_size: Number of reads to sample (default: 10000).
 
     Returns:
-        dict with:
-        - total_sampled: number of reads sampled
-        - would_pass: number that would pass filters
-        - pass_rate: fraction that would pass
-        - issues: list of issue descriptions
-        - suggested_flags: list of suggested flag changes
+        Dict with keys:
+        - total_sampled (int): number of reads sampled
+        - would_pass (int): number that would pass all filters
+        - pass_rate (float): fraction that would pass (0.0–1.0)
+        - issues (List[str]): human-readable issue descriptions
+        - suggested_flags (List[str]): CLI flag suggestions to fix issues
     """
-    result = {
-        "total_sampled": 0,
-        "would_pass": 0,
-        "pass_rate": 0.0,
-        "issues": [],
-        "suggested_flags": [],
-    }
+    # Use typed local lists so mypy can verify .append() calls.
+    # They are assembled into the return dict at the end of the function.
+    issues: List[str] = []
+    suggested_flags: List[str] = []
+
+    logger.debug(
+        f"Checking BAM compatibility: {bam_path.name} "
+        f"(sample_size={sample_size}, mapq>={mapq_threshold}, "
+        f"proper_pair={require_proper_pair}, skip_dups={skip_duplicates})"
+    )
 
     try:
         bam = pysam.AlignmentFile(str(bam_path), "rb")
     except Exception as e:
-        result["issues"].append(f"Could not open BAM: {e}")
-        return result
+        msg = f"Could not open BAM: {e}"
+        logger.warning(msg)
+        issues.append(msg)
+        return {
+            "total_sampled": 0,
+            "would_pass": 0,
+            "pass_rate": 0.0,
+            "issues": issues,
+            "suggested_flags": suggested_flags,
+        }
 
     # Sample from first chromosome that has reads
     sampled = 0
@@ -62,7 +83,7 @@ def check_bam_compatibility(
         if sampled >= sample_size:
             break
 
-        # Skip completely unusable reads
+        # Skip completely unusable reads (unmapped, secondary, supplementary)
         if read.is_unmapped or read.is_secondary or read.is_supplementary:
             continue
 
@@ -80,7 +101,7 @@ def check_bam_compatibility(
         if not has_mapq:
             low_mapq_count += 1
 
-        # Would this read pass all filters?
+        # Would this read pass all active filters?
         passes = True
         if require_proper_pair and not is_proper:
             passes = False
@@ -94,38 +115,52 @@ def check_bam_compatibility(
 
     bam.close()
 
-    result["total_sampled"] = sampled
-    result["would_pass"] = passed
-    result["pass_rate"] = passed / sampled if sampled > 0 else 0.0
+    pass_rate = passed / sampled if sampled > 0 else 0.0
+    logger.debug(
+        f"  BAM sample: {sampled} reads, {passed} pass ({pass_rate:.1%}), "
+        f"proper={proper_pair_count}, dups={duplicate_count}, lo_mapq={low_mapq_count}"
+    )
 
-    # Analyze issues
+    # Analyze sampled reads and generate actionable issue descriptions
     if sampled > 0:
         proper_rate = proper_pair_count / sampled
         dup_rate = duplicate_count / sampled
         mapq_fail_rate = low_mapq_count / sampled
 
-        # If very few proper pairs, suggest disabling that filter
-        if require_proper_pair and proper_rate < 0.1:
-            result["issues"].append(
+        # Very few proper pairs → likely duplex/consensus BAM; flag for user
+        if require_proper_pair and proper_rate < _PROPER_PAIR_WARN_THRESHOLD:
+            msg = (
                 f"Only {proper_rate:.1%} of reads are marked as proper pairs. "
                 "This is common for duplex/consensus BAMs."
             )
-            result["suggested_flags"].append("--no-require-proper-pair")
+            logger.warning(f"  BAM compatibility: {msg}")
+            issues.append(msg)
+            suggested_flags.append("--no-require-proper-pair")
 
-        # If high duplicate rate, flag it
-        if skip_duplicates and dup_rate > 0.5:
-            result["issues"].append(
+        # High duplicate rate → investigate before running (possible QC issue)
+        if skip_duplicates and dup_rate > _DUPLICATE_WARN_THRESHOLD:
+            msg = (
                 f"{dup_rate:.1%} of reads are marked as duplicates. "
                 "Consider using --no-skip-duplicates if these are valid reads."
             )
-            result["suggested_flags"].append("--no-skip-duplicates")
+            logger.warning(f"  BAM compatibility: {msg}")
+            issues.append(msg)
+            suggested_flags.append("--no-skip-duplicates")
 
-        # If MAPQ fails too many reads
-        if mapq_fail_rate > 0.5:
-            result["issues"].append(
+        # High MAPQ failure rate → threshold may be too strict for this BAM
+        if mapq_fail_rate > _MAPQ_FAIL_WARN_THRESHOLD:
+            msg = (
                 f"{mapq_fail_rate:.1%} of reads have MAPQ < {mapq_threshold}. "
                 "Consider lowering --mapq threshold."
             )
-            result["suggested_flags"].append("--mapq 0")
+            logger.warning(f"  BAM compatibility: {msg}")
+            issues.append(msg)
+            suggested_flags.append("--mapq 0")
 
-    return result
+    return {
+        "total_sampled": sampled,
+        "would_pass": passed,
+        "pass_rate": pass_rate,
+        "issues": issues,
+        "suggested_flags": suggested_flags,
+    }

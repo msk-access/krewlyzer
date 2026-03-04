@@ -13,7 +13,7 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use anyhow::{Result, Context};
-use log::{info, warn};
+use log::{info, debug, warn};
 use crate::bed::{Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
 use crate::fsc::FscConsumer;
@@ -45,23 +45,26 @@ impl MultiConsumer {
     pub fn write_outputs(
         &self,
         fsc_path: Option<PathBuf>,
-        wps_parquet_path: Option<PathBuf>,  // Foreground Parquet (TSS/CTCF)
-        wps_background_path: Option<PathBuf>,  // Background Parquet (Alu stacking)
+        wps_parquet_path: Option<PathBuf>,   // Foreground Parquet (TSS/CTCF) — always Parquet
+        wps_background_path: Option<PathBuf>, // Background Parquet (Alu stacking) — always Parquet
         fsd_path: Option<PathBuf>,
         ocf_dir: Option<PathBuf>,
-        _empty: bool, // for WPS (unused with Parquet)
+        _empty: bool,     // for WPS (unused with Parquet)
+        output_format: &str,
+        compress: bool,
     ) -> Result<()> {
         if let Some(c) = &self.fsc {
             if let Some(p) = fsc_path {
+                // FSC counts are an internal intermediate; keep as TSV for now.
+                // Parquet for fsc_counts would require a write_output_format() on FscConsumer.
                 c.write_output(&p).context("Writing FSC output")?;
             }
         }
         
         if let Some(c) = &self.wps {
-            // Write foreground Parquet (ML-ready vectors)
+            // WPS is always written as Parquet (ML-ready vectors — no TSV variant in pipeline)
             if let Some(p) = wps_parquet_path {
                 if let Err(e) = c.write_parquet(&p, None) {
-                    // Create detailed error message that will survive PyO3 conversion
                     let full_error = format!("WPS Parquet write failed: {:#}", e);
                     return Err(anyhow::anyhow!(full_error));
                 }
@@ -69,7 +72,7 @@ impl MultiConsumer {
         }
         
         if let Some(c) = &self.wps_background {
-            // Write background Parquet (Alu stacking)
+            // WPS background is always Parquet
             if let Some(p) = wps_background_path {
                 c.write_parquet(&p).context("Writing WPS Background Parquet output")?;
             }
@@ -77,13 +80,17 @@ impl MultiConsumer {
         
         if let Some(c) = &self.fsd {
             if let Some(p) = fsd_path {
-                c.write_output(&p).context("Writing FSD output")?;
+                // Dispatch through format-aware method (TSV / Parquet / both)
+                c.write_output_format(&p, output_format, compress)
+                    .context("Writing FSD output")?;
             }
         }
         
         if let Some(c) = &self.ocf {
             if let Some(p) = ocf_dir {
-                c.write_output(&p).context("Writing OCF output")?;
+                // Dispatch through format-aware method (TSV / Parquet / both)
+                c.write_output_format(&p, output_format, compress)
+                    .context("Writing OCF output")?;
             }
         }
         
@@ -135,6 +142,9 @@ impl FragmentConsumer for MultiConsumer {
     target_regions_path=None,
     // Bait edge padding (adaptive safety applies)
     bait_padding=50,
+    // Output format control
+    output_format="tsv",
+    compress=false,
     // Progress control
     silent=false
 ))]
@@ -162,6 +172,10 @@ pub fn run_unified_pipeline(
     target_regions_path: Option<PathBuf>,
     // Bait edge padding in bp (default 50, adaptive safety applies)
     bait_padding: u64,
+    // Output format: "tsv", "parquet", or "both"
+    output_format: &str,
+    // Gzip TSV outputs when true (only for tsv/both format)
+    compress: bool,
     // Progress control
     silent: bool,
 ) -> PyResult<()> {
@@ -173,15 +187,16 @@ pub fn run_unified_pipeline(
     // Phase 1: GC Correction Factors (Load or Compute)
     // ═══════════════════════════════════════════════════════════════════
     let factors = if let Some(input_path) = correction_input_path {
-        // Load pre-computed factors from CSV
-        info!("Phase 1: Loading pre-computed GC correction factors from {:?}", input_path);
-        match CorrectionFactors::load_csv(&input_path) {
+        // Load pre-computed factors — Parquet-first auto-detection handles both
+        // Parquet (new) and TSV/legacy-CSV (old) transparently.
+        info!("pipeline: loading pre-computed GC correction factors from {:?}", input_path);
+        match CorrectionFactors::load(&input_path) {
             Ok(f) => {
-                info!("Loaded {} correction factor entries", f.data.len());
+                info!("pipeline: loaded {} correction factor bins", f.data.len());
                 Some(f)
             },
             Err(e) => {
-                warn!("Failed to load correction factors: {}. Proceeding without GC correction.", e);
+                warn!("pipeline: failed to load correction factors: {}. Proceeding without GC correction.", e);
                 None
             }
         }
@@ -210,10 +225,20 @@ pub fn run_unified_pipeline(
         let computed = compute_gcfix_factors(&obs_result.observed, &ref_data, None)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Factor computation failed: {}", e)))?;
             
-        // 5. Write Factors
-        computed.write_csv(&out_factors)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors: {}", e)))?;
-            
+        // 5. Write factors: dispatch by output_format (TSV / Parquet / both).
+        use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
+        let fmt = validated_output_format(output_format);
+        debug!("pipeline: writing off-target GC factors → {:?} (format={})", out_factors, fmt);
+        if should_write_tsv(fmt) {
+            computed.write_tsv(&out_factors)
+                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (TSV): {}", e)))?;
+        }
+        if should_write_parquet(fmt) {
+            let pq = out_factors.with_extension("parquet");
+            computed.write_parquet(&pq)
+                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (Parquet): {}", e)))?;
+        }
+        
         Some(computed)
     } else {
         info!("GC correction skipped (no factors provided and no reference files)");
@@ -324,9 +349,17 @@ pub fn run_unified_pipeline(
     let final_consumer = analyzer.process_file(&bed_path, &mut chrom_map, silent)
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         
-    // 5. Write Outputs
-    final_consumer.write_outputs(fsc_output, wps_output, wps_background_output, fsd_output, ocf_output, wps_empty)
-         .map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
+    // 5. Write Outputs (format-aware: TSV / Parquet / both, with optional gzip)
+    final_consumer.write_outputs(
+        fsc_output,
+        wps_output,
+        wps_background_output,
+        fsd_output,
+        ocf_output,
+        wps_empty,
+        output_format,
+        compress,
+    ).map_err(|e| pyo3::exceptions::PyIOError::new_err(e.to_string()))?;
     
     Ok(())
 }

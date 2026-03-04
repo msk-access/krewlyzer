@@ -40,7 +40,7 @@ flowchart TB
     ENTROPY --> TFBS["TFBS.tsv"]
     ENTROPY --> ATAC["ATAC.tsv"]
     
-    EXTRACT --> META["metadata.json"]
+    EXTRACT --> META["metadata.tsv"]
     
     subgraph "With --variants"
         BAM --> MFSD["mFSD.tsv"]
@@ -200,9 +200,16 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ --generate-json
 # Output: out/sample.features.json (contains FSD, FSR, WPS, Motif, OCF, etc.)
 ```
 
-!!! note
-    Output format is determined automatically per feature (TSV for tabular data, Parquet for WPS profiles).
-    There is no global `--output-format` flag. Use `--generate-json` to produce a unified JSON for ML pipelines.
+!!! note "Output format"
+    The `--output-format` flag controls output format for tabular features: `tsv` (default),
+    `parquet`, or `both`. Use `--compress` to gzip-compress TSV outputs.
+
+    **WPS exception:** `*.WPS.parquet`, `*.WPS_background.parquet`, and `*.WPS.panel.parquet`
+    are **always Parquet** regardless of `--output-format`. WPS vectors are high-dimensional
+    (thousands of 200-point profiles) and impractical as TSV.
+
+    Use `--generate-json` to also produce a unified `{sample}.features.json` for ML pipelines.
+    JSON output is compatible with any `--output-format` setting.
 
 See [JSON Output](../features/output/json-output.md) for full documentation.
 

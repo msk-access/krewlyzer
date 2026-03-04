@@ -19,6 +19,7 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
+from .core.output_utils import read_table, write_table  # Parquet-first I/O
 from . import __version__
 
 
@@ -71,6 +72,17 @@ def region_mds(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
     silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only applies when format is tsv or both)",
+    ),
 ):
     """
     Calculate per-region Motif Diversity Score (MDS).
@@ -172,8 +184,11 @@ def region_mds(
     else:
         logger.debug(f"Using provided sample name: {sample_name}")
 
-    output_exon = output / f"{sample_name}.MDS.exon.tsv"
-    output_gene = output / f"{sample_name}.MDS.gene.tsv"
+    output_exon_base = output / f"{sample_name}.MDS.exon"
+    output_gene_base = output / f"{sample_name}.MDS.gene"
+    # Rust expects .tsv paths for its initial write; Parquet added by Python after
+    output_exon = output_exon_base.with_suffix(".tsv")
+    output_gene = output_gene_base.with_suffix(".tsv")
 
     # ═══════════════════════════════════════════════════════════════════
     # STARTUP BANNER
@@ -223,10 +238,9 @@ def region_mds(
 
     logger.info(f"Region-MDS complete: {n_regions} regions, {n_genes} genes")
 
-    # PON z-score normalization
+    # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
         try:
-            import pandas as pd
             from krewlyzer.pon.model import PonModel
 
             logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
@@ -237,39 +251,71 @@ def region_mds(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )
             else:
-                # Read gene output
-                df = pd.read_csv(output_gene, sep="\t")
+                # Read gene output with Parquet-first auto-detection
+                df = read_table(output_gene)
+                if df is None:
+                    logger.warning(
+                        f"Could not read gene output for z-score: {output_gene}"
+                    )
+                else:
+                    # Compute z-scores for each gene
+                    import pandas as pd
 
-                # Compute z-scores for each gene
-                mds_z_scores = []
-                mds_e1_z_scores = []
+                    mds_z_scores = []
+                    mds_e1_z_scores = []
 
-                for _, row in df.iterrows():
-                    gene = row["gene"]
-                    mds_mean = row.get("mds_mean", 0.0)
-                    mds_e1 = row.get("mds_e1", 0.0)
+                    for _, row in df.iterrows():
+                        gene = row["gene"]
+                        mds_mean = row.get("mds_mean", 0.0)
+                        mds_e1 = row.get("mds_e1", 0.0)
 
-                    # MDS mean z-score
-                    z = pon.region_mds.compute_zscore(gene, mds_mean)
-                    mds_z_scores.append(z if z is not None else float("nan"))
+                        # MDS mean z-score
+                        z = pon.region_mds.compute_zscore(gene, mds_mean)
+                        mds_z_scores.append(z if z is not None else float("nan"))
 
-                    # E1 z-score
-                    z_e1 = pon.region_mds.compute_e1_zscore(gene, mds_e1)
-                    mds_e1_z_scores.append(z_e1 if z_e1 is not None else float("nan"))
+                        # E1 z-score
+                        z_e1 = pon.region_mds.compute_e1_zscore(gene, mds_e1)
+                        mds_e1_z_scores.append(
+                            z_e1 if z_e1 is not None else float("nan")
+                        )
 
-                # Add z-score columns
-                df["mds_z"] = mds_z_scores
-                df["mds_e1_z"] = mds_e1_z_scores
+                    # Add z-score columns and re-write in selected format
+                    df["mds_z"] = mds_z_scores
+                    df["mds_e1_z"] = mds_e1_z_scores
+                    write_table(
+                        df,
+                        output_gene_base,
+                        output_format=output_format,
+                        compress=compress,
+                    )
 
-                # Write updated output
-                df.to_csv(output_gene, sep="\t", index=False)
-
-                n_with_z = sum(
-                    1 for z in mds_z_scores if z is not None and not pd.isna(z)
-                )
-                logger.info(f"Added z-scores for {n_with_z}/{len(df)} genes")
+                    n_with_z = sum(
+                        1 for z in mds_z_scores if z is not None and not pd.isna(z)
+                    )
+                    logger.info(f"Added z-scores for {n_with_z}/{len(df)} genes")
 
         except Exception as e:
             logger.warning(f"PON z-score computation failed: {e}")
+
+    # Write exon output in the selected format (Rust already wrote TSV; add Parquet/both)
+    logger.debug(
+        f"region_mds: post-process exon output (format={output_format!r}, compress={compress})"
+    )
+    if output_format != "tsv":
+        logger.debug(
+            f"region_mds: converting {output_exon.name} → format={output_format!r}"
+        )
+        df_exon = read_table(output_exon)
+        if df_exon is not None:
+            write_table(
+                df_exon,
+                output_exon_base,
+                output_format=output_format,
+                compress=compress,
+            )
+        else:
+            logger.warning(
+                f"region_mds: could not read {output_exon.name} for format conversion"
+            )
 
     return n_regions, n_genes

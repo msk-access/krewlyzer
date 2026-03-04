@@ -408,7 +408,8 @@ pub fn run_region_entropy(
     // These factors correct for GC bias in off-target/genome-wide regions
     // -------------------------------------------------------------------------
     let factors_offtarget = if let Some(ref p) = gc_correction_path {
-        match CorrectionFactors::load_csv(p) {
+        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded OFF-TARGET GC factors: {} ({} bins)", 
                           p, f.data.len());
@@ -430,7 +431,8 @@ pub fn run_region_entropy(
     // Falls back to off-target factors if not provided
     // -------------------------------------------------------------------------
     let factors_ontarget = if let Some(ref p) = gc_correction_ontarget_path {
-        match CorrectionFactors::load_csv(p) {
+        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded ON-TARGET GC factors: {} ({} bins)", 
                           p, f.data.len());
@@ -457,7 +459,7 @@ pub fn run_region_entropy(
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(), u32>>> = HashMap::new();
         
         if let Ok(reader) = crate::bed::get_reader(std::path::Path::new(p)) {
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if line.starts_with('#') { continue; }
                 let cols: Vec<&str> = line.split('\t').collect();
                 if cols.len() >= 3 {

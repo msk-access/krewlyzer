@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{BufRead, Write};
 use std::collections::HashMap;
 use crate::bed;
-use log::info;
+use log::{debug, info};
 
 
 /// Calculate Fragment Size Distribution (FSD)
@@ -189,29 +189,117 @@ impl FsdConsumer {
         Ok(())
     }
     
+    /// Write FSD output in TSV format (delegates to write_output_format).
+    ///
+    /// # Deprecated
+    /// Use `write_output_format(output_path, "tsv", false)` for explicit format control.
     pub fn write_output(&self, output_path: &Path) -> Result<()> {
-        // Log summary
+        self.write_output_format(output_path, "tsv", false)
+    }
+
+    /// Write FSD histogram to Parquet (output_utils::write_parquet_batch).
+    ///
+    /// Schema: region (Utf8) | 65-69 .. 395-399 (Float64 × 67) | total (Float64)
+    ///
+    /// # Errors
+    /// Returns an error if Parquet serialization or I/O fails.
+    fn write_parquet_output(&self, histograms: &[Vec<f64>], totals: &[f64], output_path: &Path) -> Result<()> {
+        use arrow::array::{ArrayRef, Float64Array, StringArray};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use crate::output_utils::write_parquet_batch;
+        use std::sync::Arc;
+
+        // Build column vectors
+        let mut region_col: Vec<String> = Vec::with_capacity(self.regions.len());
+        let mut bin_cols: Vec<Vec<f64>> = (0..67).map(|_| Vec::with_capacity(self.regions.len())).collect();
+        let mut total_col: Vec<f64> = Vec::with_capacity(self.regions.len());
+
+        for (i, region) in self.regions.iter().enumerate() {
+            region_col.push(format!("{}:{}-{}", region.chrom, region.start, region.end));
+            for b in 0..67 {
+                bin_cols[b].push(histograms[i][b]);
+            }
+            total_col.push(totals[i]);
+        }
+
+        // Build Arrow schema
+        let mut fields = vec![Field::new("region", DataType::Utf8, false)];
+        for s in (65..400usize).step_by(5) {
+            fields.push(Field::new(format!("{}-{}", s, s + 4), DataType::Float64, false));
+        }
+        fields.push(Field::new("total", DataType::Float64, false));
+        let schema = Arc::new(Schema::new(fields));
+
+        // Build Arrow arrays
+        let mut arrays: Vec<ArrayRef> = Vec::with_capacity(69);
+        arrays.push(Arc::new(StringArray::from(region_col)) as ArrayRef);
+        for col in bin_cols {
+            arrays.push(Arc::new(Float64Array::from(col)) as ArrayRef);
+        }
+        arrays.push(Arc::new(Float64Array::from(total_col)) as ArrayRef);
+
+        write_parquet_batch(output_path, Arc::new(Schema::new(schema.fields().to_vec())), arrays)
+    }
+
+    /// Write FSD output in the requested format (TSV, Parquet, or both).
+    ///
+    /// Dispatches between TSV (`write_histogram`) and Parquet (`write_parquet_output`).
+    pub fn write_output_format(&self, output_path: &Path, output_format: &str, compress: bool) -> Result<()> {
+        use crate::output_utils::{should_write_tsv, should_write_parquet, tsv_path, validated_output_format};
+        let fmt = validated_output_format(output_format);
+
+        debug!("FSD: write_output_format(fmt={}, compress={}) → {:?}", fmt, compress, output_path);
+
         let total_off: f64 = self.totals_off.iter().sum();
         let total_on: f64 = self.totals_on.iter().sum();
-        
-        info!("FSD: {} arms, {:.0} off-target frags, {:.0} on-target frags", 
+
+        info!("FSD: {} arms, {:.0} off-target frags, {:.0} on-target frags",
             self.regions.len(), total_off, total_on);
-        
-        // Write off-target (main output)
-        self.write_histogram(&self.histograms_off, &self.totals_off, output_path)?;
-        
-        // Write on-target if targets were provided
-        if self.target_tree.is_some() && total_on > 0.0 {
-            let stem = output_path.file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("output");
-            let on_path = output_path.with_file_name(format!("{}.ontarget.tsv", stem));
-            self.write_histogram(&self.histograms_on, &self.totals_on, &on_path)?;
-            info!("FSD on-target: {:?}", on_path);
+
+        // Determine output paths.
+        // IMPORTANT: Do not use with_extension("") then re-add .tsv — Rust's with_extension()
+        // treats anything after the last dot as the extension, so 'test_sample.FSD.tsv'
+        // → with_extension("") → 'test_sample.FSD' → with_extension("tsv") → 'test_sample.tsv'
+        // (replaces 'FSD' as the extension). Instead, derive Parquet path by replacing .tsv,
+        // and use tsv_path(output_path) directly for the TSV write.
+        let parquet_path = if output_path.extension().is_some_and(|e| e == "tsv") {
+            output_path.with_extension("parquet")
+        } else {
+            let mut p = output_path.to_path_buf();
+            p.set_extension("parquet");
+            p
+        };
+        // TSV path is output_path itself (optionally gzipped)
+        let tsv_out = tsv_path(output_path, compress);
+
+        // Off-target
+        if should_write_tsv(fmt) {
+            self.write_histogram(&self.histograms_off, &self.totals_off, &tsv_out)?;
         }
-        
+        if should_write_parquet(fmt) {
+            self.write_parquet_output(&self.histograms_off, &self.totals_off, &parquet_path)?;
+        }
+
+        // On-target (panel mode)
+        if self.target_tree.is_some() && total_on > 0.0 {
+            // Build on-target paths by inserting '.ontarget' before the final extension
+            let stem = output_path
+                .file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+            let parent = output_path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            let on_tsv = parent.join(format!("{}.ontarget.tsv", stem));
+            let on_parquet = parent.join(format!("{}.ontarget.parquet", stem));
+            if should_write_tsv(fmt) {
+                self.write_histogram(&self.histograms_on, &self.totals_on, &tsv_path(&on_tsv, compress))?;
+            }
+            if should_write_parquet(fmt) {
+                self.write_parquet_output(&self.histograms_on, &self.totals_on, &on_parquet)?;
+            }
+            info!("FSD on-target: {:?}", on_tsv);
+        }
+
         Ok(())
     }
+
 }
 
 impl FragmentConsumer for FsdConsumer {
