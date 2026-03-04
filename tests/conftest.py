@@ -182,12 +182,10 @@ def temp_markers(tmp_path):
 def temp_vcf(tmp_path):
     """Create VCF file for mFSD testing."""
     vcf = tmp_path / "variants.vcf"
-    vcf.write_text(
-        """##fileformat=VCFv4.2
+    vcf.write_text("""##fileformat=VCFv4.2
 #CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO
 chr1\t1001\t.\tA\tT\t.\tPASS\t.
-"""
-    )
+""")
     return vcf
 
 
