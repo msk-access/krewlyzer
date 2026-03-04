@@ -489,7 +489,7 @@ impl RegionAccumulator {
     }
     
     // Add val to [start, end)
-    fn add_range(vec: &mut Vec<f64>, start: i64, end: i64, val: f64) {
+    fn add_range(vec: &mut [f64], start: i64, end: i64, val: f64) {
         let len = vec.len() as i64 - 1; 
         // Clamp to region bounds [0, len)
         let s = start.clamp(0, len) as usize;
@@ -1571,7 +1571,7 @@ impl WpsBackgroundConsumer {
         
         let mut slope_numer = 0.0;
         let mut slope_denom = 0.0;
-        for i in 0..n {
+        for (i, _) in data.iter().enumerate().take(n) {
             let xi = i as f64 - x_mean;
             let yi = data[i] - y_mean;
             slope_numer += xi * yi;
@@ -1580,8 +1580,8 @@ impl WpsBackgroundConsumer {
         let slope = if slope_denom.abs() > 1e-9 { slope_numer / slope_denom } else { 0.0 };
         let intercept = y_mean - slope * x_mean;
         
-        for i in 0..n {
-            data[i] -= slope * i as f64 + intercept;
+        for (i, val) in data.iter_mut().enumerate().take(n) {
+            *val -= slope * i as f64 + intercept;
         }
         
         // 2. Z-score normalize
@@ -1598,9 +1598,9 @@ impl WpsBackgroundConsumer {
         }
         
         // 3. Apply Hann window
-        for i in 0..n {
+        for (i, val) in data.iter_mut().enumerate().take(n) {
             let window = 0.5 * (1.0 - (2.0 * PI * i as f64 / (n_f - 1.0)).cos());
-            data[i] *= window;
+            *val *= window;
         }
         
         // 4. Compute FFT using realfft
@@ -1629,15 +1629,15 @@ impl WpsBackgroundConsumer {
         let mut sum_amplitude = 0.0;
         let mut count_in_range = 0;
         
-        for i in 1..amplitudes.len() {
+        for (i, &amp;amp) in amplitudes.iter().enumerate().skip(1) {
             let period_bp = (n as f64 * bin_size_bp) / i as f64;
             
             if period_bp >= min_period_bp && period_bp <= max_period_bp {
-                sum_amplitude += amplitudes[i];
+                sum_amplitude += amp;
                 count_in_range += 1;
                 
-                if amplitudes[i] > peak_amplitude {
-                    peak_amplitude = amplitudes[i];
+                if amp > peak_amplitude {
+                    peak_amplitude = amp;
                     peak_idx = i;
                 }
             }

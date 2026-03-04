@@ -211,7 +211,7 @@ impl FsdConsumer {
 
         // Build column vectors
         let mut region_col: Vec<String> = Vec::with_capacity(self.regions.len());
-        let mut bin_cols: Vec<Vec<f64>> = vec![Vec::with_capacity(self.regions.len()); 67];
+        let mut bin_cols: Vec<Vec<f64>> = (0..67).map(|_| Vec::with_capacity(self.regions.len())).collect();
         let mut total_col: Vec<f64> = Vec::with_capacity(self.regions.len());
 
         for (i, region) in self.regions.iter().enumerate() {

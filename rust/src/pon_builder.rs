@@ -32,7 +32,7 @@ pub struct GcBiasResult {
 }
 
 /// Compute median of a slice
-fn median(data: &mut Vec<f64>) -> f64 {
+fn median(data: &mut [f64]) -> f64 {
     if data.is_empty() {
         return 1.0;
     }
