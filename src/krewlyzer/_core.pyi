@@ -85,12 +85,12 @@ class extract_motif:
         require_proper_pair: bool,
         silent: bool,
     ) -> tuple[
-        int,                   # fragment count
-        dict[str, int],        # end_motifs (off-target)
-        dict[str, int],        # bp_motifs (off-target)
+        int,  # fragment count
+        dict[str, int],  # end_motifs (off-target)
+        dict[str, int],  # bp_motifs (off-target)
         dict[tuple[int, int], int],  # gc_observations (off-target)
-        dict[str, int],        # end_motifs_on (on-target)
-        dict[str, int],        # bp_motifs_on (on-target)
+        dict[str, int],  # end_motifs_on (on-target)
+        dict[str, int],  # bp_motifs_on (on-target)
         dict[tuple[int, int], int],  # gc_observations_ontarget (on-target)
     ]:
         """Extract fragments and motifs from a BAM in parallel.
