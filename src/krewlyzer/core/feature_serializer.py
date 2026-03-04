@@ -313,10 +313,11 @@ class FeatureSerializer:
         # Local helper: read_table returns DataFrame|None; callers here always
         # check path.exists() first, so the result is never None. This narrows
         # the type from DataFrame|None to DataFrame so mypy is satisfied.
+        from .output_utils import read_table as _read_table
         import pandas as _pd
 
         def _rt(p: Path) -> "_pd.DataFrame":
-            df = _rt(p)
+            df = _read_table(p)
             assert df is not None, f"read_table returned None for existing file: {p}"
             return df
 
@@ -429,7 +430,7 @@ class FeatureSerializer:
         bpm_on_path = output_dir / f"{sample_id}.BreakPointMotif.ontarget.tsv"
         mds_on_path = output_dir / f"{sample_id}.MDS.ontarget.tsv"
 
-        motif_data = {}
+        motif_data: Dict[str, Any] = {}
 
         # Off-target motifs
         if edm_path.exists():
@@ -450,13 +451,13 @@ class FeatureSerializer:
             mds_df = _rt(mds_path)
             for col in mds_df.columns:
                 if col.lower() == "mds":
-                    motif_data["mds"] = float(mds_df[col].iloc[0])
+                    motif_data["mds"] = float(mds_df[col].iloc[0])  # type: ignore[index]
                     break
             # Also extract mds_z if PON normalization was applied
             if "mds_z" in mds_df.columns:
                 val = mds_df["mds_z"].iloc[0]
                 if pd.notna(val):
-                    motif_data["mds_z"] = float(val)
+                    motif_data["mds_z"] = float(val)  # type: ignore[index]
 
         # On-target motifs
         if edm_on_path.exists():
@@ -477,13 +478,13 @@ class FeatureSerializer:
             mds_on_df = _rt(mds_on_path)
             for col in mds_on_df.columns:
                 if col.lower() == "mds":
-                    motif_data["mds_on_target"] = float(mds_on_df[col].iloc[0])
+                    motif_data["mds_on_target"] = float(mds_on_df[col].iloc[0])  # type: ignore[index]
                     break
             # Also extract mds_z for on-target if PON normalization was applied
             if "mds_z" in mds_on_df.columns:
                 val = mds_on_df["mds_z"].iloc[0]
                 if pd.notna(val):
-                    motif_data["mds_z_on_target"] = float(val)
+                    motif_data["mds_z_on_target"] = float(val)  # type: ignore[index]
 
         if motif_data:
             serializer.features["motif"] = motif_data
@@ -637,7 +638,7 @@ class FeatureSerializer:
         mds_gene_path = output_dir / f"{sample_id}.MDS.gene.tsv"
 
         if mds_exon_path.exists() or mds_gene_path.exists():
-            region_mds_data = {}
+            region_mds_data: Dict[str, Any] = {}
 
             if mds_exon_path.exists():
                 exon_df = _rt(mds_exon_path)
@@ -646,17 +647,17 @@ class FeatureSerializer:
 
                 # Summary statistics
                 if "mds" in exon_df.columns:
-                    region_mds_data["mds_exon_mean"] = float(exon_df["mds"].mean())
-                    region_mds_data["mds_exon_std"] = float(exon_df["mds"].std())
+                    region_mds_data["mds_exon_mean"] = float(exon_df["mds"].mean())  # type: ignore[index]
+                    region_mds_data["mds_exon_std"] = float(exon_df["mds"].std())  # type: ignore[index]
 
             if mds_gene_path.exists():
                 gene_df = _rt(mds_gene_path)
                 region_mds_data["gene"] = gene_df.to_dict(orient="records")
-                region_mds_data["n_genes"] = len(gene_df)
+                region_mds_data["n_genes"] = len(gene_df)  # type: ignore[index]
 
                 # E1 summary
                 if "mds_e1" in gene_df.columns:
-                    region_mds_data["mds_e1_mean"] = float(gene_df["mds_e1"].mean())
+                    region_mds_data["mds_e1_mean"] = float(gene_df["mds_e1"].mean())  # type: ignore[index]
 
             serializer.features["region_mds"] = region_mds_data
 
@@ -665,9 +666,9 @@ class FeatureSerializer:
         # .metadata.json was removed; metadata is now consistent TSV/Parquet.
         # =====================================================================
         meta_tsv_path = output_dir / f"{sample_id}.metadata.tsv"
-        meta_df = _rt(meta_tsv_path)
+        meta_df = _read_table(meta_tsv_path)
         if meta_df is not None and not meta_df.empty:
-            serializer.set_metadata(meta_df.iloc[0].to_dict())
+            serializer.set_metadata(meta_df.iloc[0].to_dict())  # type: ignore[arg-type]
 
         return serializer
 

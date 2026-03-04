@@ -459,7 +459,7 @@ pub fn run_region_entropy(
         let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(), u32>>> = HashMap::new();
         
         if let Ok(reader) = crate::bed::get_reader(std::path::Path::new(p)) {
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if line.starts_with('#') { continue; }
                 let cols: Vec<&str> = line.split('\t').collect();
                 if cols.len() >= 3 {

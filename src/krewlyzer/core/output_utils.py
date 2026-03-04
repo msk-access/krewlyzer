@@ -197,8 +197,15 @@ def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
                 )
                 return df
             # Plain TSV or gzip TSV
-            compression = "gzip" if str(candidate).endswith(".gz") else None
-            df = pd.read_csv(candidate, sep="\t", compression=compression, **csv_kwargs)
+            from typing import Literal, cast
+
+            compression_arg = cast(
+                "Literal['gzip'] | None",
+                "gzip" if str(candidate).endswith(".gz") else None,
+            )
+            df = pd.read_csv(  # type: ignore[assignment]
+                candidate, sep="\t", compression=compression_arg, **csv_kwargs
+            )
             logger.debug(
                 "read_table: loaded TSV %s (%d rows × %d cols)",
                 candidate.name,

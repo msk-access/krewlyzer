@@ -818,7 +818,7 @@ class PonModel:
             arms_dict = {}
             for arm_name, arm_group in fsd_df.groupby("arm"):
                 arm_group = arm_group.sort_values("size_bin")
-                arms_dict[arm_name] = {
+                arms_dict[str(arm_name)] = {
                     "expected": arm_group["expected"].tolist(),
                     "std": arm_group["std"].tolist(),
                 }

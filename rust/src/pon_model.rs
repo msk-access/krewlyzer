@@ -226,8 +226,10 @@ impl PonModel {
         let reader = builder.build()
             .map_err(|e| format!("Failed to build Parquet reader: {}", e))?;
         
-        let mut model = PonModel::default();
-        model.schema_version = "1.0".to_string();
+        let mut model = PonModel {
+            schema_version: "1.0".to_string(),
+            ..Default::default()
+        };
         
         // Parse record batches - schema uses "table" column to identify row types
         for batch_result in reader {

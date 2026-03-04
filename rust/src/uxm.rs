@@ -128,12 +128,10 @@ pub fn calculate_uxm(
                 let mut num_meth = 0u32;
                 let mut num_unmeth = 0u32;
                 
-                if let Ok(aux) = record.aux(b"XM") {
-                    if let Aux::String(s) = aux {
-                        for &b in s.as_bytes() {
-                            if b == b'Z' { num_meth += 1; }
-                            else if b == b'z' { num_unmeth += 1; }
-                        }
+                if let Ok(Aux::String(s)) = record.aux(b"XM") {
+                    for &b in s.as_bytes() {
+                        if b == b'Z' { num_meth += 1; }
+                        else if b == b'z' { num_unmeth += 1; }
                     }
                 }
                 

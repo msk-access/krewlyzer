@@ -68,7 +68,7 @@ fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
     let mut regions = HashSet::new();
     let path_buf = std::path::PathBuf::from(path);
     if let Ok(reader) = crate::bed::get_reader(&path_buf) {
-        for line in reader.lines().flatten() {
+        for line in reader.lines().map_while(Result::ok) {
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() >= 3 {
                 if let (Ok(start), Ok(end)) = (fields[1].parse(), fields[2].parse()) {
