@@ -1629,7 +1629,7 @@ impl WpsBackgroundConsumer {
         let mut sum_amplitude = 0.0;
         let mut count_in_range = 0;
         
-        for (i, &amp;amp) in amplitudes.iter().enumerate().skip(1) {
+        for (i, &amp) in amplitudes.iter().enumerate().skip(1) {
             let period_bp = (n as f64 * bin_size_bp) / i as f64;
             
             if period_bp >= min_period_bp && period_bp <= max_period_bp {
