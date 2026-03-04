@@ -7,8 +7,12 @@
 #   extract_motif, uxm
 #
 # Keep in sync with Rust signatures in rust/src/*.rs when updating.
+#
+# NOTE: Path arguments are typed as `str` (not `pathlib.Path`) because PyO3's
+# PathBuf extraction only guarantees `str` from Python's perspective when
+# called via `str(path)` at all call sites.  Accept `str | None` for optional
+# path args to match actual usage throughout the Python codebase.
 
-from pathlib import Path
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -24,23 +28,23 @@ def configure_threads(num_threads: int = 0) -> None:
     ...
 
 def run_unified_pipeline(
-    bed_path: Path,
-    gc_ref_path: Path | None,
-    valid_regions_path: Path | None,
-    correction_out_path: Path | None,
-    correction_input_path: Path | None,
-    fsc_bins: Path | None,
-    fsc_output: Path | None,
-    wps_regions: Path | None,
-    wps_output: Path | None,
-    wps_background_regions: Path | None,
-    wps_background_output: Path | None,
+    bed_path: str,
+    gc_ref_path: str | None,
+    valid_regions_path: str | None,
+    correction_out_path: str | None,
+    correction_input_path: str | None,
+    fsc_bins: str | None,
+    fsc_output: str | None,
+    wps_regions: str | None,
+    wps_output: str | None,
+    wps_background_regions: str | None,
+    wps_background_output: str | None,
     wps_empty: bool,
-    fsd_arms: Path | None,
-    fsd_output: Path | None,
-    ocf_regions: Path | None,
-    ocf_output: Path | None,
-    target_regions_path: Path | None,
+    fsd_arms: str | None,
+    fsd_output: str | None,
+    ocf_regions: str | None,
+    ocf_output: str | None,
+    target_regions_path: str | None,
     bait_padding: int,
     output_format: str,
     compress: bool,
@@ -50,10 +54,10 @@ def run_unified_pipeline(
     ...
 
 def aggregate_by_gene(
-    bed_path: Path,
-    gene_bed_path: Path,
-    output_path: Path,
-    gc_factors_path: Path | None,
+    bed_path: str,
+    gene_bed_path: str,
+    output_path: str,
+    gc_factors_path: str | None,
     aggregate_by: str,
 ) -> int:
     """Aggregate fragment counts by gene region from FSC BED output.
@@ -124,9 +128,17 @@ class gc:
     @staticmethod
     def generate_valid_regions(
         reference_path: str,
+        exclude_regions_path: str,
         output_path: str,
+        bin_size: int = 100000,
     ) -> int:
         """Generate valid region BED from reference FASTA.
+
+        Args:
+            reference_path: Path to indexed reference FASTA.
+            exclude_regions_path: Path to exclude-regions BED (blacklist).
+            output_path: Output path for the valid-regions BED.gz.
+            bin_size: Bin size in bp (default: 100 000).
 
         Returns:
             Number of valid regions written.
@@ -166,20 +178,21 @@ class gc:
 class mfsd:
     @staticmethod
     def calculate_mfsd(
-        bam_path: Path,
-        input_file: Path,
-        output_file: Path,
+        bam_path: str,
+        input_file: str,
+        output_file: str,
         input_format: str,
         map_quality: int,
         min_frag_len: int,
         max_frag_len: int,
         output_distributions: bool,
-        reference_path: Path | None,
-        correction_factors_path: Path | None,
+        reference_path: str | None,
+        correction_factors_path: str | None,
         require_proper_pair: bool,
         duplex_mode: bool,
-        silent: bool,
-        min_baseq: int,
+        silent: bool = False,
+        *,
+        min_baseq: int = 20,
     ) -> None:
         """Compute mutant Fragment Size Distribution statistics from BAM + MAF/VCF."""
         ...
@@ -191,9 +204,9 @@ class mfsd:
 class fsd:
     @staticmethod
     def apply_pon_logratio(
-        fsd_input_path: Path,
-        pon_parquet_path: Path,
-        output_path: Path | None = None,
+        fsd_input_path: str,
+        pon_parquet_path: str,
+        output_path: str | None = None,
     ) -> int:
         """Apply PON log-ratio normalization to FSD TSV output.
 
@@ -209,9 +222,9 @@ class fsd:
 class ocf:
     @staticmethod
     def apply_pon_zscore(
-        ocf_path: Path,
-        pon_parquet_path: Path,
-        output_path: Path | None = None,
+        ocf_path: str,
+        pon_parquet_path: str,
+        output_path: str | None = None,
     ) -> int:
         """Apply PON z-score normalization to OCF TSV output.
 
@@ -227,9 +240,9 @@ class ocf:
 class wps:
     @staticmethod
     def apply_pon_zscore(
-        wps_parquet_path: Path,
-        pon_parquet_path: Path,
-        output_path: Path | None = None,
+        wps_parquet_path: str,
+        pon_parquet_path: str,
+        output_path: str | None = None,
     ) -> int:
         """Apply PON z-score normalization to WPS Parquet output.
 
@@ -250,8 +263,8 @@ class region_entropy:
         output_path: str,
         gc_correction_path: str | None,
         gc_correction_ontarget_path: str | None,
-        target_regions_path: str | None,
-        silent: bool,
+        target_regions_path: str | None = None,
+        silent: bool = False,
     ) -> tuple[int, int]:
         """Compute per-region entropy from fragment BED file.
 
@@ -262,9 +275,9 @@ class region_entropy:
 
     @staticmethod
     def apply_pon_zscore(
-        entropy_path: Path,
-        pon_parquet_path: Path,
-        output_path: Path | None = None,
+        entropy_path: str,
+        pon_parquet_path: str,
+        output_path: str,
         baseline_table: str = "entropy_baseline",
     ) -> int:
         """Apply PON z-score normalization to region entropy output.
@@ -355,15 +368,15 @@ class pon_builder:
 class uxm:
     @staticmethod
     def calculate_uxm(
-        bam_path: Path,
-        marker_path: Path,
-        output_file: Path,
+        bam_path: str,
+        marker_path: str,
+        output_file: str,
         map_quality: int,
         min_cpg: int,
         methy_threshold: float,
         unmethy_threshold: float,
         pe_type: str,
-        silent: bool,
+        silent: bool = False,
     ) -> None:
         """Compute UXM (UnMethylated/eXtreme Methylation) scores from BAM."""
         ...
