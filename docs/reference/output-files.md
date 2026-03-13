@@ -9,7 +9,7 @@ Complete reference for every file Krewlyzer produces — what it contains, what 
 | File | Feature | Resolution | ML Signal |
 |------|---------|-----------|-----------|
 | [`{s}.FSD.tsv`](#fsd-fragment-size-distribution) | FSD | Per chr arm | Arm-level fragmentation shift |
-| [`{s}.FSR.tsv`](#fsr-fragment-size-ratio) | FSR | 5 Mb window | PON-normalized short/long ratio |
+| [`{s}.FSR.tsv`](#fsr-fragment-size-ratio) | FSR | 5 Mb / 100kb | PON-normalized short/long ratio |
 | [`{s}.FSC.tsv`](#fsc-fragment-size-coverage) | FSC | 5 Mb window | Multi-channel size coverage |
 | [`{s}.FSC.gene.tsv`](#fsc-gene-level) | FSC | Per gene | Gene fragmentation composition |
 | [`{s}.FSC.regions.tsv`](#fsc-region-level) | FSC | Per exon/target | Exon fragmentation composition |
@@ -111,7 +111,7 @@ In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
   (genome-wide)         (panel genes only)
          │                    │
    FSC.tsv, FSR.tsv      FSC.ontarget.tsv
-   MDS.tsv, OCF.tsv      MDS.ontarget.tsv
+   MDS.tsv, OCF.tsv      FSR.ontarget.tsv
    FSD.tsv, ...          FSD.ontarget.tsv
 ```
 
@@ -228,16 +228,16 @@ props["long_frac"]  = props[[c for c in size_cols if int(c.split("-")[0]) >= 260
 
 **File:** `{sample}.FSR.tsv` / `{sample}.FSR.ontarget.tsv`
 
-FSR computes the **PON-normalized short-to-long ratio** per 5 Mb window. This is the primary genome-wide tumor fraction biomarker.
+FSR computes the **PON-normalized short-to-long ratio** per window (5 Mb in WGS mode, 100kb in panel mode). This is the primary genome-wide tumor fraction biomarker.
 
 #### Columns
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `region` | str | 5 Mb window, e.g. `chr1:0-5000000` |
-| `short_count` | float | GC-corrected count of short frags (65–149 bp) |
-| `long_count` | float | GC-corrected count of long frags (261–400 bp) |
-| `total_count` | float | Total GC-corrected count |
+| `region` | str | Window region, e.g. `chr1:0-5000000` (WGS) or `chr1:0-100000` (panel) |
+| `short_count` | int | Count of short frags: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Count of long frags: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragment count in window |
 | `short_norm` | float | `short_count / PON_short_mean` — PON-normalized short |
 | `long_norm` | float | `long_count / PON_long_mean` — PON-normalized long |
 | `short_long_ratio` | float | `short_norm / long_norm` — primary biomarker |

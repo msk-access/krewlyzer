@@ -186,19 +186,22 @@ Raw per-GC-bin, per-size-class fragment counts. Source: `{sample}.fsc_counts.tsv
 
 ### FSR (Fragment Size Ratios)
 
-Biomarker ratios for tumor detection. Split into `off_target` and `on_target`.
+PON-normalized short/long ratios for tumor detection. Split into `off_target` and `on_target`.
 
 ```json
 "fsr": {
   "off_target": [
     {
-      "region": "chr1:0-500000",
-      "ultra_short_ratio": 0.0074,
-      "core_short_ratio": 0.275,
-      "mono_nucl_ratio": 0.536,
-      "di_nucl_ratio": 0.141,
-      "long_ratio": 0.041,
-      "core_short_long_ratio": 6.73
+      "region": "chr1:0-5000000",
+      "short_count": 12450,
+      "long_count": 8200,
+      "total_count": 28614,
+      "short_norm": 1.23,
+      "long_norm": 0.98,
+      "short_long_ratio": 1.26,
+      "short_long_log2": 0.33,
+      "short_frac": 0.435,
+      "long_frac": 0.287
     }
   ],
   "on_target": [ ... ]
@@ -207,8 +210,16 @@ Biomarker ratios for tumor detection. Split into `off_target` and `on_target`.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `*_ratio` | float | Fraction of total fragments in that size class |
-| `core_short_long_ratio` | float | Primary cancer biomarker (higher = more tumor content) |
+| `region` | string | Genomic window (`chr:start-end`) |
+| `short_count` | int | Short fragments: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Long fragments: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragment count |
+| `short_norm` | float | `short_count / PON_short_mean` |
+| `long_norm` | float | `long_count / PON_long_mean` |
+| `short_long_ratio` | float | `short_norm / long_norm` — primary cancer biomarker |
+| `short_long_log2` | float | `log2(short_long_ratio)` — ML-ready signed metric |
+| `short_frac` | float | `short_count / total_count` |
+| `long_frac` | float | `long_count / total_count` |
 
 ---
 

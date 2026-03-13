@@ -486,18 +486,18 @@ def run_all(
             logger.warning(f"Failed to load PON model: {resolved_pon_path}")
 
     # Window settings for FSC/FSR
-    # - Custom bins or panel data: no aggregation (preserve gene-level resolution)
-    # - WGS default: aggregate 50 bins → 5Mb windows for arm-level CNV
-    if bin_input or is_panel_mode:
-        fsc_windows, fsc_continue_n = 1, 1
-        if bin_input:
-            logger.info(f"Using custom bin file: {bin_input}")
-        if is_panel_mode:
-            logger.info(
-                "Panel mode: FSC/FSR aggregation disabled (preserving gene-level resolution)"
-            )
+    # fsc_windows: bin size in bp — must match the bundled bin BED (100kb)
+    # fsc_continue_n: bins per aggregated output row
+    #   WGS: 50 bins × 100kb = 5Mb windows (arm-level CNV resolution)
+    #   Panel: 1 bin = 100kb per row (preserves per-bin/gene resolution)
+    fsc_windows = 100000  # Always matches bundled 100kb bin file
+    if is_panel_mode:
+        fsc_continue_n = 1
+        logger.info("Panel mode: FSC/FSR using continue_n=1 (per-bin resolution)")
     else:
-        fsc_windows, fsc_continue_n = 100000, 50
+        fsc_continue_n = 50
+    if bin_input:
+        logger.info(f"Using custom bin file: {bin_input}")
 
     logger.info(f"Processing sample: {sample}")
     logger.info(

@@ -33,27 +33,38 @@ def process_fsr(
 
     Takes raw bin-level counts and computes short/long ratios with proper
     normalization order:
-    1. Aggregate into windows
+    1. Aggregate bins into windows (continue_n bins per window)
     2. Normalize counts to PoN FIRST (if provided)
     3. THEN compute ratios from normalized values
 
     This order is critical for accurate cross-sample comparison.
 
+    Region labels use actual genomic coordinates from the input DataFrame
+    (matching the FSC approach), not a synthetic formula.
+
     Args:
         counts_df: DataFrame with columns [chrom, start, end, ultra_short,
                    core_short, mono_nucl, di_nucl, long, total, mean_gc]
-        output_path: Path to write FSR.tsv output
-        windows: Window size in bp (default 100000)
-        continue_n: Number of bins to aggregate (default 50)
+        output_path: Path to write FSR output
+        windows: Retained for API compatibility; coordinates are now read
+            from the DataFrame directly.
+        continue_n: Number of bins to aggregate per window (default 50).
+            Panel mode typically uses 1 for per-bin resolution.
         pon: Optional PON model for count normalization
+        output_format: Output format ('tsv' or 'parquet')
+        compress: Whether to gzip-compress TSV output
 
     Returns:
         Path to the output file
     """
     logger.info(f"Processing FSR: {len(counts_df)} bins → {output_path}")
+    logger.debug(
+        f"FSR params: windows={windows}, continue_n={continue_n}, "
+        f"pon={'yes' if pon else 'no'}, format={output_format}"
+    )
 
-    # Validate required columns
-    required_cols = ["chrom"] + CHANNELS + ["total"]
+    # Validate required columns (start/end needed for region labels)
+    required_cols = ["chrom", "start", "end"] + CHANNELS + ["total"]
     missing = [c for c in required_cols if c not in counts_df.columns]
     if missing:
         raise ValueError(f"Missing required columns: {missing}")
@@ -68,8 +79,15 @@ def process_fsr(
             continue
 
         trunc_len = n_windows * continue_n
-        window_starts = np.arange(n_windows) * continue_n * windows
-        window_ends = (np.arange(n_windows) + 1) * continue_n * windows - 1
+
+        # Use actual genomic coordinates from the input bins.
+        # Takes the start of the first bin and end of the last bin
+        # in each aggregated window (matches FSC approach at
+        # fsc_processor.py:L228-229).
+        starts = (
+            group["start"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)[:, 0]
+        )
+        ends = group["end"].to_numpy()[:trunc_len].reshape(n_windows, continue_n)[:, -1]
 
         # Aggregate all channels
         channel_sums = {}
@@ -86,7 +104,7 @@ def process_fsr(
         total_counts = total_mat.sum(axis=1).astype(float)
 
         for i in range(n_windows):
-            region = f"{chrom}:{window_starts[i]}-{window_ends[i]}"
+            region = f"{chrom}:{starts[i]}-{ends[i]}"
 
             s = short_counts[i]
             long_val = long_counts[i]
