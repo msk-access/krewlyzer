@@ -766,6 +766,7 @@ class PonModel:
     # for higher signal in target-adjacent chromatin. Other features use fragment filtering.
     gc_bias_ontarget: Optional[GcBiasModel] = None
     fsd_baseline_ontarget: Optional[FsdBaseline] = None
+    mds_baseline_ontarget: Optional[MdsBaseline] = None  # On-target k-mer MDS
     tfbs_baseline_ontarget: Optional[TfbsBaseline] = None  # Panel-specific TFBS regions
     atac_baseline_ontarget: Optional[AtacBaseline] = None  # Panel-specific ATAC regions
 
@@ -966,6 +967,32 @@ class PonModel:
                 mds_std=float(row.get("mds_std", 1)),
             )
 
+        # Parse on-target MDS baseline (panel mode)
+        # Uses on-target k-mer frequencies for separate panel-mode MDS baseline
+        mds_on_df = df_all[df_all["table"] == "mds_baseline_ontarget"]
+        mds_baseline_ontarget = None
+        if not mds_on_df.empty:
+            row_on = mds_on_df.iloc[0]
+            kmer_expected_on = {}
+            kmer_std_on = {}
+            if "kmer_expected" in mds_on_df.columns:
+                kmer_data = row_on.get("kmer_expected", {})
+                if isinstance(kmer_data, dict):
+                    kmer_expected_on = kmer_data
+            if "kmer_std" in mds_on_df.columns:
+                kmer_data = row_on.get("kmer_std", {})
+                if isinstance(kmer_data, dict):
+                    kmer_std_on = kmer_data
+            mds_baseline_ontarget = MdsBaseline(
+                kmer_expected=kmer_expected_on,
+                kmer_std=kmer_std_on,
+                mds_mean=float(row_on.get("mds_mean", 0)),
+                mds_std=float(row_on.get("mds_std", 1)),
+            )
+            logger.debug(
+                f"Loaded MDS on-target baseline: mean={mds_baseline_ontarget.mds_mean:.4f}"
+            )
+
         # Parse on-target FSD baseline (panel mode)
         fsd_on_df = df_all[df_all["table"] == "fsd_baseline_ontarget"]
         fsd_baseline_ontarget = None
@@ -1145,6 +1172,7 @@ class PonModel:
             wps_baseline_panel=wps_baseline_panel,
             ocf_baseline=ocf_baseline,
             mds_baseline=mds_baseline,
+            mds_baseline_ontarget=mds_baseline_ontarget,
             fsd_baseline_ontarget=fsd_baseline_ontarget,
             gc_bias_ontarget=gc_bias_ontarget,
             tfbs_baseline=tfbs_baseline,
@@ -1165,6 +1193,10 @@ class PonModel:
                 logger.info(f"  FSD on-target: {len(fsd_baseline_ontarget.arms)} arms")
             if gc_bias_ontarget:
                 logger.info(f"  GC on-target: {len(gc_bias_ontarget.gc_bins)} bins")
+            if mds_baseline_ontarget:
+                logger.info(
+                    f"  MDS on-target: mean={mds_baseline_ontarget.mds_mean:.4f}"
+                )
             # On-target entropy baselines
             if tfbs_baseline_ontarget:
                 logger.info(

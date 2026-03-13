@@ -683,6 +683,10 @@ def build_pon(
         all_fsd_data_ontarget = []
         all_gc_data_ontarget = []
 
+        # On-target MDS data (panel mode only)
+        # Uses on-target k-mer frequencies for panel-specific MDS baseline
+        all_mds_data_ontarget = []
+
         # On-target entropy data collectors (panel mode only)
         # These build separate baselines for on-target regions which have
         # fundamentally different depth/variance due to capture enrichment
@@ -838,6 +842,24 @@ def build_pon(
                     {"kmers": outputs.mds_counts, "mds": outputs.mds_score}
                 )
 
+            # Collect on-target MDS data (panel mode)
+            # Uses on-target k-mer frequencies for separate panel-mode baseline
+            if outputs.em_counts_ontarget and sum(outputs.em_counts_ontarget.values()) > 0:
+                from krewlyzer.core.motif_processor import compute_mds as _compute_mds_from_em
+
+                mds_on_val = _compute_mds_from_em(outputs.em_counts_ontarget)
+                total_on = sum(outputs.em_counts_ontarget.values())
+                kmer_freqs_on = {
+                    k: v / total_on
+                    for k, v in outputs.em_counts_ontarget.items()
+                }
+                all_mds_data_ontarget.append(
+                    {"kmers": kmer_freqs_on, "mds": mds_on_val}
+                )
+                logger.debug(
+                    f"  Collected on-target MDS data from {sample_name}: MDS={mds_on_val:.4f}"
+                )
+
             # Collect TFBS entropy data (off-target / WGS-like)
             if outputs.tfbs_data:
                 all_tfbs_data.append(outputs.tfbs_data)
@@ -906,6 +928,8 @@ def build_pon(
         logger.info(f"  WPS sample parquets: {len(wps_paths)}")
         logger.info(f"  OCF samples: {len(all_ocf_data)}")
         logger.info(f"  MDS samples: {len(all_mds_data)}")
+        if is_panel_mode:
+            logger.info(f"  MDS on-target samples: {len(all_mds_data_ontarget)}")
         logger.info(f"  TFBS samples: {len(all_tfbs_data)}")
         logger.info(f"  ATAC samples: {len(all_atac_data)}")
         if is_panel_mode:
@@ -953,6 +977,18 @@ def build_pon(
     if all_mds_data:
         logger.info("  Computing MDS baseline...")
         mds_baseline = _compute_mds_baseline(all_mds_data)
+
+    # Build on-target MDS baseline (panel mode only)
+    mds_baseline_ontarget = None
+    if is_panel_mode and all_mds_data_ontarget:
+        logger.info(
+            f"  Computing on-target MDS baseline ({len(all_mds_data_ontarget)} samples)..."
+        )
+        mds_baseline_ontarget = _compute_mds_baseline(all_mds_data_ontarget)
+        if mds_baseline_ontarget:
+            logger.debug(
+                f"    On-target MDS: mean={mds_baseline_ontarget.mds_mean:.4f}"
+            )
 
     # Build TFBS baseline (off-target / WGS-like)
     tfbs_baseline = None
@@ -1066,6 +1102,7 @@ def build_pon(
         wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
         mds_baseline=mds_baseline,
+        mds_baseline_ontarget=mds_baseline_ontarget,
         region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
@@ -1145,7 +1182,19 @@ def build_pon(
             lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
         )
     )
-    logger.info(_baseline_status("mds_baseline", mds_baseline, lambda b: "OK"))
+    logger.info(
+        _baseline_status(
+            "mds_baseline", mds_baseline, lambda b: "OK"
+        )
+    )
+    if is_panel_mode and mds_baseline_ontarget:
+        logger.info(
+            _baseline_status(
+                "mds_baseline_ontarget",
+                mds_baseline_ontarget,
+                lambda b: f"mean={b.mds_mean:.4f}",
+            )
+        )
     logger.info(
         _baseline_status(
             "region_mds",
@@ -1856,6 +1905,21 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             ]
         )
 
+    # Build on-target MDS baseline DataFrame (panel mode)
+    mds_ontarget_df = pd.DataFrame()
+    if model.mds_baseline_ontarget:
+        mds_ontarget_df = pd.DataFrame(
+            [
+                {
+                    "table": "mds_baseline_ontarget",
+                    "mds_mean": model.mds_baseline_ontarget.mds_mean,
+                    "mds_std": model.mds_baseline_ontarget.mds_std,
+                    "kmer_expected": model.mds_baseline_ontarget.kmer_expected,
+                    "kmer_std": model.mds_baseline_ontarget.kmer_std,
+                }
+            ]
+        )
+
     # Build on-target FSD baseline DataFrame (panel mode)
     fsd_ontarget_rows = []
     if model.fsd_baseline_ontarget:
@@ -2031,6 +2095,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(ocf_df)
     if not mds_df.empty:
         all_dfs.append(mds_df)
+    if not mds_ontarget_df.empty:
+        all_dfs.append(mds_ontarget_df)
     if not fsd_ontarget_df.empty:
         all_dfs.append(fsd_ontarget_df)
     if not gc_bias_ontarget_df.empty:
