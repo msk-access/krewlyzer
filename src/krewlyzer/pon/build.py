@@ -677,6 +677,12 @@ def build_pon(
         all_fsd_data = []
 
         all_ocf_data = []
+
+        # On-target/off-target OCF data collectors (panel mode only)
+        # OCF splits fragments by target overlap; each requires a separate baseline
+        all_ocf_data_ontarget = []
+        all_ocf_data_offtarget = []
+
         all_mds_data = []
         all_tfbs_data = []
         all_atac_data = []
@@ -821,6 +827,42 @@ def build_pon(
                 except Exception as e:
                     logger.debug(f"  Could not read OCF for {sample_name}: {e}")
 
+            # Collect on-target OCF data (panel mode)
+            if feat and feat.ocf_ontarget and feat.ocf_ontarget.exists():
+                try:
+                    ocf_on_df = pd.read_csv(feat.ocf_ontarget, sep="\t")
+                    if "tissue" in ocf_on_df.columns and "OCF" in ocf_on_df.columns:
+                        ocf_on_df = ocf_on_df.rename(
+                            columns={"tissue": "region_id", "OCF": "ocf"}
+                        )
+                    if "region_id" in ocf_on_df.columns and "ocf" in ocf_on_df.columns:
+                        all_ocf_data_ontarget.append(ocf_on_df[["region_id", "ocf"]])
+                        logger.debug(
+                            f"  Collected on-target OCF from {sample_name}"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"  Could not read on-target OCF for {sample_name}: {e}"
+                    )
+
+            # Collect off-target OCF data (panel mode)
+            if feat and feat.ocf_offtarget and feat.ocf_offtarget.exists():
+                try:
+                    ocf_off_df = pd.read_csv(feat.ocf_offtarget, sep="\t")
+                    if "tissue" in ocf_off_df.columns and "OCF" in ocf_off_df.columns:
+                        ocf_off_df = ocf_off_df.rename(
+                            columns={"tissue": "region_id", "OCF": "ocf"}
+                        )
+                    if "region_id" in ocf_off_df.columns and "ocf" in ocf_off_df.columns:
+                        all_ocf_data_offtarget.append(ocf_off_df[["region_id", "ocf"]])
+                        logger.debug(
+                            f"  Collected off-target OCF from {sample_name}"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"  Could not read off-target OCF for {sample_name}: {e}"
+                    )
+
             # Collect WPS background (Alu stacking) data
             if feat and feat.wps_background and feat.wps_background.exists():
                 wps_background_paths.append(str(feat.wps_background))
@@ -927,6 +969,9 @@ def build_pon(
         logger.info(f"  FSD samples: {len(all_fsd_data)}")
         logger.info(f"  WPS sample parquets: {len(wps_paths)}")
         logger.info(f"  OCF samples: {len(all_ocf_data)}")
+        if is_panel_mode:
+            logger.info(f"  OCF on-target samples: {len(all_ocf_data_ontarget)}")
+            logger.info(f"  OCF off-target samples: {len(all_ocf_data_offtarget)}")
         logger.info(f"  MDS samples: {len(all_mds_data)}")
         if is_panel_mode:
             logger.info(f"  MDS on-target samples: {len(all_mds_data_ontarget)}")
@@ -971,6 +1016,22 @@ def build_pon(
     if all_ocf_data:
         logger.info("  Computing OCF baseline...")
         ocf_baseline = _compute_ocf_baseline(all_ocf_data)
+
+    # Build on-target OCF baseline (panel mode only)
+    ocf_baseline_ontarget = None
+    if is_panel_mode and all_ocf_data_ontarget:
+        logger.info(
+            f"  Computing on-target OCF baseline ({len(all_ocf_data_ontarget)} samples)..."
+        )
+        ocf_baseline_ontarget = _compute_ocf_baseline(all_ocf_data_ontarget)
+
+    # Build off-target OCF baseline (panel mode only)
+    ocf_baseline_offtarget = None
+    if is_panel_mode and all_ocf_data_offtarget:
+        logger.info(
+            f"  Computing off-target OCF baseline ({len(all_ocf_data_offtarget)} samples)..."
+        )
+        ocf_baseline_offtarget = _compute_ocf_baseline(all_ocf_data_offtarget)
 
     # Build MDS baseline
     mds_baseline = None
@@ -1101,6 +1162,8 @@ def build_pon(
         wps_background_baseline=wps_background_baseline,
         wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
+        ocf_baseline_ontarget=ocf_baseline_ontarget,
+        ocf_baseline_offtarget=ocf_baseline_offtarget,
         mds_baseline=mds_baseline,
         mds_baseline_ontarget=mds_baseline_ontarget,
         region_mds=region_mds_baseline,
@@ -1890,6 +1953,18 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         ocf_df = model.ocf_baseline.regions.copy()
         ocf_df["table"] = "ocf_baseline"
 
+    # Build on-target OCF baseline DataFrame (panel mode)
+    ocf_ontarget_df = pd.DataFrame()
+    if model.ocf_baseline_ontarget and model.ocf_baseline_ontarget.regions is not None:
+        ocf_ontarget_df = model.ocf_baseline_ontarget.regions.copy()
+        ocf_ontarget_df["table"] = "ocf_baseline_ontarget"
+
+    # Build off-target OCF baseline DataFrame (panel mode)
+    ocf_offtarget_df = pd.DataFrame()
+    if model.ocf_baseline_offtarget and model.ocf_baseline_offtarget.regions is not None:
+        ocf_offtarget_df = model.ocf_baseline_offtarget.regions.copy()
+        ocf_offtarget_df["table"] = "ocf_baseline_offtarget"
+
     # Build MDS baseline DataFrame
     mds_df = pd.DataFrame()
     if model.mds_baseline:
@@ -2093,6 +2168,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(wps_panel_df)
     if not ocf_df.empty:
         all_dfs.append(ocf_df)
+    if not ocf_ontarget_df.empty:
+        all_dfs.append(ocf_ontarget_df)
+    if not ocf_offtarget_df.empty:
+        all_dfs.append(ocf_offtarget_df)
     if not mds_df.empty:
         all_dfs.append(mds_df)
     if not mds_ontarget_df.empty:

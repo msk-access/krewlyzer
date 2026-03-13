@@ -820,16 +820,30 @@ def run_features(
             shutil.move(str(rust_ocf_ontarget), str(outputs.ocf_ontarget))
             logger.info(f"✓ OCF on-target: {outputs.ocf_ontarget.name}")
 
-            # OCF on-target: format conversion only (no PON z-scores).
-            # The PON only contains a genome-wide ocf_baseline — applying
-            # genome-wide baselines to on-target subsets would be incorrect.
-            from .ocf_processor import convert_ocf_output
+            # OCF on-target: apply PON z-scores if on-target baseline exists,
+            # otherwise format conversion only
+            if (
+                pon_for_zscore
+                and hasattr(pon_for_zscore, "ocf_baseline_ontarget")
+                and pon_for_zscore.ocf_baseline_ontarget
+            ):
+                from .ocf_processor import apply_ocf_python_pon
 
-            convert_ocf_output(
-                outputs.ocf_ontarget,
-                output_format=resolved_output_format,
-                compress=resolved_compress,
-            )
+                apply_ocf_python_pon(
+                    outputs.ocf_ontarget,
+                    pon_for_zscore,
+                    baseline_attr="ocf_baseline_ontarget",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+            else:
+                from .ocf_processor import convert_ocf_output
+
+                convert_ocf_output(
+                    outputs.ocf_ontarget,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
 
         # Convert on-target sync to requested format
         if rust_sync_ontarget.exists():
@@ -854,15 +868,30 @@ def run_features(
             shutil.move(str(rust_ocf_offtarget), str(outputs.ocf_offtarget))
             logger.info(f"✓ OCF off-target: {outputs.ocf_offtarget.name}")
 
-            # OCF off-target: format conversion only (no PON z-scores).
-            # Same rationale as on-target: PON only has genome-wide baseline.
-            from .ocf_processor import convert_ocf_output as _convert_off
+            # OCF off-target: apply PON z-scores if off-target baseline exists,
+            # otherwise format conversion only
+            if (
+                pon_for_zscore
+                and hasattr(pon_for_zscore, "ocf_baseline_offtarget")
+                and pon_for_zscore.ocf_baseline_offtarget
+            ):
+                from .ocf_processor import apply_ocf_python_pon as _apply_off
 
-            _convert_off(
-                outputs.ocf_offtarget,
-                output_format=resolved_output_format,
-                compress=resolved_compress,
-            )
+                _apply_off(
+                    outputs.ocf_offtarget,
+                    pon_for_zscore,
+                    baseline_attr="ocf_baseline_offtarget",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+            else:
+                from .ocf_processor import convert_ocf_output as _convert_off
+
+                _convert_off(
+                    outputs.ocf_offtarget,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
 
         # Convert off-target sync to requested format
         if rust_sync_offtarget.exists():

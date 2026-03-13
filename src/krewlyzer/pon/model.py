@@ -750,6 +750,8 @@ class PonModel:
         None  # Panel-specific WPS (panel mode only)
     )
     ocf_baseline: Optional[OcfBaseline] = None
+    ocf_baseline_ontarget: Optional[OcfBaseline] = None  # On-target OCF (panel mode)
+    ocf_baseline_offtarget: Optional[OcfBaseline] = None  # Off-target OCF (panel mode)
     mds_baseline: Optional[MdsBaseline] = None
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
     atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
@@ -943,6 +945,30 @@ class PonModel:
                 ocf_cols.extend(["sync_mean", "sync_std"])
             regions_df = ocf_df[ocf_cols].copy()
             ocf_baseline = OcfBaseline(regions=regions_df)
+
+        # Parse on-target OCF baseline (panel mode)
+        ocf_on_df = df_all[df_all["table"] == "ocf_baseline_ontarget"]
+        ocf_baseline_ontarget = None
+        if not ocf_on_df.empty:
+            ocf_on_cols = ["region_id", "ocf_mean", "ocf_std"]
+            if "sync_mean" in ocf_on_df.columns:
+                ocf_on_cols.extend(["sync_mean", "sync_std"])
+            ocf_baseline_ontarget = OcfBaseline(regions=ocf_on_df[ocf_on_cols].copy())
+            logger.debug(
+                f"Loaded OCF on-target baseline: {len(ocf_on_df)} regions"
+            )
+
+        # Parse off-target OCF baseline (panel mode)
+        ocf_off_df = df_all[df_all["table"] == "ocf_baseline_offtarget"]
+        ocf_baseline_offtarget = None
+        if not ocf_off_df.empty:
+            ocf_off_cols = ["region_id", "ocf_mean", "ocf_std"]
+            if "sync_mean" in ocf_off_df.columns:
+                ocf_off_cols.extend(["sync_mean", "sync_std"])
+            ocf_baseline_offtarget = OcfBaseline(regions=ocf_off_df[ocf_off_cols].copy())
+            logger.debug(
+                f"Loaded OCF off-target baseline: {len(ocf_off_df)} regions"
+            )
 
         # Parse MDS baseline
         mds_df = df_all[df_all["table"] == "mds_baseline"]
@@ -1171,6 +1197,8 @@ class PonModel:
             wps_baseline=wps_baseline,
             wps_baseline_panel=wps_baseline_panel,
             ocf_baseline=ocf_baseline,
+            ocf_baseline_ontarget=ocf_baseline_ontarget,
+            ocf_baseline_offtarget=ocf_baseline_offtarget,
             mds_baseline=mds_baseline,
             mds_baseline_ontarget=mds_baseline_ontarget,
             fsd_baseline_ontarget=fsd_baseline_ontarget,

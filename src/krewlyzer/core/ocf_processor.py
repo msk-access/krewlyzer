@@ -109,3 +109,66 @@ def _write_ocf_output(tsv_path: Path, output_format: str, compress: bool) -> Non
     if output_format == "parquet" and tsv_path.exists():
         tsv_path.unlink()
         logger.debug(f"Removed intermediate TSV: {tsv_path.name}")
+
+
+def apply_ocf_python_pon(
+    ocf_path: Path,
+    pon,
+    baseline_attr: str = "ocf_baseline_ontarget",
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> int:
+    """Apply PON z-scores to OCF output using Python (for on-target/off-target).
+
+    Unlike primary OCF which uses Rust-based z-score computation, on-target and
+    off-target OCF files are small (<50 rows) so Python-side computation is
+    efficient and avoids Rust changes.
+
+    Args:
+        ocf_path: Path to on-target or off-target OCF TSV
+        pon: Loaded PonModel with on-target/off-target OCF baseline
+        baseline_attr: PON attribute name ('ocf_baseline_ontarget' or 'ocf_baseline_offtarget')
+        output_format: One of "tsv", "parquet", or "both"
+        compress: If True, gzip-compress TSV output
+
+    Returns:
+        Number of regions with z-scores matched
+    """
+    import pandas as pd
+
+    baseline = getattr(pon, baseline_attr, None) if pon else None
+    if baseline is None:
+        logger.debug(f"No {baseline_attr} in PON, skipping OCF z-scores for {ocf_path.name}")
+        convert_ocf_output(ocf_path, output_format, compress)
+        return 0
+
+    df = read_table(ocf_path)
+    if df is None:
+        logger.warning(f"OCF file not found for Python PON: {ocf_path}")
+        return 0
+
+    # Determine column names (Rust outputs "tissue"/"OCF", PON uses "region_id"/"ocf")
+    region_col = "tissue" if "tissue" in df.columns else "region_id"
+    ocf_col = "OCF" if "OCF" in df.columns else "ocf"
+
+    if region_col not in df.columns or ocf_col not in df.columns:
+        logger.warning(
+            f"OCF file missing required columns ({region_col}, {ocf_col}): {ocf_path.name}"
+        )
+        convert_ocf_output(ocf_path, output_format, compress)
+        return 0
+
+    # Compute z-scores per row using the baseline
+    z_scores = []
+    for _, row in df.iterrows():
+        z = baseline.compute_zscore(str(row[region_col]), float(row[ocf_col]))
+        z_scores.append(z if z is not None else float("nan"))
+
+    df["ocf_z"] = z_scores
+    n_matched = sum(1 for z in z_scores if not pd.isna(z))
+
+    write_table(df, ocf_path, output_format=output_format, compress=compress)
+    logger.info(
+        f"OCF Python PON ({baseline_attr}): {n_matched}/{len(df)} regions matched ({ocf_path.name})"
+    )
+    return n_matched
