@@ -361,6 +361,8 @@ def run_features(
             outputs.fsc = output_dir / f"{sample_name}.FSC.tsv"
         if enable_fsr:
             outputs.fsr = output_dir / f"{sample_name}.FSR.tsv"
+            if is_panel_mode:
+                outputs.fsr_ontarget = output_dir / f"{sample_name}.FSR.ontarget.tsv"
     else:
         out_fsc_counts = None
 
@@ -519,6 +521,26 @@ def run_features(
             compress=resolved_compress,
         )
         logger.info(f"✓ FSR: {outputs.fsr.name}")
+
+        # On-target FSR (panel mode) — mirrors FSC on-target block above.
+        # Reads fsc_counts.ontarget.tsv and produces FSR.ontarget.tsv.
+        # feature_serializer.from_outputs() already reads this file (L343-352).
+        out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
+        if is_panel_mode and out_fsc_counts_on.exists() and outputs.fsr_ontarget:
+            df_counts_on = read_table(out_fsc_counts_on)
+            assert df_counts_on is not None, (
+                "fsc_counts_on file missing after existence check"
+            )
+            process_fsr(
+                df_counts_on,
+                outputs.fsr_ontarget,
+                resolved_fsc_windows,
+                resolved_fsc_continue_n,
+                pon=pon_for_zscore,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+            logger.info(f"✓ FSR on-target: {outputs.fsr_ontarget.name}")
 
     # Convert fsc_counts to requested output format.
     # FSC and FSR have already consumed the raw TSV via read_table() above;
