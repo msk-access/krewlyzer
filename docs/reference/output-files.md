@@ -111,7 +111,7 @@ In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
   (genome-wide)         (panel genes only)
          │                    │
    FSC.tsv, FSR.tsv      FSC.ontarget.tsv
-   MDS.tsv, OCF.tsv      MDS.ontarget.tsv
+   MDS.tsv, OCF.tsv      FSR.ontarget.tsv
    FSD.tsv, ...          FSD.ontarget.tsv
 ```
 
