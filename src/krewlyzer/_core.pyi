@@ -207,6 +207,7 @@ class fsd:
         fsd_input_path: str,
         pon_parquet_path: str,
         output_path: str | None = None,
+        baseline_table: str | None = None,
     ) -> int:
         """Apply PON log-ratio normalization to FSD TSV output.
 

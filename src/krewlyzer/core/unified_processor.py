@@ -694,7 +694,7 @@ def run_features(
         )
         logger.info(f"✓ FSD: {outputs.fsd.name}")
 
-        # On-target FSD
+        # On-target FSD: use fsd_baseline_ontarget table from PON
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
         if is_panel_mode and out_fsd_on.exists():
             outputs.fsd_ontarget = out_fsd_on
@@ -703,8 +703,11 @@ def run_features(
                 pon_parquet_path=fsd_pon_path,
                 output_format=resolved_output_format,
                 compress=resolved_compress,
+                baseline_table="fsd_baseline_ontarget",
             )
-            logger.info(f"✓ FSD on-target: {outputs.fsd_ontarget.name}")
+            logger.info(
+                f"✓ FSD on-target: {outputs.fsd_ontarget.name} (using fsd_baseline_ontarget)"
+            )
 
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():

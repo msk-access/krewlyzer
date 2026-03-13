@@ -27,6 +27,7 @@ def process_fsd(
     pon_parquet_path: Optional[Path] = None,
     output_format: str = "tsv",
     compress: bool = False,
+    baseline_table: str = "fsd_baseline",
 ) -> Path:
     """
     Process raw FSD counts into ML-ready features.
@@ -45,6 +46,7 @@ def process_fsd(
         pon_parquet_path: Path to PON parquet for normalization
         output_format: One of "tsv", "parquet", or "both"
         compress: If True, gzip-compress TSV output (.tsv.gz)
+        baseline_table: PON baseline table name ("fsd_baseline" or "fsd_baseline_ontarget")
 
     Returns:
         Path to processed output file (base path; actual files may have
@@ -68,6 +70,7 @@ def process_fsd(
                 str(fsd_raw_path),
                 str(pon_parquet_path),
                 str(output_path) if output_path != fsd_raw_path else None,
+                baseline_table=baseline_table,
             )
             if arms_processed > 0:
                 logger.info(f"FSD PON: {arms_processed} arms normalized")
