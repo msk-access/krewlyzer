@@ -661,7 +661,13 @@ Single-base (A/C/G/T) composition at fragment ends.
 
 Single-number summary of end-motif randomness (Shannon entropy of 256 4-mers).
 
-#### Columns: `MDS` (float)
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `Sample` | str | Sample name |
+| `MDS` | float | Motif Diversity Score (Shannon entropy of 256 4-mers) |
+| `mds_z` | float | Z-score vs PON on-target baseline (`.ontarget` variant only, with `--pon-model`) |
 
 **Range**: Healthy plasma ~0.80–0.85; cancer (DNASE1L3 suppressed) < 0.75
 

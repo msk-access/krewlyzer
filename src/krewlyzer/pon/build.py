@@ -677,11 +677,21 @@ def build_pon(
         all_fsd_data = []
 
         all_ocf_data = []
+
+        # On-target/off-target OCF data collectors (panel mode only)
+        # OCF splits fragments by target overlap; each requires a separate baseline
+        all_ocf_data_ontarget = []
+        all_ocf_data_offtarget = []
+
         all_mds_data = []
         all_tfbs_data = []
         all_atac_data = []
         all_fsd_data_ontarget = []
         all_gc_data_ontarget = []
+
+        # On-target MDS data (panel mode only)
+        # Uses on-target k-mer frequencies for panel-specific MDS baseline
+        all_mds_data_ontarget = []
 
         # On-target entropy data collectors (panel mode only)
         # These build separate baselines for on-target regions which have
@@ -817,6 +827,41 @@ def build_pon(
                 except Exception as e:
                     logger.debug(f"  Could not read OCF for {sample_name}: {e}")
 
+            # Collect on-target OCF data (panel mode)
+            if feat and feat.ocf_ontarget and feat.ocf_ontarget.exists():
+                try:
+                    ocf_on_df = pd.read_csv(feat.ocf_ontarget, sep="\t")
+                    if "tissue" in ocf_on_df.columns and "OCF" in ocf_on_df.columns:
+                        ocf_on_df = ocf_on_df.rename(
+                            columns={"tissue": "region_id", "OCF": "ocf"}
+                        )
+                    if "region_id" in ocf_on_df.columns and "ocf" in ocf_on_df.columns:
+                        all_ocf_data_ontarget.append(ocf_on_df[["region_id", "ocf"]])
+                        logger.debug(f"  Collected on-target OCF from {sample_name}")
+                except Exception as e:
+                    logger.debug(
+                        f"  Could not read on-target OCF for {sample_name}: {e}"
+                    )
+
+            # Collect off-target OCF data (panel mode)
+            if feat and feat.ocf_offtarget and feat.ocf_offtarget.exists():
+                try:
+                    ocf_off_df = pd.read_csv(feat.ocf_offtarget, sep="\t")
+                    if "tissue" in ocf_off_df.columns and "OCF" in ocf_off_df.columns:
+                        ocf_off_df = ocf_off_df.rename(
+                            columns={"tissue": "region_id", "OCF": "ocf"}
+                        )
+                    if (
+                        "region_id" in ocf_off_df.columns
+                        and "ocf" in ocf_off_df.columns
+                    ):
+                        all_ocf_data_offtarget.append(ocf_off_df[["region_id", "ocf"]])
+                        logger.debug(f"  Collected off-target OCF from {sample_name}")
+                except Exception as e:
+                    logger.debug(
+                        f"  Could not read off-target OCF for {sample_name}: {e}"
+                    )
+
             # Collect WPS background (Alu stacking) data
             if feat and feat.wps_background and feat.wps_background.exists():
                 wps_background_paths.append(str(feat.wps_background))
@@ -836,6 +881,28 @@ def build_pon(
             if outputs.mds_counts:
                 all_mds_data.append(
                     {"kmers": outputs.mds_counts, "mds": outputs.mds_score}
+                )
+
+            # Collect on-target MDS data (panel mode)
+            # Uses on-target k-mer frequencies for separate panel-mode baseline
+            if (
+                outputs.em_counts_ontarget
+                and sum(outputs.em_counts_ontarget.values()) > 0
+            ):
+                from krewlyzer.core.motif_processor import (
+                    compute_mds as _compute_mds_from_em,
+                )
+
+                mds_on_val = _compute_mds_from_em(outputs.em_counts_ontarget)
+                total_on = sum(outputs.em_counts_ontarget.values())
+                kmer_freqs_on = {
+                    k: v / total_on for k, v in outputs.em_counts_ontarget.items()
+                }
+                all_mds_data_ontarget.append(
+                    {"kmers": kmer_freqs_on, "mds": mds_on_val}
+                )
+                logger.debug(
+                    f"  Collected on-target MDS data from {sample_name}: MDS={mds_on_val:.4f}"
                 )
 
             # Collect TFBS entropy data (off-target / WGS-like)
@@ -905,7 +972,12 @@ def build_pon(
         logger.info(f"  FSD samples: {len(all_fsd_data)}")
         logger.info(f"  WPS sample parquets: {len(wps_paths)}")
         logger.info(f"  OCF samples: {len(all_ocf_data)}")
+        if is_panel_mode:
+            logger.info(f"  OCF on-target samples: {len(all_ocf_data_ontarget)}")
+            logger.info(f"  OCF off-target samples: {len(all_ocf_data_offtarget)}")
         logger.info(f"  MDS samples: {len(all_mds_data)}")
+        if is_panel_mode:
+            logger.info(f"  MDS on-target samples: {len(all_mds_data_ontarget)}")
         logger.info(f"  TFBS samples: {len(all_tfbs_data)}")
         logger.info(f"  ATAC samples: {len(all_atac_data)}")
         if is_panel_mode:
@@ -948,11 +1020,39 @@ def build_pon(
         logger.info("  Computing OCF baseline...")
         ocf_baseline = _compute_ocf_baseline(all_ocf_data)
 
+    # Build on-target OCF baseline (panel mode only)
+    ocf_baseline_ontarget = None
+    if is_panel_mode and all_ocf_data_ontarget:
+        logger.info(
+            f"  Computing on-target OCF baseline ({len(all_ocf_data_ontarget)} samples)..."
+        )
+        ocf_baseline_ontarget = _compute_ocf_baseline(all_ocf_data_ontarget)
+
+    # Build off-target OCF baseline (panel mode only)
+    ocf_baseline_offtarget = None
+    if is_panel_mode and all_ocf_data_offtarget:
+        logger.info(
+            f"  Computing off-target OCF baseline ({len(all_ocf_data_offtarget)} samples)..."
+        )
+        ocf_baseline_offtarget = _compute_ocf_baseline(all_ocf_data_offtarget)
+
     # Build MDS baseline
     mds_baseline = None
     if all_mds_data:
         logger.info("  Computing MDS baseline...")
         mds_baseline = _compute_mds_baseline(all_mds_data)
+
+    # Build on-target MDS baseline (panel mode only)
+    mds_baseline_ontarget = None
+    if is_panel_mode and all_mds_data_ontarget:
+        logger.info(
+            f"  Computing on-target MDS baseline ({len(all_mds_data_ontarget)} samples)..."
+        )
+        mds_baseline_ontarget = _compute_mds_baseline(all_mds_data_ontarget)
+        if mds_baseline_ontarget:
+            logger.debug(
+                f"    On-target MDS: mean={mds_baseline_ontarget.mds_mean:.4f}"
+            )
 
     # Build TFBS baseline (off-target / WGS-like)
     tfbs_baseline = None
@@ -1065,7 +1165,10 @@ def build_pon(
         wps_background_baseline=wps_background_baseline,
         wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
+        ocf_baseline_ontarget=ocf_baseline_ontarget,
+        ocf_baseline_offtarget=ocf_baseline_offtarget,
         mds_baseline=mds_baseline,
+        mds_baseline_ontarget=mds_baseline_ontarget,
         region_mds=region_mds_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
@@ -1146,6 +1249,14 @@ def build_pon(
         )
     )
     logger.info(_baseline_status("mds_baseline", mds_baseline, lambda b: "OK"))
+    if is_panel_mode and mds_baseline_ontarget:
+        logger.info(
+            _baseline_status(
+                "mds_baseline_ontarget",
+                mds_baseline_ontarget,
+                lambda b: f"mean={b.mds_mean:.4f}",
+            )
+        )
     logger.info(
         _baseline_status(
             "region_mds",
@@ -1841,6 +1952,21 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         ocf_df = model.ocf_baseline.regions.copy()
         ocf_df["table"] = "ocf_baseline"
 
+    # Build on-target OCF baseline DataFrame (panel mode)
+    ocf_ontarget_df = pd.DataFrame()
+    if model.ocf_baseline_ontarget and model.ocf_baseline_ontarget.regions is not None:
+        ocf_ontarget_df = model.ocf_baseline_ontarget.regions.copy()
+        ocf_ontarget_df["table"] = "ocf_baseline_ontarget"
+
+    # Build off-target OCF baseline DataFrame (panel mode)
+    ocf_offtarget_df = pd.DataFrame()
+    if (
+        model.ocf_baseline_offtarget
+        and model.ocf_baseline_offtarget.regions is not None
+    ):
+        ocf_offtarget_df = model.ocf_baseline_offtarget.regions.copy()
+        ocf_offtarget_df["table"] = "ocf_baseline_offtarget"
+
     # Build MDS baseline DataFrame
     mds_df = pd.DataFrame()
     if model.mds_baseline:
@@ -1852,6 +1978,21 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
                     "mds_std": model.mds_baseline.mds_std,
                     "kmer_expected": model.mds_baseline.kmer_expected,
                     "kmer_std": model.mds_baseline.kmer_std,
+                }
+            ]
+        )
+
+    # Build on-target MDS baseline DataFrame (panel mode)
+    mds_ontarget_df = pd.DataFrame()
+    if model.mds_baseline_ontarget:
+        mds_ontarget_df = pd.DataFrame(
+            [
+                {
+                    "table": "mds_baseline_ontarget",
+                    "mds_mean": model.mds_baseline_ontarget.mds_mean,
+                    "mds_std": model.mds_baseline_ontarget.mds_std,
+                    "kmer_expected": model.mds_baseline_ontarget.kmer_expected,
+                    "kmer_std": model.mds_baseline_ontarget.kmer_std,
                 }
             ]
         )
@@ -2029,8 +2170,14 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(wps_panel_df)
     if not ocf_df.empty:
         all_dfs.append(ocf_df)
+    if not ocf_ontarget_df.empty:
+        all_dfs.append(ocf_ontarget_df)
+    if not ocf_offtarget_df.empty:
+        all_dfs.append(ocf_offtarget_df)
     if not mds_df.empty:
         all_dfs.append(mds_df)
+    if not mds_ontarget_df.empty:
+        all_dfs.append(mds_ontarget_df)
     if not fsd_ontarget_df.empty:
         all_dfs.append(fsd_ontarget_df)
     if not gc_bias_ontarget_df.empty:

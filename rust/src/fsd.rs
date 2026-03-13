@@ -449,16 +449,18 @@ use crate::pon_model::FsdBaseline;
 /// # Performance
 /// 10-50x faster than Python iterrows() implementation
 #[pyfunction]
-#[pyo3(signature = (fsd_input_path, pon_parquet_path, output_path=None))]
+#[pyo3(signature = (fsd_input_path, pon_parquet_path, output_path=None, baseline_table=None))]
 pub fn apply_pon_logratio(
     fsd_input_path: PathBuf,
     pon_parquet_path: PathBuf,
     output_path: Option<PathBuf>,
+    baseline_table: Option<String>,
 ) -> PyResult<usize> {
-    info!("FSD PON log-ratio: loading PON from {:?}", pon_parquet_path);
+    let table_name = baseline_table.as_deref().unwrap_or("fsd_baseline");
+    info!("FSD PON log-ratio: using baseline '{}' from {:?}", table_name, pon_parquet_path);
     
     // 1. Load FSD baseline from PON parquet
-    let fsd_baseline = load_fsd_baseline_from_parquet(&pon_parquet_path)
+    let fsd_baseline = load_fsd_baseline_from_parquet(&pon_parquet_path, table_name)
         .map_err(|e| pyo3::exceptions::PyIOError::new_err(
             format!("Failed to load FSD baseline: {}", e)
         ))?;
@@ -580,8 +582,9 @@ pub fn apply_pon_logratio(
 
 /// Load FsdBaseline from PON parquet file.
 /// 
-/// Parses the fsd_baseline table from the PON parquet.
-fn load_fsd_baseline_from_parquet(path: &Path) -> Result<FsdBaseline> {
+/// Parses the specified baseline table from the PON parquet.
+/// Typically "fsd_baseline" (genome-wide) or "fsd_baseline_ontarget" (panel on-target).
+fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBaseline> {
     use parquet::file::reader::{FileReader, SerializedFileReader};
     use parquet::record::RowAccessor;
     
@@ -597,7 +600,7 @@ fn load_fsd_baseline_from_parquet(path: &Path) -> Result<FsdBaseline> {
         if let Ok(table) = row.get_string(
             row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
         ) {
-            if table != "fsd_baseline" {
+            if table != table_name {
                 continue;
             }
         } else {

@@ -83,6 +83,10 @@ The `--pon-variant` flag:
 | **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
 | **FSC Gene Baseline** | Per-gene normalized depth mean/std | FSC Gene |
 | **FSC Region Baseline** | Per-exon normalized depth mean/std | FSC Region |
+| **FSD On-Target** | On-target size distribution (panel mode) | FSD |
+| **MDS On-Target** | On-target motif diversity baseline (panel mode) | Motif |
+| **OCF On-Target** | On-target OCF scores (panel mode) | OCF |
+| **OCF Off-Target** | Off-target OCF scores (panel mode) | OCF |
 
 ## Panel Mode
 
@@ -94,9 +98,21 @@ krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o po
 
 This enables:
 
-- **GC model trained on off-target only** - Avoids capture bias
-- **Separate on/off-target baselines** - For features that differ in captured regions
-- **Panel mode detection** - Sample processing auto-detects matching PON mode
+- **GC model trained on off-target only** — Avoids capture bias
+- **Separate on/off-target baselines** — FSD, MDS, OCF each get on-target variants
+- **Panel mode detection** — Sample processing auto-detects matching PON mode
+
+Panel mode generates these additional baselines:
+
+| On-Target Baseline | Description |
+|---|---|
+| `gc_bias_ontarget` | GC correction from on-target reads |
+| `fsd_baseline_ontarget` | Size distribution from on-target fragments |
+| `mds_baseline_ontarget` | Motif diversity from on-target fragments |
+| `ocf_baseline_ontarget` | OCF scores from on-target reads |
+| `ocf_baseline_offtarget` | OCF scores from off-target reads |
+| `tfbs_baseline_ontarget` | TFBS entropy from on-target reads |
+| `atac_baseline_ontarget` | ATAC entropy from on-target reads |
 
 ## Building a PON
 
@@ -165,11 +181,13 @@ Stores expected fragment coverage per GC content (0-100%) for each fragment type
 | `wps_long` | 120-180bp | WPS nucleosomal |
 | `wps_short` | 35-80bp | WPS TF footprint |
 
-### FSD Baseline (`fsd_baseline`)
+### FSD Baseline (`fsd_baseline` / `fsd_baseline_ontarget`)
 
 Size distribution per chromosome arm (46 arms):
 - `expected`: Mean proportion at each size bin
 - `std`: Standard deviation across PON samples
+
+In panel mode, `fsd_baseline_ontarget` provides a separate baseline for on-target fragment distributions. This is used automatically when processing `{s}.FSD.ontarget.tsv`.
 
 ### WPS Baseline (`wps_baseline`)
 
@@ -196,18 +214,22 @@ Per-region nucleosome positioning metrics.
 
 See [WPS Features](../features/core/wps.md) for output column details.
 
-### OCF Baseline (`ocf_baseline`)
+### OCF Baseline (`ocf_baseline` / `ocf_baseline_ontarget` / `ocf_baseline_offtarget`)
 
 Per-region open chromatin footprint:
 - `ocf_mean/std`: OCF score baseline
 - `sync_mean/std`: Synchronization score baseline
 
-### MDS Baseline (`mds_baseline`)
+In panel mode, separate `ocf_baseline_ontarget` and `ocf_baseline_offtarget` baselines are built, enabling z-score normalization for `{s}.OCF.ontarget.tsv` and `{s}.OCF.offtarget.tsv` independently.
+
+### MDS Baseline (`mds_baseline` / `mds_baseline_ontarget`)
 
 Motif diversity expectations:
 - `kmer_expected`: 256 4-mer frequencies from healthy samples
 - `kmer_std`: Variability per k-mer
 - `mds_mean/std`: Expected Motif Diversity Score
+
+In panel mode, `mds_baseline_ontarget` provides a separate baseline computed from on-target fragments only. The on-target MDS z-score is written to `{s}.MDS.ontarget.tsv`.
 
 ### TFBS Baseline (`tfbs_baseline`)
 
