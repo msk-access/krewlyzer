@@ -5,7 +5,7 @@
 <link href="../fsd/" rel="prev">
 <link href="../wps/" rel="next">
 <link href="../../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.3" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.5" name="generator">
 <title>FSR - Krewlyzer</title>
 <link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
 <link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
@@ -1373,8 +1373,8 @@
 <div class="admonition info">
 <p class="admonition-title">Plain English</p>
 <p><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
-A higher <code>core_short_long_ratio</code> means more tumor-derived DNA in your sample.</p>
-<p><strong>Example</strong>: <code>core_short_long_ratio = 1.5</code> suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).</p>
+A higher <code>short_long_ratio</code> means more tumor-derived DNA in your sample.</p>
+<p><strong>Example</strong>: <code>short_long_ratio = 1.5</code> suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).</p>
 </div>
 <hr>
 <h2 id="purpose">Purpose</h2>
@@ -1475,6 +1475,11 @@ Use mouse to pan and zoom
 </thead>
 <tbody>
 <tr>
+<td><strong>ultra_short</strong></td>
+<td>65-99bp</td>
+<td>TF footprints, highly tumor-specific</td>
+</tr>
+<tr>
 <td><strong>core_short</strong></td>
 <td>100-149bp</td>
 <td>Tumor DNA (sub-nucleosomal, ~145bp peak)</td>
@@ -1496,7 +1501,7 @@ Use mouse to pan and zoom
 </tr>
 </tbody>
 </table>
-<p><strong>Key Biomarker</strong>: <code>core_short_long_ratio</code> – Higher ratio = higher probability of tumor DNA</p>
+<p><strong>Key Biomarker</strong>: <code>short_long_ratio</code> — where "short" = ultra_short + core_short (65–149 bp) and "long" = di_nucl + long (221–400+ bp). Higher ratio = higher probability of tumor DNA.</p>
 <h3 id="why-short-fragments-tumor">Why Short Fragments = Tumor?</h3>
 <p>Tumor cells have abnormal chromatin structure:
 - <strong>Disrupted nucleosome positioning</strong> → non-canonical cutting
@@ -1688,20 +1693,22 @@ Use mouse to pan and zoom
 </div>
 <p><strong>Step 1 - Normalize short:</strong></p>
 <div class="arithmatex">\[
-\text{core_short_norm} = \frac{\text{core_short_count}}{\text{PoN_core_short_mean}}
+\text{short\_norm} = \frac{\text{short\_count}}{\text{PoN\_short\_mean}}
 \]</div>
+<p>where <code>short_count = ultra_short + core_short</code> (65–149 bp)</p>
 <p><strong>Step 2 - Normalize long:</strong></p>
 <div class="arithmatex">\[
-\text{long_norm} = \frac{\text{long_count}}{\text{PoN_long_mean}}
+\text{long\_norm} = \frac{\text{long\_count}}{\text{PoN\_long\_mean}}
 \]</div>
+<p>where <code>long_count = di_nucl + long</code> (221–400+ bp)</p>
 <p><strong>Step 3 - Compute ratio:</strong></p>
 <div class="arithmatex">\[
-\text{core_short_long_ratio} = \frac{\text{core_short_norm}}{\text{long_norm}}
+\text{short\_long\_ratio} = \frac{\text{short\_norm}}{\text{long\_norm}}
 \]</div>
 <p>This removes batch effects <strong>before</strong> ratio calculation, ensuring accurate cross-sample comparison.</p>
-<p><strong>Step 4 - Log2 ratio (optional):</strong></p>
+<p><strong>Step 4 - Log2 ratio (ML-ready):</strong></p>
 <div class="arithmatex">\[
-\text{short_long_log2} = \log_2(\text{core_short_long_ratio})
+\text{short\_long\_log2} = \log_2(\text{short\_long\_ratio})
 \]</div>
 <table>
 <thead>
@@ -1727,7 +1734,7 @@ Use mouse to pan and zoom
 </table>
 <hr>
 <h2 id="output-format">Output Format</h2>
-<p>Output: <code>{sample}.FSR.tsv</code></p>
+<p>Output: <code>{sample}.FSR.tsv</code> / <code>{sample}.FSR.ontarget.tsv</code> (panel mode)</p>
 <table>
 <thead>
 <tr>
@@ -1740,67 +1747,52 @@ Use mouse to pan and zoom
 <tr>
 <td><code>region</code></td>
 <td>str</td>
-<td>Genomic region (chr:start-end)</td>
+<td>Genomic region, e.g. <code>chr1:0-5000000</code> (WGS) or <code>chr1:0-100000</code> (panel)</td>
 </tr>
 <tr>
-<td><code>ultra_short_count</code></td>
+<td><code>short_count</code></td>
 <td>int</td>
-<td>Ultra-short fragments (65-99bp)</td>
-</tr>
-<tr>
-<td><code>core_short_count</code></td>
-<td>int</td>
-<td>Core short fragments (100-149bp)</td>
-</tr>
-<tr>
-<td><code>mono_nucl_count</code></td>
-<td>int</td>
-<td>Mono-nucleosomal fragments (150-259bp)</td>
-</tr>
-<tr>
-<td><code>di_nucl_count</code></td>
-<td>int</td>
-<td>Di-nucleosomal fragments (260-399bp)</td>
+<td>Short fragments: ultra_short + core_short (65–149 bp)</td>
 </tr>
 <tr>
 <td><code>long_count</code></td>
 <td>int</td>
-<td>Long fragments (400+bp)</td>
+<td>Long fragments: di_nucl + long (221–400+ bp)</td>
 </tr>
 <tr>
 <td><code>total_count</code></td>
 <td>int</td>
-<td>Total fragments</td>
+<td>Total fragments in window</td>
 </tr>
 <tr>
-<td><code>ultra_short_ratio</code></td>
+<td><code>short_norm</code></td>
 <td>float</td>
-<td>ultra_short / total</td>
+<td><code>short_count / PON_short_mean</code> — <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized short</td>
 </tr>
 <tr>
-<td><code>core_short_ratio</code></td>
+<td><code>long_norm</code></td>
 <td>float</td>
-<td>core_short / total</td>
+<td><code>long_count / PON_long_mean</code> — <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized long</td>
 </tr>
 <tr>
-<td><code>mono_nucl_ratio</code></td>
+<td><code>short_long_ratio</code></td>
 <td>float</td>
-<td>mono_nucl / total</td>
+<td><code>short_norm / long_norm</code> — <strong>primary biomarker</strong></td>
 </tr>
 <tr>
-<td><code>di_nucl_ratio</code></td>
+<td><code>short_long_log2</code></td>
 <td>float</td>
-<td>di_nucl / total</td>
+<td><code>log2(short_long_ratio)</code> — ML-ready signed metric</td>
 </tr>
 <tr>
-<td><code>long_ratio</code></td>
+<td><code>short_frac</code></td>
 <td>float</td>
-<td>long / total</td>
+<td><code>short_count / total_count</code> — raw proportion</td>
 </tr>
 <tr>
-<td><code>core_short_long_ratio</code></td>
+<td><code>long_frac</code></td>
 <td>float</td>
-<td><strong>core_short / long</strong> (primary biomarker)</td>
+<td><code>long_count / total_count</code> — raw proportion</td>
 </tr>
 </tbody>
 </table>
@@ -1822,15 +1814,19 @@ Use mouse to pan and zoom
 <tbody>
 <tr>
 <td><code>{sample}.FSR.tsv</code></td>
-<td><strong>Off-target</strong> fragment ratios</td>
+<td><strong>Off-target</strong> fragment ratios (100kb windows)</td>
 <td>Unbiased ratio (primary biomarker)</td>
+</tr>
+<tr>
+<td><code>{sample}.FSR.ontarget.tsv</code></td>
+<td><strong>On-target</strong> fragment ratios (100kb windows)</td>
+<td>Capture-region analysis</td>
 </tr>
 </tbody>
 </table>
-<div class="admonition important">
-<p class="admonition-title">Important</p>
-<p><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> is computed from <strong>off-target <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> counts</strong> and does not produce a separate <code>.ontarget.tsv</code> file.
-Off-target fragments provide unbiased short/long ratios for tumor detection.</p>
+<div class="admonition warning">
+<p class="admonition-title">Do not mix off-target and on-target in the same model</p>
+<p><code>FSR.tsv</code> and <code>FSR.ontarget.tsv</code> are not on the same scale — the on-target pool has different <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias and fragment size distributions. Always use the same variant consistently across all samples in a cohort.</p>
 </div>
 <hr>
 <h2 id="clinical-interpretation">Clinical Interpretation</h2>
@@ -1849,7 +1845,7 @@ Off-target fragments provide unbiased short/long ratios for tumor detection.</p>
 <td>Left-shifted (~145bp)</td>
 </tr>
 <tr>
-<td><code>core_short_long_ratio</code></td>
+<td><code>short_long_ratio</code></td>
 <td>~0.8-1.0 (baseline)</td>
 <td><strong>&gt;1.2 elevated</strong></td>
 </tr>
@@ -1882,9 +1878,9 @@ Off-target fragments provide unbiased short/long ratios for tumor detection.</p>
 </button>
 </nav>
 <pre class="mermaid"><code>flowchart TD
-    FSR[FSR Results] --&gt; Q1{core_short_long_ratio &gt; 1.3?}
+    FSR[FSR Results] --&gt; Q1{"short_long_ratio &gt; 1.3?"}
     Q1 --&gt;|Yes| HIGH[High tumor burden]
-    Q1 --&gt;|No| Q2{core_short_long_ratio &gt; 1.1?}
+    Q1 --&gt;|No| Q2{"short_long_ratio &gt; 1.1?"}
     Q2 --&gt;|Yes| MOD[Moderate tumor signal]
     Q2 --&gt;|No| LOW[Low/no detectable tumor]
 </code></pre>
@@ -1912,7 +1908,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 00:01:10 UTC"><span class="timeago" datetime="2026-03-01T00:01:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 00:01:10 UTC">2026-03-01</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 13, 2026 19:53:25 UTC"><span class="timeago" datetime="2026-03-13T19:53:25+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 13, 2026 19:53:25 UTC">2026-03-13</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
