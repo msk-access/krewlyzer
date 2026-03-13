@@ -954,9 +954,7 @@ class PonModel:
             if "sync_mean" in ocf_on_df.columns:
                 ocf_on_cols.extend(["sync_mean", "sync_std"])
             ocf_baseline_ontarget = OcfBaseline(regions=ocf_on_df[ocf_on_cols].copy())
-            logger.debug(
-                f"Loaded OCF on-target baseline: {len(ocf_on_df)} regions"
-            )
+            logger.debug(f"Loaded OCF on-target baseline: {len(ocf_on_df)} regions")
 
         # Parse off-target OCF baseline (panel mode)
         ocf_off_df = df_all[df_all["table"] == "ocf_baseline_offtarget"]
@@ -965,10 +963,10 @@ class PonModel:
             ocf_off_cols = ["region_id", "ocf_mean", "ocf_std"]
             if "sync_mean" in ocf_off_df.columns:
                 ocf_off_cols.extend(["sync_mean", "sync_std"])
-            ocf_baseline_offtarget = OcfBaseline(regions=ocf_off_df[ocf_off_cols].copy())
-            logger.debug(
-                f"Loaded OCF off-target baseline: {len(ocf_off_df)} regions"
+            ocf_baseline_offtarget = OcfBaseline(
+                regions=ocf_off_df[ocf_off_cols].copy()
             )
+            logger.debug(f"Loaded OCF off-target baseline: {len(ocf_off_df)} regions")
 
         # Parse MDS baseline
         mds_df = df_all[df_all["table"] == "mds_baseline"]

@@ -581,9 +581,7 @@ def write_motif_outputs(
                 bl_name = "genome-wide (fallback)"
 
             if mds_bl:
-                mds_z_on = (mds_on_val - mds_bl.mds_mean) / max(
-                    mds_bl.mds_std, 1e-10
-                )
+                mds_z_on = (mds_on_val - mds_bl.mds_mean) / max(mds_bl.mds_std, 1e-10)
                 logger.debug(
                     f"  MDS on-target z-score: {mds_z_on:.3f} (baseline: {bl_name})"
                 )

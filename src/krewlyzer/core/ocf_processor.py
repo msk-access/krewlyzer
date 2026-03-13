@@ -138,7 +138,9 @@ def apply_ocf_python_pon(
 
     baseline = getattr(pon, baseline_attr, None) if pon else None
     if baseline is None:
-        logger.debug(f"No {baseline_attr} in PON, skipping OCF z-scores for {ocf_path.name}")
+        logger.debug(
+            f"No {baseline_attr} in PON, skipping OCF z-scores for {ocf_path.name}"
+        )
         convert_ocf_output(ocf_path, output_format, compress)
         return 0
 

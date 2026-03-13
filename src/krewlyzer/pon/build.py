@@ -837,9 +837,7 @@ def build_pon(
                         )
                     if "region_id" in ocf_on_df.columns and "ocf" in ocf_on_df.columns:
                         all_ocf_data_ontarget.append(ocf_on_df[["region_id", "ocf"]])
-                        logger.debug(
-                            f"  Collected on-target OCF from {sample_name}"
-                        )
+                        logger.debug(f"  Collected on-target OCF from {sample_name}")
                 except Exception as e:
                     logger.debug(
                         f"  Could not read on-target OCF for {sample_name}: {e}"
@@ -853,11 +851,12 @@ def build_pon(
                         ocf_off_df = ocf_off_df.rename(
                             columns={"tissue": "region_id", "OCF": "ocf"}
                         )
-                    if "region_id" in ocf_off_df.columns and "ocf" in ocf_off_df.columns:
+                    if (
+                        "region_id" in ocf_off_df.columns
+                        and "ocf" in ocf_off_df.columns
+                    ):
                         all_ocf_data_offtarget.append(ocf_off_df[["region_id", "ocf"]])
-                        logger.debug(
-                            f"  Collected off-target OCF from {sample_name}"
-                        )
+                        logger.debug(f"  Collected off-target OCF from {sample_name}")
                 except Exception as e:
                     logger.debug(
                         f"  Could not read off-target OCF for {sample_name}: {e}"
@@ -886,14 +885,18 @@ def build_pon(
 
             # Collect on-target MDS data (panel mode)
             # Uses on-target k-mer frequencies for separate panel-mode baseline
-            if outputs.em_counts_ontarget and sum(outputs.em_counts_ontarget.values()) > 0:
-                from krewlyzer.core.motif_processor import compute_mds as _compute_mds_from_em
+            if (
+                outputs.em_counts_ontarget
+                and sum(outputs.em_counts_ontarget.values()) > 0
+            ):
+                from krewlyzer.core.motif_processor import (
+                    compute_mds as _compute_mds_from_em,
+                )
 
                 mds_on_val = _compute_mds_from_em(outputs.em_counts_ontarget)
                 total_on = sum(outputs.em_counts_ontarget.values())
                 kmer_freqs_on = {
-                    k: v / total_on
-                    for k, v in outputs.em_counts_ontarget.items()
+                    k: v / total_on for k, v in outputs.em_counts_ontarget.items()
                 }
                 all_mds_data_ontarget.append(
                     {"kmers": kmer_freqs_on, "mds": mds_on_val}
@@ -1245,11 +1248,7 @@ def build_pon(
             lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
         )
     )
-    logger.info(
-        _baseline_status(
-            "mds_baseline", mds_baseline, lambda b: "OK"
-        )
-    )
+    logger.info(_baseline_status("mds_baseline", mds_baseline, lambda b: "OK"))
     if is_panel_mode and mds_baseline_ontarget:
         logger.info(
             _baseline_status(
@@ -1961,7 +1960,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
 
     # Build off-target OCF baseline DataFrame (panel mode)
     ocf_offtarget_df = pd.DataFrame()
-    if model.ocf_baseline_offtarget and model.ocf_baseline_offtarget.regions is not None:
+    if (
+        model.ocf_baseline_offtarget
+        and model.ocf_baseline_offtarget.regions is not None
+    ):
         ocf_offtarget_df = model.ocf_baseline_offtarget.regions.copy()
         ocf_offtarget_df["table"] = "ocf_baseline_offtarget"
 
