@@ -152,6 +152,21 @@ def process_region_entropy(
         str(raw_path), str(pon_parquet_path), str(output_path), baseline_table
     )
 
+    # Rust apply_pon_zscore writes plain TSV; re-write through write_table()
+    # to honour --output-format and --compress flags (parquet, gzip).
+    df = load_entropy_tsv(output_path)
+    write_table(
+        df,
+        output_path,
+        output_format=output_format,
+        compress=compress,
+        float_format="%.4f",
+    )
+    # Clean up intermediate Rust TSV if format is parquet-only
+    if output_format == "parquet" and output_path.exists():
+        output_path.unlink()
+        logger.debug(f"Removed intermediate TSV: {output_path.name}")
+
     logger.info(
         f"Region entropy z-scores: {n_matched} labels matched ({output_path.name})"
     )
