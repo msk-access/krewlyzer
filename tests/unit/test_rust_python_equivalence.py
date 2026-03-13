@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def synthetic_fsd_data() -> pd.DataFrame:
     """Generate synthetic FSD TSV data for testing."""
     arms = ["1p", "1q", "2p", "2q", "3p", "3q"]
-    size_bins = [f"{s}-{s+4}" for s in range(65, 200, 5)]
+    size_bins = [f"{s}-{s + 4}" for s in range(65, 200, 5)]
 
     data = []
     for arm in arms:
@@ -142,9 +142,9 @@ class TestMathEquivalence:
             # Manual Rust-equivalent calculation
             rust_result = np.log2((sample + 1.0) / (expected + 1.0))
 
-            assert np.isclose(
-                py_result, rust_result, rtol=1e-10
-            ), f"Log-ratio mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            assert np.isclose(py_result, rust_result, rtol=1e-10), (
+                f"Log-ratio mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            )
 
     def test_zscore_equivalence(self):
         """Test z-score computation matches."""
@@ -164,9 +164,9 @@ class TestMathEquivalence:
             else:
                 rust_result = 0.0
 
-            assert np.isclose(
-                py_result, rust_result, rtol=1e-10
-            ), f"Z-score mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            assert np.isclose(py_result, rust_result, rtol=1e-10), (
+                f"Z-score mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            )
 
     def test_median_equivalence(self):
         """Test median computation matches."""
@@ -191,9 +191,9 @@ class TestMathEquivalence:
                 else:
                     rust_result = sorted_data[mid]
 
-            assert np.isclose(
-                py_result, rust_result, rtol=1e-10
-            ), f"Median mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            assert np.isclose(py_result, rust_result, rtol=1e-10), (
+                f"Median mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            )
 
     def test_std_equivalence(self):
         """Test std computation matches (sample std, N-1)."""
@@ -214,9 +214,9 @@ class TestMathEquivalence:
                 variance = sum((x - mean) ** 2 for x in data) / (len(data) - 1)
                 rust_result = np.sqrt(variance)
 
-            assert np.isclose(
-                py_result, rust_result, rtol=1e-10
-            ), f"Std mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            assert np.isclose(py_result, rust_result, rtol=1e-10), (
+                f"Std mismatch: Python={py_result}, Rust-equiv={rust_result}"
+            )
 
 
 # =============================================================================
@@ -262,9 +262,9 @@ class TestFsdEquivalence:
                     log_ratio = python_log_ratio(sample_val, expected_val)
 
                     # Verify log-ratio is finite and reasonable
-                    assert np.isfinite(
-                        log_ratio
-                    ), f"Non-finite log-ratio for {arm}/{col}"
+                    assert np.isfinite(log_ratio), (
+                        f"Non-finite log-ratio for {arm}/{col}"
+                    )
                     assert -10 < log_ratio < 10, f"Extreme log-ratio: {log_ratio}"
 
 

@@ -229,4 +229,4 @@ def test_adaptive_trim_preserves_at_least_50_percent():
         # With max_safe_trim = length/4, trimming both sides
         # means we keep at least 50% of the region
         masked_pct = (2 * effective) / length
-        assert masked_pct <= 0.5, f"Masked {masked_pct*100}% for {length}bp target"
+        assert masked_pct <= 0.5, f"Masked {masked_pct * 100}% for {length}bp target"
