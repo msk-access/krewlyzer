@@ -5,7 +5,7 @@ def create_mock_bedgz(path):
     # Create a small BED file
     data = []
     for i in range(100):
-        data.append(f"chr1\t{1000+i*10}\t{1000+i*10+160}\t0.5")
+        data.append(f"chr1\t{1000 + i * 10}\t{1000 + i * 10 + 160}\t0.5")
 
     with open(path.with_suffix(""), "w") as f:
         f.write("\n".join(data))

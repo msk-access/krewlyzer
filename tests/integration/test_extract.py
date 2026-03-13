@@ -247,9 +247,9 @@ def test_extract_target_regions_panel_mode(tmp_path):
     import pandas as pd
 
     meta_file = output_dir / "panel.metadata.tsv"
-    assert (
-        meta_file.exists()
-    ), f"Metadata TSV missing; files: {list(output_dir.iterdir())}"
+    assert meta_file.exists(), (
+        f"Metadata TSV missing; files: {list(output_dir.iterdir())}"
+    )
 
     metadata = pd.read_csv(meta_file, sep="\t").iloc[0].to_dict()
 

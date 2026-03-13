@@ -157,7 +157,7 @@ class TestParseGeneBed:
     def test_parse_filters_msi_regions(self, tmp_path):
         bed = tmp_path / "v2.bed"
         bed.write_text(
-            "1\t100\t200\tMTOR_target_01\t0\t.\n" "1\t200\t300\tmsi_Target002\t0\t.\n"
+            "1\t100\t200\tMTOR_target_01\t0\t.\n1\t200\t300\tmsi_Target002\t0\t.\n"
         )
 
         genes = parse_gene_bed(bed)

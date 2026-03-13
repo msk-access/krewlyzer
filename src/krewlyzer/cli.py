@@ -20,7 +20,7 @@ def set_log_level(
         "INFO",
         "--log-level",
         help="Logging level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
-    )
+    ),
 ):
     """Set global logging level."""
     level = getattr(logging, log_level.upper(), logging.INFO)

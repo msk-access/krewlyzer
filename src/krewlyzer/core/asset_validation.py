@@ -215,7 +215,6 @@ def _validate_columns(fields: list, schema: FileSchema, line_num: int, path: Pat
         FileSchema.REGION_BED,
         FileSchema.TARGETS_BED,
     ):
-
         # Column 2: start must be numeric
         try:
             start = int(fields[1])
@@ -327,9 +326,9 @@ def _raise_validation_error(
     """
     spec = SCHEMA_SPECS[schema]
 
-    error_msg = f"\n{'='*60}\n"
+    error_msg = f"\n{'=' * 60}\n"
     error_msg += f"VALIDATION ERROR: {spec['description']}\n"
-    error_msg += f"{'='*60}\n\n"
+    error_msg += f"{'=' * 60}\n\n"
     error_msg += f"File: {path}\n"
     if line_num > 0:
         error_msg += f"Line: {line_num}\n"
