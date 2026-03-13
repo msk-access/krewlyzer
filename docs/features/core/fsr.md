@@ -4,9 +4,9 @@
 
 !!! info "Plain English"
     FSR measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
-    A higher `core_short_long_ratio` means more tumor-derived DNA in your sample.
+    A higher `short_long_ratio` means more tumor-derived DNA in your sample.
 
-    **Example**: `core_short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
+    **Example**: `short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
 
 ---
 
@@ -63,12 +63,13 @@ The ratio of short to long fragments is a key indicator of tumor burden in cfDNA
 
 | Fragment Type | Size Range | Biological Source |
 |---------------|------------|-------------------|
+| **ultra_short** | 65-99bp | TF footprints, highly tumor-specific |
 | **core_short** | 100-149bp | Tumor DNA (sub-nucleosomal, ~145bp peak) |
 | **mono_nucl** | 150-259bp | Standard mono-nucleosomal cfDNA |
 | **di_nucl** | 260-399bp | Di-nucleosomal (healthy chromatin) |
 | **long** | 400+bp | Very long fragments |
 
-**Key Biomarker**: `core_short_long_ratio` – Higher ratio = higher probability of tumor DNA
+**Key Biomarker**: `short_long_ratio` — where "short" = ultra_short + core_short (65–149 bp) and "long" = di_nucl + long (221–400+ bp). Higher ratio = higher probability of tumor DNA.
 
 ### Why Short Fragments = Tumor?
 
@@ -139,27 +140,31 @@ FSR uses the Rust backend's 5-channel size bins:
 **Step 1 - Normalize short:**
 
 $$
-\text{core_short_norm} = \frac{\text{core_short_count}}{\text{PoN_core_short_mean}}
+\text{short\_norm} = \frac{\text{short\_count}}{\text{PoN\_short\_mean}}
 $$
+
+where `short_count = ultra_short + core_short` (65–149 bp)
 
 **Step 2 - Normalize long:**
 
 $$
-\text{long_norm} = \frac{\text{long_count}}{\text{PoN_long_mean}}
+\text{long\_norm} = \frac{\text{long\_count}}{\text{PoN\_long\_mean}}
 $$
+
+where `long_count = di_nucl + long` (221–400+ bp)
 
 **Step 3 - Compute ratio:**
 
 $$
-\text{core_short_long_ratio} = \frac{\text{core_short_norm}}{\text{long_norm}}
+\text{short\_long\_ratio} = \frac{\text{short\_norm}}{\text{long\_norm}}
 $$
 
 This removes batch effects **before** ratio calculation, ensuring accurate cross-sample comparison.
 
-**Step 4 - Log2 ratio (optional):**
+**Step 4 - Log2 ratio (ML-ready):**
 
 $$
-\text{short_long_log2} = \log_2(\text{core_short_long_ratio})
+\text{short\_long\_log2} = \log_2(\text{short\_long\_ratio})
 $$
 
 | log2 Value | Meaning |
@@ -172,23 +177,20 @@ $$
 
 ## Output Format
 
-Output: `{sample}.FSR.tsv`
+Output: `{sample}.FSR.tsv` / `{sample}.FSR.ontarget.tsv` (panel mode)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `region` | str | Genomic region (chr:start-end) |
-| `ultra_short_count` | int | Ultra-short fragments (65-99bp) |
-| `core_short_count` | int | Core short fragments (100-149bp) |
-| `mono_nucl_count` | int | Mono-nucleosomal fragments (150-259bp) |
-| `di_nucl_count` | int | Di-nucleosomal fragments (260-399bp) |
-| `long_count` | int | Long fragments (400+bp) |
-| `total_count` | int | Total fragments |
-| `ultra_short_ratio` | float | ultra_short / total |
-| `core_short_ratio` | float | core_short / total |
-| `mono_nucl_ratio` | float | mono_nucl / total |
-| `di_nucl_ratio` | float | di_nucl / total |
-| `long_ratio` | float | long / total |
-| `core_short_long_ratio` | float | **core_short / long** (primary biomarker) |
+| `region` | str | Genomic region, e.g. `chr1:0-5000000` (WGS) or `chr1:0-100000` (panel) |
+| `short_count` | int | Short fragments: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Long fragments: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragments in window |
+| `short_norm` | float | `short_count / PON_short_mean` — PON-normalized short |
+| `long_norm` | float | `long_count / PON_long_mean` — PON-normalized long |
+| `short_long_ratio` | float | `short_norm / long_norm` — **primary biomarker** |
+| `short_long_log2` | float | `log2(short_long_ratio)` — ML-ready signed metric |
+| `short_frac` | float | `short_count / total_count` — raw proportion |
+| `long_frac` | float | `long_count / total_count` — raw proportion |
 
 ---
 
@@ -205,11 +207,11 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 
 | File | Contents | Use Case |
 |------|----------|----------|
-| `{sample}.FSR.tsv` | **Off-target** fragment ratios | Unbiased ratio (primary biomarker) |
+| `{sample}.FSR.tsv` | **Off-target** fragment ratios (100kb windows) | Unbiased ratio (primary biomarker) |
+| `{sample}.FSR.ontarget.tsv` | **On-target** fragment ratios (100kb windows) | Capture-region analysis |
 
-!!! important
-    FSR is computed from **off-target FSC counts** and does not produce a separate `.ontarget.tsv` file.
-    Off-target fragments provide unbiased short/long ratios for tumor detection.
+!!! warning "Do not mix off-target and on-target in the same model"
+    `FSR.tsv` and `FSR.ontarget.tsv` are not on the same scale — the on-target pool has different GC bias and fragment size distributions. Always use the same variant consistently across all samples in a cohort.
 
 ---
 
@@ -218,16 +220,16 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | Metric | Healthy Plasma | Cancer (ctDNA) |
 |--------|----------------|----------------|
 | Modal fragment size | ~166bp | Left-shifted (~145bp) |
-| `core_short_long_ratio` | ~0.8-1.0 (baseline) | **>1.2 elevated** |
+| `short_long_ratio` | ~0.8-1.0 (baseline) | **>1.2 elevated** |
 | Interpretation | Normal profile | Elevated tumor burden |
 
 ### Decision Flowchart
 
 ```mermaid
 flowchart TD
-    FSR[FSR Results] --> Q1{core_short_long_ratio > 1.3?}
+    FSR[FSR Results] --> Q1{"short_long_ratio > 1.3?"}
     Q1 -->|Yes| HIGH[High tumor burden]
-    Q1 -->|No| Q2{core_short_long_ratio > 1.1?}
+    Q1 -->|No| Q2{"short_long_ratio > 1.1?"}
     Q2 -->|Yes| MOD[Moderate tumor signal]
     Q2 -->|No| LOW[Low/no detectable tumor]
 ```
