@@ -59,6 +59,21 @@ maturin build --release --out dist
 docker build -t msk-access/krewlyzer:dev .
 ```
 
+> [!CAUTION]
+> **`maturin develop --release` MUST be run from the project root**, not from the `rust/` subdirectory.
+> Running from `rust/` builds a `krewlyzer_core` wheel that does NOT update the `.so` at `src/krewlyzer/_core.cpython-*.so`.
+> Running from the project root builds the `krewlyzer` wheel which correctly installs the `.so`.
+>
+> Verify the installed build timestamp:
+> ```python
+> python -c "import krewlyzer._core as c; import os, datetime; print(datetime.datetime.fromtimestamp(os.path.getmtime(c.__file__)))"
+> ```
+
+> [!WARNING]
+> **Rust `Path::with_extension()` MUST NOT be used on compound extensions** like `.correction_factors.tsv` or `.ontarget.tsv`.
+> Rust treats only the text after the **last** dot as the extension, so `with_extension("")` on `sample.correction_factors.tsv` strips `.tsv` to get `sample.correction_factors`, then `with_extension("tsv")` replaces `.correction_factors` → `sample.tsv` (wrong!).
+> Use **string-based suffix stripping** instead: `output_path.strip_suffix(".tsv")`.
+
 ## Lint & Type Checking — Run Before Every Commit
 
 > **Agent rule:** Always run the full lint suite before committing. CI enforces exactly these

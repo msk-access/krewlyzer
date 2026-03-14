@@ -226,15 +226,28 @@ pub fn run_unified_pipeline(
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Factor computation failed: {}", e)))?;
             
         // 5. Write factors: dispatch by output_format (TSV / Parquet / both).
+        // Use string-based stem extraction to avoid Path::with_extension()
+        // mangling compound names like "correction_factors.ontarget".
         use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
         let fmt = validated_output_format(output_format);
-        debug!("pipeline: writing off-target GC factors → {:?} (format={})", out_factors, fmt);
+        let factors_str = out_factors.to_string_lossy();
+        let factors_stem = if factors_str.ends_with(".tsv") {
+            &factors_str[..factors_str.len() - 4]
+        } else {
+            &factors_str
+        };
+        debug!("pipeline: writing off-target GC factors → {} (format={})", factors_stem, fmt);
         if should_write_tsv(fmt) {
-            computed.write_tsv(&out_factors)
+            let tsv_out = if compress {
+                PathBuf::from(format!("{}.tsv.gz", factors_stem))
+            } else {
+                PathBuf::from(format!("{}.tsv", factors_stem))
+            };
+            computed.write_tsv(&tsv_out, compress)
                 .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (TSV): {}", e)))?;
         }
         if should_write_parquet(fmt) {
-            let pq = out_factors.with_extension("parquet");
+            let pq = PathBuf::from(format!("{}.parquet", factors_stem));
             computed.write_parquet(&pq)
                 .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (Parquet): {}", e)))?;
         }

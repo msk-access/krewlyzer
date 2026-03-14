@@ -58,9 +58,14 @@ def resolve_gc_assets(
         return result
 
     # First, check for pre-computed correction factors adjacent to input.
-    # Try Parquet first (written when --output-format=parquet|both), then TSV.
+    # Try Parquet first (written when --output-format=parquet|both), then
+    # gzipped TSV (--compress), then plain TSV.
     sample_stem = bedgz_input.stem.replace(".bed", "")
-    for ext in (".correction_factors.parquet", ".correction_factors.tsv"):
+    for ext in (
+        ".correction_factors.parquet",
+        ".correction_factors.tsv.gz",
+        ".correction_factors.tsv",
+    ):
         potential_factors = bedgz_input.parent / f"{sample_stem}{ext}"
         if potential_factors.exists():
             result.factors_input = potential_factors

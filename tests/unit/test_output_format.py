@@ -332,3 +332,128 @@ class TestFscCountsFormat:
         write_table(loaded, out, output_format="tsv", compress=True)
 
         assert (tmp_path / "sample.fsc_counts.tsv.gz").exists()
+
+
+# ── cleanup_intermediate_tsv tests ───────────────────────────────────────────
+
+
+class TestCleanupIntermediateTsv:
+    """Test that cleanup_intermediate_tsv removes .tsv only when appropriate."""
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize(
+        "fmt,compress,expect_deleted",
+        [
+            ("tsv", False, False),  # keep — .tsv IS the output
+            ("tsv", True, True),  # delete — .tsv.gz replaced it
+            ("parquet", False, True),  # delete — .parquet replaced it
+            ("both", False, False),  # keep — .tsv is one of the outputs
+            ("both", True, True),  # delete — .tsv.gz + .parquet replaced it
+        ],
+    )
+    def test_cleanup_matrix(self, tmp_path, fmt, compress, expect_deleted):
+        """Parametrized test covering all format+compress combinations."""
+        from krewlyzer.core.output_utils import cleanup_intermediate_tsv
+
+        tsv = tmp_path / "sample.FSR.tsv"
+        tsv.write_text("a\tb\n1\t2\n")
+        cleanup_intermediate_tsv(tsv, fmt, compress)
+        assert tsv.exists() != expect_deleted
+
+    @pytest.mark.unit
+    def test_nonexistent_file_is_noop(self, tmp_path):
+        """cleanup_intermediate_tsv on missing file does not raise."""
+        from krewlyzer.core.output_utils import cleanup_intermediate_tsv
+
+        tsv = tmp_path / "does_not_exist.tsv"
+        # Should not raise
+        cleanup_intermediate_tsv(tsv, "parquet", False)
+        assert not tsv.exists()
+
+
+# ── OCF compress+cleanup test ────────────────────────────────────────────────
+
+
+class TestOcfCompressCleanup:
+    """Test OCF processor cleans up intermediate TSV when compress=True."""
+
+    @pytest.mark.unit
+    def test_ocf_both_compress_cleans_tsv(self, tmp_path, ocf_df):
+        """convert_ocf_output with both+compress removes intermediate .tsv."""
+        from krewlyzer.core.ocf_processor import _write_ocf_output
+
+        tsv = tmp_path / "sample.OCF.tsv"
+        ocf_df.to_csv(tsv, sep="\t", index=False)
+
+        _write_ocf_output(tsv, output_format="both", compress=True)
+
+        assert not tsv.exists(), "Intermediate TSV should be removed with compress=True"
+        assert (tmp_path / "sample.OCF.tsv.gz").exists()
+        assert (tmp_path / "sample.OCF.parquet").exists()
+
+    @pytest.mark.unit
+    def test_ocf_tsv_compress_cleans_tsv(self, tmp_path, ocf_df):
+        """convert_ocf_output with tsv+compress removes intermediate .tsv."""
+        from krewlyzer.core.ocf_processor import _write_ocf_output
+
+        tsv = tmp_path / "sample.OCF.tsv"
+        ocf_df.to_csv(tsv, sep="\t", index=False)
+
+        _write_ocf_output(tsv, output_format="tsv", compress=True)
+
+        assert not tsv.exists(), "Intermediate TSV should be removed with compress=True"
+        assert (tmp_path / "sample.OCF.tsv.gz").exists()
+
+
+# ── Region entropy compress+cleanup test ─────────────────────────────────────
+
+
+class TestRegionEntropyCompressCleanup:
+    """Test region entropy processor cleans up when compress=True (no-PON path)."""
+
+    @pytest.mark.unit
+    def test_no_pon_both_compress_cleans_tsv(self, tmp_path, entropy_df):
+        """No-PON branch with both+compress should NOT leave intermediate .tsv."""
+        from krewlyzer.core.region_entropy_processor import process_region_entropy
+
+        raw = tmp_path / "sample.TFBS.raw.tsv"
+        out = tmp_path / "sample.TFBS.tsv"
+        entropy_df.to_csv(raw, sep="\t", index=False)
+
+        process_region_entropy(
+            raw,
+            out,
+            pon_parquet_path=None,
+            output_format="both",
+            compress=True,
+        )
+
+        # The no-PON path writes directly via write_table — raw.tsv was input, out is output
+        assert (tmp_path / "sample.TFBS.tsv.gz").exists()
+        assert (tmp_path / "sample.TFBS.parquet").exists()
+
+
+# ── fsc_counts compress+cleanup test ─────────────────────────────────────────
+
+
+class TestFscCountsCompressCleanup:
+    """Test that fsc_counts format conversion cleans up with compress."""
+
+    @pytest.mark.unit
+    def test_fsc_counts_both_compress_cleans_tsv(self, tmp_path):
+        """fsc_counts with both+compress should remove intermediate .tsv."""
+        from krewlyzer.core.output_utils import cleanup_intermediate_tsv
+
+        df = pd.DataFrame({"bin": [100, 200], "count": [50, 30]})
+        out = tmp_path / "sample.fsc_counts.tsv"
+        df.to_csv(out, sep="\t", index=False)
+
+        # Simulate format conversion (same as unified_processor.py)
+        loaded = read_table(out)
+        assert loaded is not None
+        write_table(loaded, out, output_format="both", compress=True)
+        cleanup_intermediate_tsv(out, "both", True)
+
+        assert not out.exists(), "Intermediate TSV should be removed with compress=True"
+        assert (tmp_path / "sample.fsc_counts.tsv.gz").exists()
+        assert (tmp_path / "sample.fsc_counts.parquet").exists()

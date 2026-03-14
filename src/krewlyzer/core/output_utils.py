@@ -134,6 +134,36 @@ def write_table(
         logger.info("write_table: wrote %s", parquet_path.name)
 
 
+def cleanup_intermediate_tsv(
+    tsv_path: Path,
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Remove the raw ``.tsv`` left by Rust after ``write_table()`` produced the target format.
+
+    Call this **after** ``write_table()`` whenever the source was a Rust-produced
+    ``.tsv`` that has been re-written as ``.tsv.gz`` and/or ``.parquet``.
+
+    Deletes *tsv_path* when:
+
+    - ``output_format == "parquet"`` — only ``.parquet`` was written.
+    - ``compress is True`` — ``.tsv.gz`` replaces the original ``.tsv``.
+
+    Does **not** delete when ``output_format`` is ``"tsv"`` or ``"both"`` and
+    ``compress`` is ``False``, because the ``.tsv`` *is* the desired output.
+
+    Args:
+        tsv_path: Path to the intermediate ``.tsv`` file.
+        output_format: ``"tsv"``, ``"parquet"``, or ``"both"``.
+        compress: Whether gzip compression was applied.
+    """
+    if not tsv_path.exists():
+        return
+    if output_format == "parquet" or compress:
+        tsv_path.unlink()
+        logger.debug("Cleaned up intermediate TSV: %s", tsv_path.name)
+
+
 # ---------------------------------------------------------------------------
 # Reader
 # ---------------------------------------------------------------------------

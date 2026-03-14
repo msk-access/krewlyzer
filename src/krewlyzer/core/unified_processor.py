@@ -49,7 +49,7 @@ from .utils import resolve_int as _resolve_int
 from .utils import resolve_path as _resolve_path
 from .utils import resolve_bool as _resolve_bool
 from .utils import resolve_str as _resolve_str
-from .output_utils import read_table, write_table  # Parquet-first table reader/writer
+from .output_utils import read_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("krewlyzer.core.unified_processor")
 
@@ -554,6 +554,9 @@ def run_features(
                 output_format=resolved_output_format,
                 compress=resolved_compress,
             )
+            cleanup_intermediate_tsv(
+                out_fsc_counts, resolved_output_format, resolved_compress
+            )
             logger.debug(f"fsc_counts format conversion: {out_fsc_counts.name}")
 
     # Convert on-target fsc_counts if present (panel mode)
@@ -566,6 +569,9 @@ def run_features(
                 out_fsc_counts_on,
                 output_format=resolved_output_format,
                 compress=resolved_compress,
+            )
+            cleanup_intermediate_tsv(
+                out_fsc_counts_on, resolved_output_format, resolved_compress
             )
             logger.debug(
                 f"fsc_counts.ontarget format conversion: {out_fsc_counts_on.name}"
@@ -1044,6 +1050,9 @@ def run_features(
                             output_format=resolved_output_format,
                             compress=resolved_compress,
                         )
+                        cleanup_intermediate_tsv(
+                            outputs.tfbs_sync, resolved_output_format, resolved_compress
+                        )
                     logger.debug(
                         f"TFBS sync format conversion: {outputs.tfbs_sync.name}"
                     )
@@ -1111,6 +1120,11 @@ def run_features(
                                     output_format=resolved_output_format,
                                     compress=resolved_compress,
                                 )
+                                cleanup_intermediate_tsv(
+                                    outputs.tfbs_sync_ontarget,
+                                    resolved_output_format,
+                                    resolved_compress,
+                                )
                             logger.debug(
                                 f"TFBS ontarget sync format conversion: "
                                 f"{outputs.tfbs_sync_ontarget.name}"
@@ -1171,6 +1185,9 @@ def run_features(
                             outputs.atac_sync,
                             output_format=resolved_output_format,
                             compress=resolved_compress,
+                        )
+                        cleanup_intermediate_tsv(
+                            outputs.atac_sync, resolved_output_format, resolved_compress
                         )
                     logger.debug(
                         f"ATAC sync format conversion: {outputs.atac_sync.name}"
@@ -1238,6 +1255,11 @@ def run_features(
                                     outputs.atac_sync_ontarget,
                                     output_format=resolved_output_format,
                                     compress=resolved_compress,
+                                )
+                                cleanup_intermediate_tsv(
+                                    outputs.atac_sync_ontarget,
+                                    resolved_output_format,
+                                    resolved_compress,
                                 )
                             logger.debug(
                                 f"ATAC ontarget sync format conversion: "

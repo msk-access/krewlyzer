@@ -189,7 +189,7 @@ FSD measures how many fragments of each size (65–400 bp, 5 bp bins) come from 
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `region` | str | Arm label, e.g. `chr1p`, `chr17q` |
+| `region` | str | Arm coordinate range, e.g. `chr1:10001-121535433`, `chr17:25263006-81195210` |
 | `65-69`, `70-74`, … `395-399` | float | GC-corrected fragment count in that 5 bp size bin |
 | `total` | float | Total GC-corrected fragment count for this arm |
 

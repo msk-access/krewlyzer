@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from .output_utils import read_table, write_table
+from .output_utils import read_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("core.ocf_processor")
 
@@ -105,10 +105,8 @@ def _write_ocf_output(tsv_path: Path, output_format: str, compress: bool) -> Non
 
     write_table(df, tsv_path, output_format=output_format, compress=compress)
 
-    # If output_format is "parquet" only, clean up the intermediate Rust TSV
-    if output_format == "parquet" and tsv_path.exists():
-        tsv_path.unlink()
-        logger.debug(f"Removed intermediate TSV: {tsv_path.name}")
+    # Clean up intermediate Rust TSV if write_table() produced a different format
+    cleanup_intermediate_tsv(tsv_path, output_format, compress)
 
 
 def apply_ocf_python_pon(

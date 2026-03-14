@@ -160,18 +160,30 @@ impl FsdConsumer {
         false
     }
     
-    /// Write histogram to file (raw GC-weighted counts)
-    fn write_histogram(&self, histograms: &[Vec<f64>], totals: &[f64], output_path: &Path) -> Result<()> {
-        let mut file = File::create(output_path)
+    /// Write histogram to file (raw GC-weighted counts), with optional gzip.
+    ///
+    /// When `compress` is true, wraps the writer in `flate2::GzEncoder` so
+    /// `.tsv.gz` files contain actual gzip data.
+    fn write_histogram(&self, histograms: &[Vec<f64>], totals: &[f64], output_path: &Path, compress: bool) -> Result<()> {
+        use std::io::BufWriter;
+        use flate2::{write::GzEncoder, Compression as GzCompression};
+
+        let file = File::create(output_path)
             .with_context(|| format!("Failed to create output file: {:?}", output_path))?;
-            
+
+        let mut w: Box<dyn Write> = if compress {
+            Box::new(GzEncoder::new(BufWriter::new(file), GzCompression::default()))
+        } else {
+            Box::new(BufWriter::new(file))
+        };
+
         // Header: region + 67 bin columns + total
         let mut header_cols = vec!["region".to_string()];
         for s in (65..400).step_by(5) {
             header_cols.push(format!("{}-{}", s, s + 4));
         }
         header_cols.push("total".to_string());
-        writeln!(file, "{}", header_cols.join("\t"))?;
+        writeln!(w, "{}", header_cols.join("\t"))?;
         
         for (i, region) in self.regions.iter().enumerate() {
             let region_str = format!("{}:{}-{}", region.chrom, region.start, region.end);
@@ -183,9 +195,11 @@ impl FsdConsumer {
             }
             row.push(format!("{:.4}", totals[i]));
             
-            writeln!(file, "{}", row.join("\t"))?;
+            writeln!(w, "{}", row.join("\t"))?;
         }
-        
+
+        // Flush to finalize gzip stream
+        w.flush().context("Flushing FSD histogram writer")?;
         Ok(())
     }
     
@@ -274,7 +288,7 @@ impl FsdConsumer {
 
         // Off-target
         if should_write_tsv(fmt) {
-            self.write_histogram(&self.histograms_off, &self.totals_off, &tsv_out)?;
+            self.write_histogram(&self.histograms_off, &self.totals_off, &tsv_out, compress)?;
         }
         if should_write_parquet(fmt) {
             self.write_parquet_output(&self.histograms_off, &self.totals_off, &parquet_path)?;
@@ -289,7 +303,7 @@ impl FsdConsumer {
             let on_tsv = parent.join(format!("{}.ontarget.tsv", stem));
             let on_parquet = parent.join(format!("{}.ontarget.parquet", stem));
             if should_write_tsv(fmt) {
-                self.write_histogram(&self.histograms_on, &self.totals_on, &tsv_path(&on_tsv, compress))?;
+                self.write_histogram(&self.histograms_on, &self.totals_on, &tsv_path(&on_tsv, compress), compress)?;
             }
             if should_write_parquet(fmt) {
                 self.write_parquet_output(&self.histograms_on, &self.totals_on, &on_parquet)?;

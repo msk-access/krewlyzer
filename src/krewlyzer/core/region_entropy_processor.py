@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional, Dict, Tuple
 import logging
 
-from .output_utils import read_table, write_table  # Parquet-first I/O utilities
+from .output_utils import read_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("krewlyzer.core.region_entropy_processor")
 
@@ -162,10 +162,8 @@ def process_region_entropy(
         compress=compress,
         float_format="%.4f",
     )
-    # Clean up intermediate Rust TSV if format is parquet-only
-    if output_format == "parquet" and output_path.exists():
-        output_path.unlink()
-        logger.debug(f"Removed intermediate TSV: {output_path.name}")
+    # Clean up intermediate Rust TSV if write_table() produced a different format
+    cleanup_intermediate_tsv(output_path, output_format, compress)
 
     logger.info(
         f"Region entropy z-scores: {n_matched} labels matched ({output_path.name})"

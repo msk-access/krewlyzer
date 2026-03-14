@@ -138,23 +138,23 @@ krewlyzer build-gc-reference hg19.fa -o data/gc/ -T msk_targets.bed
 
 ## Correction Factors File
 
-The `extract` command generates `{sample}.correction_factors.tsv`:
+The `extract` command generates `{sample}.correction_factors.tsv` (or `.tsv.gz` with `--compress`):
 
-```csv
-len_bin,gc_bin,factor,observed,expected,n_fragments
-0,0.30,1.23,1234,1003,50000
-0,0.31,1.21,1256,1038,51234
+```tsv
+length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
+75	80	36	53	1281884	1.0000
+75	80	39	56	1259020	1.0000
 ...
 ```
 
 | Column | Description |
 |--------|-------------|
-| `len_bin` | Fragment length bin (0-16) |
-| `gc_bin` | GC content (0.00-1.00) |
-| `factor` | Correction multiplier |
+| `length_bin_min` | Fragment length bin lower bound (bp) |
+| `length_bin_max` | Fragment length bin upper bound (bp) |
+| `gc_percent` | GC content percentage (0–100) |
 | `observed` | Raw fragment count |
-| `expected` | LOESS-predicted count |
-| `n_fragments` | Number of fragments in bin |
+| `expected` | Expected count from LOESS model |
+| `correction_factor` | `expected / observed` — multiply raw counts by this |
 
 ---
 
@@ -211,7 +211,9 @@ from krewlyzer import _core
 _core.gc.compute_and_write_gc_factors(
     bed_path="sample.bed.gz",
     gc_reference_path="gc_reference.parquet",
-    output_path="correction_factors.tsv"
+    output_path="correction_factors.tsv",
+    output_format="both",   # "tsv", "parquet", or "both"
+    compress=True,           # gzip-compress TSV output
 )
 ```
 
