@@ -18,6 +18,7 @@ use anyhow::{Result, anyhow};
 use log::{info, debug};
 use lowess::prelude::*;
 use std::io::{Write, BufRead};
+use std::path::PathBuf;
 use coitrees::IntervalTree;
 
 /// Configuration for GC bias correction
