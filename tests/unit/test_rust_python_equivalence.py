@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 def synthetic_fsd_data() -> pd.DataFrame:
     """Generate synthetic FSD TSV data for testing."""
     arms = ["1p", "1q", "2p", "2q", "3p", "3q"]
-    size_bins = [f"{s}-{s+4}" for s in range(65, 200, 5)]
+    size_bins = [f"{s}-{s + 4}" for s in range(65, 200, 5)]
 
     data = []
     for arm in arms:

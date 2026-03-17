@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.0] - 2026-03-17
+
+### Added
+- **On-target PON Z-scores**: Panel mode now computes on-target/off-target PON baselines
+  for MDS, OCF, and FSD features, providing clinically-scoped z-scores in panel assays.
+- **FSR On-target Output**: FSR now emits a separate `.FSR.ontarget.tsv` file in panel mode.
+- **FSR Real Genomic Coordinates**: Region labels now reflect true genomic window coordinates
+  instead of internal indices.
+
+### Fixed
+- **Output Format / Compress**: All output files now correctly respect `--output-format` and
+  `--compress` flags (gzip compression, path handling, GC correction factors loading).
+- **Rust GC Correction**: Added missing `PathBuf` import; fixed path handling for correction
+  factor files.
+- **Rust Clippy**: Replaced manual string strip with `strip_suffix` (`manual_strip` lint).
+
+### Documentation
+- Corrected stale FSR column names in `concepts.md` and `json-output.md`.
+- Updated FSR on-target output docs and window/panel-mode descriptions.
+- Documented `_core.pyi` stub maintenance requirements.
+
+### CI
+- **GitHub Actions Node.js 24**: Bumped `actions/checkout` v4→v5, `actions/setup-python` v5→v6,
+  `actions/cache` v4→v5 to address Node.js 20 deprecation (enforced June 2, 2026).
+
 ## [0.7.0] - 2026-03-02
 
 ### Added

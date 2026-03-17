@@ -19,7 +19,7 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
-from .core.output_utils import read_table, write_table  # Parquet-first I/O
+from .core.output_utils import read_table, write_table, cleanup_intermediate_tsv
 from . import __version__
 
 
@@ -288,6 +288,9 @@ def region_mds(
                         output_format=output_format,
                         compress=compress,
                     )
+                    # Clean up Rust-produced gene TSV (output_gene may differ from
+                    # output_gene_base due to Python with_suffix() behaviour)
+                    cleanup_intermediate_tsv(output_gene, output_format, compress)
 
                     n_with_z = sum(
                         1 for z in mds_z_scores if z is not None and not pd.isna(z)
@@ -313,6 +316,8 @@ def region_mds(
                 output_format=output_format,
                 compress=compress,
             )
+            # Clean up Rust-produced exon TSV after format conversion
+            cleanup_intermediate_tsv(output_exon, output_format, compress)
         else:
             logger.warning(
                 f"region_mds: could not read {output_exon.name} for format conversion"

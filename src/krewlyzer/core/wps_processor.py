@@ -62,7 +62,9 @@ def post_process_wps(
             pon_path = getattr(pon, "_source_path", None)
             if pon_path:
                 regions_processed = _core.wps.apply_pon_zscore(
-                    str(wps_parquet), str(pon_path), None  # Overwrite in place
+                    str(wps_parquet),
+                    str(pon_path),
+                    None,  # Overwrite in place
                 )
                 if regions_processed > 0:
                     result["pon_subtracted"] = True

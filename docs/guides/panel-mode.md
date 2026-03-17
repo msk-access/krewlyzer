@@ -155,15 +155,13 @@ In panel mode, each feature outputs two files:
 | Feature | Primary File | On-Target File |
 |---------|--------------|----------------|
 | FSC | `.FSC.tsv` | `.FSC.ontarget.tsv` |
+| FSR | `.FSR.tsv` | `.FSR.ontarget.tsv` |
 | FSD | `.FSD.tsv` | `.FSD.ontarget.tsv` |
 | OCF | `.OCF.tsv` | `.OCF.ontarget.tsv` |
 | TFBS | `.TFBS.tsv` (genome-wide) | `.TFBS.ontarget.tsv` (panel regions) |
 | ATAC | `.ATAC.tsv` (genome-wide) | `.ATAC.ontarget.tsv` (panel regions) |
 | Motif | `.EndMotif.tsv` | `.EndMotif.ontarget.tsv` |
 | MDS | `.MDS.tsv` | `.MDS.ontarget.tsv` |
-
-!!! note
-    **FSR** does not produce a separate on-target file. The FSR ratio is computed from off-target FSC counts, which represent unbiased cfDNA.
 
 !!! note
     On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)

@@ -10,7 +10,7 @@
 process KREWLYZER_EXTRACT {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.7.0"
+    container "ghcr.io/msk-access/krewlyzer:0.8.0"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -65,7 +65,7 @@ process KREWLYZER_EXTRACT {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.7.0
+        krewlyzer: 0.8.0
     END_VERSIONS
     """
 }

@@ -125,13 +125,13 @@ krewlyzer run-all -i patient_blood.bam -r hg19.fa -o results/
 
 **FSR (Fragment Size Ratio):**
 ```
-region              core_short_count  long_count  core_short_long_ratio
-chr1:0-5000000      12,450           8,200       1.52
-chr1:5000000-10M    11,890           7,950       1.50
+region              short_count  long_count  short_long_ratio
+chr1:0-5000000      12,450       8,200       1.52
+chr1:5000000-10M    11,890       7,950       1.50
 ...
 ```
 
-A `core_short_long_ratio` of **1.5** (vs. ~0.9 in healthy samples) suggests elevated tumor burden.
+A `short_long_ratio` of **1.5** (vs. ~0.9 in healthy samples) suggests elevated tumor burden.
 
 **FSD (Fragment Size Distribution):**
 The size histogram shows a left-shifted peak at ~148bp instead of the healthy ~166bp.

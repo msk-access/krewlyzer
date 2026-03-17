@@ -15,7 +15,7 @@ import pandas as pd
 import numpy as np
 import logging
 
-from .output_utils import read_table, write_table  # Parquet-first I/O utilities
+from .output_utils import read_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("core.fsc_processor")
 
@@ -420,6 +420,8 @@ def aggregate_by_gene(
                 compress=compress,
                 float_format="%.4f",
             )
+            # Clean up original Rust TSV now that write_table() produced target format
+            cleanup_intermediate_tsv(tsv_path, output_format, compress)
             logger.debug(
                 f"FSC {aggregate_by}: converted to format={output_format}, compress={compress}"
             )

@@ -568,6 +568,38 @@ def write_motif_outputs(
             f"  On-target: {total_em_on:,} EM, {total_bpm_on:,} BPM, MDS={mds_on_val:.4f}"
         )
 
+        # Compute on-target MDS z-score if PON provided
+        # Uses mds_baseline_ontarget if available, falls back to genome-wide mds_baseline
+        if pon and mds_on_val is not None:
+            mds_bl = None
+            bl_name = "none"
+            if hasattr(pon, "mds_baseline_ontarget") and pon.mds_baseline_ontarget:
+                mds_bl = pon.mds_baseline_ontarget
+                bl_name = "ontarget"
+            elif hasattr(pon, "mds_baseline") and pon.mds_baseline:
+                mds_bl = pon.mds_baseline
+                bl_name = "genome-wide (fallback)"
+
+            if mds_bl:
+                mds_z_on = (mds_on_val - mds_bl.mds_mean) / max(mds_bl.mds_std, 1e-10)
+                logger.debug(
+                    f"  MDS on-target z-score: {mds_z_on:.3f} (baseline: {bl_name})"
+                )
+
+                # Append z-score to on-target MDS file
+                try:
+                    mds_on_df = read_table(mds_on_base.with_suffix(ext))
+                    if mds_on_df is not None and "mds_z" not in mds_on_df.columns:
+                        mds_on_df["mds_z"] = mds_z_on
+                        write_table(
+                            mds_on_df,
+                            mds_on_base,
+                            output_format=output_format,
+                            compress=compress,
+                        )
+                except Exception as e:
+                    logger.debug(f"  Could not add on-target MDS z-score: {e}")
+
     # Write 1-mer End Motif (Jagged Index / C-end fraction)
     from .motif_processor import write_end_motif_1mer
 

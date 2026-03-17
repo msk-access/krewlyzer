@@ -49,7 +49,7 @@ from .utils import resolve_int as _resolve_int
 from .utils import resolve_path as _resolve_path
 from .utils import resolve_bool as _resolve_bool
 from .utils import resolve_str as _resolve_str
-from .output_utils import read_table  # Parquet-first table reader
+from .output_utils import read_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("krewlyzer.core.unified_processor")
 
@@ -361,6 +361,8 @@ def run_features(
             outputs.fsc = output_dir / f"{sample_name}.FSC.tsv"
         if enable_fsr:
             outputs.fsr = output_dir / f"{sample_name}.FSR.tsv"
+            if is_panel_mode:
+                outputs.fsr_ontarget = output_dir / f"{sample_name}.FSR.ontarget.tsv"
     else:
         out_fsc_counts = None
 
@@ -520,6 +522,61 @@ def run_features(
         )
         logger.info(f"✓ FSR: {outputs.fsr.name}")
 
+        # On-target FSR (panel mode) — mirrors FSC on-target block above.
+        # Reads fsc_counts.ontarget.tsv and produces FSR.ontarget.tsv.
+        # feature_serializer.from_outputs() already reads this file (L343-352).
+        out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
+        if is_panel_mode and out_fsc_counts_on.exists() and outputs.fsr_ontarget:
+            df_counts_on = read_table(out_fsc_counts_on)
+            assert (
+                df_counts_on is not None
+            ), "fsc_counts_on file missing after existence check"
+            process_fsr(
+                df_counts_on,
+                outputs.fsr_ontarget,
+                resolved_fsc_windows,
+                resolved_fsc_continue_n,
+                pon=pon_for_zscore,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+            logger.info(f"✓ FSR on-target: {outputs.fsr_ontarget.name}")
+
+    # Convert fsc_counts to requested output format.
+    # FSC and FSR have already consumed the raw TSV via read_table() above;
+    # now re-write to produce .parquet / .tsv.gz as requested.
+    if out_fsc_counts and out_fsc_counts.exists():
+        df_counts_fmt = read_table(out_fsc_counts)
+        if df_counts_fmt is not None:
+            write_table(
+                df_counts_fmt,
+                out_fsc_counts,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+            cleanup_intermediate_tsv(
+                out_fsc_counts, resolved_output_format, resolved_compress
+            )
+            logger.debug(f"fsc_counts format conversion: {out_fsc_counts.name}")
+
+    # Convert on-target fsc_counts if present (panel mode)
+    out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
+    if out_fsc_counts_on.exists():
+        df_counts_on_fmt = read_table(out_fsc_counts_on)
+        if df_counts_on_fmt is not None:
+            write_table(
+                df_counts_on_fmt,
+                out_fsc_counts_on,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+            cleanup_intermediate_tsv(
+                out_fsc_counts_on, resolved_output_format, resolved_compress
+            )
+            logger.debug(
+                f"fsc_counts.ontarget format conversion: {out_fsc_counts_on.name}"
+            )
+
     # Gene-centric FSC (if assay provided)
     # Uses on-target GC correction factors for accurate copy number analysis
     if resolved_assay and enable_fsc:
@@ -657,15 +714,28 @@ def run_features(
             logger.info(
                 "  FSD: --skip-pon active, outputting raw values (no log-ratios)"
             )
-        process_fsd(outputs.fsd, pon_parquet_path=fsd_pon_path)
+        process_fsd(
+            outputs.fsd,
+            pon_parquet_path=fsd_pon_path,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
         logger.info(f"✓ FSD: {outputs.fsd.name}")
 
-        # On-target FSD
+        # On-target FSD: use fsd_baseline_ontarget table from PON
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
         if is_panel_mode and out_fsd_on.exists():
             outputs.fsd_ontarget = out_fsd_on
-            process_fsd(out_fsd_on, pon_parquet_path=fsd_pon_path)
-            logger.info(f"✓ FSD on-target: {outputs.fsd_ontarget.name}")
+            process_fsd(
+                out_fsd_on,
+                pon_parquet_path=fsd_pon_path,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+                baseline_table="fsd_baseline_ontarget",
+            )
+            logger.info(
+                f"✓ FSD on-target: {outputs.fsd_ontarget.name} (using fsd_baseline_ontarget)"
+            )
 
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
@@ -737,15 +807,38 @@ def run_features(
             if pon_parquet and not skip_pon_zscore:
                 from .ocf_processor import process_ocf_with_pon
 
-                process_ocf_with_pon(outputs.ocf, pon_parquet)
-                logger.info(f"  OCF PON z-scores applied ({outputs.ocf.name})")
-            elif skip_pon_zscore and pon_parquet:
-                logger.info(
-                    "  OCF: --skip-pon active, outputting raw values (no z-scores)"
+                process_ocf_with_pon(
+                    outputs.ocf,
+                    pon_parquet,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
+                logger.info(f"  OCF PON z-scores applied ({outputs.ocf.name})")
+            else:
+                # No PON or --skip-pon: still convert output format
+                from .ocf_processor import convert_ocf_output
 
+                convert_ocf_output(
+                    outputs.ocf,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+                if skip_pon_zscore and pon_parquet:
+                    logger.info(
+                        "  OCF: --skip-pon active, outputting raw values (no z-scores)"
+                    )
+
+        # Convert OCF sync file to requested output format
         if rust_sync.exists():
+            assert outputs.ocf_sync is not None, "ocf_sync path must be set"
             shutil.move(str(rust_sync), str(outputs.ocf_sync))
+            from .ocf_processor import convert_ocf_output as _convert_sync
+
+            _convert_sync(
+                outputs.ocf_sync,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
 
         # On-target output (panel mode only)
         rust_ocf_ontarget = ocf_tmp_dir / "all.ocf.ontarget.tsv"
@@ -755,11 +848,45 @@ def run_features(
             outputs.ocf_ontarget = output_dir / f"{sample_name}.OCF.ontarget.tsv"
             shutil.move(str(rust_ocf_ontarget), str(outputs.ocf_ontarget))
             logger.info(f"✓ OCF on-target: {outputs.ocf_ontarget.name}")
+
+            # OCF on-target: apply PON z-scores if on-target baseline exists,
+            # otherwise format conversion only
+            if (
+                pon_for_zscore
+                and hasattr(pon_for_zscore, "ocf_baseline_ontarget")
+                and pon_for_zscore.ocf_baseline_ontarget
+            ):
+                from .ocf_processor import apply_ocf_python_pon
+
+                apply_ocf_python_pon(
+                    outputs.ocf_ontarget,
+                    pon_for_zscore,
+                    baseline_attr="ocf_baseline_ontarget",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+            else:
+                from .ocf_processor import convert_ocf_output
+
+                convert_ocf_output(
+                    outputs.ocf_ontarget,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+
+        # Convert on-target sync to requested format
         if rust_sync_ontarget.exists():
             outputs.ocf_ontarget_sync = (
                 output_dir / f"{sample_name}.OCF.ontarget.sync.tsv"
             )
             shutil.move(str(rust_sync_ontarget), str(outputs.ocf_ontarget_sync))
+            from .ocf_processor import convert_ocf_output as _convert_sync_on
+
+            _convert_sync_on(
+                outputs.ocf_ontarget_sync,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
 
         # Off-target output (panel mode only)
         rust_ocf_offtarget = ocf_tmp_dir / "all.ocf.offtarget.tsv"
@@ -769,11 +896,45 @@ def run_features(
             outputs.ocf_offtarget = output_dir / f"{sample_name}.OCF.offtarget.tsv"
             shutil.move(str(rust_ocf_offtarget), str(outputs.ocf_offtarget))
             logger.info(f"✓ OCF off-target: {outputs.ocf_offtarget.name}")
+
+            # OCF off-target: apply PON z-scores if off-target baseline exists,
+            # otherwise format conversion only
+            if (
+                pon_for_zscore
+                and hasattr(pon_for_zscore, "ocf_baseline_offtarget")
+                and pon_for_zscore.ocf_baseline_offtarget
+            ):
+                from .ocf_processor import apply_ocf_python_pon as _apply_off
+
+                _apply_off(
+                    outputs.ocf_offtarget,
+                    pon_for_zscore,
+                    baseline_attr="ocf_baseline_offtarget",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+            else:
+                from .ocf_processor import convert_ocf_output as _convert_off
+
+                _convert_off(
+                    outputs.ocf_offtarget,
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
+                )
+
+        # Convert off-target sync to requested format
         if rust_sync_offtarget.exists():
             outputs.ocf_sync_offtarget = (
                 output_dir / f"{sample_name}.OCF.offtarget.sync.tsv"
             )
             shutil.move(str(rust_sync_offtarget), str(outputs.ocf_sync_offtarget))
+            from .ocf_processor import convert_ocf_output as _convert_sync_off
+
+            _convert_sync_off(
+                outputs.ocf_sync_offtarget,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
 
         # Cleanup temp dir
         try:
@@ -874,11 +1035,25 @@ def run_features(
                 out_tfbs_raw.unlink(missing_ok=True)
                 logger.info(f"✓ TFBS entropy: {outputs.tfbs.name} ({n_all} TFs)")
 
-                # Keep sync file as-is (no z-score normalization needed)
+                # Convert sync file to requested output format
                 out_tfbs_sync_raw = output_dir / f"{sample_name}.TFBS.sync.raw.tsv"
                 if out_tfbs_sync_raw.exists():
                     outputs.tfbs_sync = output_dir / f"{sample_name}.TFBS.sync.tsv"
                     out_tfbs_sync_raw.rename(outputs.tfbs_sync)
+                    _df_sync = read_table(outputs.tfbs_sync)
+                    if _df_sync is not None:
+                        write_table(
+                            _df_sync,
+                            outputs.tfbs_sync,
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
+                        )
+                        cleanup_intermediate_tsv(
+                            outputs.tfbs_sync, resolved_output_format, resolved_compress
+                        )
+                    logger.debug(
+                        f"TFBS sync format conversion: {outputs.tfbs_sync.name}"
+                    )
 
                 # =========================================================
                 # PANEL-SPECIFIC TFBS (uses pre-intersected regions)
@@ -926,7 +1101,7 @@ def run_features(
                             f"✓ TFBS on-target: {outputs.tfbs_ontarget.name} ({n_ont} TFs)"
                         )
 
-                        # Keep sync file for panel-specific
+                        # Convert sync file for panel-specific to requested format
                         out_tfbs_ont_sync_raw = (
                             output_dir / f"{sample_name}.TFBS.ontarget.sync.raw.tsv"
                         )
@@ -935,6 +1110,23 @@ def run_features(
                                 output_dir / f"{sample_name}.TFBS.ontarget.sync.tsv"
                             )
                             out_tfbs_ont_sync_raw.rename(outputs.tfbs_sync_ontarget)
+                            _df_sync = read_table(outputs.tfbs_sync_ontarget)
+                            if _df_sync is not None:
+                                write_table(
+                                    _df_sync,
+                                    outputs.tfbs_sync_ontarget,
+                                    output_format=resolved_output_format,
+                                    compress=resolved_compress,
+                                )
+                                cleanup_intermediate_tsv(
+                                    outputs.tfbs_sync_ontarget,
+                                    resolved_output_format,
+                                    resolved_compress,
+                                )
+                            logger.debug(
+                                f"TFBS ontarget sync format conversion: "
+                                f"{outputs.tfbs_sync_ontarget.name}"
+                            )
 
             except Exception as e:
                 logger.warning(f"TFBS entropy failed: {e}")
@@ -979,11 +1171,25 @@ def run_features(
                     f"✓ ATAC entropy: {outputs.atac.name} ({n_all} cancer types)"
                 )
 
-                # Keep sync file as-is (no z-score normalization needed)
+                # Convert sync file to requested output format
                 out_atac_sync_raw = output_dir / f"{sample_name}.ATAC.sync.raw.tsv"
                 if out_atac_sync_raw.exists():
                     outputs.atac_sync = output_dir / f"{sample_name}.ATAC.sync.tsv"
                     out_atac_sync_raw.rename(outputs.atac_sync)
+                    _df_sync = read_table(outputs.atac_sync)
+                    if _df_sync is not None:
+                        write_table(
+                            _df_sync,
+                            outputs.atac_sync,
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
+                        )
+                        cleanup_intermediate_tsv(
+                            outputs.atac_sync, resolved_output_format, resolved_compress
+                        )
+                    logger.debug(
+                        f"ATAC sync format conversion: {outputs.atac_sync.name}"
+                    )
 
                 # =========================================================
                 # PANEL-SPECIFIC ATAC (uses pre-intersected regions)
@@ -1031,7 +1237,7 @@ def run_features(
                             f"✓ ATAC on-target: {outputs.atac_ontarget.name} ({n_ont} cancer types)"
                         )
 
-                        # Keep sync file for panel-specific
+                        # Convert sync file for panel-specific to requested format
                         out_atac_ont_sync_raw = (
                             output_dir / f"{sample_name}.ATAC.ontarget.sync.raw.tsv"
                         )
@@ -1040,6 +1246,23 @@ def run_features(
                                 output_dir / f"{sample_name}.ATAC.ontarget.sync.tsv"
                             )
                             out_atac_ont_sync_raw.rename(outputs.atac_sync_ontarget)
+                            _df_sync = read_table(outputs.atac_sync_ontarget)
+                            if _df_sync is not None:
+                                write_table(
+                                    _df_sync,
+                                    outputs.atac_sync_ontarget,
+                                    output_format=resolved_output_format,
+                                    compress=resolved_compress,
+                                )
+                                cleanup_intermediate_tsv(
+                                    outputs.atac_sync_ontarget,
+                                    resolved_output_format,
+                                    resolved_compress,
+                                )
+                            logger.debug(
+                                f"ATAC ontarget sync format conversion: "
+                                f"{outputs.atac_sync_ontarget.name}"
+                            )
 
             except Exception as e:
                 logger.warning(f"ATAC entropy failed: {e}")

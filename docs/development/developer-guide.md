@@ -129,6 +129,10 @@ pub fn run_unified_pipeline(
     // Target regions for on/off-target split (panel mode)
     target_regions_path: Option<PathBuf>,
     bait_padding: u64,
+    // Output format: "tsv", "parquet", or "both"
+    output_format: &str,
+    // Gzip-compress TSV outputs
+    compress: bool,
     silent: bool,
 ) -> PyResult<()>
 ```
@@ -196,7 +200,7 @@ assets.get_pon("xs2")          # Bundled PON
 Collects all features into unified JSON:
 
 ```python
-serializer = FeatureSerializer(sample_id, version="0.5.3")
+serializer = FeatureSerializer(sample_id, version="X.Y.Z")
 serializer.add_fsc(fsc_df)
 serializer.add_fsc_e1(fsc_e1_df)
 serializer.add_wps(wps_df)
@@ -211,7 +215,7 @@ serializer.save(output_dir)
 serializer = FeatureSerializer.from_outputs(
     sample_id=sample_id,
     output_dir=output_dir,
-    version="0.5.3"
+    version="X.Y.Z"
 )
 ```
 
@@ -251,14 +255,21 @@ pytest tests/ --cov=krewlyzer --cov-report=html
 
 ### Building
 
-```bash
-cd rust
+!!! warning "Always build from **project root**, not `rust/`"
+    Running `maturin develop` from `rust/` builds a `krewlyzer_core` wheel that
+    does NOT update the `.so` at `src/krewlyzer/_core.cpython-*.so`.
+    Running from the project root builds the `krewlyzer` wheel which correctly
+    installs the extension module.
 
+```bash
 # Debug build (fast compile, slow run)
 maturin develop
 
 # Release build (slow compile, fast run)
 maturin develop --release
+
+# Verify the installed build timestamp
+python -c "import krewlyzer._core as c; import os, datetime; print(datetime.datetime.fromtimestamp(os.path.getmtime(c.__file__)))"
 ```
 
 ### Testing Rust

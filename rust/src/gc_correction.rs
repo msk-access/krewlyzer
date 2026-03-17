@@ -18,6 +18,7 @@ use anyhow::{Result, anyhow};
 use log::{info, debug};
 use lowess::prelude::*;
 use std::io::{Write, BufRead};
+use std::path::PathBuf;
 use coitrees::IntervalTree;
 
 /// Configuration for GC bias correction
@@ -176,21 +177,27 @@ impl CorrectionFactors {
     // Writers
     // -----------------------------------------------------------------------
 
-    /// Write correction factors to a **tab-separated** TSV file.
+    /// Write correction factors to a **tab-separated** TSV file, with optional gzip.
     ///
     /// Columns: `length_bin_min`, `length_bin_max`, `gc_percent`, `observed`,
     /// `expected`, `correction_factor`.
     ///
-    /// This fixes the historical bug where the file had a `.tsv` extension but
-    /// used comma separators.  All new code should call this method; the old
-    /// `write_csv` name is gone.
-    pub fn write_tsv<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+    /// When `compress` is true, wraps the writer in `flate2::GzEncoder` so
+    /// the file is real gzip (not plain text with a `.gz` extension).
+    pub fn write_tsv<P: AsRef<Path>>(&self, path: P, compress: bool) -> Result<()> {
         use std::io::BufWriter;
+        use flate2::{write::GzEncoder, Compression as GzCompression};
         let path = path.as_ref();
-        debug!("gc_correction: writing TSV → {:?}", path);
+        debug!("gc_correction: writing TSV (compress={}) → {:?}", compress, path);
         let file = File::create(path)
             .with_context(|| format!("Failed to create correction factors TSV: {:?}", path))?;
-        let mut w = BufWriter::new(file);
+
+        let mut w: Box<dyn Write> = if compress {
+            Box::new(GzEncoder::new(BufWriter::new(file), GzCompression::default()))
+        } else {
+            Box::new(BufWriter::new(file))
+        };
+
         writeln!(w, "length_bin_min\tlength_bin_max\tgc_percent\tobserved\texpected\tcorrection_factor")?;
         let mut keys: Vec<_> = self.data.keys().collect();
         keys.sort();
@@ -201,6 +208,8 @@ impl CorrectionFactors {
             writeln!(w, "{}\t{}\t{}\t{}\t{}\t{:.4}",
                 min, max, gc, stats.observed, stats.expected, stats.factor)?;
         }
+        // Flush to finalize gzip stream before dropping
+        w.flush().context("Flushing correction factors TSV writer")?;
         info!("gc_correction: wrote {} factor rows → {:?}", keys.len(), path);
         Ok(())
     }
@@ -261,13 +270,25 @@ impl CorrectionFactors {
     /// This is the updated loader matching [`write_tsv`].  It parses tab-separated
     /// fields and handles both the new TSV format and any legacy comma-separated
     /// files by auto-detecting the delimiter on the first data line.
+    ///
+    /// When `path` ends with `.gz`, the file is transparently decompressed with
+    /// `flate2::GzDecoder` before parsing.
     pub fn load_tsv<P: AsRef<Path>>(path: P) -> Result<Self> {
         use std::io::{BufRead, BufReader};
+        use flate2::read::GzDecoder;
         let path = path.as_ref();
         debug!("gc_correction: loading TSV → {:?}", path);
         let file = File::open(path)
             .with_context(|| format!("Failed to open correction factors TSV: {:?}", path))?;
-        let mut reader = BufReader::new(file);
+
+        // Transparently decompress gzip when the path ends with .gz
+        let boxed_reader: Box<dyn std::io::Read> = if path.extension().is_some_and(|e| e == "gz") {
+            Box::new(GzDecoder::new(file))
+        } else {
+            Box::new(file)
+        };
+        let mut reader = BufReader::new(boxed_reader);
+
         let mut data = HashMap::new();
         // Detect delimiter from header line
         let mut header = String::new();
@@ -330,22 +351,31 @@ impl CorrectionFactors {
     ///
     /// Priority:
     /// 1. `{path}.parquet` (replace extension)
-    /// 2. `{path}` as-is (TSV or legacy CSV — delimiter auto-detected)
+    /// 2. `{path}.gz` (gzip-compressed TSV, when --compress was used)
+    /// 3. `{path}` as-is (TSV or legacy CSV — delimiter auto-detected)
     ///
-    /// Returns an error only if both candidates fail to load.
+    /// Returns an error only if all candidates fail to load.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let p = path.as_ref();
         let parquet_candidate = p.with_extension("parquet");
         if parquet_candidate.exists() {
             debug!("gc_correction::load: found Parquet candidate {:?}", parquet_candidate);
-            Self::load_parquet(&parquet_candidate)
-        } else if p.exists() {
-            debug!("gc_correction::load: falling back to TSV {:?}", p);
-            Self::load_tsv(p)
-        } else {
-            Err(anyhow!("Correction factors file not found: {:?} (tried {:?} and {:?})",
-                p, parquet_candidate, p))
+            return Self::load_parquet(&parquet_candidate);
         }
+        // Try .tsv.gz (produced by --compress)
+        let p_str = p.to_string_lossy();
+        let gz_candidate = PathBuf::from(format!("{}.gz", p_str));
+        if gz_candidate.exists() {
+            debug!("gc_correction::load: found .tsv.gz candidate {:?}", gz_candidate);
+            return Self::load_tsv(&gz_candidate);
+        }
+        // Try the path as given (handles both .tsv and .tsv.gz passed directly)
+        if p.exists() {
+            debug!("gc_correction::load: loading {:?}", p);
+            return Self::load_tsv(p);
+        }
+        Err(anyhow!("Correction factors file not found: {:?} (tried {:?}, {:?}, and {:?})",
+            p, parquet_candidate, gz_candidate, p))
     }
 }
 
@@ -567,7 +597,8 @@ pub fn compute_and_write_gc_factors(
     output_format: &str,
     compress: bool,
 ) -> PyResult<u64> {
-    use crate::output_utils::{should_write_tsv, should_write_parquet, tsv_path, validated_output_format};
+    use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
+    use std::path::PathBuf;
     let fmt = validated_output_format(output_format);
     info!(
         "gc_correction: computing factors from {} observations (format={}, compress={})",
@@ -591,22 +622,29 @@ pub fn compute_and_write_gc_factors(
     let n_factors = factors.data.len() as u64;
     info!("gc_correction: computed {} correction factor bins", n_factors);
 
-    // Write outputs
-    let base = Path::new(output_path);
+    // Write outputs.
+    // Use string-based stem extraction instead of Path::with_extension() to
+    // avoid mangling compound names like "correction_factors.ontarget".
+    // Rust's with_extension("") treats the last dot-segment as an extension,
+    // destroying compound names (e.g. "sample.correction_factors" becomes
+    // "sample" after with_extension("").with_extension("tsv")).
+    let stem = if let Some(stripped) = output_path.strip_suffix(".tsv") {
+        stripped
+    } else {
+        output_path
+    };
     if should_write_tsv(fmt) {
-        // Strip .tsv extension if caller already included it, then re-add with compress awareness
-        let base_no_ext = if base.extension().map(|e| e == "tsv").unwrap_or(false) {
-            base.with_extension("")
+        let tsv_out = if compress {
+            PathBuf::from(format!("{}.tsv.gz", stem))
         } else {
-            base.to_path_buf()
+            PathBuf::from(format!("{}.tsv", stem))
         };
-        let tsv_out = tsv_path(&base_no_ext.with_extension("tsv"), compress);
-        factors.write_tsv(&tsv_out)
+        factors.write_tsv(&tsv_out, compress)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
         info!("gc_correction: wrote {:?}", tsv_out);
     }
     if should_write_parquet(fmt) {
-        let parquet_out = base.with_extension("parquet");
+        let parquet_out = PathBuf::from(format!("{}.parquet", stem));
         factors.write_parquet(&parquet_out)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
         info!("gc_correction: wrote {:?}", parquet_out);
