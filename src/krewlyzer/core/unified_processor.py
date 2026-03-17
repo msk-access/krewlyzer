@@ -467,9 +467,9 @@ def run_features(
         if skip_pon_zscore and pon:
             logger.info("  FSC: --skip-pon active, outputting raw values (no z-scores)")
         # outputs.fsc is always set before this block (assigned earlier in run_features)
-        assert outputs.fsc is not None, (
-            "outputs.fsc must be set before process_fsc call"
-        )
+        assert (
+            outputs.fsc is not None
+        ), "outputs.fsc must be set before process_fsc call"
         process_fsc(
             df_counts,
             outputs.fsc,
@@ -486,9 +486,9 @@ def run_features(
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
             df_counts_on = read_table(out_fsc_counts_on)
-            assert df_counts_on is not None, (
-                "fsc_counts_on file missing after existence check"
-            )
+            assert (
+                df_counts_on is not None
+            ), "fsc_counts_on file missing after existence check"
             process_fsc(
                 df_counts_on,
                 outputs.fsc_ontarget,
@@ -508,9 +508,9 @@ def run_features(
         if skip_pon_zscore and pon:
             logger.info("  FSR: --skip-pon active, outputting raw values (no z-scores)")
         # outputs.fsr is always set before this block
-        assert outputs.fsr is not None, (
-            "outputs.fsr must be set before process_fsr call"
-        )
+        assert (
+            outputs.fsr is not None
+        ), "outputs.fsr must be set before process_fsr call"
         process_fsr(
             df_counts,
             outputs.fsr,
@@ -528,9 +528,9 @@ def run_features(
         out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
         if is_panel_mode and out_fsc_counts_on.exists() and outputs.fsr_ontarget:
             df_counts_on = read_table(out_fsc_counts_on)
-            assert df_counts_on is not None, (
-                "fsc_counts_on file missing after existence check"
-            )
+            assert (
+                df_counts_on is not None
+            ), "fsc_counts_on file missing after existence check"
             process_fsr(
                 df_counts_on,
                 outputs.fsr_ontarget,
@@ -759,9 +759,7 @@ def run_features(
                     (
                         str(gc.factors_out)
                         if gc.factors_out and gc.factors_out.exists()
-                        else str(gc.factors_input)
-                        if gc.factors_input
-                        else None
+                        else str(gc.factors_input) if gc.factors_input else None
                     ),
                     None,
                     None,  # No FSC
@@ -800,9 +798,9 @@ def run_features(
         if rust_ocf.exists():
             shutil.move(str(rust_ocf), str(outputs.ocf))
             # outputs.ocf is always set before this block (assigned during output path setup)
-            assert outputs.ocf is not None, (
-                "outputs.ocf must be set before OCF processing"
-            )
+            assert (
+                outputs.ocf is not None
+            ), "outputs.ocf must be set before OCF processing"
             logger.info(f"✓ OCF: {outputs.ocf.name}")
 
             # Apply OCF PON normalization (z-scores) if PON is available and not skipped

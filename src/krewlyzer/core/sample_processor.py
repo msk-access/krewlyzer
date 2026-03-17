@@ -861,9 +861,9 @@ def process_sample(
 
         # Transfer to SampleOutputs — result fields come from Rust PyO3 ExtractionResult
         # bed_path is always set when write_bed=True (asserted); None would indicate a Rust bug.
-        assert result.bed_path is not None, (
-            "Rust did not return bed_path despite write_bed=True"
-        )
+        assert (
+            result.bed_path is not None
+        ), "Rust did not return bed_path despite write_bed=True"
         outputs.bed_path = result.bed_path
         outputs.fragment_count = result.fragment_count
         outputs.em_counts = result.em_counts

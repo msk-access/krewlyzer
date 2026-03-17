@@ -893,9 +893,9 @@ def run_all(
 
                 # resolved_variants may be None only if no variant file provided.
                 # mfsd requires it — guard here matches the outer has_mfsd check.
-                assert resolved_variants is not None, (
-                    "mfsd called without resolved_variants — check has_mfsd guard"
-                )
+                assert (
+                    resolved_variants is not None
+                ), "mfsd called without resolved_variants — check has_mfsd guard"
                 mfsd(
                     bam_input=mfsd_bam_path,
                     input_file=resolved_variants,

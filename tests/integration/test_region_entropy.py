@@ -90,9 +90,9 @@ class TestRegionEntropyCli:
 
         # Should have tfbs-related parameter
         has_tfbs_param = any("tfbs" in p.lower() for p in param_names)
-        assert has_tfbs_param, (
-            f"Should have TFBS-related parameter. Found: {param_names}"
-        )
+        assert (
+            has_tfbs_param
+        ), f"Should have TFBS-related parameter. Found: {param_names}"
 
     def test_cli_has_atac_flag(self):
         """CLI should have ATAC-related option."""
@@ -103,9 +103,9 @@ class TestRegionEntropyCli:
         param_names = list(sig.parameters.keys())
 
         has_atac_param = any("atac" in p.lower() for p in param_names)
-        assert has_atac_param, (
-            f"Should have ATAC-related parameter. Found: {param_names}"
-        )
+        assert (
+            has_atac_param
+        ), f"Should have ATAC-related parameter. Found: {param_names}"
 
 
 class TestRegionEntropyOutput:

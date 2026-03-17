@@ -13,7 +13,6 @@ import pytest
 
 from krewlyzer.core.output_utils import write_table, read_table
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
 
