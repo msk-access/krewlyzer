@@ -628,8 +628,8 @@ pub fn compute_and_write_gc_factors(
     // Rust's with_extension("") treats the last dot-segment as an extension,
     // destroying compound names (e.g. "sample.correction_factors" becomes
     // "sample" after with_extension("").with_extension("tsv")).
-    let stem = if output_path.ends_with(".tsv") {
-        &output_path[..output_path.len() - 4]
+    let stem = if let Some(stripped) = output_path.strip_suffix(".tsv") {
+        stripped
     } else {
         output_path
     };

@@ -231,8 +231,8 @@ pub fn run_unified_pipeline(
         use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
         let fmt = validated_output_format(output_format);
         let factors_str = out_factors.to_string_lossy();
-        let factors_stem = if factors_str.ends_with(".tsv") {
-            &factors_str[..factors_str.len() - 4]
+        let factors_stem = if let Some(stripped) = factors_str.strip_suffix(".tsv") {
+            stripped
         } else {
             &factors_str
         };
