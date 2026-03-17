@@ -77,3 +77,7 @@ results/
 !tests/data/fixtures/*.fai
 !tests/data/fixtures/*.bed
 !tests/data/fixtures/*.parquet
+
+# MkDocs
+.cache/
+site/
