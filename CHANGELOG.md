@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
 - Updated FSR on-target output docs and window/panel-mode descriptions.
 - Documented `_core.pyi` stub maintenance requirements.
 
+### CI
+- **GitHub Actions Node.js 24**: Bumped `actions/checkout` v4→v5, `actions/setup-python` v5→v6,
+  `actions/cache` v4→v5 to address Node.js 20 deprecation (enforced June 2, 2026).
+
 ## [0.7.0] - 2026-03-02
 
 ### Added
