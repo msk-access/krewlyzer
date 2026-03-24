@@ -1317,6 +1317,20 @@ def build_pon(
         )
         logger.info(
             _baseline_status(
+                "ocf_baseline_ontarget",
+                ocf_baseline_ontarget,
+                lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
+            )
+        )
+        logger.info(
+            _baseline_status(
+                "ocf_baseline_offtarget",
+                ocf_baseline_offtarget,
+                lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
+            )
+        )
+        logger.info(
+            _baseline_status(
                 "wps_baseline_panel",
                 wps_baseline_panel,
                 lambda b: (
