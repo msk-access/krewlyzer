@@ -1319,14 +1319,18 @@ def build_pon(
             _baseline_status(
                 "ocf_baseline_ontarget",
                 ocf_baseline_ontarget,
-                lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
+                lambda b: (
+                    f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK"
+                ),
             )
         )
         logger.info(
             _baseline_status(
                 "ocf_baseline_offtarget",
                 ocf_baseline_offtarget,
-                lambda b: f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK",
+                lambda b: (
+                    f"{len(b.regions)} regions" if hasattr(b, "regions") else "OK"
+                ),
             )
         )
         logger.info(

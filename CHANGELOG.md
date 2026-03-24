@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.1] - 2026-03-24
+
+### Fixed
+- **WPS Panel GC Correction**: Panel WPS now uses on-target GC correction factors instead
+  of off-target. Panel anchors overlap capture regions, making on-target correction more
+  accurate. Falls back to off-target factors when on-target unavailable.
+- **Rust WPS Background**: Fixed `coitrees` metadata type mismatch in WPS background consumer
+  (`wps.rs:1684`) — uses `.clone()` for cross-platform compatibility (returns `&usize` on
+  macOS but `usize` on CI Linux).
+
+### Changed
+- **Dead Code Cleanup**: Removed 11 unused Python z-score functions from `pon_integration.py`
+  (all replaced by Rust equivalents). Module reduced from 448 to 98 lines, 14 to 3 functions.
+  Remaining: `load_pon_model`, `compute_nrl_zscore`, `compute_periodicity_zscore`.
+- **GC Factor Resolution**: `gc_str`/`gc_ontarget_str` path resolution hoisted to a shared
+  section in `unified_processor.py`, eliminating duplication between panel WPS and TFBS/ATAC.
+
+### Added
+- **build-pon Logging**: OCF on-target/off-target baseline status now logged during PON build.
+- **sbatch Script**: `scripts/build_pon_unfiltered.sh` for building PON from high-coverage
+  unfiltered BAMs on SLURM clusters.
+
+### Data
+- **PON Models Updated**: Rebuilt xs1/xs2 PON models for both `all_unique` and `duplex`
+  variants with krewlyzer 0.8.x.
+
 ## [0.8.0] - 2026-03-17
 
 ### Added
