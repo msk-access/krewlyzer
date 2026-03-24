@@ -1680,8 +1680,11 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
             
             // Collect overlapping region indices first (avoids borrow conflict)
             let mut overlaps: Vec<usize> = Vec::new();
+            // coitrees 0.4.0: node.metadata is &usize on macOS but usize on CI Linux.
+            // .clone() handles both; suppress clippy::clone_on_copy for the usize case.
+            #[allow(clippy::clone_on_copy)]
             tree.query(start as i32, end_closed as i32, |node| {
-                overlaps.push(node.metadata);
+                overlaps.push(node.metadata.clone());
             });
             
             // Process each overlapping region

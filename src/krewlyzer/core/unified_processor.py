@@ -737,6 +737,31 @@ def run_features(
                 f"✓ FSD on-target: {outputs.fsd_ontarget.name} (using fsd_baseline_ontarget)"
             )
 
+    # =========================================================================
+    # 5a. RESOLVE GC CORRECTION FACTOR PATHS
+    # =========================================================================
+    # Resolve once, used by: panel WPS, TFBS, ATAC
+    # Off-target: WGS-like GC bias model (global/off-target fragments)
+    # On-target: capture-specific GC bias model (on-target fragments in panel mode)
+    gc_factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
+    gc_factors_ontarget_path = (
+        output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
+    )
+
+    gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
+    gc_ontarget_str = (
+        str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
+    )
+
+    if gc_str:
+        logger.debug(f"  GC factors (off-target): {gc_factors_path.name}")
+    if is_panel_mode and gc_ontarget_str:
+        logger.debug(f"  GC factors (on-target): {gc_factors_ontarget_path.name}")
+    elif is_panel_mode and not gc_ontarget_str:
+        logger.debug(
+            "  GC factors (on-target): not available, using off-target fallback"
+        )
+
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
         if skip_pon_zscore and pon:
@@ -756,11 +781,10 @@ def run_features(
                     None,
                     None,
                     None,  # GC already computed
-                    (
-                        str(gc.factors_out)
-                        if gc.factors_out and gc.factors_out.exists()
-                        else str(gc.factors_input) if gc.factors_input else None
-                    ),
+                    # Use on-target GC factors for panel WPS: anchors overlap
+                    # capture regions, so on-target correction is more accurate.
+                    # Falls back to off-target if on-target factors unavailable.
+                    gc_ontarget_str or gc_str,
                     None,
                     None,  # No FSC
                     str(panel_anchors),
@@ -956,31 +980,7 @@ def run_features(
         from .region_entropy_processor import process_region_entropy
 
         # Note: load_pon_model is imported at module level (line 41)
-
-        # =====================================================================
-        # Load GC correction factors for region entropy
-        # Off-target: WGS-like GC bias model (used for global/off-target fragments)
-        # On-target: capture-specific GC bias model (used for on-target fragments)
-        # =====================================================================
-        gc_factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
-        gc_factors_ontarget_path = (
-            output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
-        )
-
-        gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
-        gc_ontarget_str = (
-            str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
-        )
-
-        # Log GC factor availability for debugging
-        if gc_str:
-            logger.debug(f"  GC factors (off-target): {gc_factors_path.name}")
-        if is_panel_mode and gc_ontarget_str:
-            logger.debug(f"  GC factors (on-target): {gc_factors_ontarget_path.name}")
-        elif is_panel_mode and not gc_ontarget_str:
-            logger.debug(
-                "  GC factors (on-target): not available, using off-target fallback"
-            )
+        # Note: gc_str and gc_ontarget_str are resolved above (section 5a)
 
         # Use pon_parquet directly for Z-score normalization (Rust implementation)
         entropy_pon_parquet = (

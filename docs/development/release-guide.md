@@ -24,7 +24,7 @@ gitGraph
     commit id: "bump version"
     commit id: "update CHANGELOG"
     checkout main
-    merge release/X.Y.Z tag: "vX.Y.Z"
+    merge release/X.Y.Z tag: "X.Y.Z"
     checkout develop
     merge release/X.Y.Z
 ```
@@ -172,14 +172,14 @@ After review and approval:
 # Merge to main
 git checkout main
 git pull origin main
-git merge --no-ff release/X.Y.Z -m "Release vX.Y.Z"
+git merge --no-ff release/X.Y.Z -m "Release X.Y.Z"
 
 # Create annotated tag
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git tag -a X.Y.Z -m "Release X.Y.Z"
 
 # Push main and tag (triggers CI release)
 git push origin main
-git push origin vX.Y.Z
+git push origin X.Y.Z
 
 # Merge back to develop
 git checkout develop
