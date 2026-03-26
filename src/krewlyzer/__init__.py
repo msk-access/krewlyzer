@@ -1,3 +1,3 @@
 """cfDNAFE - Feature extraction tools for circulating tumor DNA"""
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
