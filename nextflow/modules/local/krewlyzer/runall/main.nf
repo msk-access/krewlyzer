@@ -95,21 +95,31 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.TFBS.tsv"),             emit: tfbs, optional: true
     tuple val(meta), path("*.TFBS.parquet"),         emit: tfbs_parquet, optional: true
     tuple val(meta), path("*.TFBS.sync.tsv"),        emit: tfbs_sync, optional: true
+    tuple val(meta), path("*.TFBS.sync.parquet"),     emit: tfbs_sync_parquet, optional: true
     tuple val(meta), path("*.TFBS.ontarget.tsv"),    emit: tfbs_ontarget, optional: true
     tuple val(meta), path("*.TFBS.ontarget.parquet"), emit: tfbs_ontarget_parquet, optional: true
     tuple val(meta), path("*.TFBS.ontarget.sync.tsv"), emit: tfbs_ontarget_sync, optional: true
+    tuple val(meta), path("*.TFBS.ontarget.sync.parquet"), emit: tfbs_ontarget_sync_parquet, optional: true
     tuple val(meta), path("*.ATAC.tsv"),             emit: atac, optional: true
     tuple val(meta), path("*.ATAC.parquet"),         emit: atac_parquet, optional: true
     tuple val(meta), path("*.ATAC.sync.tsv"),        emit: atac_sync, optional: true
+    tuple val(meta), path("*.ATAC.sync.parquet"),     emit: atac_sync_parquet, optional: true
     tuple val(meta), path("*.ATAC.ontarget.tsv"),    emit: atac_ontarget, optional: true
     tuple val(meta), path("*.ATAC.ontarget.parquet"), emit: atac_ontarget_parquet, optional: true
     tuple val(meta), path("*.ATAC.ontarget.sync.tsv"), emit: atac_ontarget_sync, optional: true
+    tuple val(meta), path("*.ATAC.ontarget.sync.parquet"), emit: atac_ontarget_sync_parquet, optional: true
     
     // Region MDS outputs — TSV and/or Parquet
     tuple val(meta), path("*.MDS.exon.tsv"),         emit: mds_exon, optional: true
     tuple val(meta), path("*.MDS.exon.parquet"),     emit: mds_exon_parquet, optional: true
     tuple val(meta), path("*.MDS.gene.tsv"),         emit: mds_gene, optional: true
     tuple val(meta), path("*.MDS.gene.parquet"),     emit: mds_gene_parquet, optional: true
+    
+    // FSC counts — raw bin counts (intermediate, but published for reproducibility)
+    tuple val(meta), path("*.fsc_counts.tsv"),       emit: fsc_counts, optional: true
+    tuple val(meta), path("*.fsc_counts.parquet"),    emit: fsc_counts_parquet, optional: true
+    tuple val(meta), path("*.fsc_counts.ontarget.tsv"), emit: fsc_counts_ontarget, optional: true
+    tuple val(meta), path("*.fsc_counts.ontarget.parquet"), emit: fsc_counts_ontarget_parquet, optional: true
     
     // mFSD outputs — TSV and/or Parquet
     tuple val(meta), path("*.mFSD.tsv"),             emit: mfsd, optional: true
@@ -235,7 +245,9 @@ process KREWLYZER_RUNALL {
     touch ${prefix}.BreakPointMotif.tsv
     touch ${prefix}.MDS.tsv
     touch ${prefix}.TFBS.tsv
+    touch ${prefix}.TFBS.sync.tsv
     touch ${prefix}.ATAC.tsv
+    touch ${prefix}.ATAC.sync.tsv
     touch ${prefix}.correction_factors.tsv
     touch ${prefix}.fsc_counts.tsv
     touch ${prefix}.mFSD.tsv
