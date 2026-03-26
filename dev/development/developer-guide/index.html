@@ -18,7 +18,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.5">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -2290,6 +2290,34 @@
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-gotchas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Gotchas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Known Gotchas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pathwith_suffix-and-compound-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path.with_suffix() and Compound Extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
           <li class="md-nav__item">
   <a href="#_corepyi-rust-extension-stub-maintenance" class="md-nav__link">
     <span class="md-ellipsis">
@@ -2886,6 +2914,34 @@
   
 </li>
         
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#known-gotchas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Known Gotchas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Known Gotchas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pathwith_suffix-and-compound-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path.with_suffix() and Compound Extensions
+      
+    </span>
+  </a>
+  
+</li>
+        
           <li class="md-nav__item">
   <a href="#_corepyi-rust-extension-stub-maintenance" class="md-nav__link">
     <span class="md-ellipsis">
@@ -3251,6 +3307,54 @@ installs the extension module.</p>
 <li>Log with <code>log::info!</code>, <code>log::debug!</code></li>
 </ul>
 <hr>
+<h2 id="known-gotchas">Known Gotchas</h2>
+<h3 id="pathwith_suffix-and-compound-extensions"><code>Path.with_suffix()</code> and Compound Extensions</h3>
+<div class="admonition danger">
+<p class="admonition-title">NEVER use <code>Path.with_suffix()</code> on paths with compound dot-separated names</p>
+</div>
+<p>Krewlyzer output files use compound names like <code>sample.MDS.exon</code>, <code>sample.EndMotif.ontarget</code>,
+<code>sample.FSC.regions.e1only</code>. Python's <code>Path.with_suffix()</code> replaces only the <strong>last</strong> dot-segment,
+which silently corrupts these paths:</p>
+<table>
+<thead>
+<tr>
+<th>Expression</th>
+<th>Expected</th>
+<th>Actual</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Path("P-XXX.MDS.exon").with_suffix(".tsv")</code></td>
+<td><code>P-XXX.MDS.exon.tsv</code></td>
+<td><code>P-XXX.MDS.tsv</code> ❌</td>
+</tr>
+<tr>
+<td><code>Path("P-XXX.MDS.ontarget").with_suffix(".tsv")</code></td>
+<td><code>P-XXX.MDS.ontarget.tsv</code></td>
+<td><code>P-XXX.MDS.tsv</code> ❌</td>
+</tr>
+<tr>
+<td><code>Path("P-XXX.EndMotif").with_suffix(".tsv")</code></td>
+<td><code>P-XXX.EndMotif.tsv</code></td>
+<td><code>P-XXX.tsv</code> ❌</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Safe pattern — always use string concatenation:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ✅ CORRECT: preserves all dot-segments</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">output_path</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="p">(</span><span class="n">base</span><span class="o">.</span><span class="n">name</span> <span class="o">+</span> <span class="s2">".tsv"</span><span class="p">)</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># ❌ WRONG: replaces last dot-segment</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">output_path</span> <span class="o">=</span> <span class="n">base</span><span class="o">.</span><span class="n">with_suffix</span><span class="p">(</span><span class="s2">".tsv"</span><span class="p">)</span>
+</code></pre></div>
+<p><strong>Compound names in krewlyzer</strong> (all vulnerable to <code>with_suffix()</code>):
+<code>MDS.exon</code>, <code>MDS.gene</code>, <code>MDS.ontarget</code>, <code>EndMotif</code>, <code>EndMotif.ontarget</code>,
+<code>BreakPointMotif</code>, <code>EndMotif1mer</code>, <code>FSC.gene</code>, <code>FSC.regions</code>,
+<code>FSC.regions.e1only</code>, <code>OCF.sync</code>, <code>TFBS.sync</code>, <code>ATAC.sync</code>.</p>
+<p>This gotcha caused a silent data loss bug in v0.8.0 where <code>MDS.exon.tsv</code> and
+<code>MDS.gene.tsv</code> were never generated. Test coverage: <code>tests/unit/test_compound_extension.py</code>.</p>
+<hr>
 <h3 id="_corepyi-rust-extension-stub-maintenance"><code>_core.pyi</code> — Rust Extension Stub Maintenance</h3>
 <p><code>src/krewlyzer/_core.pyi</code> is a <strong>type stub</strong> for the compiled Rust/PyO3 extension
 (<code>krewlyzer._core</code>). It tells mypy what functions and submodules exist without
@@ -3262,9 +3366,9 @@ inspecting the binary <code>.so</code> — following the same pattern as
 <li>Add a new sub-PyModule registered in <code>rust/src/lib.rs</code></li>
 <li>Change the signature (parameters or return type) of an existing exported function</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># After updating rust/src/*.rs, update the stub and verify:</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/<span class="w"> </span>--ignore-missing-imports<span class="w"> </span>--no-error-summary
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="c1"># Must exit 0 with no output. Commit .rs and .pyi changes together.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># After updating rust/src/*.rs, update the stub and verify:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/<span class="w"> </span>--ignore-missing-imports<span class="w"> </span>--no-error-summary
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Must exit 0 with no output. Commit .rs and .pyi changes together.</span>
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Stub drift causes CI failures</p>
@@ -3280,13 +3384,13 @@ Python files that call the Rust functions, even if the code runs correctly at ru
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran <code>pytest tests/</code> — 244 pass, 4 skipped</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> If Rust functions changed: updated <code>src/krewlyzer/_core.pyi</code> stub</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran Python lint (matches CI lint job):
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>black<span class="w"> </span>--check<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>python<span class="w"> </span>scripts/check_output_format.py
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>black<span class="w"> </span>--check<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>python<span class="w"> </span>scripts/check_output_format.py
 </code></pre></div></li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran Rust lint:
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
 </code></pre></div></li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Updated CHANGELOG.md</li>
 </ul>
@@ -3315,7 +3419,7 @@ Python files that call the Rust functions, even if the code runs correctly at ru
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 14, 2026 04:35:04 UTC"><span class="timeago" datetime="2026-03-14T04:35:04+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 14, 2026 04:35:04 UTC">2026-03-14</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 26, 2026 00:08:45 UTC"><span class="timeago" datetime="2026-03-26T00:08:45+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 26, 2026 00:08:45 UTC">2026-03-26</span>
   </span>
 
     
