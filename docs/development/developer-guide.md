@@ -318,6 +318,42 @@ from krewlyzer import _core
 
 ---
 
+## Known Gotchas
+
+### `Path.with_suffix()` and Compound Extensions
+
+!!! danger "NEVER use `Path.with_suffix()` on paths with compound dot-separated names"
+
+Krewlyzer output files use compound names like `sample.MDS.exon`, `sample.EndMotif.ontarget`,
+`sample.FSC.regions.e1only`. Python's `Path.with_suffix()` replaces only the **last** dot-segment,
+which silently corrupts these paths:
+
+| Expression | Expected | Actual |
+|---|---|---|
+| `Path("P-XXX.MDS.exon").with_suffix(".tsv")` | `P-XXX.MDS.exon.tsv` | `P-XXX.MDS.tsv` ❌ |
+| `Path("P-XXX.MDS.ontarget").with_suffix(".tsv")` | `P-XXX.MDS.ontarget.tsv` | `P-XXX.MDS.tsv` ❌ |
+| `Path("P-XXX.EndMotif").with_suffix(".tsv")` | `P-XXX.EndMotif.tsv` | `P-XXX.tsv` ❌ |
+
+**Safe pattern — always use string concatenation:**
+
+```python
+# ✅ CORRECT: preserves all dot-segments
+output_path = base.parent / (base.name + ".tsv")
+
+# ❌ WRONG: replaces last dot-segment
+output_path = base.with_suffix(".tsv")
+```
+
+**Compound names in krewlyzer** (all vulnerable to `with_suffix()`):
+`MDS.exon`, `MDS.gene`, `MDS.ontarget`, `EndMotif`, `EndMotif.ontarget`,
+`BreakPointMotif`, `EndMotif1mer`, `FSC.gene`, `FSC.regions`,
+`FSC.regions.e1only`, `OCF.sync`, `TFBS.sync`, `ATAC.sync`.
+
+This gotcha caused a silent data loss bug in v0.8.0 where `MDS.exon.tsv` and
+`MDS.gene.tsv` were never generated. Test coverage: `tests/unit/test_compound_extension.py`.
+
+---
+
 ### `_core.pyi` — Rust Extension Stub Maintenance
 
 `src/krewlyzer/_core.pyi` is a **type stub** for the compiled Rust/PyO3 extension
