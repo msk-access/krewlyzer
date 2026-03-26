@@ -1,0 +1,3300 @@
+<!DOCTYPE html><html class="no-js" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width,initial-scale=1" name="viewport">
+<link href="https://msk-access.github.io/krewlyzer/0.8.2/development/changelog/" rel="canonical">
+<link href="../release-guide/" rel="prev">
+<link href="../contributing/" rel="next">
+<link href="../../assets/images/favicon.png" rel="icon">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.6" name="generator">
+<title>Changelog - Krewlyzer</title>
+<link href="../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
+<link href="../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
+<link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet">
+<style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+<link href="../../css/timeago.css" rel="stylesheet">
+<link href="../../stylesheets/extra.css" rel="stylesheet">
+<link href="../../assets/stylesheets/panzoom.css" rel="stylesheet">
+<script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+<meta content="website" property="og:type">
+<meta content="Changelog - Krewlyzer" property="og:title">
+<meta content="https://msk-access.github.io/krewlyzer/0.8.2/assets/images/social/development/changelog.png" property="og:image">
+<meta content="image/png" property="og:image:type">
+<meta content="1200" property="og:image:width">
+<meta content="630" property="og:image:height">
+<meta content="https://msk-access.github.io/krewlyzer/0.8.2/development/changelog/" property="og:url">
+<meta content="summary_large_image" property="twitter:card">
+<meta content="Changelog - Krewlyzer" property="twitter:title">
+<meta content="https://msk-access.github.io/krewlyzer/0.8.2/assets/images/social/development/changelog.png" property="twitter:image">
+<link href="../../assets/stylesheets/glightbox.min.css" rel="stylesheet"><script src="../../assets/javascripts/glightbox.min.js"></script><style id="glightbox-style">
+            html.glightbox-open { overflow: initial; height: 100%; }
+            .gslide-title { margin-top: 0px; user-select: text; }
+            .gslide-desc { color: #666; user-select: text; }
+            .gslide-image img { background: white; }
+            .gscrollbar-fixer { padding-right: 15px; }
+            .gdesc-inner { font-size: 0.75rem; }
+            body[data-md-color-scheme="slate"] .gdesc-inner { background: var(--md-default-bg-color); }
+            body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
+            body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
+        </style><meta name="panzoom-theme" content="material">
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
+<input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
+<input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
+<label class="md-overlay" for="__drawer"></label>
+<div data-md-component="skip">
+<a class="md-skip" href="#changelog">
+          Skip to content
+        </a>
+</div>
+<div data-md-component="announce">
+</div>
+<div data-md-color-scheme="default" data-md-component="outdated" hidden="">
+</div>
+<header class="md-header md-header--shadow" data-md-component="header">
+<nav aria-label="Header" class="md-header__inner md-grid">
+<a aria-label="Krewlyzer" class="md-header__button md-logo" data-md-component="logo" href="../.." title="Krewlyzer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+<label class="md-header__button md-icon" for="__drawer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"></path></svg>
+</label>
+<div class="md-header__title" data-md-component="header-title">
+<div class="md-header__ellipsis">
+<div class="md-header__topic">
+<span class="md-ellipsis">
+            Krewlyzer
+          </span>
+</div>
+<div class="md-header__topic" data-md-component="header-topic">
+<span class="md-ellipsis">
+            
+              Changelog
+            
+          </span>
+</div>
+</div>
+</div>
+<form class="md-header__option" data-md-component="palette">
+<input aria-label="Switch to dark mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: light)" data-md-color-primary="custom" data-md-color-scheme="default" id="__palette_0" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_1" hidden="" title="Switch to dark mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+<input aria-label="Switch to light mode" class="md-option" data-md-color-accent="custom" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-primary="custom" data-md-color-scheme="slate" id="__palette_1" name="__palette" type="radio">
+<label class="md-header__button md-icon" for="__palette_0" hidden="" title="Switch to light mode">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"></path></svg>
+</label>
+</form>
+<script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+<label class="md-header__button md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+</label>
+<div class="md-search" data-md-component="search" role="dialog">
+<label class="md-search__overlay" for="__search"></label>
+<div class="md-search__inner" role="search">
+<form class="md-search__form" name="search">
+<input aria-label="Search" autocapitalize="off" autocomplete="off" autocorrect="off" class="md-search__input" data-md-component="search-query" name="query" placeholder="Search" required="" spellcheck="false" type="text">
+<label class="md-search__icon md-icon" for="__search">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"></path></svg>
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"></path></svg>
+</label>
+<nav aria-label="Search" class="md-search__options">
+<button aria-label="Clear" class="md-search__icon md-icon" tabindex="-1" title="Clear" type="reset">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"></path></svg>
+</button>
+</nav>
+</form>
+<div class="md-search__output">
+<div class="md-search__scrollwrap" data-md-scrollfix="" tabindex="0">
+<div class="md-search-result" data-md-component="search-result">
+<div class="md-search-result__meta">
+            Initializing search
+          </div>
+<ol class="md-search-result__list" role="presentation"></ol>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="md-header__source">
+<a class="md-source" data-md-component="source" href="https://github.com/msk-access/krewlyzer" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    msk-access/krewlyzer
+  </div>
+</a>
+</div>
+</nav>
+</header>
+<div class="md-container" data-md-component="container">
+<main class="md-main" data-md-component="main">
+<div class="md-main__inner md-grid">
+<div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Navigation" class="md-nav md-nav--primary" data-md-level="0">
+<label class="md-nav__title" for="__drawer">
+<a aria-label="Krewlyzer" class="md-nav__button md-logo" data-md-component="logo" href="../.." title="Krewlyzer">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"></path></svg>
+</a>
+    Krewlyzer
+  </label>
+<div class="md-nav__source">
+<a class="md-source" data-md-component="source" href="https://github.com/msk-access/krewlyzer" title="Go to repository">
+<div class="md-source__icon md-icon">
+<svg viewBox="0 0 448 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"></path></svg>
+</div>
+<div class="md-source__repository">
+    msk-access/krewlyzer
+  </div>
+</a>
+</div>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../..">
+<span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_2" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../getting-started/">
+<span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_2_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../getting-started/installation/">
+<span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../getting-started/quickstart/">
+<span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../getting-started/concepts/">
+<span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_3" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../cli/">
+<span class="md-ellipsis">
+    
+  
+    CLI Reference
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_3_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    CLI Reference
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../cli/run-all/">
+<span class="md-ellipsis">
+    
+  
+    run-all
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_4" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../nextflow/">
+<span class="md-ellipsis">
+    
+  
+    Nextflow Pipeline
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_4_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Nextflow Pipeline
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../nextflow/samplesheet/">
+<span class="md-ellipsis">
+    
+  
+    Samplesheet
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../nextflow/parameters/">
+<span class="md-ellipsis">
+    
+  
+    Parameters
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../nextflow/outputs/">
+<span class="md-ellipsis">
+    
+  
+    Outputs
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../nextflow/examples/">
+<span class="md-ellipsis">
+    
+  
+    Examples
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5" type="checkbox">
+<div class="md-nav__link md-nav__container">
+<a class="md-nav__link" href="../../features/">
+<span class="md-ellipsis">
+    
+  
+    Features
+  
+
+    
+  </span>
+</a>
+<label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+<span class="md-nav__icon md-icon"></span>
+</label>
+</div>
+<nav aria-expanded="false" aria-labelledby="__nav_5_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Features
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_2" type="checkbox">
+<label class="md-nav__link" for="__nav_5_2" id="__nav_5_2_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Core
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_2_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_2">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Core
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/core/extract/">
+<span class="md-ellipsis">
+    
+  
+    Fragment Extraction
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/core/fsc/">
+<span class="md-ellipsis">
+    
+  
+    FSC
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/core/fsd/">
+<span class="md-ellipsis">
+    
+  
+    FSD
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/core/fsr/">
+<span class="md-ellipsis">
+    
+  
+    FSR
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/core/wps/">
+<span class="md-ellipsis">
+    
+  
+    WPS
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_3" type="checkbox">
+<label class="md-nav__link" for="__nav_5_3" id="__nav_5_3_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Regulatory
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_3_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_3">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Regulatory
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/regulatory/motif/">
+<span class="md-ellipsis">
+    
+  
+    End Motif
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/regulatory/ocf/">
+<span class="md-ellipsis">
+    
+  
+    OCF
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/regulatory/region-entropy/">
+<span class="md-ellipsis">
+    
+  
+    Region Entropy
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/regulatory/region-mds/">
+<span class="md-ellipsis">
+    
+  
+    Region MDS
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_4" type="checkbox">
+<label class="md-nav__link" for="__nav_5_4" id="__nav_5_4_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Variant
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_4_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_4">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Variant
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/variant/mfsd/">
+<span class="md-ellipsis">
+    
+  
+    mFSD
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_5" type="checkbox">
+<label class="md-nav__link" for="__nav_5_5" id="__nav_5_5_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Methylation
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_5_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_5">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Methylation
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/methylation/uxm/">
+<span class="md-ellipsis">
+    
+  
+    UXM
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_5_6" type="checkbox">
+<label class="md-nav__link" for="__nav_5_6" id="__nav_5_6_label" tabindex="0">
+<span class="md-ellipsis">
+    
+  
+    Output
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_5_6_label" class="md-nav" data-md-level="2">
+<label class="md-nav__title" for="__nav_5_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Output
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../features/output/json-output/">
+<span class="md-ellipsis">
+    
+  
+    JSON Export
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_6" type="checkbox">
+<label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_6_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_6">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../guides/panel-mode/">
+<span class="md-ellipsis">
+    
+  
+    Panel Mode
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../guides/msk-access-quickstart/">
+<span class="md-ellipsis">
+    
+  
+    MSK-ACCESS Quickstart
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../guides/building-pon/">
+<span class="md-ellipsis">
+    
+  
+    Building PON
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../guides/gc-correction/">
+<span class="md-ellipsis">
+    
+  
+    GC Correction
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_7" type="checkbox">
+<label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_7_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_7">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../reference/pon-models/">
+<span class="md-ellipsis">
+    
+  
+    PON Models
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../reference/input-formats/">
+<span class="md-ellipsis">
+    
+  
+    Input Formats
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../reference/output-files/">
+<span class="md-ellipsis">
+    
+  
+    Output Files
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../reference/architecture/">
+<span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../reference/glossary/">
+<span class="md-ellipsis">
+    
+  
+    Glossary
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+<input checked="" class="md-nav__toggle md-toggle" id="__nav_8" type="checkbox">
+<label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="true" aria-labelledby="__nav_8_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_8">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../developer-guide/">
+<span class="md-ellipsis">
+    
+  
+    Developer Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../testing-guide/">
+<span class="md-ellipsis">
+    
+  
+    Testing Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../release-guide/">
+<span class="md-ellipsis">
+    
+  
+    Release Guide
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item md-nav__item--active">
+<input class="md-nav__toggle md-toggle" id="__toc" type="checkbox">
+<label class="md-nav__link md-nav__link--active" for="__toc">
+<span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<a class="md-nav__link md-nav__link--active" href="./">
+<span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+</a>
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#082-2026-03-26">
+<span class="md-ellipsis">
+      
+        [0.8.2] - 2026-03-26
+      
+    </span>
+</a>
+<nav aria-label="[0.8.2] - 2026-03-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#081-2026-03-24">
+<span class="md-ellipsis">
+      
+        [0.8.1] - 2026-03-24
+      
+    </span>
+</a>
+<nav aria-label="[0.8.1] - 2026-03-24" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_1">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_1">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_1">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#data">
+<span class="md-ellipsis">
+      
+        Data
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#080-2026-03-17">
+<span class="md-ellipsis">
+      
+        [0.8.0] - 2026-03-17
+      
+    </span>
+</a>
+<nav aria-label="[0.8.0] - 2026-03-17" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_2">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_2">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ci">
+<span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#070-2026-03-02">
+<span class="md-ellipsis">
+      
+        [0.7.0] - 2026-03-02
+      
+    </span>
+</a>
+<nav aria-label="[0.7.0] - 2026-03-02" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_3">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_3">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_1">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ci_1">
+<span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#060-2026-02-28">
+<span class="md-ellipsis">
+      
+        [0.6.0] - 2026-02-28
+      
+    </span>
+</a>
+<nav aria-label="[0.6.0] - 2026-02-28" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_4">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_4">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_2">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_2">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#053-2026-02-06">
+<span class="md-ellipsis">
+      
+        [0.5.3] - 2026-02-06
+      
+    </span>
+</a>
+<nav aria-label="[0.5.3] - 2026-02-06" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_3">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#052-2026-02-05">
+<span class="md-ellipsis">
+      
+        [0.5.2] - 2026-02-05
+      
+    </span>
+</a>
+<nav aria-label="[0.5.2] - 2026-02-05" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_5">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_5">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_4">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#051-2026-02-04">
+<span class="md-ellipsis">
+      
+        [0.5.1] - 2026-02-04
+      
+    </span>
+</a>
+<nav aria-label="[0.5.1] - 2026-02-04" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_6">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_3">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_5">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#050-2026-02-02">
+<span class="md-ellipsis">
+      
+        [0.5.0] - 2026-02-02
+      
+    </span>
+</a>
+<nav aria-label="[0.5.0] - 2026-02-02" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_6">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+<nav aria-label="Added" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pon-framework">
+<span class="md-ellipsis">
+      
+        PON Framework
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#panel-mode-msk-access">
+<span class="md-ellipsis">
+      
+        Panel Mode (MSK-ACCESS)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#duplex-sequencing">
+<span class="md-ellipsis">
+      
+        Duplex Sequencing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#region-based-analysis">
+<span class="md-ellipsis">
+      
+        Region-Based Analysis
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#feature-enhancements">
+<span class="md-ellipsis">
+      
+        Feature Enhancements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_4">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+<nav aria-label="Changed" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nextflow-pipeline">
+<span class="md-ellipsis">
+      
+        Nextflow Pipeline
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#cli">
+<span class="md-ellipsis">
+      
+        CLI
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#data-assets">
+<span class="md-ellipsis">
+      
+        Data &amp; Assets
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_7">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_6">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#tests">
+<span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#032-2025-12-18">
+<span class="md-ellipsis">
+      
+        [0.3.2] - 2025-12-18
+      
+    </span>
+</a>
+<nav aria-label="[0.3.2] - 2025-12-18" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_8">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_5">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#031-2025-12-18">
+<span class="md-ellipsis">
+      
+        [0.3.1] - 2025-12-18
+      
+    </span>
+</a>
+<nav aria-label="[0.3.1] - 2025-12-18" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_7">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_6">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_7">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#030-2025-12-16">
+<span class="md-ellipsis">
+      
+        [0.3.0] - 2025-12-16
+      
+    </span>
+</a>
+<nav aria-label="[0.3.0] - 2025-12-16" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_8">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_7">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_9">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#023-2025-12-16">
+<span class="md-ellipsis">
+      
+        [0.2.3] - 2025-12-16
+      
+    </span>
+</a>
+<nav aria-label="[0.2.3] - 2025-12-16" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_8">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#022-2025-12-15">
+<span class="md-ellipsis">
+      
+        [0.2.2] - 2025-12-15
+      
+    </span>
+</a>
+<nav aria-label="[0.2.2] - 2025-12-15" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_9">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_10">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#021-2025-12-15">
+<span class="md-ellipsis">
+      
+        [0.2.1] - 2025-12-15
+      
+    </span>
+</a>
+<nav aria-label="[0.2.1] - 2025-12-15" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_11">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#020-2025-12-12">
+<span class="md-ellipsis">
+      
+        [0.2.0] - 2025-12-12
+      
+    </span>
+</a>
+<nav aria-label="[0.2.0] - 2025-12-12" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_9">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_10">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_12">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#removed">
+<span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#017-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.7] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.7] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_13">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#016-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.6] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.6] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_14">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#015-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.5] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.5] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_15">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#014-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.4] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.4] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_16">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#013-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.3] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.3] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_11">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#012-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.2] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.2] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_10">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_12">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../contributing/">
+<span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../contributing-data/">
+<span class="md-ellipsis">
+    
+  
+    Contributing Data
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item md-nav__item--section md-nav__item--nested">
+<input class="md-nav__toggle md-toggle md-toggle--indeterminate" id="__nav_9" type="checkbox">
+<label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="">
+<span class="md-ellipsis">
+    
+  
+    Resources
+  
+
+    
+  </span>
+<span class="md-nav__icon md-icon"></span>
+</label>
+<nav aria-expanded="false" aria-labelledby="__nav_9_label" class="md-nav" data-md-level="1">
+<label class="md-nav__title" for="__nav_9">
+<span class="md-nav__icon md-icon"></span>
+            
+  
+    Resources
+  
+
+          </label>
+<ul class="md-nav__list" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../resources/overview/">
+<span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../resources/citation/">
+<span class="md-ellipsis">
+    
+  
+    Citation
+  
+
+    
+  </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="../../resources/troubleshooting/">
+<span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc">
+<div class="md-sidebar__scrollwrap">
+<div class="md-sidebar__inner">
+<nav aria-label="Table of contents" class="md-nav md-nav--secondary">
+<label class="md-nav__title" for="__toc">
+<span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+<ul class="md-nav__list" data-md-component="toc" data-md-scrollfix="">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#082-2026-03-26">
+<span class="md-ellipsis">
+      
+        [0.8.2] - 2026-03-26
+      
+    </span>
+</a>
+<nav aria-label="[0.8.2] - 2026-03-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#081-2026-03-24">
+<span class="md-ellipsis">
+      
+        [0.8.1] - 2026-03-24
+      
+    </span>
+</a>
+<nav aria-label="[0.8.1] - 2026-03-24" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_1">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_1">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_1">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#data">
+<span class="md-ellipsis">
+      
+        Data
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#080-2026-03-17">
+<span class="md-ellipsis">
+      
+        [0.8.0] - 2026-03-17
+      
+    </span>
+</a>
+<nav aria-label="[0.8.0] - 2026-03-17" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_2">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_2">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ci">
+<span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#070-2026-03-02">
+<span class="md-ellipsis">
+      
+        [0.7.0] - 2026-03-02
+      
+    </span>
+</a>
+<nav aria-label="[0.7.0] - 2026-03-02" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_3">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_3">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_1">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#ci_1">
+<span class="md-ellipsis">
+      
+        CI
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#060-2026-02-28">
+<span class="md-ellipsis">
+      
+        [0.6.0] - 2026-02-28
+      
+    </span>
+</a>
+<nav aria-label="[0.6.0] - 2026-02-28" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_4">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_4">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_2">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_2">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#053-2026-02-06">
+<span class="md-ellipsis">
+      
+        [0.5.3] - 2026-02-06
+      
+    </span>
+</a>
+<nav aria-label="[0.5.3] - 2026-02-06" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_3">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#052-2026-02-05">
+<span class="md-ellipsis">
+      
+        [0.5.2] - 2026-02-05
+      
+    </span>
+</a>
+<nav aria-label="[0.5.2] - 2026-02-05" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_5">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_5">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_4">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#051-2026-02-04">
+<span class="md-ellipsis">
+      
+        [0.5.1] - 2026-02-04
+      
+    </span>
+</a>
+<nav aria-label="[0.5.1] - 2026-02-04" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_6">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_3">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_5">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#050-2026-02-02">
+<span class="md-ellipsis">
+      
+        [0.5.0] - 2026-02-02
+      
+    </span>
+</a>
+<nav aria-label="[0.5.0] - 2026-02-02" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_6">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+<nav aria-label="Added" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#pon-framework">
+<span class="md-ellipsis">
+      
+        PON Framework
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#panel-mode-msk-access">
+<span class="md-ellipsis">
+      
+        Panel Mode (MSK-ACCESS)
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#duplex-sequencing">
+<span class="md-ellipsis">
+      
+        Duplex Sequencing
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#region-based-analysis">
+<span class="md-ellipsis">
+      
+        Region-Based Analysis
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#feature-enhancements">
+<span class="md-ellipsis">
+      
+        Feature Enhancements
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#infrastructure">
+<span class="md-ellipsis">
+      
+        Infrastructure
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_4">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+<nav aria-label="Changed" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#nextflow-pipeline">
+<span class="md-ellipsis">
+      
+        Nextflow Pipeline
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#cli">
+<span class="md-ellipsis">
+      
+        CLI
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#data-assets">
+<span class="md-ellipsis">
+      
+        Data &amp; Assets
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_7">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_6">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#tests">
+<span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#032-2025-12-18">
+<span class="md-ellipsis">
+      
+        [0.3.2] - 2025-12-18
+      
+    </span>
+</a>
+<nav aria-label="[0.3.2] - 2025-12-18" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_8">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_5">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#031-2025-12-18">
+<span class="md-ellipsis">
+      
+        [0.3.1] - 2025-12-18
+      
+    </span>
+</a>
+<nav aria-label="[0.3.1] - 2025-12-18" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_7">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_6">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#documentation_7">
+<span class="md-ellipsis">
+      
+        Documentation
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#030-2025-12-16">
+<span class="md-ellipsis">
+      
+        [0.3.0] - 2025-12-16
+      
+    </span>
+</a>
+<nav aria-label="[0.3.0] - 2025-12-16" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_8">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_7">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_9">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#023-2025-12-16">
+<span class="md-ellipsis">
+      
+        [0.2.3] - 2025-12-16
+      
+    </span>
+</a>
+<nav aria-label="[0.2.3] - 2025-12-16" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_8">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#022-2025-12-15">
+<span class="md-ellipsis">
+      
+        [0.2.2] - 2025-12-15
+      
+    </span>
+</a>
+<nav aria-label="[0.2.2] - 2025-12-15" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_9">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_10">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#021-2025-12-15">
+<span class="md-ellipsis">
+      
+        [0.2.1] - 2025-12-15
+      
+    </span>
+</a>
+<nav aria-label="[0.2.1] - 2025-12-15" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_11">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#020-2025-12-12">
+<span class="md-ellipsis">
+      
+        [0.2.0] - 2025-12-12
+      
+    </span>
+</a>
+<nav aria-label="[0.2.0] - 2025-12-12" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_9">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_10">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_12">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#removed">
+<span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#017-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.7] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.7] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_13">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#016-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.6] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.6] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_14">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#015-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.5] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.5] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_15">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#014-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.4] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.4] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#fixed_16">
+<span class="md-ellipsis">
+      
+        Fixed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#013-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.3] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.3] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_11">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#012-2025-11-26">
+<span class="md-ellipsis">
+      
+        [0.1.2] - 2025-11-26
+      
+    </span>
+</a>
+<nav aria-label="[0.1.2] - 2025-11-26" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#added_10">
+<span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#changed_12">
+<span class="md-ellipsis">
+      
+        Changed
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+</ul>
+</nav>
+</div>
+</div>
+</div>
+<div class="md-content" data-md-component="content">
+<nav aria-label="Navigation" class="md-path">
+<ol class="md-path__list">
+<li class="md-path__item">
+<a class="md-path__link" href="../..">
+<span class="md-ellipsis">
+    Home
+  </span>
+</a>
+</li>
+<li class="md-path__item">
+<a class="md-path__link" href="../developer-guide/">
+<span class="md-ellipsis">
+    Development
+  </span>
+</a>
+</li>
+</ol>
+</nav>
+<article class="md-content__inner md-typeset">
+<h1 id="changelog">Changelog</h1>
+<p>All notable changes to this project will be documented in this file.</p>
+<h2 id="082-2026-03-26">[0.8.2] - 2026-03-26</h2>
+<h3 id="fixed">Fixed</h3>
+<ul>
+<li><strong>Region <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> Output Collision</strong>: Fixed <code>Path.with_suffix()</code> compound-extension bug that
+  caused <code>MDS.exon.tsv</code> and <code>MDS.gene.tsv</code> to both resolve to <code>MDS.tsv</code>, silently
+  destroying per-exon and per-gene data. Affects standalone <code>region-mds</code>, <code>motif</code>, and
+  <code>run-all</code> commands.</li>
+<li><strong>Motif Tracking Paths</strong>: Fixed 5 additional <code>with_suffix()</code> bugs in motif output
+  tracking (EndMotif, BreakPointMotif, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>.ontarget, EndMotif1mer) that caused
+  path collisions and silent <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-score normalization failures.</li>
+<li><strong>Gene Format Conversion</strong>: Region <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> gene output now correctly undergoes format
+  conversion (Parquet/gzip) when no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> is provided.</li>
+<li><strong><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> Z-score Logging</strong>: Z-score append failures upgraded from <code>debug</code> to <code>warning</code>
+  level to surface issues in production runs.</li>
+</ul>
+<h3 id="added">Added</h3>
+<ul>
+<li><strong>Compound Extension Tests</strong>: 57 new parametrized tests (<code>test_compound_extension.py</code>)
+  covering all 13 compound base names across <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>, Parquet, both formats, and roundtrip.</li>
+<li><strong>Developer Guide</strong>: "Known Gotchas" section documenting the <code>Path.with_suffix()</code> anti-
+  pattern with safe alternative and complete table of affected names.</li>
+</ul>
+<h3 id="changed">Changed</h3>
+<ul>
+<li><strong>Nextflow Outputs</strong>: Added missing Parquet emit declarations for <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> sync (2), <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>
+  sync (2), <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>/<abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> ontarget sync (2), and fsc_counts (4 — <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>+Parquet, off/on-target).</li>
+<li><strong>SLURM Script</strong>: Tuned head process memory (16G→32G), queue size (100→200), added
+  <code>--output_format both --compress_tsv true --verbose true</code> for 14K+ sample production runs.</li>
+</ul>
+<h2 id="081-2026-03-24">[0.8.1] - 2026-03-24</h2>
+<h3 id="fixed_1">Fixed</h3>
+<ul>
+<li><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Panel <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: Panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> now uses on-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors instead
+  of off-target. Panel anchors overlap capture regions, making on-target correction more
+  accurate. Falls back to off-target factors when on-target unavailable.</li>
+<li><strong>Rust <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Background</strong>: Fixed <code>coitrees</code> metadata type mismatch in <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> background consumer
+  (<code>wps.rs:1684</code>) — uses <code>.clone()</code> for cross-platform compatibility (returns <code>&amp;usize</code> on
+  macOS but <code>usize</code> on CI Linux).</li>
+</ul>
+<h3 id="changed_1">Changed</h3>
+<ul>
+<li><strong>Dead Code Cleanup</strong>: Removed 11 unused Python z-score functions from <code>pon_integration.py</code>
+  (all replaced by Rust equivalents). Module reduced from 448 to 98 lines, 14 to 3 functions.
+  Remaining: <code>load_pon_model</code>, <code>compute_nrl_zscore</code>, <code>compute_periodicity_zscore</code>.</li>
+<li><strong><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factor Resolution</strong>: <code>gc_str</code>/<code>gc_ontarget_str</code> path resolution hoisted to a shared
+  section in <code>unified_processor.py</code>, eliminating duplication between panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> and <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>.</li>
+</ul>
+<h3 id="added_1">Added</h3>
+<ul>
+<li><strong>build-pon Logging</strong>: <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> on-target/off-target baseline status now logged during <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build.</li>
+<li><strong>sbatch Script</strong>: <code>scripts/build_pon_unfiltered.sh</code> for building <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> from high-coverage
+  unfiltered BAMs on SLURM clusters.</li>
+</ul>
+<h3 id="data">Data</h3>
+<ul>
+<li><strong><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Models Updated</strong>: Rebuilt xs1/xs2 <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> models for both <code>all_unique</code> and <code>duplex</code>
+  variants with krewlyzer 0.8.x.</li>
+</ul>
+<h2 id="080-2026-03-17">[0.8.0] - 2026-03-17</h2>
+<h3 id="added_2">Added</h3>
+<ul>
+<li><strong>On-target <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Z-scores</strong>: Panel mode now computes on-target/off-target <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> baselines
+  for <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>, <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>, and <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> features, providing clinically-scoped z-scores in panel assays.</li>
+<li><strong><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> On-target Output</strong>: <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> now emits a separate <code>.FSR.ontarget.tsv</code> file in panel mode.</li>
+<li><strong><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> Real Genomic Coordinates</strong>: Region labels now reflect true genomic window coordinates
+  instead of internal indices.</li>
+</ul>
+<h3 id="fixed_2">Fixed</h3>
+<ul>
+<li><strong>Output Format / Compress</strong>: All output files now correctly respect <code>--output-format</code> and
+  <code>--compress</code> flags (gzip compression, path handling, <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors loading).</li>
+<li><strong>Rust <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: Added missing <code>PathBuf</code> import; fixed path handling for correction
+  factor files.</li>
+<li><strong>Rust Clippy</strong>: Replaced manual string strip with <code>strip_suffix</code> (<code>manual_strip</code> lint).</li>
+</ul>
+<h3 id="documentation">Documentation</h3>
+<ul>
+<li>Corrected stale <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> column names in <code>concepts.md</code> and <code>json-output.md</code>.</li>
+<li>Updated <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> on-target output docs and window/panel-mode descriptions.</li>
+<li>Documented <code>_core.pyi</code> stub maintenance requirements.</li>
+</ul>
+<h3 id="ci">CI</h3>
+<ul>
+<li><strong>GitHub Actions Node.js 24</strong>: Bumped <code>actions/checkout</code> v4→v5, <code>actions/setup-python</code> v5→v6,
+  <code>actions/cache</code> v4→v5 to address Node.js 20 deprecation (enforced June 2, 2026).</li>
+</ul>
+<h2 id="070-2026-03-02">[0.7.0] - 2026-03-02</h2>
+<h3 id="added_3">Added</h3>
+<ul>
+<li><strong>Configurable Output Formats</strong>: <code>--output-format tsv|parquet|both</code> (default: <code>tsv</code>) controls
+  all tabular feature outputs. <code>--compress</code> gzip-compresses <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> outputs (<code>.tsv.gz</code>).
+  <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> outputs remain always-Parquet regardless of setting.</li>
+</ul>
+<h3 id="fixed_3">Fixed</h3>
+<ul>
+<li><strong>build-pon Intermediate Files</strong>: Explicitly force <code>output_format="tsv"</code> and <code>compress=False</code>
+  in all <code>process_sample()</code> calls within <code>build-pon</code> (both parallel and sequential paths).
+  Prevents silent failure if default output format changes — intermediate files are internal
+  scratch consumed by <code>pd.read_csv(sep="\t")</code>.</li>
+<li><strong>Feature Serializer</strong>: Include <code>mds_z</code> in JSON output for the <code>from_outputs()</code> code path.</li>
+<li><strong><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> Base File</strong>: <code>OCF.tsv</code> = all reads (on + off combined), not off-target.
+  <code>OCF.offtarget.tsv</code> is the true panel off-target score. Corrected in docs and code comments.</li>
+<li><strong>Rust wps.rs</strong>: Remove erroneous <code>*</code> dereference on <code>node.metadata</code> (E0614 — <code>usize</code> is Copy).</li>
+<li><strong>Rust gc_correction.rs</strong>: Prefix unused <code>valid_regions_path</code> param with <code>_</code> to silence
+  compiler warning; parameter retained for API symmetry.</li>
+<li><strong>MkDocs Snippets</strong>: Fix <code>--8&lt;-- "CHANGELOG.md"</code> / <code>--8&lt;-- "CONTRIBUTING.md"</code> broken includes
+  by changing <code>pymdownx.snippets.base_path</code> from scalar <code>docs</code> to list <code>['.', 'docs']</code> so
+  repo-root files resolve without path traversal blocked by CI deploy sandbox.</li>
+</ul>
+<h3 id="documentation_1">Documentation</h3>
+<ul>
+<li><strong>Post-0.6.0 Docs Audit</strong> (12 files, 7 issue categories):</li>
+<li>Fixed broken <code>--8&lt;-- "../CHANGELOG.md"</code> / <code>--8&lt;-- "../CONTRIBUTING.md"</code> snippet includes</li>
+<li>Corrected outdated "no global <code>--output-format</code> flag" note in <code>cli/run-all.md</code></li>
+<li>Updated <code>metadata.json</code> → <code>metadata.tsv</code> across 7 files (8 references total)</li>
+<li>Added <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> always-Parquet exception note to <code>reference/output-files.md</code></li>
+<li>Added build-pon intermediate <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> format note to <code>guides/building-pon.md</code></li>
+<li>Updated test count (248 → 244 + 4 skipped) and added CI lint steps to <code>developer-guide.md</code></li>
+<li>Added <code>--output_format</code> and <code>--compress</code> parameters to <code>nextflow/parameters.md</code></li>
+<li><strong>Output Format Options section</strong>: New section in <code>reference/output-files.md</code> documenting
+  <code>--output-format</code>, <code>--compress</code>, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> always-Parquet exception, and <code>--generate-json</code></li>
+<li><strong><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> Variant Clarification</strong>: Added 3-variant table and note block in <code>reference/output-files.md</code>
+  explaining <code>OCF.tsv</code> (all reads) vs <code>OCF.ontarget.tsv</code> vs <code>OCF.offtarget.tsv</code></li>
+<li><strong>docs/index.md</strong>: Replaced <code>:latest</code> Docker tag with explicit <code>:0.7.0</code> per release policy</li>
+</ul>
+<h3 id="ci_1">CI</h3>
+<ul>
+<li><strong>Lint Job</strong>: Added parallel <code>lint</code> job (<code>ruff · black · mypy · cargo clippy -- -D warnings</code>)
+  running alongside tests on all push/PR events</li>
+</ul>
+<h2 id="060-2026-02-28">[0.6.0] - 2026-02-28</h2>
+<h3 id="added_4">Added</h3>
+<ul>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> Base Quality Filtering</strong>: <code>--min-baseq</code> / <code>-Q</code> (default 20) gates variant evidence by base quality</li>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: Rust-native LOESS <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction for variant fragment size distributions</li>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> Duplex Weighting</strong>: Proper consensus fragment handling via <code>--duplex</code></li>
+<li><strong>Region <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> <code>--sample-name</code></strong>: Consistent output naming without post-hoc rename</li>
+<li><strong>Feature Serializer</strong>: Auto-load <code>fsc_counts</code>, <code>region_mds</code>, <code>uxm</code> in <code>from_outputs()</code></li>
+<li><strong>IRIS Batch Submission</strong>: <code>scripts/run_krewlyzer_iris.sh</code> for SLURM/IRIS cluster runs with <code>--generate_json</code></li>
+<li><strong>nf-core Institutional Configs</strong>: <code>custom_config_base</code> param and IRIS profile support</li>
+<li><strong>Versioned Documentation</strong>: Implemented <code>mike</code> for dev/stable doc versions</li>
+<li><strong>Nextflow mfsd Module</strong>: Full standalone params (<code>--reference</code>, <code>--correction-factors</code>, <code>--mapq</code>, <code>--minlen</code>, <code>--maxlen</code>, <code>--min-baseq</code>, <code>--duplex</code>, <code>--no-skip-duplicates</code>)</li>
+<li><strong>Nextflow runall</strong>: <code>fsc_counts.tsv</code> output declaration, <code>--min-baseq</code> wired</li>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> Integration Tests</strong>: 161 lines of new test coverage</li>
+</ul>
+<h3 id="fixed_4">Fixed</h3>
+<ul>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> MAF Parsing</strong>: Header-based column lookup (fixes column-index mismatch with different MAF flavors)</li>
+<li><strong>Nextflow FILTER_MAF</strong>: Complete overhaul — eliminated join operator blocking, replaced regex with substring match, fixed SyntaxError in versions.yml, dynamic maxForks for SLURM</li>
+<li><strong>Nextflow Workflow Streaming</strong>: Fixed RUNALL blocking from <code>remainder:true</code>, <code>failOnMismatch</code>, channel round-robin; used <code>multiMap</code> for proper routing</li>
+<li><strong>Nextflow RUNALL Outputs</strong>: Added 14 output declarations, fixed BreakPointMotif casing, explicit publishDir</li>
+<li><strong>Region <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> Nextflow</strong>: <code>--sample-name</code> replaces <code>mv</code> workaround</li>
+<li><strong>Nextflow Config</strong>: Executor queueSize placement, <code>-qs</code> CLI flag, global publishDir removal</li>
+<li><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> CLI Tests</strong>: Fixed <code>--input</code> flag (was positional arg) — recovered 2 skipped tests</li>
+<li><strong>Pandas FutureWarning</strong>: Fixed <code>pd.concat</code> with all-NA columns in <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> test fixture</li>
+</ul>
+<h3 id="changed_2">Changed</h3>
+<ul>
+<li><strong>Code Quality</strong>: Black formatted 71 files, ruff fixed 129 lint errors, cargo clippy applied</li>
+<li><strong>Ruff Config</strong>: Added <code>[tool.ruff]</code> to <code>pyproject.toml</code> with documented E402/F821 ignores</li>
+<li><strong>Agent Config</strong>: <code>.agent/</code> → <code>.agent/rules/</code> with <code>alwaysApply</code> frontmatter</li>
+</ul>
+<h3 id="documentation_2">Documentation</h3>
+<ul>
+<li><strong>45-item Audit</strong>: Corrections across 25 doc files including <code>.csv</code>→<code>.tsv</code> (7 files), <code>.WPS.tsv.gz</code>→<code>.parquet</code> (3 files), phantom <code>--output-format</code> removed, Docker versions→<code>X.Y.Z</code>, parameters.md 12→28, outputs.md 14→41, JSON schema corrected, developer guide Rust table 10→19, architecture pipeline signature updated</li>
+<li><strong>PDF Embedding</strong>: Fixed rendering with mkdocs-pdf plugin</li>
+</ul>
+<h2 id="053-2026-02-06">[0.5.3] - 2026-02-06</h2>
+<h3 id="documentation_3">Documentation</h3>
+<ul>
+<li><strong>Admonition Formatting</strong>: Converted blockquotes to proper MkDocs admonitions across 10+ docs files for consistent styling</li>
+<li><strong>Table Rendering</strong>: Fixed tables not rendering by adding required blank lines before table headers</li>
+<li><strong>LaTeX Formulas</strong>: Fixed underscore escaping in math blocks (<abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>, <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> formulas)</li>
+<li><strong>Abbreviations</strong>: Added glossary with auto-append for consistent acronym tooltips (<abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr>, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, etc.)</li>
+<li><strong>Docs CI</strong>: Added PR validation trigger with <code>mkdocs build --strict</code> to catch issues before deployment</li>
+</ul>
+<h2 id="052-2026-02-05">[0.5.2] - 2026-02-05</h2>
+<h3 id="added_5">Added</h3>
+<ul>
+<li><strong>Dual <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> Support (<abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>)</strong>: New <code>--mfsd-bam</code> parameter in <code>run-all</code> to use a dedicated duplex <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> while other features use the main all_unique <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr></li>
+<li>Auto-duplex detection from filename patterns (<code>-duplex</code>, <code>_duplex</code>, <code>.duplex</code>)</li>
+<li>Startup banner shows <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> path when specified</li>
+<li>Nextflow: Added <code>mfsd_bam</code> column to samplesheet schema</li>
+</ul>
+<h3 id="fixed_5">Fixed</h3>
+<ul>
+<li><strong>Correction Factors Loading</strong>: Fixed delimiter detection for <code>.correction_factors.tsv</code> files (CSV format with <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> extension)</li>
+</ul>
+<h3 id="documentation_4">Documentation</h3>
+<ul>
+<li><strong>Release Guide</strong>: Added version format note (use <code>0.5.2</code> not <code>v0.5.2</code> in code)</li>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> docs</strong>: Updated with dual <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> workflow examples</li>
+<li><strong>Samplesheet docs</strong>: Added <code>mfsd_bam</code> column documentation</li>
+<li><strong>Footer</strong>: Added site footer with author attribution and Antigravity acknowledgment</li>
+<li><strong>Theme</strong>: Changed color scheme to blood-red (#ef5552) to match "krew" (blood) branding</li>
+</ul>
+<h2 id="051-2026-02-04">[0.5.1] - 2026-02-04</h2>
+<h3 id="fixed_6">Fixed</h3>
+<ul>
+<li><strong>Docker Image</strong>: Data folder now bundled in container (was missing in 0.5.0)</li>
+<li><strong>CI Tests</strong>: Tests requiring bundled data now skip in PyPI installs via <code>@requires_data</code> marker</li>
+</ul>
+<h3 id="changed_3">Changed</h3>
+<ul>
+<li><strong>Docker Tags</strong>: Use versioned tags only (e.g., <code>:0.5.1</code>); no <code>:latest</code> tag published</li>
+</ul>
+<h3 id="documentation_5">Documentation</h3>
+<ul>
+<li><strong>Installation</strong>: Added Singularity/Apptainer section for <abbr title="High-Performance Computing - Cluster computing environment">HPC</abbr> clusters</li>
+<li><strong>Installation</strong>: Clarified Docker uses release tags, not <code>:latest</code></li>
+<li><strong>Nextflow Examples</strong>: Added IRIS <abbr title="High-Performance Computing - Cluster computing environment">HPC</abbr> cluster profile example (<code>-profile iris</code>)</li>
+<li><strong>Testing Guide</strong>: Added Data Availability section explaining PyPI vs source</li>
+<li><strong>Structure</strong>: Moved Changelog to Development section; removed duplicate files</li>
+<li><strong>Mermaid Diagrams</strong>: Upgraded to <code>mkdocs-mermaid2</code> plugin for theme-aware rendering</li>
+<li><strong>Removed</strong>: Full-site PDF export (unreliable rendering)</li>
+</ul>
+<h2 id="050-2026-02-02">[0.5.0] - 2026-02-02</h2>
+<h3 id="added_6">Added</h3>
+<h4 id="pon-framework"><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Framework</h4>
+<ul>
+<li><strong><code>build-pon</code> command</strong>: Generate <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> models from cohort samples with <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>/<abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>/<abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>/<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> baselines</li>
+<li><strong>Bundled <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> assets</strong>: Pre-computed xs1/xs2 <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> models for <code>all_unique</code> and <code>duplex</code> variants</li>
+<li><strong><code>--pon-variant</code> flag</strong>: Select between <code>all_unique</code> (max coverage) or <code>duplex</code> (highest accuracy) <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> models</li>
+<li><strong>Duplex tag warning</strong>: <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> warns when <code>--duplex</code> is used but no cD tags found in <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr></li>
+</ul>
+<h4 id="panel-mode-msk-access">Panel Mode (MSK-ACCESS)</h4>
+<ul>
+<li><strong>Assay-aware asset resolution</strong>: Auto-load targets, anchors, <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> via <code>-A/--assay xs1|xs2</code></li>
+<li><strong>On/Off-target splitting</strong>: All tools produce separate <code>.ontarget.tsv</code> outputs</li>
+<li><strong>Gene-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr></strong>: New <code>{sample}.FSC.gene.tsv</code> and <code>{sample}.FSC.regions.e1only.tsv</code></li>
+<li><strong>Bait edge masking</strong>: <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> <code>--bait-padding</code> to remove capture artifacts</li>
+<li><strong><code>--skip-target-regions</code></strong>: Force WGS mode for panel assays</li>
+</ul>
+<h4 id="duplex-sequencing">Duplex Sequencing</h4>
+<ul>
+<li><strong><code>--duplex</code> flag (<abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>)</strong>: Enable family size (cD tag) weighting for duplex BAMs</li>
+<li><strong>LLR scoring</strong>: Log-likelihood ratio classification for cross-species support</li>
+<li><strong><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr></strong>: 5 new <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected mean fragment size columns</li>
+</ul>
+<h4 id="region-based-analysis">Region-Based Analysis</h4>
+<ul>
+<li><strong>Region Entropy</strong>: <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> dual-output architecture with per-cluster entropy</li>
+<li><strong>Region <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr></strong>: Per-gene Motif Diversity Score with E1-only filtering</li>
+<li><strong>Rust backend</strong>: New <code>region_entropy.rs</code> for high-performance calculation</li>
+</ul>
+<h4 id="feature-enhancements">Feature Enhancements</h4>
+<ul>
+<li><strong>Jagged Index</strong>: 1-mer End Motif analysis with C-end fraction</li>
+<li><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> v2.0</strong>: Hierarchical stacking, extended anchors, panel-specific normalization</li>
+<li><strong>Output formats</strong>: <code>--format</code> flag (tsv/parquet/json) for all tools</li>
+<li><strong><code>--generate-json</code></strong>: Unified JSON export with all features</li>
+</ul>
+<h4 id="infrastructure">Infrastructure</h4>
+<ul>
+<li><strong>Git LFS</strong>: Large files (.gz, .parquet, .bed) tracked via git-lfs</li>
+<li><strong>BGZF compression</strong>: All <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> outputs use block-gzip format</li>
+<li><strong><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> references</strong>: Pre-computed Parquet format for GRCh37/GRCh38</li>
+<li><strong>Unified processor</strong>: Single-pass Rust pipeline for Extract→Motif→<abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>→<abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>→<abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>→<abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr></li>
+</ul>
+<h3 id="changed_4">Changed</h3>
+<h4 id="nextflow-pipeline">Nextflow Pipeline</h4>
+<ul>
+<li><strong>nf-core compliance</strong>: Refactored to shared INPUT_CHECK subworkflow</li>
+<li><strong>KREWLYZER_RUNALL</strong>: Unified module with 30+ output channels</li>
+<li><strong><code>pon_variant</code> parameter</strong>: New pipeline parameter (default: <code>all_unique</code>)</li>
+</ul>
+<h4 id="cli">CLI</h4>
+<ul>
+<li><strong>9 tools with <code>--pon-variant</code></strong>: run-all, fsc, fsd, fsr, wps, ocf, motif, region-entropy, region-mds</li>
+<li><strong>Centralized asset resolution</strong>: <code>resolve_pon_model()</code> and <code>resolve_target_regions()</code></li>
+<li><strong>Filter flags</strong>: <code>--mapq</code>, <code>--minlen</code>, <code>--maxlen</code>, <code>--skip-duplicates</code>, <code>--require-proper-pair</code></li>
+<li><strong>Parallel processing</strong>: <code>--threads</code> option across all tools</li>
+</ul>
+<h4 id="data-assets">Data &amp; Assets</h4>
+<ul>
+<li><strong>Terminology</strong>: Renamed "blacklist" to "exclude_regions" for inclusive language</li>
+<li><strong>Directory structure</strong>: <code>data/{type}/{genome}/{variant}/</code> for organized assets</li>
+<li><strong>Memory optimization</strong>: Parallel sample processing with spawn context in build-pon</li>
+</ul>
+<h3 id="fixed_7">Fixed</h3>
+<ul>
+<li><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>: Filter discordant reads with extreme TLEN values</li>
+<li><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>: Fix verbose mode hanging by moving debug logging outside parallel loop</li>
+<li>Proper pair detection for legacy BAMs without proper pair flags</li>
+<li><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction for gene-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> in panel mode</li>
+<li>CIGAR handling improvements for INDELs and complex variants</li>
+<li><abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> extraction for v1 ACCESS and bgzip output format</li>
+</ul>
+<h3 id="documentation_6">Documentation</h3>
+<ul>
+<li><strong>11 docs updated</strong>: <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Variant Selection across pon.md, pipeline.md, usage.md, feature docs</li>
+<li><strong>Release Guide</strong>: New <code>docs/advanced/release-guide.md</code> for version release process</li>
+<li><strong>Math rendering</strong>: LaTeX formulas in all feature documentation</li>
+<li><strong>Glossary</strong>: New terms and definitions</li>
+</ul>
+<h3 id="tests">Tests</h3>
+<ul>
+<li><strong>28 new test files</strong>: Unit, integration, and e2e coverage</li>
+<li><strong>4 <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> variant tests</strong>: test_asset_resolution.py</li>
+<li><strong>Real data tests</strong>: test_real_data.py for end-to-end validation</li>
+</ul>
+<h2 id="032-2025-12-18">[0.3.2] - 2025-12-18</h2>
+<h3 id="fixed_8">Fixed</h3>
+<ul>
+<li><strong>CI Build</strong>: Removed <code>gfortran</code> and <code>scikit-misc</code> - <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction now fully in Rust</li>
+<li><strong><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: Added <code>--gc-correct/--no-gc-correct</code> and <code>--verbose</code> flags to <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> CLI</li>
+<li><strong>Python LOESS Removed</strong>: Removed <code>gc_correct()</code> from <code>helpers.py</code> and <code>postprocess.py</code></li>
+</ul>
+<h3 id="changed_5">Changed</h3>
+<ul>
+<li><strong>Dockerfile</strong>: Removed <code>gfortran</code> dependency (no longer needed)</li>
+<li><strong>GitHub Actions</strong>: Removed <code>gfortran</code> from CI workflows</li>
+<li><strong>Nextflow Modules</strong>: Updated all container versions to <code>0.3.2</code></li>
+</ul>
+<h2 id="031-2025-12-18">[0.3.1] - 2025-12-18</h2>
+<h3 id="added_7">Added</h3>
+<ul>
+<li><strong>Rust LOESS <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: New <code>rust/src/gc_correction.rs</code> module using the <code>lowess</code> crate</li>
+<li>Per-fragment-type correction (short, intermediate, long)</li>
+<li>Configurable LOESS parameters (fraction, iterations, delta)</li>
+<li><strong><abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: <code>--gc-correct/--no-gc-correct</code> flag (default: <strong>True</strong>)</li>
+<li>Uses corrected counts from Rust before calculating ratios</li>
+<li><code>--verbose</code> flag for detailed logging</li>
+<li><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</strong>: <code>--gc-correct/--no-gc-correct</code> flag (default: <strong>True</strong>)</li>
+<li><code>--reference, -r</code>: Reference FASTA for computing region <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> content</li>
+<li>FASTA-based <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> computation using rust-htslib::faidx</li>
+<li>Graceful fallback if reference not provided</li>
+</ul>
+<h3 id="changed_6">Changed</h3>
+<ul>
+<li><strong><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Rust Backend</strong>: Added <code>count_fragments_gc_corrected()</code> function for integrated <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction</li>
+<li><strong><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Rust Backend</strong>: Updated <code>calculate_wps()</code> with <code>reference_path</code>, <code>gc_correct</code>, <code>verbose</code> parameters</li>
+<li><strong>lowess Dependency</strong>: Updated from 0.3 to 0.4 for improved API</li>
+</ul>
+<h3 id="documentation_7">Documentation</h3>
+<ul>
+<li>Updated <code>docs/features/fsr.md</code> and <code>docs/features/wps.md</code> with <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction options</li>
+</ul>
+<h2 id="030-2025-12-16">[0.3.0] - 2025-12-16</h2>
+<h3 id="added_8">Added</h3>
+<ul>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> Variant Type Support</strong>: Now handles all small variant types:</li>
+<li>SNV (single nucleotide)</li>
+<li>MNV (multi-nucleotide)</li>
+<li>Insertion</li>
+<li>Deletion</li>
+<li>Complex (substitution + indel)</li>
+<li><strong>4-Way Fragment Classification</strong>: Fragments classified as REF, ALT, NonREF, or N (low quality)</li>
+<li><strong>Comprehensive Statistics</strong>: 6 pairwise KS comparisons (ALT-REF, ALT-NonREF, etc.)</li>
+<li><strong>Derived Metrics</strong>: VAF_Proxy, Error_Rate, N_Rate, Size_Ratio, Quality_Score</li>
+<li><strong>Quality Flags</strong>: ALT_Confidence (HIGH/LOW/NONE), KS_Valid</li>
+<li><strong>Distributions Output</strong>: <code>--output-distributions</code> flag generates per-variant size distributions</li>
+<li><strong>Verbose Logging</strong>: <code>--verbose</code> flag for debug-level logging with variant type breakdown</li>
+<li><strong>MRD Support</strong>: Proper handling of low fragment counts (1-2) common in MRD settings</li>
+</ul>
+<h3 id="changed_7">Changed</h3>
+<ul>
+<li><strong>BREAKING</strong>: <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> output format changed from 11 columns to 39 columns</li>
+<li><strong>Nextflow MFSD</strong>: Distributions and verbose logging enabled by default</li>
+<li><strong>Fragment Counting</strong>: Now counts fragments (R1 only) instead of reads to avoid double-counting</li>
+</ul>
+<h3 id="fixed_9">Fixed</h3>
+<ul>
+<li><strong>CIGAR Handling</strong>: Improved sequence extraction for INDELs and complex variants</li>
+</ul>
+<h2 id="023-2025-12-16">[0.2.3] - 2025-12-16</h2>
+<h3 id="changed_8">Changed</h3>
+<ul>
+<li><strong>Nextflow Pipeline</strong>: Added <code>FILTER_MAF</code> module for multi-sample MAF filtering:</li>
+<li>New <code>maf</code> and <code>single_sample_maf</code> columns in samplesheet</li>
+<li>Filters MAF by <code>Tumor_Sample_Barcode</code> matching sample ID (regex: <code>.*sample_id.*</code>)</li>
+<li><code>single_sample_maf=true</code> bypasses filtering for per-sample MAFs</li>
+<li>Skips MFSD when filtered MAF has zero variants (with warning)</li>
+<li>Memory-efficient streaming for large MAF files (100s of MBs)</li>
+<li>Outputs filtered MAF + <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> results</li>
+<li><strong>Nextflow Modules</strong>: Updated all container versions to <code>0.2.3</code></li>
+</ul>
+<h2 id="022-2025-12-15">[0.2.2] - 2025-12-15</h2>
+<h3 id="changed_9">Changed</h3>
+<ul>
+<li><strong>Project Structure</strong>: Migrated to recommended maturin "src layout" for better Python/Rust separation:</li>
+<li>Python code moved from <code>krewlyzer/</code> to <code>src/krewlyzer/</code></li>
+<li>Rust code moved from <code>krewlyzer-core/</code> to <code>rust/</code></li>
+<li>Single <code>rust/Cargo.toml</code> (removed duplicate root <code>Cargo.toml</code>)</li>
+<li>Rust module now imports as <code>krewlyzer._core</code> (private)</li>
+<li><strong>Dockerfile</strong>: Rewritten as multi-stage build for smaller image size (~200MB vs ~1GB); amd64 only</li>
+<li><strong>OCI Labels</strong>: Added container metadata for GitHub Container Registry</li>
+</ul>
+<h3 id="fixed_10">Fixed</h3>
+<ul>
+<li><strong>Distribution Compatibility</strong>: Updated release workflow to build <code>manylinux_2_28</code> wheels (compatible with RHEL 8+, AlmaLinux 8, etc.)</li>
+<li><strong>Source Builds</strong>: Included <code>clang</code> and <code>llvm-devel</code> in build environment for <code>bindgen</code>/<code>hts-sys</code></li>
+<li><strong>Docker Build</strong>: Added <code>patchelf</code> to maturin installation for Linux wheel building</li>
+<li><strong>Test Imports</strong>: Updated test files to use new <code>krewlyzer._core</code> import path</li>
+<li><strong>CI OpenSSL</strong>: Use system OpenSSL (<code>OPENSSL_NO_VENDOR=1</code>) instead of building from source</li>
+<li><strong>CI Python Versions</strong>: Build wheels for Python 3.10, 3.11, 3.12 in release workflow</li>
+<li><strong>Documentation</strong>: Updated logo paths for new <code>src/</code> layout</li>
+</ul>
+<h2 id="021-2025-12-15">[0.2.1] - 2025-12-15</h2>
+<h3 id="fixed_11">Fixed</h3>
+<ul>
+<li><strong>Rust Compilation</strong>: Resolved cross-platform build issues with <code>coitrees</code> metadata types (<code>usize</code> vs <code>&amp;usize</code>) by using explicit <code>.to_owned()</code> conversion. </li>
+<li><strong>CI Build</strong>: Added <code>gfortran</code>, <code>clang</code>, and <code>libclang-dev</code> to CI workflows to fix <code>scikit-misc</code> and <code>rust-htslib</code> compilation failures.</li>
+<li><strong>Permission Errors</strong>: CI scripts now robustly handle <code>sudo</code> permissions when installing system dependencies.</li>
+</ul>
+<h2 id="020-2025-12-12">[0.2.0] - 2025-12-12</h2>
+<h3 id="added_9">Added</h3>
+<ul>
+<li><strong>Unified Engine</strong>: New high-performance Rust core (<code>krewlyzer-core</code>) that processes Extract, Motif, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>, <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, and <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> in a single parallelized pass.</li>
+<li><strong>Fragment Extraction</strong>: dedicated <code>extract</code> command (via Rust) to convert <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> to <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with configurable filters.</li>
+<li><strong>Extract Documentation</strong>: New <code>docs/features/extract.md</code> detailing extraction logic and JSON metadata.</li>
+<li><strong>Calculation Details</strong>: Comprehensive formulas and interpretation guides added to all feature documentation.</li>
+<li><strong>Root Cargo.toml</strong>: Added to support standard <code>maturin</code> builds for the hybrid Python-Rust package.</li>
+</ul>
+<h3 id="changed_10">Changed</h3>
+<ul>
+<li><strong>Performance</strong>: Significant speedup (3-4x) for end-to-end analysis due to multi-threaded processing and single-pass I/O.</li>
+<li><strong>Build System</strong>: Migrated to <code>maturin</code> backend for robust Rust extension compilation.</li>
+<li><strong>CLI (<code>run-all</code>)</strong>: Now defaults to the Unified Engine.</li>
+<li><strong>CLI Filters</strong>: Added <code>--mapq</code>, <code>--minlen</code>, <code>--maxlen</code>, <code>--skip-duplicates</code>, <code>--require-proper-pair</code> flags to <code>run-all</code>, <code>extract</code>, and <code>motif</code>.</li>
+<li><strong>Motif Outputs</strong>: Renamed output files to use <code>.tsv</code> extension consistently (e.g., <code>{sample}.EndMotif.tsv</code>).</li>
+<li><strong>Data Handling</strong>: <code>motif</code> now uses the unified engine, eliminating the need for <code>bedtools</code> binary entirely.</li>
+<li><strong>Documentation</strong>: Updated <code>README.md</code>, <code>usage.md</code>, and <code>pipeline.md</code> to reflect the new workflow.<ul>
+<li>Corrected <code>pipeline.md</code> samplesheet format documentation to match Nextflow schema.</li>
+<li>Updated <code>usage.md</code> and feature docs to correctly specify output directory arguments.</li>
+</ul>
+</li>
+</ul>
+<h3 id="fixed_12">Fixed</h3>
+<ul>
+<li><strong>Test Suite</strong>: Cleaned up <code>tests/</code> directory, removing obsolete scripts and fixing integration tests (<code>test_science.py</code>, <code>test_run_all_unified_wrapper.py</code>).</li>
+<li><strong>Validation</strong>: Fixed <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> header issues in tests.</li>
+</ul>
+<h3 id="removed">Removed</h3>
+<ul>
+<li><strong>Legacy Python Backends</strong>: Removed pure Python implementations of <code>extract</code>, <code>motif</code>, <code>fsc</code>, <code>fsd</code>, ensuring all paths use the unified Rust core.</li>
+<li><strong>Validation Artifacts</strong>: Deleted temporary validation scripts and data.</li>
+</ul>
+<h2 id="017-2025-11-26">[0.1.7] - 2025-11-26</h2>
+<h3 id="fixed_13">Fixed</h3>
+<ul>
+<li><strong>PyPI Metadata</strong>: Added <code>readme</code> and <code>license</code> fields to <code>pyproject.toml</code> to ensure the long description is correctly displayed on PyPI.</li>
+</ul>
+<h2 id="016-2025-11-26">[0.1.6] - 2025-11-26</h2>
+<h3 id="fixed_14">Fixed</h3>
+<ul>
+<li><strong>Docker Build</strong>: Removed <code>libatlas-base-dev</code> dependency from <code>Dockerfile</code> as it is not available in the <code>python:3.10-slim</code> (Debian Trixie) base image.</li>
+</ul>
+<h2 id="015-2025-11-26">[0.1.5] - 2025-11-26</h2>
+<h3 id="fixed_15">Fixed</h3>
+<ul>
+<li><strong>Docker Publishing</strong>: Switched to <code>GITHUB_TOKEN</code> for GHCR authentication to fix permission issues.</li>
+<li><strong>PyPI Publishing</strong>: Added <code>skip-existing: true</code> to handle existing versions gracefully.</li>
+<li><strong>CI/CD</strong>: Added build checks for Python package and Docker image to PR workflows.</li>
+</ul>
+<h2 id="014-2025-11-26">[0.1.4] - 2025-11-26</h2>
+<h3 id="fixed_16">Fixed</h3>
+<ul>
+<li><strong>Test Dependencies</strong>: Removed unused <code>pybedtools</code> imports from <code>fsr.py</code>, <code>fsd.py</code>, <code>uxm.py</code>, and <code>fsc.py</code> which were causing <code>ImportError</code> in CI environments where <code>pybedtools</code> is not installed.</li>
+</ul>
+<h2 id="013-2025-11-26">[0.1.3] - 2025-11-26</h2>
+<h3 id="changed_11">Changed</h3>
+<ul>
+<li><strong>Dependency Reduction</strong>: Removed <code>pybedtools</code> dependency.</li>
+<li><strong>Refactor</strong>: <code>motif.py</code> now uses <code>pandas</code> for blacklist filtering and sorting, removing the need for <code>bedtools</code> binary.</li>
+<li><strong>CI/CD</strong>: Added <code>pytest</code> and <code>pytest-mock</code> to <code>test</code> optional dependencies in <code>pyproject.toml</code>.</li>
+</ul>
+<h2 id="012-2025-11-26">[0.1.2] - 2025-11-26</h2>
+<h3 id="added_10">Added</h3>
+<ul>
+<li><strong>Mutant Fragment Size Distribution (<code>mfsd</code>)</strong>: New module to compare fragment size distributions of mutant vs. wild-type reads using VCF/MAF input.</li>
+<li><strong>Enhanced Fragment Size Ratios (<code>fsr</code>)</strong>: Added "Ultra-Short" (&lt;100bp) ratio bin.</li>
+<li><strong>Documentation</strong>: Comprehensive MkDocs website (<code>docs/</code>) with material theme.</li>
+<li><strong>Pipeline</strong>: <code>run-all</code> command now supports <code>--variant-input</code> for <code>mfsd</code> analysis.</li>
+<li><strong>Nextflow</strong>: Pipeline updated to support optional variant input in samplesheet.</li>
+</ul>
+<h3 id="changed_12">Changed</h3>
+<ul>
+<li>Updated <code>README.md</code> to point to the new documentation site.</li>
+<li>Added <code>mkdocs</code> and <code>mkdocs-material</code> as optional dependencies.</li>
+</ul>
+<!-- Abbreviation definitions for Krewlyzer documentation -->
+<!-- These provide hover tooltips for technical acronyms -->
+<aside class="md-source-file">
+<span class="md-source-file__fact">
+<span class="md-icon" title="Last update">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
+</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 3, 2026 03:42:10 UTC"><span class="timeago" datetime="2026-03-03T03:42:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 3, 2026 03:42:10 UTC">2026-03-03</span>
+</span>
+<span class="md-source-file__fact">
+<span class="md-icon" title="Created">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M14.47 15.08 11 13V7h1.5v5.25l3.08 1.83c-.41.28-.79.62-1.11 1m-1.39 4.84c-.36.05-.71.08-1.08.08-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8c0 .37-.03.72-.08 1.08.69.1 1.33.32 1.92.64.1-.56.16-1.13.16-1.72 0-5.5-4.5-10-10-10S2 6.5 2 12s4.47 10 10 10c.59 0 1.16-.06 1.72-.16-.32-.59-.54-1.23-.64-1.92M18 15v3h-3v2h3v3h2v-3h3v-2h-3v-3z"></path></svg>
+</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="December 25, 2025 06:50:19 UTC"><span class="timeago" datetime="2025-12-25T06:50:19+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="December 25, 2025 06:50:19 UTC">2025-12-25</span>
+</span>
+</aside>
+</article>
+</div>
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+</div>
+<button class="md-top md-icon" data-md-component="top" hidden="" type="button">
+<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"></path></svg>
+  Back to top
+</button>
+</main>
+<footer class="md-footer">
+<div class="md-footer-meta md-typeset">
+<div class="md-footer-meta__inner md-grid">
+<div class="md-copyright">
+<div class="md-copyright__highlight">
+      Developed by <a href="https://github.com/rhshah">Ronak H Shah</a> @ 
+<a href="https://www.mskcc.org">MSKCC</a> | 
+Built with <a href="https://antigravity.google/">Antigravity</a> | 
+<a href="https://github.com/msk-access/krewlyzer/blob/main/LICENSE">AGPL-3.0</a>
+</div>
+</div>
+<div class="md-social">
+<a class="md-social__link" href="https://github.com/msk-access/krewlyzer" rel="noopener" target="_blank" title="github.com">
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"></path></svg>
+</a>
+</div>
+</div>
+</div>
+</footer>
+</div>
+<div class="md-dialog" data-md-component="dialog">
+<div class="md-dialog__inner md-typeset"></div>
+</div>
+<script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.path", "toc.follow", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "stable", "provider": "mike"}}</script>
+<script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../js/timeago.min.js"></script>
+<script src="../../js/timeago_mkdocs_material.js"></script>
+<script src="../../javascripts/mathjax.js"></script>
+<script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+<script src="../../assets/javascripts/panzoom.min.js"></script>
+<script src="../../assets/javascripts/zoompan.js"></script>
+
+<script id="init-glightbox">const lightbox = GLightbox({"touchNavigation": true, "loop": false, "zoomable": true, "draggable": true, "openEffect": "zoom", "closeEffect": "zoom", "slideEffect": "slide"});
+document$.subscribe(()=>{ lightbox.reload(); });
+</script></body></html>
