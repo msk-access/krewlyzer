@@ -186,9 +186,11 @@ def region_mds(
 
     output_exon_base = output / f"{sample_name}.MDS.exon"
     output_gene_base = output / f"{sample_name}.MDS.gene"
-    # Rust expects .tsv paths for its initial write; Parquet added by Python after
-    output_exon = output_exon_base.with_suffix(".tsv")
-    output_gene = output_gene_base.with_suffix(".tsv")
+    # Rust expects .tsv paths for its initial write; Parquet added by Python after.
+    # IMPORTANT: Do NOT use .with_suffix() — compound names like "MDS.exon" would
+    # have ".exon" replaced by ".tsv", giving "MDS.tsv" instead of "MDS.exon.tsv".
+    output_exon = output_exon_base.parent / (output_exon_base.name + ".tsv")
+    output_gene = output_gene_base.parent / (output_gene_base.name + ".tsv")
 
     # ═══════════════════════════════════════════════════════════════════
     # STARTUP BANNER
@@ -288,8 +290,7 @@ def region_mds(
                         output_format=output_format,
                         compress=compress,
                     )
-                    # Clean up Rust-produced gene TSV (output_gene may differ from
-                    # output_gene_base due to Python with_suffix() behaviour)
+                    # Clean up Rust-produced gene TSV after write_table re-wrote it
                     cleanup_intermediate_tsv(output_gene, output_format, compress)
 
                     n_with_z = sum(
@@ -300,13 +301,11 @@ def region_mds(
         except Exception as e:
             logger.warning(f"PON z-score computation failed: {e}")
 
-    # Write exon output in the selected format (Rust already wrote TSV; add Parquet/both)
-    logger.debug(
-        f"region_mds: post-process exon output (format={output_format!r}, compress={compress})"
-    )
-    if output_format != "tsv":
+    # Post-process exon output: convert format and/or compress.
+    # Rust writes raw TSV; Python converts to Parquet/both/gzip as requested.
+    if output_format != "tsv" or compress:
         logger.debug(
-            f"region_mds: converting {output_exon.name} → format={output_format!r}"
+            f"region_mds: converting {output_exon.name} → format={output_format!r}, compress={compress}"
         )
         df_exon = read_table(output_exon)
         if df_exon is not None:
@@ -316,11 +315,35 @@ def region_mds(
                 output_format=output_format,
                 compress=compress,
             )
-            # Clean up Rust-produced exon TSV after format conversion
+            # Clean up Rust-produced exon TSV after write_table re-wrote it
             cleanup_intermediate_tsv(output_exon, output_format, compress)
         else:
             logger.warning(
                 f"region_mds: could not read {output_exon.name} for format conversion"
+            )
+
+    # Post-process gene output: convert format and/or compress.
+    # When PON z-scores are added (above), write_table already handles format
+    # conversion. This block ensures conversion also happens when no PON is
+    # provided, PON load fails, or PON lacks region_mds baseline.
+    # Re-converting an already-converted file is safe (read_table/write_table
+    # is idempotent).
+    if output_format != "tsv" or compress:
+        logger.debug(
+            f"region_mds: converting {output_gene.name} → format={output_format!r}, compress={compress}"
+        )
+        df_gene = read_table(output_gene)
+        if df_gene is not None:
+            write_table(
+                df_gene,
+                output_gene_base,
+                output_format=output_format,
+                compress=compress,
+            )
+            cleanup_intermediate_tsv(output_gene, output_format, compress)
+        else:
+            logger.warning(
+                f"region_mds: could not read {output_gene.name} for format conversion"
             )
 
     return n_regions, n_genes

@@ -492,9 +492,11 @@ def write_motif_outputs(
     edm_base = output_dir / f"{sample}.EndMotif"
     bpm_base = output_dir / f"{sample}.BreakPointMotif"
     mds_base = output_dir / f"{sample}.MDS"
-    edm_output = edm_base.with_suffix(ext)
-    bpm_output = bpm_base.with_suffix(ext)
-    mds_output = mds_base.with_suffix(ext)
+    # IMPORTANT: Do NOT use .with_suffix(ext) — compound names like "EndMotif"
+    # would have ".EndMotif" replaced, giving "P-XXX.tsv" instead of "P-XXX.EndMotif.tsv".
+    edm_output = edm_base.parent / (edm_base.name + ext)
+    bpm_output = bpm_base.parent / (bpm_base.name + ext)
+    mds_output = mds_base.parent / (mds_base.name + ext)
 
     logger.info(f"Writing motif outputs for {sample}")
 
@@ -523,19 +525,24 @@ def write_motif_outputs(
         mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
         logger.debug(f"  MDS z-score: {mds_z:.3f}")
 
-        # Append z-score to MDS file (Parquet-first read, same-format write)
+        # Append z-score to MDS file (read output, add column, re-write to base)
         try:
             mds_df = read_table(mds_output)
             if mds_df is not None and "mds_z" not in mds_df.columns:
                 mds_df["mds_z"] = mds_z
                 write_table(
                     mds_df,
-                    Path(mds_output).with_suffix(""),
+                    mds_base,
                     output_format=output_format,
                     compress=compress,
                 )
+                logger.debug(f"  Appended mds_z={mds_z:.3f} to {mds_output.name}")
+            elif mds_df is None:
+                logger.warning(
+                    f"  Could not read {mds_output.name} to append MDS z-score"
+                )
         except Exception as e:
-            logger.debug(f"  Could not add MDS z-score: {e}")
+            logger.warning(f"  Could not add MDS z-score: {e}")
 
     # Write on-target motif files (panel mode)
     if (
@@ -560,9 +567,10 @@ def write_motif_outputs(
             compress=compress,
         )
 
-        outputs["edm_ontarget"] = edm_on_base.with_suffix(ext)
-        outputs["bpm_ontarget"] = bpm_on_base.with_suffix(ext)
-        outputs["mds_ontarget"] = mds_on_base.with_suffix(ext)
+        # See compound-extension note above (L495-497)
+        outputs["edm_ontarget"] = edm_on_base.parent / (edm_on_base.name + ext)
+        outputs["bpm_ontarget"] = bpm_on_base.parent / (bpm_on_base.name + ext)
+        outputs["mds_ontarget"] = mds_on_base.parent / (mds_on_base.name + ext)
 
         logger.debug(
             f"  On-target: {total_em_on:,} EM, {total_bpm_on:,} BPM, MDS={mds_on_val:.4f}"
@@ -587,8 +595,9 @@ def write_motif_outputs(
                 )
 
                 # Append z-score to on-target MDS file
+                mds_on_output = mds_on_base.parent / (mds_on_base.name + ext)
                 try:
-                    mds_on_df = read_table(mds_on_base.with_suffix(ext))
+                    mds_on_df = read_table(mds_on_output)
                     if mds_on_df is not None and "mds_z" not in mds_on_df.columns:
                         mds_on_df["mds_z"] = mds_z_on
                         write_table(
@@ -597,8 +606,15 @@ def write_motif_outputs(
                             output_format=output_format,
                             compress=compress,
                         )
+                        logger.debug(
+                            f"  Appended mds_z={mds_z_on:.3f} to {mds_on_output.name}"
+                        )
+                    elif mds_on_df is None:
+                        logger.warning(
+                            f"  Could not read {mds_on_output.name} to append on-target MDS z-score"
+                        )
                 except Exception as e:
-                    logger.debug(f"  Could not add on-target MDS z-score: {e}")
+                    logger.warning(f"  Could not add on-target MDS z-score: {e}")
 
     # Write 1-mer End Motif (Jagged Index / C-end fraction)
     from .motif_processor import write_end_motif_1mer
@@ -612,7 +628,7 @@ def write_motif_outputs(
         output_format=output_format,
         compress=compress,
     )
-    outputs["edm_1mer"] = edm_1mer_base.with_suffix(ext)
+    outputs["edm_1mer"] = edm_1mer_base.parent / (edm_1mer_base.name + ext)
     logger.debug(f"  C-end fraction: {c_end_metrics['c_fraction']:.4f}")
 
     logger.info(f"  Wrote {len(outputs)} motif files")
