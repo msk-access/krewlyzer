@@ -15,7 +15,7 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.8.1"
+    container "ghcr.io/msk-access/krewlyzer:0.8.2"
 
     publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
 
@@ -258,7 +258,7 @@ process KREWLYZER_RUNALL {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.1
+        krewlyzer: 0.8.2
     END_VERSIONS
     """
 }

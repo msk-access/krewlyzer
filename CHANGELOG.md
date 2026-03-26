@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.8.2] - 2026-03-26
+
+### Fixed
+- **Region MDS Output Collision**: Fixed `Path.with_suffix()` compound-extension bug that
+  caused `MDS.exon.tsv` and `MDS.gene.tsv` to both resolve to `MDS.tsv`, silently
+  destroying per-exon and per-gene data. Affects standalone `region-mds`, `motif`, and
+  `run-all` commands.
+- **Motif Tracking Paths**: Fixed 5 additional `with_suffix()` bugs in motif output
+  tracking (EndMotif, BreakPointMotif, MDS, MDS.ontarget, EndMotif1mer) that caused
+  path collisions and silent PON z-score normalization failures.
+- **Gene Format Conversion**: Region MDS gene output now correctly undergoes format
+  conversion (Parquet/gzip) when no PON is provided.
+- **MDS Z-score Logging**: Z-score append failures upgraded from `debug` to `warning`
+  level to surface issues in production runs.
+
+### Added
+- **Compound Extension Tests**: 57 new parametrized tests (`test_compound_extension.py`)
+  covering all 13 compound base names across TSV, Parquet, both formats, and roundtrip.
+- **Developer Guide**: "Known Gotchas" section documenting the `Path.with_suffix()` anti-
+  pattern with safe alternative and complete table of affected names.
+
+### Changed
+- **Nextflow Outputs**: Added missing Parquet emit declarations for TFBS sync (2), ATAC
+  sync (2), ATAC/TFBS ontarget sync (2), and fsc_counts (4 — TSV+Parquet, off/on-target).
+- **SLURM Script**: Tuned head process memory (16G→32G), queue size (100→200), added
+  `--output_format both --compress_tsv true --verbose true` for 14K+ sample production runs.
+
 ## [0.8.1] - 2026-03-24
 
 ### Fixed
