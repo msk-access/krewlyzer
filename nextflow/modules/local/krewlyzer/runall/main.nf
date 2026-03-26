@@ -43,6 +43,9 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.FSC.regions.e1only.tsv"), emit: fsc_e1, optional: true
     tuple val(meta), path("*.FSC.regions.e1only.parquet"), emit: fsc_e1_parquet, optional: true
     tuple val(meta), path("*.fsc_counts.tsv"),       emit: fsc_counts, optional: true
+    tuple val(meta), path("*.fsc_counts.parquet"),    emit: fsc_counts_parquet, optional: true
+    tuple val(meta), path("*.fsc_counts.ontarget.tsv"), emit: fsc_counts_ontarget, optional: true
+    tuple val(meta), path("*.fsc_counts.ontarget.parquet"), emit: fsc_counts_ontarget_parquet, optional: true
     
     // FSR outputs — TSV and/or Parquet
     tuple val(meta), path("*.FSR.tsv"),              emit: fsr, optional: true
@@ -115,11 +118,6 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.MDS.gene.tsv"),         emit: mds_gene, optional: true
     tuple val(meta), path("*.MDS.gene.parquet"),     emit: mds_gene_parquet, optional: true
     
-    // FSC counts — raw bin counts (intermediate, but published for reproducibility)
-    tuple val(meta), path("*.fsc_counts.tsv"),       emit: fsc_counts, optional: true
-    tuple val(meta), path("*.fsc_counts.parquet"),    emit: fsc_counts_parquet, optional: true
-    tuple val(meta), path("*.fsc_counts.ontarget.tsv"), emit: fsc_counts_ontarget, optional: true
-    tuple val(meta), path("*.fsc_counts.ontarget.parquet"), emit: fsc_counts_ontarget_parquet, optional: true
     
     // mFSD outputs — TSV and/or Parquet
     tuple val(meta), path("*.mFSD.tsv"),             emit: mfsd, optional: true
