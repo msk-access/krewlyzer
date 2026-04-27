@@ -108,6 +108,7 @@ pub struct UnifiedConfig {
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (bam_path, fasta_path, mapq=20, min_len=65, max_len=400, kmer=4, threads=0, output_bed_path=None, output_motif_prefix=None, exclude_path=None, target_regions_path=None, skip_duplicates=true, require_proper_pair=true, silent=false))]
 pub fn process_bam_parallel(
+    py: Python<'_>,
     bam_path: String,
     fasta_path: String,
     mapq: u8,
@@ -224,8 +225,9 @@ pub fn process_bam_parallel(
         pb
     };
 
-    // 3. Parallel Processing
-    let results: Vec<ChunkResult> = chunks.par_iter().map(|chunk| {
+    // Release GIL before par_iter to prevent pyo3-log deadlock
+    let results: Vec<ChunkResult> = py.allow_threads(|| {
+        chunks.par_iter().map(|chunk| {
         let mut result = ChunkResult::new();
         
         // Thread-local Readers
@@ -426,7 +428,8 @@ pub fn process_bam_parallel(
         
         pb.inc(1);
         result
-    }).collect();
+    }).collect()
+    }); // end py.allow_threads
     
     pb.finish_with_message("Done processing chunks.");
     
