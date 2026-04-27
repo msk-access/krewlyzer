@@ -29,6 +29,7 @@ set -euo pipefail
 SAMPLE_ID="P-0000302-T03-XS1"
 BAM="/data1/share001/share/access_12_245/X/T/XT375722-T-duplex.bam"
 MAF="/data1/core006/access/production/resources/cbioportal/current/msk_solid_heme/data_mutations_extended.txt"
+REF="/data1/core006/access/production/resources/reference/versions/hg19/Homo_sapiens_assembly19.fasta"
 OUTDIR="$PWD/mfsd_diag_output"
 KREWLYZER="/usersoftware/shahr2/github/krewlyzer"
 
@@ -42,6 +43,7 @@ echo "Host:      $(hostname)"
 echo "Sample:    ${SAMPLE_ID}"
 echo "BAM:       ${BAM}"
 echo "MAF:       ${MAF}"
+echo "REF:       ${REF}"
 echo "Krewlyzer: $(which krewlyzer) ($(krewlyzer --version 2>&1 || true))"
 echo "Git:       $(cd ${KREWLYZER} && git log --oneline -1)"
 echo ""
@@ -101,6 +103,7 @@ RUST_LOG=info krewlyzer mfsd \
     -V "${FILTERED_MAF}" \
     -o "${OUTDIR}" \
     -s "${SAMPLE_ID}" \
+    -g "${REF}" \
     --duplex \
     --verbose \
     --threads 4
