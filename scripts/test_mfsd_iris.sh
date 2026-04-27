@@ -34,7 +34,7 @@ KREWLYZER="/usersoftware/shahr2/github/krewlyzer"
 
 # --- Environment ---
 eval "$(micromamba shell hook --shell bash)"
-micromamba activate nf-env  # or whichever env has krewlyzer installed
+micromamba activate krewlyzer  # or whichever env has krewlyzer installed
 
 echo "=== mFSD Diagnostic Test ==="
 echo "Date:      $(date)"
