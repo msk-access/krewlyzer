@@ -1358,6 +1358,13 @@ pub fn calculate_mfsd(
                 var.chrom, var.pos + 1, fetch_ms);
 
             for record_res in bam.records() {
+                // Heartbeat: print progress every 10,000 records
+                if result.records_processed > 0 && result.records_processed % 10_000 == 0 {
+                    eprintln!("[mfsd] Variant {}:{} — {} records processed ({:.1}s)...",
+                        var.chrom, var.pos + 1, result.records_processed,
+                        variant_start.elapsed().as_secs_f64());
+                }
+
                 let record = match record_res {
                     Ok(r) => {
                         consecutive_errors = 0;  // Reset on successful read
@@ -1367,11 +1374,11 @@ pub fn calculate_mfsd(
                         consecutive_errors += 1;
                         if consecutive_errors == 1 {
                             // Log the first error with full detail
-                            warn!("BAM read error at {}:{} record #{}: {}",
+                            eprintln!("[mfsd] ERROR: BAM read error at {}:{} record #{}: {}",
                                 var.chrom, var.pos + 1, result.records_processed, e);
                         }
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                            warn!("BAM error storm: {} consecutive errors at {}:{} — aborting variant (last: {})",
+                            eprintln!("[mfsd] ERROR: BAM error storm: {} consecutive errors at {}:{} — aborting variant (last: {})",
                                 consecutive_errors, var.chrom, var.pos + 1, e);
                             result.had_read_errors = true;
                             break;
