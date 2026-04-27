@@ -123,9 +123,9 @@ def test_mfsd_integration_snv(tmp_path):
 
     # Validate output format (46 columns: 44 original + ALT_LLR + REF_LLR)
     df = pd.read_csv(output_file, sep="\t")
-    assert (
-        len(df.columns) == 46
-    ), f"Expected 46 columns, got {len(df.columns)}: {list(df.columns)}"
+    assert len(df.columns) == 46, (
+        f"Expected 46 columns, got {len(df.columns)}: {list(df.columns)}"
+    )
 
     # Check expected columns exist
     expected_cols = [
@@ -193,9 +193,9 @@ def test_mfsd_with_distributions(tmp_path):
 
     # Check distributions file (note: extension is .distributions.tsv)
     dist_files = list(output_dir.glob("*.distributions.tsv"))
-    assert (
-        len(dist_files) == 1
-    ), f"Expected 1 distributions file, found {len(dist_files)}"
+    assert len(dist_files) == 1, (
+        f"Expected 1 distributions file, found {len(dist_files)}"
+    )
 
     # Validate distributions format
     df_dist = pd.read_csv(dist_files[0], sep="\t")
@@ -538,9 +538,9 @@ def test_mfsd_llr_scoring(tmp_path):
     ref_llr_f = float(ref_llr)
 
     # Tumor-like ALT should have higher LLR than healthy-like REF
-    assert (
-        alt_llr_f > ref_llr_f
-    ), f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
+    assert alt_llr_f > ref_llr_f, (
+        f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
+    )
 
 
 # =============================================================================
@@ -640,9 +640,9 @@ def test_mfsd_maf_standard_format(tmp_path):
     # Key assertions: parsed alleles should be actual nucleotides, not MAF metadata
     assert df.iloc[0]["Ref"] == "A", f"Expected Ref='A', got '{df.iloc[0]['Ref']}'"
     assert df.iloc[0]["Alt"] == "T", f"Expected Alt='T', got '{df.iloc[0]['Alt']}'"
-    assert (
-        df.iloc[0]["VarType"] == "SNV"
-    ), f"Expected VarType='SNV', got '{df.iloc[0]['VarType']}'"
+    assert df.iloc[0]["VarType"] == "SNV", (
+        f"Expected VarType='SNV', got '{df.iloc[0]['VarType']}'"
+    )
 
 
 def test_mfsd_maf_cbio_format(tmp_path):
@@ -698,24 +698,24 @@ def test_mfsd_maf_cbio_format(tmp_path):
 
     # The critical regression assertions:
     # Before the fix, Ref was 'SNP' and Alt was 'A' (both wrong)
-    assert (
-        df.iloc[0]["Ref"] == "A"
-    ), f"Regression: Ref should be 'A', not '{df.iloc[0]['Ref']}' (was 'SNP' before fix)"
-    assert (
-        df.iloc[0]["Alt"] == "T"
-    ), f"Regression: Alt should be 'T', not '{df.iloc[0]['Alt']}' (was ref allele before fix)"
-    assert (
-        df.iloc[0]["VarType"] == "SNV"
-    ), f"Regression: VarType should be 'SNV', not '{df.iloc[0]['VarType']}' (was 'COMPLEX' before fix)"
+    assert df.iloc[0]["Ref"] == "A", (
+        f"Regression: Ref should be 'A', not '{df.iloc[0]['Ref']}' (was 'SNP' before fix)"
+    )
+    assert df.iloc[0]["Alt"] == "T", (
+        f"Regression: Alt should be 'T', not '{df.iloc[0]['Alt']}' (was ref allele before fix)"
+    )
+    assert df.iloc[0]["VarType"] == "SNV", (
+        f"Regression: VarType should be 'SNV', not '{df.iloc[0]['VarType']}' (was 'COMPLEX' before fix)"
+    )
 
     # With correct parsing, not everything should be NonREF
     total = df.iloc[0]["Total_Count"]
     nonref = df.iloc[0]["NonREF_Count"]
     if total > 0:
         error_rate = nonref / total
-        assert (
-            error_rate < 1.0
-        ), f"Regression: Error_Rate should be < 1.0, got {error_rate} (was 1.0 before fix)"
+        assert error_rate < 1.0, (
+            f"Regression: Error_Rate should be < 1.0, got {error_rate} (was 1.0 before fix)"
+        )
 
 
 def test_mfsd_maf_invalid_alleles_warns(tmp_path):
@@ -753,3 +753,110 @@ def test_mfsd_maf_invalid_alleles_warns(tmp_path):
 
     # Should fail with informative error about missing column
     assert result.exit_code != 0, "Should fail when MAF is missing Tumor_Seq_Allele2"
+
+
+# =============================================================================
+# Diagnostics & Edge Case Tests (mFSD hang investigation)
+# =============================================================================
+
+
+def test_mfsd_zero_variants(tmp_path):
+    """0-variant input produces header-only TSV with no BAM access."""
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+
+    # Header-only VCF — no data lines
+    vcf_file = tmp_path / "empty.vcf"
+    vcf_file.write_text(
+        "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+    )
+
+    output_dir = tmp_path / "output"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "mfsd",
+            "-i",
+            str(bam_file),
+            "-V",
+            str(vcf_file),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+        ],
+    )
+
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+
+            traceback.print_exception(
+                type(result.exception), result.exception, result.exception.__traceback__
+            )
+
+    assert result.exit_code == 0
+
+    output_file = output_dir / "test.mFSD.tsv"
+    assert output_file.exists(), "Header-only TSV should always be produced"
+
+    df = pd.read_csv(output_file, sep="\t")
+    assert len(df) == 0, f"Expected 0 data rows, got {len(df)}"
+    assert "Chrom" in df.columns, "Header must contain Chrom column"
+    assert "ALT_Confidence" in df.columns, "Header must contain ALT_Confidence column"
+
+
+def test_mfsd_maf_with_comment_lines(tmp_path):
+    """MAF with leading #comment lines is parsed correctly by Rust."""
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+
+    maf_file = tmp_path / "variants.maf"
+    with open(maf_file, "w") as f:
+        # cBioPortal-style comment lines
+        f.write("#version 2.4\n")
+        f.write("#annotation.spec gdc-1.0.1-aliquot\n")
+        # MAF header
+        f.write(
+            "Hugo_Symbol\tChromosome\tStart_Position\t"
+            "Reference_Allele\tTumor_Seq_Allele2\n"
+        )
+        # One data line
+        f.write("KRAS\tchr1\t1001\tA\tT\n")
+
+    output_dir = tmp_path / "output"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "mfsd",
+            "-i",
+            str(bam_file),
+            "-V",
+            str(maf_file),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+        ],
+    )
+
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+
+            traceback.print_exception(
+                type(result.exception), result.exception, result.exception.__traceback__
+            )
+
+    assert result.exit_code == 0
+
+    df = pd.read_csv(output_dir / "test.mFSD.tsv", sep="\t")
+    assert len(df) == 1, f"Expected 1 variant row, got {len(df)}"
+    assert df.iloc[0]["Ref"] == "A", f"Expected Ref='A', got '{df.iloc[0]['Ref']}'"
+    assert df.iloc[0]["Alt"] == "T", f"Expected Alt='T', got '{df.iloc[0]['Alt']}'"
