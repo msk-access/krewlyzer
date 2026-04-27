@@ -17,7 +17,7 @@
 //! - **N**: Contains N at variant position (low quality)
 //!
 //! ## Output
-//! - {sample}.mFSD.tsv: Summary statistics per variant (39 columns)
+//! - {sample}.mFSD.tsv: Summary statistics per variant (46 columns)
 //! - {sample}.mFSD.distributions.tsv: Per-size counts (optional)
 
 use pyo3::prelude::*;

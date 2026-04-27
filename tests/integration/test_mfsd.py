@@ -4,7 +4,7 @@ Integration tests for mFSD (Mutant Fragment Size Distribution).
 Tests the new mFSD implementation with:
 - All variant types (SNV, MNV, Insertion, Deletion, Complex)
 - 4-way fragment classification (REF, ALT, NonREF, N)
-- 39-column output format
+- 46-column output format
 - Optional distributions output
 """
 
