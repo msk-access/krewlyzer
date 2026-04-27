@@ -53,9 +53,10 @@ process FILTER_MAF {
         unique_tsbs = set()
 
         for line in infile:
-            outfile.write(line)  # always write — no filtering
+            # Skip comment lines (not needed by downstream mFSD parser)
             if line.startswith('#'):
                 continue
+            outfile.write(line)  # pass through all data rows
             fields = line.strip().split('\\t')
             if tsb_col is None:
                 for i, col in enumerate(fields):
@@ -95,9 +96,8 @@ process FILTER_MAF {
         tsb_col = None
 
         for line in infile:
-            # Handle comment lines (keep them)
+            # Skip comment lines (not needed by downstream mFSD parser)
             if line.startswith('#'):
-                outfile.write(line)
                 continue
 
             fields = line.strip().split('\\t')
