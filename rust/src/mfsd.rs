@@ -1280,22 +1280,19 @@ pub fn calculate_mfsd(
             let variant_start = std::time::Instant::now();
             
             // Thread-local BAM reader (with open timing)
-            // NOTE: Use eprintln! (not info!) because pyo3-log cannot forward
-            // Rust log calls from rayon worker threads — the GIL is held by
-            // the main thread blocked on par_iter results.
-            eprintln!("[mfsd] Variant {}:{} — opening BAM...", var.chrom, var.pos + 1);
+            debug!("Variant {}:{} — opening BAM...", var.chrom, var.pos + 1);
             let bam_open_start = std::time::Instant::now();
             let mut bam = match bam::IndexedReader::from_path(&bam_path) {
                 Ok(b) => {
                     let open_ms = bam_open_start.elapsed().as_millis();
                     if open_ms > 500 {
-                        eprintln!("[mfsd] WARNING: BAM open took {}ms for variant {}:{} — possible I/O contention",
+                        warn!("BAM open took {}ms for variant {}:{} — possible I/O contention",
                             open_ms, var.chrom, var.pos + 1);
                     }
                     b
                 },
                 Err(e) => {
-                    eprintln!("[mfsd] ERROR: Failed to open BAM for variant {}:{}: {}",
+                    warn!("Failed to open BAM for variant {}:{}: {}",
                         var.chrom, var.pos + 1, e);
                     return (var.clone(), result);
                 },
@@ -1307,7 +1304,7 @@ pub fn calculate_mfsd(
                     match faidx::Reader::from_path(p) {
                         Ok(r) => Some(r),
                         Err(e) => {
-                            eprintln!("[mfsd] WARNING: Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction disabled for this variant",
+                            warn!("Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction disabled for this variant",
                                 p, var.chrom, var.pos + 1, e);
                             None
                         }
@@ -1329,7 +1326,7 @@ pub fn calculate_mfsd(
                     match bam.header().tid(alt_name.as_bytes()) {
                         Some(t) => t,
                         None => {
-                            eprintln!("[mfsd] WARNING: Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
+                            warn!("Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
                             return (var.clone(), result);
                         }
                     }
@@ -1342,15 +1339,15 @@ pub fn calculate_mfsd(
             // (e.g., 1500bp for a large deletion) would pull thousands of
             // irrelevant reads that can't inform the classification.
             let fetch_start = std::time::Instant::now();
-            eprintln!("[mfsd] Variant {}:{} — BAM opened in {}ms, fetching region...",
+            debug!("Variant {}:{} — BAM opened in {}ms, fetching region...",
                 var.chrom, var.pos + 1, bam_open_start.elapsed().as_millis());
             if let Err(e) = bam.fetch((tid, var.pos as u64, var.pos as u64 + 1)) {
-                eprintln!("[mfsd] ERROR: BAM fetch failed for variant {}:{}: {}", var.chrom, var.pos + 1, e);
+                warn!("BAM fetch failed for variant {}:{}: {}", var.chrom, var.pos + 1, e);
                 return (var.clone(), result);
             }
             let fetch_ms = fetch_start.elapsed().as_millis();
             if fetch_ms > 500 {
-                eprintln!("[mfsd] WARNING: BAM fetch took {}ms for variant {}:{} — index seek stall",
+                warn!("BAM fetch took {}ms for variant {}:{} — index seek stall",
                     fetch_ms, var.chrom, var.pos + 1);
             }
             
@@ -1363,13 +1360,13 @@ pub fn calculate_mfsd(
             let mut consecutive_errors: u32 = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 1000;
 
-            eprintln!("[mfsd] Variant {}:{} — fetch complete in {}ms, iterating records...",
+            debug!("Variant {}:{} — fetch complete in {}ms, iterating records...",
                 var.chrom, var.pos + 1, fetch_ms);
 
             for record_res in bam.records() {
-                // Heartbeat: print progress every 10,000 records
+                // Heartbeat: log progress every 10,000 records (visible with --verbose)
                 if result.records_processed > 0 && result.records_processed % 10_000 == 0 {
-                    eprintln!("[mfsd] Variant {}:{} — {} records processed ({:.1}s)...",
+                    debug!("Variant {}:{} — {} records processed ({:.1}s)...",
                         var.chrom, var.pos + 1, result.records_processed,
                         variant_start.elapsed().as_secs_f64());
                 }
@@ -1383,11 +1380,11 @@ pub fn calculate_mfsd(
                         consecutive_errors += 1;
                         if consecutive_errors == 1 {
                             // Log the first error with full detail
-                            eprintln!("[mfsd] ERROR: BAM read error at {}:{} record #{}: {}",
+                            warn!("BAM read error at {}:{} record #{}: {}",
                                 var.chrom, var.pos + 1, result.records_processed, e);
                         }
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                            eprintln!("[mfsd] ERROR: BAM error storm: {} consecutive errors at {}:{} — aborting variant (last: {})",
+                            warn!("BAM error storm: {} consecutive errors at {}:{} — aborting variant (last: {})",
                                 consecutive_errors, var.chrom, var.pos + 1, e);
                             result.had_read_errors = true;
                             break;
