@@ -1290,7 +1290,16 @@ pub fn calculate_mfsd(
             
             // Thread-local FASTA reader (for GC correction)
             let thread_fasta: Option<faidx::Reader> = if factors.is_some() {
-                reference_path.as_ref().and_then(|p| faidx::Reader::from_path(p).ok())
+                reference_path.as_ref().and_then(|p| {
+                    match faidx::Reader::from_path(p) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            warn!("Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction will use default 50% GC",
+                                p, var.chrom, var.pos + 1, e);
+                            None
+                        }
+                    }
+                })
             } else {
                 None
             };
@@ -1409,26 +1418,30 @@ pub fn calculate_mfsd(
                 
                 // Compute GC correction weight
                 let gc_weight = if let Some(ref factors_arc) = factors {
-                    // Get fragment coordinates for GC lookup
-                    let frag_start = record.pos() as u64;
-                    let frag_end = if record.insert_size() > 0 {
-                        frag_start + record.insert_size() as u64
+                    // GC correction requires a valid FASTA reader — if the reference
+                    // couldn't be opened, skip correction entirely (weight=1.0) rather
+                    // than applying a factor based on an arbitrary GC percentage.
+                    if let Some(ref fasta) = thread_fasta {
+                        // Get fragment coordinates for GC lookup
+                        let frag_start = record.pos() as u64;
+                        let frag_end = if record.insert_size() > 0 {
+                            frag_start + record.insert_size() as u64
+                        } else {
+                            frag_start + record.seq().len() as u64
+                        };
+
+                        match fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end) {
+                            Some(gc) => {
+                                let gc_pct = (gc * 100.0).round() as u8;
+                                factors_arc.get_factor(frag_len as u64, gc_pct)
+                            },
+                            None => 1.0, // GC lookup failed for this region — no correction
+                        }
                     } else {
-                        frag_start + record.seq().len() as u64
-                    };
-                    
-                    // Get GC from thread-local FASTA reader
-                    let gc_pct = if let Some(ref fasta) = thread_fasta {
-                        fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end)
-                            .map(|gc| (gc * 100.0).round() as u8)
-                            .unwrap_or(50) // Default 50% GC
-                    } else {
-                        50 // Default if no reference
-                    };
-                    
-                    factors_arc.get_factor(frag_len as u64, gc_pct)
+                        1.0 // No FASTA reader available — no correction
+                    }
                 } else {
-                    1.0 // No GC correction
+                    1.0 // No GC correction factors provided
                 };
                 
                 // Compute duplex consensus weight (for fgbio/Marianas duplex BAMs)
