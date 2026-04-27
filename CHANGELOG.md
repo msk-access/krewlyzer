@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **mFSD Silent Error Swallowing**: Replaced `Err(_) => continue` in BAM record
+  iterator with a logged error breaker (max 1000 consecutive errors). Previously,
+  corrupt BAM regions could cause infinite silent loops.
+- **FILTER_MAF Comment Lines**: Stripped `#` comment lines from filtered MAF output
+  in both multi-sample and single-sample modes. Downstream Rust parser already
+  skipped them, but output files were unnecessarily large and confusing.
+- **mFSD 0-Variant Guard**: Added early exit at both Python (`wrapper.py`) and Rust
+  layers when MAF has 0 data lines. Produces header-only TSV instead of attempting
+  BAM access. Prevents unnecessary resource allocation for samples without variants.
+
+### Added
+- **mFSD BAM I/O Diagnostics**: Per-variant timing, BAM open/fetch latency logging,
+  record counts, and slow-variant warnings (>30s). Enables production debugging of
+  the 17% job failure rate on IRIS HPC.
+- **mFSD Header Constant**: Extracted 46-column TSV header into `MFSD_HEADER` module
+  constant, eliminating duplication between normal output and 0-variant early-exit.
+
+### Tests
+- Added `test_mfsd_zero_variants` — verifies 0-variant input produces header-only TSV.
+- Added `test_mfsd_maf_with_comment_lines` — verifies MAFs with `#` comment headers
+  are parsed correctly.
+
 ## [0.8.2] - 2026-03-26
 
 ### Fixed
