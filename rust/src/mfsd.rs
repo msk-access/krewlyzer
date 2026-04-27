@@ -1271,22 +1271,22 @@ pub fn calculate_mfsd(
             let variant_start = std::time::Instant::now();
             
             // Thread-local BAM reader (with open timing)
-            info!("Variant {}:{} — opening BAM...", var.chrom, var.pos + 1);
-            // Force flush so the log is visible even if the next call hangs
-            use std::io::Write;
-            let _ = std::io::stderr().flush();
+            // NOTE: Use eprintln! (not info!) because pyo3-log cannot forward
+            // Rust log calls from rayon worker threads — the GIL is held by
+            // the main thread blocked on par_iter results.
+            eprintln!("[mfsd] Variant {}:{} — opening BAM...", var.chrom, var.pos + 1);
             let bam_open_start = std::time::Instant::now();
             let mut bam = match bam::IndexedReader::from_path(&bam_path) {
                 Ok(b) => {
                     let open_ms = bam_open_start.elapsed().as_millis();
                     if open_ms > 500 {
-                        warn!("BAM open took {}ms for variant {}:{} — possible I/O contention",
+                        eprintln!("[mfsd] WARNING: BAM open took {}ms for variant {}:{} — possible I/O contention",
                             open_ms, var.chrom, var.pos + 1);
                     }
                     b
                 },
                 Err(e) => {
-                    warn!("Failed to open BAM for variant {}:{}: {}",
+                    eprintln!("[mfsd] ERROR: Failed to open BAM for variant {}:{}: {}",
                         var.chrom, var.pos + 1, e);
                     return (var.clone(), result);
                 },
@@ -1298,7 +1298,7 @@ pub fn calculate_mfsd(
                     match faidx::Reader::from_path(p) {
                         Ok(r) => Some(r),
                         Err(e) => {
-                            warn!("Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction will use default 50% GC",
+                            eprintln!("[mfsd] WARNING: Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction disabled for this variant",
                                 p, var.chrom, var.pos + 1, e);
                             None
                         }
@@ -1320,7 +1320,7 @@ pub fn calculate_mfsd(
                     match bam.header().tid(alt_name.as_bytes()) {
                         Some(t) => t,
                         None => {
-                            warn!("Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
+                            eprintln!("[mfsd] WARNING: Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
                             return (var.clone(), result);
                         }
                     }
@@ -1333,16 +1333,15 @@ pub fn calculate_mfsd(
             // (e.g., 1500bp for a large deletion) would pull thousands of
             // irrelevant reads that can't inform the classification.
             let fetch_start = std::time::Instant::now();
-            info!("Variant {}:{} — BAM opened in {}ms, fetching region...",
+            eprintln!("[mfsd] Variant {}:{} — BAM opened in {}ms, fetching region...",
                 var.chrom, var.pos + 1, bam_open_start.elapsed().as_millis());
-            let _ = std::io::stderr().flush();
             if let Err(e) = bam.fetch((tid, var.pos as u64, var.pos as u64 + 1)) {
-                warn!("BAM fetch failed for variant {}:{}: {}", var.chrom, var.pos + 1, e);
+                eprintln!("[mfsd] ERROR: BAM fetch failed for variant {}:{}: {}", var.chrom, var.pos + 1, e);
                 return (var.clone(), result);
             }
             let fetch_ms = fetch_start.elapsed().as_millis();
             if fetch_ms > 500 {
-                warn!("BAM fetch took {}ms for variant {}:{} — index seek stall",
+                eprintln!("[mfsd] WARNING: BAM fetch took {}ms for variant {}:{} — index seek stall",
                     fetch_ms, var.chrom, var.pos + 1);
             }
             
@@ -1355,9 +1354,8 @@ pub fn calculate_mfsd(
             let mut consecutive_errors: u32 = 0;
             const MAX_CONSECUTIVE_ERRORS: u32 = 1000;
 
-            info!("Variant {}:{} — fetch complete in {}ms, iterating records...",
+            eprintln!("[mfsd] Variant {}:{} — fetch complete in {}ms, iterating records...",
                 var.chrom, var.pos + 1, fetch_ms);
-            let _ = std::io::stderr().flush();
 
             for record_res in bam.records() {
                 let record = match record_res {
