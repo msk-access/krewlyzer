@@ -14,6 +14,9 @@ All notable changes to this project will be documented in this file.
 - **mFSD 0-Variant Guard**: Added early exit at both Python (`wrapper.py`) and Rust
   layers when MAF has 0 data lines. Produces header-only TSV instead of attempting
   BAM access. Prevents unnecessary resource allocation for samples without variants.
+- **mFSD GC Correction Fallback**: When reference FASTA is unavailable or GC lookup
+  fails for a region, GC correction is now skipped (weight=1.0) instead of silently
+  using a hardcoded 50% GC to look up correction factors.
 
 ### Added
 - **mFSD BAM I/O Diagnostics**: Per-variant timing, BAM open/fetch latency logging,
