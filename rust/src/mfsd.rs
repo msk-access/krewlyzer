@@ -1077,6 +1077,7 @@ fn confidence_level(n: usize) -> &'static str {
 #[pyfunction]
 #[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false, min_baseq=20))]
 pub fn calculate_mfsd(
+    py: Python<'_>,
     bam_path: PathBuf,
     input_file: PathBuf,
     output_file: PathBuf,
@@ -1265,7 +1266,15 @@ pub fn calculate_mfsd(
     };
 
     // 2. Process Variants (Parallel)
-    let results: Vec<(Variant, VariantResult)> = variants.par_iter()
+    // CRITICAL: Release the GIL before entering rayon par_iter.
+    // pyo3-log is the global Rust logger and attempts to acquire the GIL
+    // from worker threads to forward log messages to Python. Without
+    // allow_threads(), this creates a deadlock:
+    //   main thread: holds GIL, blocked waiting for par_iter results
+    //   worker thread: blocked waiting for GIL to forward a log message
+    // This was the root cause of the 16-hour production hangs.
+    let results: Vec<(Variant, VariantResult)> = py.allow_threads(|| {
+        variants.par_iter()
         .map(|var| {
             let mut result = VariantResult::new();
             let variant_start = std::time::Instant::now();
@@ -1534,7 +1543,8 @@ pub fn calculate_mfsd(
             pb.inc(1);
             (var.clone(), result)
         })
-        .collect();
+        .collect()
+    }); // end py.allow_threads
         
     pb.finish_with_message("Done!");
 
