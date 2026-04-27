@@ -1365,7 +1365,7 @@ pub fn calculate_mfsd(
 
             for record_res in bam.records() {
                 // Heartbeat: log progress every 10,000 records (visible with --verbose)
-                if result.records_processed > 0 && result.records_processed % 10_000 == 0 {
+                if result.records_processed > 0 && result.records_processed.is_multiple_of(10_000) {
                     debug!("Variant {}:{} — {} records processed ({:.1}s)...",
                         var.chrom, var.pos + 1, result.records_processed,
                         variant_start.elapsed().as_secs_f64());

@@ -123,9 +123,9 @@ def test_mfsd_integration_snv(tmp_path):
 
     # Validate output format (46 columns: 44 original + ALT_LLR + REF_LLR)
     df = pd.read_csv(output_file, sep="\t")
-    assert len(df.columns) == 46, (
-        f"Expected 46 columns, got {len(df.columns)}: {list(df.columns)}"
-    )
+    assert (
+        len(df.columns) == 46
+    ), f"Expected 46 columns, got {len(df.columns)}: {list(df.columns)}"
 
     # Check expected columns exist
     expected_cols = [
@@ -193,9 +193,9 @@ def test_mfsd_with_distributions(tmp_path):
 
     # Check distributions file (note: extension is .distributions.tsv)
     dist_files = list(output_dir.glob("*.distributions.tsv"))
-    assert len(dist_files) == 1, (
-        f"Expected 1 distributions file, found {len(dist_files)}"
-    )
+    assert (
+        len(dist_files) == 1
+    ), f"Expected 1 distributions file, found {len(dist_files)}"
 
     # Validate distributions format
     df_dist = pd.read_csv(dist_files[0], sep="\t")
@@ -538,9 +538,9 @@ def test_mfsd_llr_scoring(tmp_path):
     ref_llr_f = float(ref_llr)
 
     # Tumor-like ALT should have higher LLR than healthy-like REF
-    assert alt_llr_f > ref_llr_f, (
-        f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
-    )
+    assert (
+        alt_llr_f > ref_llr_f
+    ), f"Expected ALT_LLR ({alt_llr_f}) > REF_LLR ({ref_llr_f}) for tumor vs healthy"
 
 
 # =============================================================================
@@ -640,9 +640,9 @@ def test_mfsd_maf_standard_format(tmp_path):
     # Key assertions: parsed alleles should be actual nucleotides, not MAF metadata
     assert df.iloc[0]["Ref"] == "A", f"Expected Ref='A', got '{df.iloc[0]['Ref']}'"
     assert df.iloc[0]["Alt"] == "T", f"Expected Alt='T', got '{df.iloc[0]['Alt']}'"
-    assert df.iloc[0]["VarType"] == "SNV", (
-        f"Expected VarType='SNV', got '{df.iloc[0]['VarType']}'"
-    )
+    assert (
+        df.iloc[0]["VarType"] == "SNV"
+    ), f"Expected VarType='SNV', got '{df.iloc[0]['VarType']}'"
 
 
 def test_mfsd_maf_cbio_format(tmp_path):
@@ -698,24 +698,24 @@ def test_mfsd_maf_cbio_format(tmp_path):
 
     # The critical regression assertions:
     # Before the fix, Ref was 'SNP' and Alt was 'A' (both wrong)
-    assert df.iloc[0]["Ref"] == "A", (
-        f"Regression: Ref should be 'A', not '{df.iloc[0]['Ref']}' (was 'SNP' before fix)"
-    )
-    assert df.iloc[0]["Alt"] == "T", (
-        f"Regression: Alt should be 'T', not '{df.iloc[0]['Alt']}' (was ref allele before fix)"
-    )
-    assert df.iloc[0]["VarType"] == "SNV", (
-        f"Regression: VarType should be 'SNV', not '{df.iloc[0]['VarType']}' (was 'COMPLEX' before fix)"
-    )
+    assert (
+        df.iloc[0]["Ref"] == "A"
+    ), f"Regression: Ref should be 'A', not '{df.iloc[0]['Ref']}' (was 'SNP' before fix)"
+    assert (
+        df.iloc[0]["Alt"] == "T"
+    ), f"Regression: Alt should be 'T', not '{df.iloc[0]['Alt']}' (was ref allele before fix)"
+    assert (
+        df.iloc[0]["VarType"] == "SNV"
+    ), f"Regression: VarType should be 'SNV', not '{df.iloc[0]['VarType']}' (was 'COMPLEX' before fix)"
 
     # With correct parsing, not everything should be NonREF
     total = df.iloc[0]["Total_Count"]
     nonref = df.iloc[0]["NonREF_Count"]
     if total > 0:
         error_rate = nonref / total
-        assert error_rate < 1.0, (
-            f"Regression: Error_Rate should be < 1.0, got {error_rate} (was 1.0 before fix)"
-        )
+        assert (
+            error_rate < 1.0
+        ), f"Regression: Error_Rate should be < 1.0, got {error_rate} (was 1.0 before fix)"
 
 
 def test_mfsd_maf_invalid_alleles_warns(tmp_path):
