@@ -297,7 +297,7 @@ impl ChunkResult {
 #[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (bam_path, _fasta_path, gene_bed_path, output_exon_path, output_gene_path, e1_only=false, mapq=20, min_len=65, max_len=400, silent=false))]
 pub fn run_region_mds(
-    _py: Python,
+    py: Python,
     bam_path: String,
     _fasta_path: String,  // Reserved for future GC-aware processing
     gene_bed_path: String,
@@ -396,9 +396,10 @@ pub fn run_region_mds(
         pb
     };
 
-    // Parallel processing
+    // Release GIL before par_iter to prevent pyo3-log deadlock
     let n_regions = regions_arc.len();
-    let results: Vec<ChunkResult> = chunks.par_iter().map(|chunk| {
+    let results: Vec<ChunkResult> = py.allow_threads(|| {
+        chunks.par_iter().map(|chunk| {
         let mut result = ChunkResult::new(n_regions);
 
         // Thread-local BAM reader
@@ -473,7 +474,8 @@ pub fn run_region_mds(
 
         pb.inc(1);
         result
-    }).collect();
+    }).collect()
+    }); // end py.allow_threads
 
     pb.finish_with_message("Done processing BAM");
 

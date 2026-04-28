@@ -33,6 +33,7 @@ use log::info;
 #[pyfunction]
 #[pyo3(signature = (bam_path, marker_path, output_file, map_quality, min_cpg, methy_threshold, unmethy_threshold, _pe_type, silent=false))]
 pub fn calculate_uxm(
+    py: Python<'_>,
     bam_path: PathBuf,
     marker_path: PathBuf,
     output_file: PathBuf,
@@ -85,8 +86,9 @@ pub fn calculate_uxm(
         pb
     };
 
-    // 2. Process Markers (Parallel)
-    let results: Vec<String> = markers.par_iter()
+    // Release GIL before par_iter to prevent pyo3-log deadlock
+    let results: Vec<String> = py.allow_threads(|| {
+        markers.par_iter()
         .map(|marker| {
             let region_str = format!("{}:{}-{}", marker.chrom, marker.start, marker.end);
             
@@ -156,7 +158,8 @@ pub fn calculate_uxm(
                 format!("{}\t{:.6}\t{:.6}\t{:.6}", region_str, u_rat, x_rat, m_rat)
             }
         })
-        .collect();
+        .collect()
+    }); // end py.allow_threads
         
     pb.finish_with_message("Done!");
 

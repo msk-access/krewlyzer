@@ -545,7 +545,23 @@ def run_all(
 
     # Determine which optional tools will run
     has_uxm = resolved_bisulfite_bam is not None and resolved_bisulfite_bam.exists()
-    has_mfsd = resolved_variants is not None and resolved_variants.exists()
+
+    # mFSD: check file exists AND has data lines (not just header/comments)
+    has_mfsd = False
+    if resolved_variants is not None and resolved_variants.exists():
+        with open(resolved_variants) as f:
+            variant_count = sum(
+                1
+                for line in f
+                if not line.startswith("#")
+                and not line.startswith("Hugo_Symbol")  # MAF header
+                and line.strip()  # skip blank lines
+            )
+        if variant_count > 0:
+            has_mfsd = True
+            logger.info(f"mFSD: {variant_count} variants in {resolved_variants.name}")
+        else:
+            logger.info(f"mFSD: 0 variants in {resolved_variants.name} — skipping mFSD")
 
     # Multi-step progress display
     with Progress(

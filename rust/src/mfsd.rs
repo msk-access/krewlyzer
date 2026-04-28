@@ -17,7 +17,7 @@
 //! - **N**: Contains N at variant position (low quality)
 //!
 //! ## Output
-//! - {sample}.mFSD.tsv: Summary statistics per variant (39 columns)
+//! - {sample}.mFSD.tsv: Summary statistics per variant (46 columns)
 //! - {sample}.mFSD.distributions.tsv: Per-size counts (optional)
 
 use pyo3::prelude::*;
@@ -33,6 +33,46 @@ use std::time::Duration;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use log::{info, warn, debug};
+
+// ============================================================================
+// Module-level constants
+// ============================================================================
+
+/// mFSD output TSV header (46 columns).
+/// Defined once to avoid duplication between 0-variant early-exit and normal output.
+const MFSD_HEADER: &[&str] = &[
+    // Variant info (5)
+    "Chrom", "Pos", "Ref", "Alt", "VarType",
+    // Counts (5)
+    "REF_Count", "ALT_Count", "NonREF_Count", "N_Count", "Total_Count",
+    // GC-Weighted Counts (5)
+    "REF_Weighted", "ALT_Weighted", "NonREF_Weighted", "N_Weighted", "VAF_GC_Corrected",
+    // Log-Likelihood Ratio (2)
+    "ALT_LLR", "REF_LLR",
+    // Mean sizes (4)
+    "REF_MeanSize", "ALT_MeanSize", "NonREF_MeanSize", "N_MeanSize",
+    // Primary: ALT vs REF (3)
+    "Delta_ALT_REF", "KS_ALT_REF", "KS_Pval_ALT_REF",
+    // Secondary: ALT vs NonREF (3)
+    "Delta_ALT_NonREF", "KS_ALT_NonREF", "KS_Pval_ALT_NonREF",
+    // REF vs NonREF (3)
+    "Delta_REF_NonREF", "KS_REF_NonREF", "KS_Pval_REF_NonREF",
+    // ALT vs N (3)
+    "Delta_ALT_N", "KS_ALT_N", "KS_Pval_ALT_N",
+    // Tertiary: REF vs N (3)
+    "Delta_REF_N", "KS_REF_N", "KS_Pval_REF_N",
+    // NonREF vs N (3)
+    "Delta_NonREF_N", "KS_NonREF_N", "KS_Pval_NonREF_N",
+    // Derived (5)
+    "VAF_Proxy", "Error_Rate", "N_Rate", "Size_Ratio", "Quality_Score",
+    // Quality flags (2)
+    "ALT_Confidence", "KS_Valid",
+];
+
+/// mFSD distributions TSV header.
+const MFSD_DIST_HEADER: &[&str] = &[
+    "Chrom", "Pos", "Ref", "Alt", "Category", "Size", "Count",
+];
 
 // ============================================================================
 // PHASE 1: Data Structures
@@ -99,6 +139,9 @@ struct VariantResult {
     skipped_low_bq: usize,   // Fragments with base quality below min_baseq
     // Duplex tag tracking (for --duplex warning)
     duplex_tags_found: usize,
+    // Diagnostics: BAM I/O monitoring (added for mFSD hang investigation)
+    had_read_errors: bool,    // True if consecutive BAM read errors exceeded threshold
+    records_processed: u64,   // Total BAM records iterated for this variant
 }
 
 // ============================================================================
@@ -1034,6 +1077,7 @@ fn confidence_level(n: usize) -> &'static str {
 #[pyfunction]
 #[pyo3(signature = (bam_path, input_file, output_file, input_format, map_quality, min_frag_len=65, max_frag_len=400, output_distributions=false, reference_path=None, correction_factors_path=None, require_proper_pair=false, duplex_mode=false, silent=false, min_baseq=20))]
 pub fn calculate_mfsd(
+    py: Python<'_>,
     bam_path: PathBuf,
     input_file: PathBuf,
     output_file: PathBuf,
@@ -1178,6 +1222,21 @@ pub fn calculate_mfsd(
     }
     
     let total_vars = variants.len();
+
+    // Early exit: 0 variants → write header-only output, skip BAM access entirely
+    if total_vars == 0 {
+        info!("No variants found in input file — writing header-only output to {:?}", output_file);
+        let mut out_file = File::create(&output_file)?;
+        writeln!(out_file, "{}", MFSD_HEADER.join("\t"))?;
+
+        if output_distributions {
+            let dist_path = output_file.with_extension("distributions.tsv");
+            let mut f = File::create(&dist_path)?;
+            writeln!(f, "{}", MFSD_DIST_HEADER.join("\t"))?;
+        }
+        return Ok(());
+    }
+
     info!("Found {} variants. Processing in parallel...", total_vars);
     
     // Debug: variant type breakdown
@@ -1207,19 +1266,50 @@ pub fn calculate_mfsd(
     };
 
     // 2. Process Variants (Parallel)
-    let results: Vec<(Variant, VariantResult)> = variants.par_iter()
+    // CRITICAL: Release the GIL before entering rayon par_iter.
+    // pyo3-log is the global Rust logger and attempts to acquire the GIL
+    // from worker threads to forward log messages to Python. Without
+    // allow_threads(), this creates a deadlock:
+    //   main thread: holds GIL, blocked waiting for par_iter results
+    //   worker thread: blocked waiting for GIL to forward a log message
+    // This was the root cause of the 16-hour production hangs.
+    let results: Vec<(Variant, VariantResult)> = py.allow_threads(|| {
+        variants.par_iter()
         .map(|var| {
             let mut result = VariantResult::new();
+            let variant_start = std::time::Instant::now();
             
-            // Thread-local BAM reader
+            // Thread-local BAM reader (with open timing)
+            debug!("Variant {}:{} — opening BAM...", var.chrom, var.pos + 1);
+            let bam_open_start = std::time::Instant::now();
             let mut bam = match bam::IndexedReader::from_path(&bam_path) {
-                Ok(b) => b,
-                Err(_) => return (var.clone(), result),
+                Ok(b) => {
+                    let open_ms = bam_open_start.elapsed().as_millis();
+                    if open_ms > 500 {
+                        warn!("BAM open took {}ms for variant {}:{} — possible I/O contention",
+                            open_ms, var.chrom, var.pos + 1);
+                    }
+                    b
+                },
+                Err(e) => {
+                    warn!("Failed to open BAM for variant {}:{}: {}",
+                        var.chrom, var.pos + 1, e);
+                    return (var.clone(), result);
+                },
             };
             
             // Thread-local FASTA reader (for GC correction)
             let thread_fasta: Option<faidx::Reader> = if factors.is_some() {
-                reference_path.as_ref().and_then(|p| faidx::Reader::from_path(p).ok())
+                reference_path.as_ref().and_then(|p| {
+                    match faidx::Reader::from_path(p) {
+                        Ok(r) => Some(r),
+                        Err(e) => {
+                            warn!("Failed to open reference FASTA {:?} for variant {}:{}: {} — GC correction disabled for this variant",
+                                p, var.chrom, var.pos + 1, e);
+                            None
+                        }
+                    }
+                })
             } else {
                 None
             };
@@ -1248,8 +1338,17 @@ pub fn calculate_mfsd(
             // overlap the anchor base (var.pos). Fetching the full REF span
             // (e.g., 1500bp for a large deletion) would pull thousands of
             // irrelevant reads that can't inform the classification.
-            if bam.fetch((tid, var.pos as u64, var.pos as u64 + 1)).is_err() {
+            let fetch_start = std::time::Instant::now();
+            debug!("Variant {}:{} — BAM opened in {}ms, fetching region...",
+                var.chrom, var.pos + 1, bam_open_start.elapsed().as_millis());
+            if let Err(e) = bam.fetch((tid, var.pos as u64, var.pos as u64 + 1)) {
+                warn!("BAM fetch failed for variant {}:{}: {}", var.chrom, var.pos + 1, e);
                 return (var.clone(), result);
+            }
+            let fetch_ms = fetch_start.elapsed().as_millis();
+            if fetch_ms > 500 {
+                warn!("BAM fetch took {}ms for variant {}:{} — index seek stall",
+                    fetch_ms, var.chrom, var.pos + 1);
             }
             
             // P4: Process ALL reads (R1 and R2), track per-fragment evidence
@@ -1258,11 +1357,42 @@ pub fn calculate_mfsd(
             // only R2 covers the variant position.
             let mut fragment_evidence: HashMap<u64, FragmentMfsdEvidence> = HashMap::new();
             
+            let mut consecutive_errors: u32 = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 1000;
+
+            debug!("Variant {}:{} — fetch complete in {}ms, iterating records...",
+                var.chrom, var.pos + 1, fetch_ms);
+
             for record_res in bam.records() {
+                // Heartbeat: log progress every 10,000 records (visible with --verbose)
+                if result.records_processed > 0 && result.records_processed.is_multiple_of(10_000) {
+                    debug!("Variant {}:{} — {} records processed ({:.1}s)...",
+                        var.chrom, var.pos + 1, result.records_processed,
+                        variant_start.elapsed().as_secs_f64());
+                }
+
                 let record = match record_res {
-                    Ok(r) => r,
-                    Err(_) => continue,
+                    Ok(r) => {
+                        consecutive_errors = 0;  // Reset on successful read
+                        r
+                    },
+                    Err(e) => {
+                        consecutive_errors += 1;
+                        if consecutive_errors == 1 {
+                            // Log the first error with full detail
+                            warn!("BAM read error at {}:{} record #{}: {}",
+                                var.chrom, var.pos + 1, result.records_processed, e);
+                        }
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            warn!("BAM error storm: {} consecutive errors at {}:{} — aborting variant (last: {})",
+                                consecutive_errors, var.chrom, var.pos + 1, e);
+                            result.had_read_errors = true;
+                            break;
+                        }
+                        continue;
+                    },
                 };
+                result.records_processed += 1;
                 
                 // Filters (applied to both R1 and R2)
                 if record.mapq() < map_quality { continue; }
@@ -1310,26 +1440,30 @@ pub fn calculate_mfsd(
                 
                 // Compute GC correction weight
                 let gc_weight = if let Some(ref factors_arc) = factors {
-                    // Get fragment coordinates for GC lookup
-                    let frag_start = record.pos() as u64;
-                    let frag_end = if record.insert_size() > 0 {
-                        frag_start + record.insert_size() as u64
+                    // GC correction requires a valid FASTA reader — if the reference
+                    // couldn't be opened, skip correction entirely (weight=1.0) rather
+                    // than applying a factor based on an arbitrary GC percentage.
+                    if let Some(ref fasta) = thread_fasta {
+                        // Get fragment coordinates for GC lookup
+                        let frag_start = record.pos() as u64;
+                        let frag_end = if record.insert_size() > 0 {
+                            frag_start + record.insert_size() as u64
+                        } else {
+                            frag_start + record.seq().len() as u64
+                        };
+
+                        match fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end) {
+                            Some(gc) => {
+                                let gc_pct = (gc * 100.0).round() as u8;
+                                factors_arc.get_factor(frag_len as u64, gc_pct)
+                            },
+                            None => 1.0, // GC lookup failed for this region — no correction
+                        }
                     } else {
-                        frag_start + record.seq().len() as u64
-                    };
-                    
-                    // Get GC from thread-local FASTA reader
-                    let gc_pct = if let Some(ref fasta) = thread_fasta {
-                        fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end)
-                            .map(|gc| (gc * 100.0).round() as u8)
-                            .unwrap_or(50) // Default 50% GC
-                    } else {
-                        50 // Default if no reference
-                    };
-                    
-                    factors_arc.get_factor(frag_len as u64, gc_pct)
+                        1.0 // No FASTA reader available — no correction
+                    }
                 } else {
-                    1.0 // No GC correction
+                    1.0 // No GC correction factors provided
                 };
                 
                 // Compute duplex consensus weight (for fgbio/Marianas duplex BAMs)
@@ -1390,12 +1524,36 @@ pub fn calculate_mfsd(
                 result.add_fragment(evidence.best_class, evidence.frag_len, evidence.weight);
             }
             
+            // Per-variant diagnostic logging
+            let elapsed = variant_start.elapsed();
+            let n_fragments = fragment_evidence.len();
+            info!("Variant {}:{} {}>{} {:.2}s {} records {} fragments ({}R {}A {}NR)",
+                var.chrom, var.pos + 1, var.ref_allele, var.alt_allele,
+                elapsed.as_secs_f64(), result.records_processed, n_fragments,
+                result.ref_lengths.len(), result.alt_lengths.len(), result.nonref_lengths.len());
+
+            if elapsed.as_secs() > 30 {
+                warn!("SLOW variant {}:{} took {:.1}s ({} records) — potential I/O stall",
+                    var.chrom, var.pos + 1, elapsed.as_secs_f64(), result.records_processed);
+            }
+
             pb.inc(1);
             (var.clone(), result)
         })
-        .collect();
+        .collect()
+    }); // end py.allow_threads
         
     pb.finish_with_message("Done!");
+
+    // Diagnostic summary: aggregate BAM I/O health metrics
+    let total_records: u64 = results.iter().map(|(_, r)| r.records_processed).sum();
+    let error_variants = results.iter().filter(|(_, r)| r.had_read_errors).count();
+    info!("mFSD diagnostics: {} total BAM records across {} variants",
+        total_records, results.len());
+    if error_variants > 0 {
+        warn!("{}/{} variants had excessive BAM read errors — check BAM file integrity",
+            error_variants, results.len());
+    }
 
     // Calculate summary statistics
     let mut total_ref = 0usize;
@@ -1480,35 +1638,8 @@ pub fn calculate_mfsd(
     info!("Writing output to {:?}...", output_file);
     let mut out_file = File::create(&output_file)?;
     
-    // Header (42 columns - added 5 GC-weighted columns)
-    writeln!(out_file, "{}", [
-        // Variant info (5)
-        "Chrom", "Pos", "Ref", "Alt", "VarType",
-        // Counts (5)
-        "REF_Count", "ALT_Count", "NonREF_Count", "N_Count", "Total_Count",
-        // GC-Weighted Counts (5)
-        "REF_Weighted", "ALT_Weighted", "NonREF_Weighted", "N_Weighted", "VAF_GC_Corrected",
-        // Log-Likelihood Ratio (2) - for duplex/panel with low N
-        "ALT_LLR", "REF_LLR",
-        // Mean sizes (4)
-        "REF_MeanSize", "ALT_MeanSize", "NonREF_MeanSize", "N_MeanSize",
-        // Primary: ALT vs REF (3)
-        "Delta_ALT_REF", "KS_ALT_REF", "KS_Pval_ALT_REF",
-        // Secondary: ALT vs NonREF (3)
-        "Delta_ALT_NonREF", "KS_ALT_NonREF", "KS_Pval_ALT_NonREF",
-        // REF vs NonREF (3)
-        "Delta_REF_NonREF", "KS_REF_NonREF", "KS_Pval_REF_NonREF",
-        // ALT vs N (3)
-        "Delta_ALT_N", "KS_ALT_N", "KS_Pval_ALT_N",
-        // Tertiary: REF vs N (3)
-        "Delta_REF_N", "KS_REF_N", "KS_Pval_REF_N",
-        // NonREF vs N (3)
-        "Delta_NonREF_N", "KS_NonREF_N", "KS_Pval_NonREF_N",
-        // Derived (5)
-        "VAF_Proxy", "Error_Rate", "N_Rate", "Size_Ratio", "Quality_Score",
-        // Quality flags (2)
-        "ALT_Confidence", "KS_Valid",
-    ].join("\t"))?;
+    // Header (46 columns — uses module-level MFSD_HEADER constant)
+    writeln!(out_file, "{}", MFSD_HEADER.join("\t"))?;
     
     // Optional: distributions file
     let mut dist_file = if output_distributions {
@@ -1516,7 +1647,7 @@ pub fn calculate_mfsd(
         info!("Writing distributions to {:?}...", dist_path);
         let f = File::create(&dist_path)?;
         let mut f = std::io::BufWriter::new(f);
-        writeln!(f, "Chrom\tPos\tRef\tAlt\tCategory\tSize\tCount")?;
+        writeln!(f, "{}", MFSD_DIST_HEADER.join("\t"))?;
         Some(f)
     } else {
         None

@@ -53,9 +53,10 @@ process FILTER_MAF {
         unique_tsbs = set()
 
         for line in infile:
-            outfile.write(line)  # always write — no filtering
+            # Skip comment lines (not needed by downstream mFSD parser)
             if line.startswith('#'):
                 continue
+            outfile.write(line)  # pass through all data rows
             fields = line.strip().split('\\t')
             if tsb_col is None:
                 for i, col in enumerate(fields):
@@ -70,7 +71,7 @@ process FILTER_MAF {
     if len(unique_tsbs) > 1:
         print(f"WARNING: MAF contains {len(unique_tsbs)} unique Tumor_Sample_Barcodes: {unique_tsbs}", file=sys.stderr)
         print(f"WARNING: single_sample_maf=true so no filtering applied — all samples included", file=sys.stderr)
-    if unique_tsbs and not any(sample_id_lower in tsb.lower() for tsb in unique_tsbs):
+    if unique_tsbs and not any(sample_id_lower == tsb.lower() for tsb in unique_tsbs):
         print(f"WARNING: sample '{sample_id}' not found in Tumor_Sample_Barcode values: {unique_tsbs}", file=sys.stderr)
 
     with open('versions.yml', 'w') as vf:
@@ -95,9 +96,8 @@ process FILTER_MAF {
         tsb_col = None
 
         for line in infile:
-            # Handle comment lines (keep them)
+            # Skip comment lines (not needed by downstream mFSD parser)
             if line.startswith('#'):
-                outfile.write(line)
                 continue
 
             fields = line.strip().split('\\t')
@@ -119,9 +119,9 @@ process FILTER_MAF {
 
             total_rows += 1
 
-            # Filter: check if sample_id is a substring of Tumor_Sample_Barcode
+            # Filter: exact case-insensitive match on Tumor_Sample_Barcode
             if tsb_col is not None:
-                if len(fields) > tsb_col and sample_id_lower in fields[tsb_col].lower():
+                if len(fields) > tsb_col and sample_id_lower == fields[tsb_col].lower():
                     outfile.write(line)
                     variant_count += 1
             else:

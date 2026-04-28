@@ -4,7 +4,7 @@ Integration tests for mFSD (Mutant Fragment Size Distribution).
 Tests the new mFSD implementation with:
 - All variant types (SNV, MNV, Insertion, Deletion, Complex)
 - 4-way fragment classification (REF, ALT, NonREF, N)
-- 39-column output format
+- 46-column output format
 - Optional distributions output
 """
 
@@ -753,3 +753,110 @@ def test_mfsd_maf_invalid_alleles_warns(tmp_path):
 
     # Should fail with informative error about missing column
     assert result.exit_code != 0, "Should fail when MAF is missing Tumor_Seq_Allele2"
+
+
+# =============================================================================
+# Diagnostics & Edge Case Tests (mFSD hang investigation)
+# =============================================================================
+
+
+def test_mfsd_zero_variants(tmp_path):
+    """0-variant input produces header-only TSV with no BAM access."""
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+
+    # Header-only VCF — no data lines
+    vcf_file = tmp_path / "empty.vcf"
+    vcf_file.write_text(
+        "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+    )
+
+    output_dir = tmp_path / "output"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "mfsd",
+            "-i",
+            str(bam_file),
+            "-V",
+            str(vcf_file),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+        ],
+    )
+
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+
+            traceback.print_exception(
+                type(result.exception), result.exception, result.exception.__traceback__
+            )
+
+    assert result.exit_code == 0
+
+    output_file = output_dir / "test.mFSD.tsv"
+    assert output_file.exists(), "Header-only TSV should always be produced"
+
+    df = pd.read_csv(output_file, sep="\t")
+    assert len(df) == 0, f"Expected 0 data rows, got {len(df)}"
+    assert "Chrom" in df.columns, "Header must contain Chrom column"
+    assert "ALT_Confidence" in df.columns, "Header must contain ALT_Confidence column"
+
+
+def test_mfsd_maf_with_comment_lines(tmp_path):
+    """MAF with leading #comment lines is parsed correctly by Rust."""
+    bam_file = tmp_path / "test.bam"
+    create_mock_bam(bam_file)
+
+    maf_file = tmp_path / "variants.maf"
+    with open(maf_file, "w") as f:
+        # cBioPortal-style comment lines
+        f.write("#version 2.4\n")
+        f.write("#annotation.spec gdc-1.0.1-aliquot\n")
+        # MAF header
+        f.write(
+            "Hugo_Symbol\tChromosome\tStart_Position\t"
+            "Reference_Allele\tTumor_Seq_Allele2\n"
+        )
+        # One data line
+        f.write("KRAS\tchr1\t1001\tA\tT\n")
+
+    output_dir = tmp_path / "output"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "mfsd",
+            "-i",
+            str(bam_file),
+            "-V",
+            str(maf_file),
+            "-o",
+            str(output_dir),
+            "-s",
+            "test",
+        ],
+    )
+
+    if result.exit_code != 0:
+        print(result.stdout)
+        if result.exception:
+            import traceback
+
+            traceback.print_exception(
+                type(result.exception), result.exception, result.exception.__traceback__
+            )
+
+    assert result.exit_code == 0
+
+    df = pd.read_csv(output_dir / "test.mFSD.tsv", sep="\t")
+    assert len(df) == 1, f"Expected 1 variant row, got {len(df)}"
+    assert df.iloc[0]["Ref"] == "A", f"Expected Ref='A', got '{df.iloc[0]['Ref']}'"
+    assert df.iloc[0]["Alt"] == "T", f"Expected Alt='T', got '{df.iloc[0]['Alt']}'"
