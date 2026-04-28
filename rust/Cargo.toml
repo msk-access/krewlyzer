@@ -1,7 +1,8 @@
 [package]
 name = "krewlyzer_core"
-version = "0.8.2"
+version = "0.8.3"
 edition = "2021"
+rust-version = "1.87"  # Required for u64::is_multiple_of (stabilized 1.87)
 authors = ["Ronak Shah <shahr2@mskcc.org>"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
 repository = "https://github.com/msk-access/krewlyzer"

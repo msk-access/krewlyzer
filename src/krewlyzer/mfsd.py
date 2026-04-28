@@ -128,7 +128,7 @@ def mfsd(
 
     Input: BAM file and VCF/MAF file with variants
     Output:
-    - {sample}.mFSD.tsv: Summary statistics (39 columns)
+    - {sample}.mFSD.tsv: Summary statistics (46 columns)
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
     # Set log level based on verbose flag
