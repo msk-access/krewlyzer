@@ -2,33 +2,55 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.8.3] - 2026-04-28
 
 ### Fixed
+- **GIL Deadlock in Parallel Modules**: Wrapped all Rayon `par_iter()` calls in
+  `py.allow_threads()` across `mfsd.rs`, `uxm.rs`, `extract_motif.rs`, and
+  `region_mds.rs`. Previously, `pyo3-log` attempted to acquire the GIL from
+  Rayon worker threads while the main thread held it, causing indefinite hangs
+  on multi-threaded runs (observed as 16-hour wall time on IRIS HPC).
 - **mFSD Silent Error Swallowing**: Replaced `Err(_) => continue` in BAM record
   iterator with a logged error breaker (max 1000 consecutive errors). Previously,
   corrupt BAM regions could cause infinite silent loops.
+- **FILTER_MAF Substring Match**: Changed `sample_id in tsb` to exact match
+  (`sample_id == tsb`) preventing `T01` from matching `T01-XS1`.
 - **FILTER_MAF Comment Lines**: Stripped `#` comment lines from filtered MAF output
-  in both multi-sample and single-sample modes. Downstream Rust parser already
-  skipped them, but output files were unnecessarily large and confusing.
+  in both multi-sample and single-sample modes.
 - **mFSD 0-Variant Guard**: Added early exit at both Python (`wrapper.py`) and Rust
   layers when MAF has 0 data lines. Produces header-only TSV instead of attempting
-  BAM access. Prevents unnecessary resource allocation for samples without variants.
+  BAM access.
 - **mFSD GC Correction Fallback**: When reference FASTA is unavailable or GC lookup
   fails for a region, GC correction is now skipped (weight=1.0) instead of silently
-  using a hardcoded 50% GC to look up correction factors.
+  using a hardcoded 50% GC.
 
 ### Added
 - **mFSD BAM I/O Diagnostics**: Per-variant timing, BAM open/fetch latency logging,
-  record counts, and slow-variant warnings (>30s). Enables production debugging of
-  the 17% job failure rate on IRIS HPC.
+  record counts, and slow-variant warnings (>30s). All diagnostics use structured
+  `log` macros (visible with `--verbose`).
 - **mFSD Header Constant**: Extracted 46-column TSV header into `MFSD_HEADER` module
   constant, eliminating duplication between normal output and 0-variant early-exit.
+
+### Changed
+- **Minimum Python**: `requires-python` raised from `>=3.8` to `>=3.10` (Python
+  3.8 and 3.9 are EOL).
+- **Minimum Rust**: Added `rust-version = "1.87"` MSRV to `Cargo.toml`.
+- **Cargo Dependencies**: Updated 81 semver-compatible transitive dependencies
+  (rayon 1.11→1.12, anyhow 1.0.100→1.0.102, flate2 1.1.5→1.1.9, etc.).
+- **Diagnostic Logging**: Converted all `eprintln!` breadcrumbs inside parallel
+  closures to structured `debug!`/`warn!` macros for proper timestamp/level
+  formatting through Python's logging framework.
+
+### Documentation
+- **Developer Guide**: Added "PyO3 + Rayon GIL deadlock" Known Gotcha with correct
+  and incorrect code examples.
+- **Developer Guide**: Updated contributing checklist test count (244→357).
 
 ### Tests
 - Added `test_mfsd_zero_variants` — verifies 0-variant input produces header-only TSV.
 - Added `test_mfsd_maf_with_comment_lines` — verifies MAFs with `#` comment headers
   are parsed correctly.
+- Total: 357 passed, 4 skipped.
 
 ## [0.8.2] - 2026-03-26
 

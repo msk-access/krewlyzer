@@ -354,6 +354,44 @@ This gotcha caused a silent data loss bug in v0.8.0 where `MDS.exon.tsv` and
 
 ---
 
+### PyO3 + Rayon: Always Release the GIL Before `par_iter`
+
+When calling Rayon `par_iter()` from a `#[pyfunction]`, the GIL must be
+released first. Otherwise, `pyo3-log` (our global logger) tries to acquire
+the GIL from worker threads while the main thread holds it — **deadlock**.
+
+```rust
+// ✅ CORRECT: release GIL before parallel work
+fn my_function(py: Python, ...) -> PyResult<...> {
+    let results = py.allow_threads(|| {
+        items.par_iter().map(|item| {
+            info!("Processing {}", item);  // safe — GIL is released
+            process(item)
+        }).collect()
+    });
+    Ok(results)
+}
+
+// ❌ WRONG: GIL held during par_iter
+fn my_function(...) -> PyResult<...> {
+    let results = items.par_iter().map(|item| {
+        info!("Log from worker");  // DEADLOCK — pyo3-log needs GIL
+        process(item)
+    }).collect();
+    Ok(results)
+}
+```
+
+**Affected modules** (all patched in v0.8.3):
+`mfsd.rs`, `uxm.rs`, `extract_motif.rs`, `region_mds.rs`.
+
+**Rule**: Any `#[pyfunction]` using `rayon::par_iter()` MUST accept `py: Python`
+and wrap the parallel block in `py.allow_threads(|| { ... })`.
+
+This gotcha caused 16-hour wall-time hangs on the IRIS HPC cluster in v0.8.2.
+
+---
+
 ### `_core.pyi` — Rust Extension Stub Maintenance
 
 `src/krewlyzer/_core.pyi` is a **type stub** for the compiled Rust/PyO3 extension
@@ -384,7 +422,7 @@ python -m mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
 - [ ] Code follows existing patterns
 - [ ] Added/updated tests
 - [ ] Updated documentation
-- [ ] Ran `pytest tests/` — 244 pass, 4 skipped
+- [ ] Ran `pytest tests/` — 357 pass, 4 skipped
 - [ ] If Rust functions changed: updated `src/krewlyzer/_core.pyi` stub
 - [ ] Ran Python lint (matches CI lint job):
     ```bash
