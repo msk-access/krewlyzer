@@ -3,7 +3,7 @@ name = "krewlyzer"
 version = "0.8.2"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 readme = "README.md"
 license = { file = "LICENSE" }
 dependencies = [
