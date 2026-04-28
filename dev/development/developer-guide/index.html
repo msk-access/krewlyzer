@@ -2319,6 +2319,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#pyo3-rayon-always-release-the-gil-before-par_iter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PyO3 + Rayon: Always Release the GIL Before par_iter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_corepyi-rust-extension-stub-maintenance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2943,6 +2954,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#pyo3-rayon-always-release-the-gil-before-par_iter" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        PyO3 + Rayon: Always Release the GIL Before par_iter
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#_corepyi-rust-extension-stub-maintenance" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3355,6 +3377,36 @@ which silently corrupts these paths:</p>
 <p>This gotcha caused a silent data loss bug in v0.8.0 where <code>MDS.exon.tsv</code> and
 <code>MDS.gene.tsv</code> were never generated. Test coverage: <code>tests/unit/test_compound_extension.py</code>.</p>
 <hr>
+<h3 id="pyo3-rayon-always-release-the-gil-before-par_iter">PyO3 + Rayon: Always Release the GIL Before <code>par_iter</code></h3>
+<p>When calling Rayon <code>par_iter()</code> from a <code>#[pyfunction]</code>, the GIL must be
+released first. Otherwise, <code>pyo3-log</code> (our global logger) tries to acquire
+the GIL from worker threads while the main thread holds it — <strong>deadlock</strong>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1">// ✅ CORRECT: release GIL before parallel work</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">fn</span><span class="w"> </span><span class="nf">my_function</span><span class="p">(</span><span class="n">py</span><span class="p">:</span><span class="w"> </span><span class="nc">Python</span><span class="p">,</span><span class="w"> </span><span class="o">..</span><span class="p">.)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">PyResult</span><span class="o">&lt;..</span><span class="p">.</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">results</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">py</span><span class="p">.</span><span class="n">allow_threads</span><span class="p">(</span><span class="o">||</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">        </span><span class="n">items</span><span class="p">.</span><span class="n">par_iter</span><span class="p">().</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">item</span><span class="o">|</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">            </span><span class="n">info</span><span class="o">!</span><span class="p">(</span><span class="s">"Processing {}"</span><span class="p">,</span><span class="w"> </span><span class="n">item</span><span class="p">);</span><span class="w">  </span><span class="c1">// safe — GIL is released</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="w">            </span><span class="n">process</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="w">        </span><span class="p">}).</span><span class="n">collect</span><span class="p">()</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="w">    </span><span class="p">});</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="w">    </span><span class="nb">Ok</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="p">}</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="c1">// ❌ WRONG: GIL held during par_iter</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="k">fn</span><span class="w"> </span><span class="nf">my_function</span><span class="p">(</span><span class="o">..</span><span class="p">.)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nc">PyResult</span><span class="o">&lt;..</span><span class="p">.</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">results</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">items</span><span class="p">.</span><span class="n">par_iter</span><span class="p">().</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">item</span><span class="o">|</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="w">        </span><span class="n">info</span><span class="o">!</span><span class="p">(</span><span class="s">"Log from worker"</span><span class="p">);</span><span class="w">  </span><span class="c1">// DEADLOCK — pyo3-log needs GIL</span>
+<a id="__codelineno-11-16" name="__codelineno-11-16" href="#__codelineno-11-16"></a><span class="w">        </span><span class="n">process</span><span class="p">(</span><span class="n">item</span><span class="p">)</span>
+<a id="__codelineno-11-17" name="__codelineno-11-17" href="#__codelineno-11-17"></a><span class="w">    </span><span class="p">}).</span><span class="n">collect</span><span class="p">();</span>
+<a id="__codelineno-11-18" name="__codelineno-11-18" href="#__codelineno-11-18"></a><span class="w">    </span><span class="nb">Ok</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+<a id="__codelineno-11-19" name="__codelineno-11-19" href="#__codelineno-11-19"></a><span class="p">}</span>
+</code></pre></div>
+<p><strong>Affected modules</strong> (all patched in v0.8.3):
+<code>mfsd.rs</code>, <code>uxm.rs</code>, <code>extract_motif.rs</code>, <code>region_mds.rs</code>.</p>
+<p><strong>Rule</strong>: Any <code>#[pyfunction]</code> using <code>rayon::par_iter()</code> MUST accept <code>py: Python</code>
+and wrap the parallel block in <code>py.allow_threads(|| { ... })</code>.</p>
+<p>This gotcha caused 16-hour wall-time hangs on the IRIS <abbr title="High-Performance Computing - Cluster computing environment">HPC</abbr> cluster in v0.8.2.</p>
+<hr>
 <h3 id="_corepyi-rust-extension-stub-maintenance"><code>_core.pyi</code> — Rust Extension Stub Maintenance</h3>
 <p><code>src/krewlyzer/_core.pyi</code> is a <strong>type stub</strong> for the compiled Rust/PyO3 extension
 (<code>krewlyzer._core</code>). It tells mypy what functions and submodules exist without
@@ -3366,9 +3418,9 @@ inspecting the binary <code>.so</code> — following the same pattern as
 <li>Add a new sub-PyModule registered in <code>rust/src/lib.rs</code></li>
 <li>Change the signature (parameters or return type) of an existing exported function</li>
 </ul>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># After updating rust/src/*.rs, update the stub and verify:</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/<span class="w"> </span>--ignore-missing-imports<span class="w"> </span>--no-error-summary
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Must exit 0 with no output. Commit .rs and .pyi changes together.</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># After updating rust/src/*.rs, update the stub and verify:</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/<span class="w"> </span>--ignore-missing-imports<span class="w"> </span>--no-error-summary
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="c1"># Must exit 0 with no output. Commit .rs and .pyi changes together.</span>
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Stub drift causes CI failures</p>
@@ -3381,16 +3433,16 @@ Python files that call the Rust functions, even if the code runs correctly at ru
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Code follows existing patterns</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Added/updated tests</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Updated documentation</li>
-<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran <code>pytest tests/</code> — 244 pass, 4 skipped</li>
+<li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran <code>pytest tests/</code> — 357 pass, 4 skipped</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> If Rust functions changed: updated <code>src/krewlyzer/_core.pyi</code> stub</li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran Python lint (matches CI lint job):
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>black<span class="w"> </span>--check<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>python<span class="w"> </span>scripts/check_output_format.py
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>black<span class="w"> </span>--check<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>python<span class="w"> </span>-m<span class="w"> </span>mypy<span class="w"> </span>src/krewlyzer/
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>python<span class="w"> </span>scripts/check_output_format.py
 </code></pre></div></li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Ran Rust lint:
-    <div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+    <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>cargo<span class="w"> </span>fmt<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
 </code></pre></div></li>
 <li class="task-list-item"><label class="task-list-control"><input type="checkbox" disabled=""><span class="task-list-indicator"></span></label> Updated CHANGELOG.md</li>
 </ul>
@@ -3419,7 +3471,7 @@ Python files that call the Rust functions, even if the code runs correctly at ru
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 26, 2026 00:08:45 UTC"><span class="timeago" datetime="2026-03-26T00:08:45+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 26, 2026 00:08:45 UTC">2026-03-26</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="April 28, 2026 13:36:24 UTC"><span class="timeago" datetime="2026-04-28T13:36:24+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="April 28, 2026 13:36:24 UTC">2026-04-28</span>
   </span>
 
     
