@@ -5,17 +5,17 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
-- **UXM: `X` (mixed-methylation) class was unreachable.** The CLI passed
-  `methy_threshold = unmethy_threshold = 0.5` to the Rust backend. Because the
-  backend evaluates `ratio >= methy_threshold` first, every fragment collapsed
-  into `M` or `U` and the published `X` column was identically `0.0` for every
-  region of every sample. Thresholds are now `METHY_THRESHOLD = 0.75` /
-  `UNMETHY_THRESHOLD = 0.25`, matching the documented Loyfer et al. (2022)
-  definition. Added a regression test covering a genuinely mixed fragment.
+- **region-MDS: E1 (first exon) selection ignored strand.** `identify_e1_regions`
+  always chose the lowest start coordinate, so for every **minus-strand gene**
+  the reported `mds_e1` was the gene's *last* exon rather than its first —
+  roughly half of a typical panel. E1 is now selected by transcription order
+  (lowest start on `+`, highest start on `-`).
+  `write_gene_output` no longer re-derives E1 by coordinate; it reads the
+  strand-aware `is_e1` flag, so `mds_e1` also stops silently falling through to
+  the next covered exon when E1 has no fragments.
 
-  > **Output change:** `{sample}.UXM.tsv` `X` becomes non-zero, and `U`/`M`
-  > shrink correspondingly. Any model trained on the previous (degenerate)
-  > columns must be refit.
+  > **Output change:** `{sample}.MDS.gene.tsv` `mds_e1` / `mds_e1_z` change for
+  > all minus-strand genes. Values from earlier versions are not comparable.
 
 ## [0.8.3] - 2026-04-28
 

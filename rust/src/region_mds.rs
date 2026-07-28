@@ -185,14 +185,27 @@ fn parse_gene_bed(
 /// 
 /// Returns the count of E1 regions identified.
 fn identify_e1_regions(regions: &mut [RegionInfo]) -> usize {
-    // Group by gene, find first by position (lowest start coordinate)
+    // Group by gene and find the TRANSCRIPTIONALLY first exon.
+    //
+    // E1 is defined by transcription order, not genomic coordinate order:
+    //   '+' strand -> lowest  start coordinate
+    //   '-' strand -> highest start coordinate
+    //
+    // Ignoring strand (the historical behaviour) silently reported the LAST
+    // exon as E1 for every minus-strand gene, i.e. roughly half of any panel.
     let mut gene_first: HashMap<String, (usize, u64)> = HashMap::new();
 
     for (idx, region) in regions.iter().enumerate() {
+        let is_minus = region.strand == '-';
         gene_first
             .entry(region.gene.clone())
             .and_modify(|(best_idx, best_start)| {
-                if region.start < *best_start {
+                let better = if is_minus {
+                    region.start > *best_start
+                } else {
+                    region.start < *best_start
+                };
+                if better {
                     *best_idx = idx;
                     *best_start = region.start;
                 }
@@ -552,7 +565,11 @@ fn write_gene_output(
     writeln!(file, "gene\tn_exons\tn_fragments\tmds_mean\tmds_e1\tmds_std")?;
 
     for (gene, regions_data) in &gene_data {
-        // Sort by position to find E1
+        // Sort by genomic position for stable, reproducible output ordering.
+        // NOTE: E1 is NOT re-derived here -- it is read from the `is_e1` flag
+        // set by identify_e1_regions(), which is strand-aware. Re-deriving it
+        // by coordinate (the historical behaviour) both ignored strand and
+        // fell through to the next exon whenever E1 had zero fragments.
         let mut sorted_data = regions_data.clone();
         sorted_data.sort_by_key(|(_, start, _, _)| *start);
 
@@ -568,8 +585,10 @@ fn write_gene_output(
         let n_exons = sorted_data.len();
         let n_fragments: u64 = sorted_data.iter().map(|(_, _, _, c)| c).sum();
         let mds_mean = mds_values.iter().sum::<f64>() / mds_values.len() as f64;
+        // Strict E1: the region flagged by identify_e1_regions() for this gene.
+        // 0.0 means "E1 had no fragments", NOT "the next exon's value".
         let mds_e1 = sorted_data.iter()
-            .find(|(_, _, _, count)| *count > 0)
+            .find(|(idx, _, _, _)| regions[*idx].is_e1)
             .map(|(_, _, mds, _)| *mds)
             .unwrap_or(0.0);
 
@@ -592,4 +611,75 @@ fn write_gene_output(
     let n_genes = gene_data.len();
     info!("Wrote gene output to {} ({} genes)", path.display(), n_genes);
     Ok(n_genes)
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn region(gene: &str, name: &str, start: u64, strand: char) -> RegionInfo {
+        RegionInfo {
+            chrom: "1".to_string(),
+            start,
+            end: start + 100,
+            gene: gene.to_string(),
+            name: name.to_string(),
+            strand,
+            chrom_id: 0,
+            is_e1: false,
+        }
+    }
+
+    #[test]
+    fn e1_is_lowest_coordinate_on_plus_strand() {
+        let mut regions = vec![
+            region("TP53", "exon_01", 1_000, '+'),
+            region("TP53", "exon_02", 2_000, '+'),
+            region("TP53", "exon_03", 3_000, '+'),
+        ];
+        let n = identify_e1_regions(&mut regions);
+        assert_eq!(n, 1);
+        assert!(regions[0].is_e1, "plus-strand E1 must be the lowest start");
+        assert!(!regions[1].is_e1);
+        assert!(!regions[2].is_e1);
+    }
+
+    #[test]
+    fn e1_is_highest_coordinate_on_minus_strand() {
+        // Regression: strand was previously ignored, so the LAST exon of every
+        // minus-strand gene was reported as E1.
+        let mut regions = vec![
+            region("BRCA1", "exon_01", 1_000, '-'),
+            region("BRCA1", "exon_02", 2_000, '-'),
+            region("BRCA1", "exon_03", 3_000, '-'),
+        ];
+        let n = identify_e1_regions(&mut regions);
+        assert_eq!(n, 1);
+        assert!(
+            regions[2].is_e1,
+            "minus-strand E1 must be the HIGHEST start (transcription order)"
+        );
+        assert!(!regions[0].is_e1);
+        assert!(!regions[1].is_e1);
+    }
+
+    #[test]
+    fn e1_is_per_gene_and_strand_aware_when_mixed() {
+        let mut regions = vec![
+            region("PLUS", "e1", 100, '+'),
+            region("PLUS", "e2", 900, '+'),
+            region("MINUS", "e1", 200, '-'),
+            region("MINUS", "e2", 800, '-'),
+        ];
+        let n = identify_e1_regions(&mut regions);
+        assert_eq!(n, 2, "one E1 per gene");
+        assert!(regions[0].is_e1, "PLUS E1 = lowest start");
+        assert!(!regions[1].is_e1);
+        assert!(!regions[2].is_e1);
+        assert!(regions[3].is_e1, "MINUS E1 = highest start");
+    }
 }
