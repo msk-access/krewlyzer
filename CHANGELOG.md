@@ -2,45 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-### Fixed
-- **region-MDS: E1 (first exon) selection ignored strand.** `identify_e1_regions`
-  always chose the lowest start coordinate, so for every **minus-strand gene**
-  the reported `mds_e1` was the gene's *last* exon rather than its first —
-  roughly half of a typical panel. E1 is now selected by transcription order
-  (lowest start on `+`, highest start on `-`).
-  `write_gene_output` no longer re-derives E1 by coordinate; it reads the
-  strand-aware `is_e1` flag, so `mds_e1` also stops silently falling through to
-  the next covered exon when E1 has no fragments.
-
-  > **Output change:** `{sample}.MDS.gene.tsv` `mds_e1` / `mds_e1_z` change for
-  > all minus-strand genes. Values from earlier versions are not comparable.
-
 ## [0.8.3] - 2026-04-28
 
 ### Fixed
-- **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
-  The Alu background profile covered only the ~300bp Alu body in 30 bins, so
-  the DFT period grid was `300 / i` and the *only* index falling inside the
-  nucleosomal search band was `i = 2` (150bp). Every sample therefore produced
-  `nrl_bp = 150.0`, `periodicity_score = 0.3333` and `adjusted_score = 0.0`
-  regardless of its data, and the documented "healthy NRL ~190bp, quality > 0.7"
-  was unreachable. Fixes:
-  - stack a **2000bp** window per Alu (850bp flank + 300bp body + 850bp flank),
-    spanning ~10 nucleosome repeats instead of ~1.5; the background interval
-    tree is widened to match so flanking fragments are retrieved;
-  - bin at 200 x 10bp instead of 30 x 10bp;
-  - zero-pad the DFT 8x so the peak can be located between native bins and the
-    SNR denominator averages over more than one sample;
-  - widen the search band to 140-250bp;
-  - set the deviation tolerance to the **50bp** already documented (the code
-    used 20bp, which forced `adjusted_score` to 0 given the pinned 150bp NRL).
-
-  > **Output change:** `{sample}.WPS_background.parquet` `nrl_bp`,
-  > `nrl_deviation_bp`, `periodicity_score` and `adjusted_score` all become
-  > data-dependent. Values from earlier versions are constants and must be
-  > discarded, not compared.
+- **region-entropy crashed when the PON lacked a matching baseline.** The Rust
+  `apply_pon_zscore` returns early *without writing an output file* if the PON
+  has no `tfbs_baseline` / `atac_baseline` table. The Python caller then ran
+  `load_entropy_tsv()` on the missing file, tripping its `assert df is not
+  None`, and the raw Rust output was unlinked afterwards -- losing the entropy
+  results entirely. It now degrades to the documented no-PON behaviour
+  (`z_score = 0`) with a warning telling the user to rebuild the PON.
 
 - **GIL Deadlock in Parallel Modules**: Wrapped all Rayon `par_iter()` calls in
   `py.allow_threads()` across `mfsd.rs`, `uxm.rs`, `extract_motif.rs`, and

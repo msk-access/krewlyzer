@@ -152,6 +152,26 @@ def process_region_entropy(
         str(raw_path), str(pon_parquet_path), str(output_path), baseline_table
     )
 
+    # The Rust backend returns early WITHOUT writing an output file when the
+    # PON contains no matching baseline table (e.g. a PON built before
+    # TFBS/ATAC baselines existed). Degrade to the no-PON behaviour instead of
+    # asserting on a file that was never created.
+    if not output_path.exists():
+        logger.warning(
+            f"PON has no '{baseline_table}' baseline; writing {output_path.name} "
+            f"with z_score=0. Rebuild the PON with build-pon to get z-scores."
+        )
+        df = load_entropy_tsv(raw_path)
+        df["z_score"] = 0.0
+        write_table(
+            df,
+            output_path,
+            output_format=output_format,
+            compress=compress,
+            float_format="%.4f",
+        )
+        return 0
+
     # Rust apply_pon_zscore writes plain TSV; re-write through write_table()
     # to honour --output-format and --compress flags (parquet, gzip).
     df = load_entropy_tsv(output_path)
