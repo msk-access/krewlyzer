@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **UXM: `X` (mixed-methylation) class was unreachable.** The CLI passed
+  `methy_threshold = unmethy_threshold = 0.5` to the Rust backend. Because the
+  backend evaluates `ratio >= methy_threshold` first, every fragment collapsed
+  into `M` or `U` and the published `X` column was identically `0.0` for every
+  region of every sample. Thresholds are now `METHY_THRESHOLD = 0.75` /
+  `UNMETHY_THRESHOLD = 0.25`, matching the documented Loyfer et al. (2022)
+  definition. Added a regression test covering a genuinely mixed fragment.
+
+  > **Output change:** `{sample}.UXM.tsv` `X` becomes non-zero, and `U`/`M`
+  > shrink correspondingly. Any model trained on the previous (degenerate)
+  > columns must be refit.
+
 ## [0.8.3] - 2026-04-28
 
 ### Fixed
