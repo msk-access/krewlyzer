@@ -314,6 +314,18 @@ When using a v2.0 vector PON, these additional columns are computed:
 | `shape_score` | float32 | Pearson correlation with healthy shape [-1, 1] |
 | `z_amplitude` | float32 | Mean of abs(z_vector) for backward compat |
 
+> [!WARNING]
+> **Not currently emitted.** `compute_shape_score()` and `compute_z_vector()`
+> exist in `src/krewlyzer/pon/model.py` but no pipeline code calls them, so
+> these three columns do not appear in `{sample}.WPS.parquet`.
+>
+> Separately, `wps.apply_pon_zscore()` resolves the sample column to
+> `wps_nuc`, which is written as `List<Float32>`, and then downcasts it to
+> `Float64Array`. The downcast fails and the fallback yields `0.0`, so the
+> emitted z-scores are `(0 - mean) / std` for every region while the function
+> still reports success. Do not use WPS PON z-scores until this is fixed;
+> plot the raw `wps_nuc_smooth` / `wps_tf_smooth` profiles instead.
+
 !!! tip
     **Shape Score Interpretation:**
     - **0.9-1.0**: Healthy nucleosome positioning

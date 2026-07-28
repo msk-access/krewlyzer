@@ -2,17 +2,90 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.3] - 2026-04-28
+## [Unreleased]
 
 ### Fixed
+
+- **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
+  The Alu background profile covered only the ~300bp Alu body in 30 bins, so
+  the DFT period grid was `300 / i` and the *only* index falling inside the
+  nucleosomal search band was `i = 2` (150bp). Every sample therefore produced
+  `nrl_bp = 150.0`, `periodicity_score = 0.3333` and `adjusted_score = 0.0`
+  regardless of its data, and the documented "healthy NRL ~190bp, quality >
+  0.7" was unreachable. The profile is now 2000bp (850bp flank + 300bp body +
+  850bp flank) binned at 200 x 10bp, the DFT is zero-padded 8x, the search band
+  is 140-250bp, and the deviation tolerance is the 50bp already documented
+  (the code used 20bp, which forced `adjusted_score` to 0 given the pinned
+  150bp NRL).
+
+  > **Output change:** `{sample}.WPS_background.parquet` `nrl_bp`,
+  > `nrl_deviation_bp`, `periodicity_score` and `adjusted_score` become
+  > data-dependent. Earlier values are constants and must be discarded, not
+  > compared.
+
+- **UXM: the `X` (mixed-methylation) class was unreachable.** The CLI passed
+  `methy_threshold = unmethy_threshold = 0.5`. Because the backend evaluates
+  `ratio >= methy_threshold` first, every fragment collapsed into `M` or `U`
+  and the published `X` column was identically `0.0` for every region of every
+  sample. Thresholds are now `METHY_THRESHOLD = 0.75` / `UNMETHY_THRESHOLD =
+  0.25`, matching the documented Loyfer et al. (2022) definition.
+
+  > **Output change:** `{sample}.UXM.tsv` `X` becomes non-zero and `U`/`M`
+  > shrink correspondingly. Models trained on the previous columns must be
+  > refit.
+
+- **region-MDS: E1 (first exon) selection ignored strand.** `identify_e1_regions`
+  always chose the lowest start coordinate, so for every **minus-strand gene**
+  the reported `mds_e1` was the gene's *last* exon — roughly half of a typical
+  panel. E1 is now selected by transcription order (lowest start on `+`,
+  highest on `-`). `write_gene_output` no longer re-derives E1 by coordinate;
+  it reads the strand-aware `is_e1` flag, so `mds_e1` also stops silently
+  falling through to the next covered exon when E1 has no fragments.
+
+  > **Output change:** `{sample}.MDS.gene.tsv` `mds_e1` / `mds_e1_z` change for
+  > all minus-strand genes. Earlier values are not comparable.
+
 - **region-entropy crashed when the PON lacked a matching baseline.** The Rust
   `apply_pon_zscore` returns early *without writing an output file* if the PON
   has no `tfbs_baseline` / `atac_baseline` table. The Python caller then ran
   `load_entropy_tsv()` on the missing file, tripping its `assert df is not
-  None`, and the raw Rust output was unlinked afterwards -- losing the entropy
+  None`, and the raw Rust output was unlinked afterwards — losing the entropy
   results entirely. It now degrades to the documented no-PON behaviour
-  (`z_score = 0`) with a warning telling the user to rebuild the PON.
+  (`z_score = 0`) with a warning.
 
+- **Metadata footers parsed as data (`read_table`).** `{sample}.EndMotif1mer.tsv`
+  appends `# c_fraction`, `# entropy`, `# c_bias` and `# sample` after the data
+  rows, but `read_table()` called `pd.read_csv` without `comment="#"`. Those
+  lines became data rows and `FeatureSerializer` propagated them into
+  `features.motif.edm_1mer` as junk keys with NaN values. `read_table()` now
+  defaults to `comment="#"` (callers may override).
+
+  > **Output change:** `features.motif.edm_1mer` loses the four `"# ..."` keys.
+
+- **Rust test suite did not compile.** `src/output_utils.rs` used
+  `tempfile::tempdir` with no `[dev-dependencies]` section in `rust/Cargo.toml`
+  and referenced `Arc` without importing it, so `cargo test` failed to build
+  and no Rust unit test was running in CI. Also corrected the stale
+  `gc_reference` bin-index test, which asserted a 68-bin ceiling although
+  `get_length_bin_index` spans 60..999 across 188 bins.
+
+### Documentation
+
+- Corrected feature documentation against the implementation: the inverted
+  "higher MDS = tumor" summary in `motif.md`; mFSD LLR sigmas (`human()` is
+  167/30 and 145/35, not 167/35 and 145/25), the canine/ssdna presets, their
+  unreachability, and the `MIN_FOR_KS = 2` floor; the non-existent 20-500bp
+  region-entropy window and its unusable absolute entropy bands; OCF's 1bp
+  resolution and per-10,000 per-label normalization; the FSR channel table
+  (FSR and FSC share one counter) and the fact that `total` spans 65-1000bp
+  while only five channels are returned, so `channel / total` ratios do not
+  sum to 1; and that WPS `z_vector` / `shape_score` / `z_amplitude` are
+  documented but never emitted, while `apply_pon_zscore` silently yields
+  `z = (0 - mean) / std`.
+
+## [0.8.3] - 2026-04-28
+
+### Fixed
 - **GIL Deadlock in Parallel Modules**: Wrapped all Rayon `par_iter()` calls in
   `py.allow_threads()` across `mfsd.rs`, `uxm.rs`, `extract_motif.rs`, and
   `region_mds.rs`. Previously, `pyo3-log` attempted to acquire the GIL from

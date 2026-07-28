@@ -6,7 +6,7 @@
     Motif analysis looks at the 4-letter DNA sequences at fragment ends.
     Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
 
-    **Key metric**: MDS (Motif Diversity Score) - **higher MDS = more abnormal cutting = potential tumor signal**
+    **Key metric**: MDS (Motif Diversity Score) - **lower MDS = more stereotyped cutting = potential tumor signal**
 
 ---
 

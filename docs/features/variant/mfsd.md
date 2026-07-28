@@ -231,8 +231,13 @@ $$
 $$
 
 Using Gaussian models:
-- **Healthy**: μ = 167bp, σ = 35bp (nucleosomal periodicity)
-- **Tumor**: μ = 145bp, σ = 25bp (sub-nucleosomal fragments)
+- **Healthy**: μ = 167bp, σ = 30bp (nucleosomal periodicity)
+- **Tumor**: μ = 145bp, σ = 35bp (sub-nucleosomal fragments)
+
+> [!NOTE]
+> These are the values compiled into `LLRModelParams::human()`
+> (`rust/src/mfsd.rs`). Earlier revisions of this page quoted σ = 35 / σ = 25,
+> which the code has never used.
 
 ### LLR Output Columns
 
@@ -276,9 +281,15 @@ The LLR model uses Gaussian distributions for healthy and tumor fragment length 
 
 | Preset | Healthy μ | Healthy σ | Tumor μ | Tumor σ | Use Case |
 |--------|-----------|-----------|---------|---------|----------|
-| **human** (default) | 167bp | 35bp | 145bp | 25bp | Human cfDNA |
-| **canine** | 153bp | 30bp | 135bp | 22bp | Canine cfDNA |
-| **ssdna** | 160bp | 40bp | 140bp | 30bp | Single-stranded library prep |
+| **human** (default) | 167bp | 30bp | 145bp | 35bp | Human cfDNA |
+| **canine** | 153bp | 25bp | 130bp | 30bp | Canine cfDNA |
+| **ssdna** | 157bp | 30bp | 135bp | 35bp | Single-stranded library prep |
+
+> [!WARNING]
+> Only `human()` is reachable today. `calc_log_likelihood_ratio()` hardcodes it
+> and `calculate_mfsd()` exposes no model parameter, so `canine()`, `ssdna()`
+> and `custom()` are currently dead code and the Python snippet below does not
+> affect a run.
 
 ### Biological Rationale
 
