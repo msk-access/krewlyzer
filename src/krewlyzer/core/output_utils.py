@@ -233,6 +233,13 @@ def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
                 "Literal['gzip'] | None",
                 "gzip" if str(candidate).endswith(".gz") else None,
             )
+            # Several krewlyzer TSVs append '#'-prefixed metadata footers
+            # (e.g. EndMotif1mer writes '# c_fraction', '# entropy',
+            # '# c_bias', '# sample' after the data rows). Without
+            # comment='#' those lines are parsed as data and propagate into
+            # the unified features JSON as junk keys with NaN values.
+            # Callers may override by passing comment= explicitly.
+            csv_kwargs.setdefault("comment", "#")
             df = pd.read_csv(  # type: ignore[assignment]
                 candidate, sep="\t", compression=compression_arg, **csv_kwargs
             )
