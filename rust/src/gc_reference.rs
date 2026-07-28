@@ -96,7 +96,7 @@ impl Default for GcCorrectionFactors {
 
 impl GcCorrectionFactors {
     /// Create a new empty correction factors table
-    /// Uses NUM_LENGTH_BINS (68 bins for 5bp granularity)
+    /// Uses NUM_LENGTH_BINS (188 bins of 5bp spanning 60..999)
     pub fn new() -> Self {
         Self {
             factors: vec![vec![1.0; 101]; NUM_LENGTH_BINS],
@@ -491,7 +491,7 @@ pub fn generate_ref_genome_gc(
         ))?;
     
     // Initialize counts matrix [length_bin][gc_percent]
-    // Uses NUM_LENGTH_BINS (68 bins for 5bp granularity)
+    // Uses NUM_LENGTH_BINS (188 bins of 5bp spanning 60..999)
     let mut counts: Vec<Vec<u64>> = vec![vec![0; 101]; NUM_LENGTH_BINS];
     let mut total_fragments: u64 = 0;
     
@@ -669,15 +669,17 @@ mod tests {
     
     #[test]
     fn test_length_bin_index() {
-        // 5bp bins: 60-64 = bin 0, 65-69 = bin 1, ..., 395-399 = bin 67
+        // 5bp bins spanning 60..999 -> NUM_LENGTH_BINS (188) bins:
+        // 60-64 = bin 0, 65-69 = bin 1, ..., 995-999 = bin 187
         assert_eq!(get_length_bin_index(60), Some(0));
         assert_eq!(get_length_bin_index(64), Some(0));  // Still bin 0
         assert_eq!(get_length_bin_index(65), Some(1));  // Now bin 1
         assert_eq!(get_length_bin_index(79), Some(3));  // (79-60)/5 = 3
         assert_eq!(get_length_bin_index(80), Some(4));  // (80-60)/5 = 4
         assert_eq!(get_length_bin_index(166), Some(21)); // Nucleosome peak ~166bp
-        assert_eq!(get_length_bin_index(399), Some(67)); // Last bin
-        assert_eq!(get_length_bin_index(400), None);     // Out of range
+        assert_eq!(get_length_bin_index(400), Some(68)); // Multi-nucleosomal range
+        assert_eq!(get_length_bin_index(999), Some(NUM_LENGTH_BINS - 1)); // Last bin
+        assert_eq!(get_length_bin_index(1000), None);    // Out of range (exclusive)
         assert_eq!(get_length_bin_index(59), None);      // Out of range
     }
     
