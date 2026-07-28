@@ -22,6 +22,9 @@ Design principles
 
 from __future__ import annotations
 
+import gzip
+import io
+import zlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -169,6 +172,30 @@ def cleanup_intermediate_tsv(
 # ---------------------------------------------------------------------------
 
 
+
+def _read_gzip_member_prefix(path: Path) -> "str | None":
+    """Decompress only the FIRST gzip member of ``path``, ignoring trailing bytes.
+
+    krewlyzer <= 0.8.3 appended the EndMotif1mer metadata footer as plain text
+    to an already-gzipped file, yielding ``<gzip member><raw text>``. Both
+    :func:`gzip.decompress` and pandas reject that with ``BadGzipFile``. zlib
+    stops at the member boundary and exposes the remainder as ``unused_data``,
+    so the table itself is fully recoverable.
+
+    Returns the decoded text of the first member, or ``None`` if ``path`` is
+    not gzip at all.
+    """
+    raw = path.read_bytes()
+    if not raw.startswith(b"\x1f\x8b"):
+        return None
+    dco = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        data = dco.decompress(raw) + dco.flush()
+    except zlib.error:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
 def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
     """Parquet-first reader with TSV and ``.tsv.gz`` fallback.
 
@@ -240,9 +267,30 @@ def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
             # the unified features JSON as junk keys with NaN values.
             # Callers may override by passing comment= explicitly.
             csv_kwargs.setdefault("comment", "#")
-            df = pd.read_csv(  # type: ignore[assignment]
-                candidate, sep="\t", compression=compression_arg, **csv_kwargs
-            )
+            try:
+                df = pd.read_csv(  # type: ignore[assignment]
+                    candidate, sep="\t", compression=compression_arg, **csv_kwargs
+                )
+            except (gzip.BadGzipFile, OSError, EOFError):
+                # Recovery path for files written by krewlyzer <= 0.8.3 with
+                # --compress: the metadata footer was appended as PLAIN text
+                # after the gzip member, so the file is a valid gzip member
+                # followed by raw bytes. gzip/pandas reject the whole file.
+                # zlib stops cleanly at the end of the first member and hands
+                # the trailing bytes back via unused_data, which is exactly
+                # the footer we want to skip anyway.
+                recovered = _read_gzip_member_prefix(candidate)
+                if recovered is None:
+                    raise
+                logger.warning(
+                    "read_table: %s has a plain-text footer appended after the "
+                    "gzip member (written by krewlyzer <= 0.8.3 with --compress); "
+                    "recovered the table and skipped the footer.",
+                    candidate.name,
+                )
+                df = pd.read_csv(  # type: ignore[assignment]
+                    io.StringIO(recovered), sep="\t", **csv_kwargs
+                )
             logger.debug(
                 "read_table: loaded TSV %s (%d rows × %d cols)",
                 candidate.name,

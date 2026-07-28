@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **EndMotif1mer was unreadable whenever `--compress` was used.**
+  `write_end_motif_1mer()` gzipped the table via `write_table()` and then
+  appended the `# c_fraction` / `# entropy` / `# c_bias` / `# sample` footer
+  with a plain `open(path, "a")`. The result is a valid gzip member followed by
+  raw bytes, which `gzip.decompress()` and pandas both reject with
+  `BadGzipFile: Not a gzipped file (b'# ')` — so the **entire table** was lost,
+  not merely polluted with footer rows. Every run using `--compress` (i.e. any
+  pipeline emitting `.tsv.gz`) is affected. The footer is now written through
+  the gzip codec, and `read_table()` gained a recovery path that decompresses
+  the first gzip member and skips trailing bytes, so files already produced by
+  <= 0.8.3 remain readable.
+
 
 - **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
   The Alu background profile covered only the ~300bp Alu body in 30 bins, so
