@@ -20,6 +20,28 @@ All notable changes to this project will be documented in this file.
 ## [0.8.3] - 2026-04-28
 
 ### Fixed
+- **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
+  The Alu background profile covered only the ~300bp Alu body in 30 bins, so
+  the DFT period grid was `300 / i` and the *only* index falling inside the
+  nucleosomal search band was `i = 2` (150bp). Every sample therefore produced
+  `nrl_bp = 150.0`, `periodicity_score = 0.3333` and `adjusted_score = 0.0`
+  regardless of its data, and the documented "healthy NRL ~190bp, quality > 0.7"
+  was unreachable. Fixes:
+  - stack a **2000bp** window per Alu (850bp flank + 300bp body + 850bp flank),
+    spanning ~10 nucleosome repeats instead of ~1.5; the background interval
+    tree is widened to match so flanking fragments are retrieved;
+  - bin at 200 x 10bp instead of 30 x 10bp;
+  - zero-pad the DFT 8x so the peak can be located between native bins and the
+    SNR denominator averages over more than one sample;
+  - widen the search band to 140-250bp;
+  - set the deviation tolerance to the **50bp** already documented (the code
+    used 20bp, which forced `adjusted_score` to 0 given the pinned 150bp NRL).
+
+  > **Output change:** `{sample}.WPS_background.parquet` `nrl_bp`,
+  > `nrl_deviation_bp`, `periodicity_score` and `adjusted_score` all become
+  > data-dependent. Values from earlier versions are constants and must be
+  > discarded, not compared.
+
 - **GIL Deadlock in Parallel Modules**: Wrapped all Rayon `par_iter()` calls in
   `py.allow_threads()` across `mfsd.rs`, `uxm.rs`, `extract_motif.rs`, and
   `region_mds.rs`. Previously, `pyo3-log` attempted to acquire the GIL from

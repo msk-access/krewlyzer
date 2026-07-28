@@ -103,6 +103,11 @@ WPS generates **two complementary outputs** that capture different biological sc
 
 **What it is**: Stacked WPS profiles from ~770,000 Alu elements across the genome.
 
+Each Alu contributes a **2000bp** window — the ~300bp Alu body plus 850bp of
+flank on each side. The flank matters: the nucleosome repeat length being
+measured is ~190bp, so a profile covering only the Alu body spans ~1.5 repeats
+and cannot resolve that period at all. The 2000bp window spans ~10 repeats.
+
 **Why Alu elements?**
 
 1. **Ubiquitous**: Alu elements are everywhere (~11% of human genome)
@@ -147,7 +152,7 @@ WPS generates **two complementary outputs** that capture different biological sc
 1. **Detrend**: Remove linear trends from stacked profile
 2. **Normalize**: Z-score to make amplitude comparable across samples
 3. **Window**: Apply Hann window to reduce spectral leakage
-4. **FFT**: Find dominant frequency in 150-250bp range
+4. **FFT**: Zero-pad (8x) and find the dominant frequency in the 140-250bp band
 5. **SNR**: Compare peak amplitude to background
 
 | Column | Description |
