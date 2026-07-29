@@ -79,6 +79,28 @@ jobs:
         run: |
           docker build .
 
+  rust-test:
+    name: Rust unit tests (cargo test)
+    # Runs on macOS deliberately. krewlyzer_core is a pyo3 `extension-module`
+    # cdylib, so it does not link libpython; on Linux the `cargo test` binary
+    # therefore fails to resolve Python symbols at link time. macOS resolves
+    # them lazily and links fine. Linux compilation of the crate is already
+    # covered by the maturin build in the `test` job.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run cargo test
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib
+
   lint:
     name: Lint (ruff · black · mypy · clippy)
     runs-on: ubuntu-latest
@@ -137,3 +159,10 @@ jobs:
             -D warnings \
             -A clippy::too_many_arguments \
             -A clippy::type_complexity
+
+      # Static gate: every output-writing call site must pass output_format=
+      # and compress=. .agent/rules/development.md already claims CI enforces
+      # this, but it was not wired into any workflow.
+      - name: Check output-format call sites
+        run: |
+          python scripts/check_output_format.py
