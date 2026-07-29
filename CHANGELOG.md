@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`krewlyzer validate-output`** — checks a finished output directory against
+  the contract its consumers rely on. Three layers, in increasing order of what
+  a schema alone can catch: every consumed table present and shaped correctly;
+  domain invariants (frequencies sum to 1, chromosomes `chr`-prefixed, the six
+  FSC channels partition `total`, FSD carries only size-bin columns); and
+  **anti-degeneracy** — a metric that is identical across every sample is an
+  error, not a pass.
+
+  That last layer is the point. Run against a real 0.8.3 cohort the schema
+  passes completely, while `WPS_background.nrl_bp` ≡ 150.0,
+  `nrl_deviation_bp` ≡ 40.0, `periodicity_score` ≡ 0.3333 and
+  `adjusted_score` ≡ 0.0 in every sample: four of the five columns that table
+  contributes carry no information. A schema-only gate certifies that directory
+  as good.
+
+  Exit codes are `0` satisfied, `1` contract violation, `2` structural (missing
+  directory, unreadable Parquet) so a workflow can retry on 2 and escalate on 1.
+  Cross-sample degeneracy below two samples is reported SKIP, never PASS.
+  Declaring a column legitimately constant requires a written
+  `constant_reason`, so silencing a finding costs a justification.
+
+  `--json-report` emits stable finding ids for trend tracking.
+  `scripts/validate_output.py` runs it from a checkout.
+
 ### Fixed
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was

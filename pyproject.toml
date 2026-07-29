@@ -64,6 +64,7 @@ markers = [
     "e2e: End-to-end workflow tests",
     "slow: Tests that take >10s",
     "rust: Tests requiring Rust backend",
+    "invariant: Output-contract and anti-degeneracy checks",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
