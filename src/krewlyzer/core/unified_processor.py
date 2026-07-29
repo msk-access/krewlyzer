@@ -651,7 +651,16 @@ def run_features(
                 logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
 
             # Also generate per-region FSC (exon/probe level)
-            outputs.fsc_region = output_dir / f"{sample_name}.FSC.regions.tsv"
+            # Resolve the file that was ACTUALLY written -- writers honour
+            # --output-format/--compress, so it may be .tsv, .tsv.gz or
+            # .parquet. Hard-coding .tsv made the E1 guard below fail for any
+            # compressed or Parquet run, silently skipping E1 generation.
+            from .output_utils import resolve_table_path
+
+            outputs.fsc_region = (
+                resolve_table_path(output_dir / f"{sample_name}.FSC.regions.tsv")
+                or output_dir / f"{sample_name}.FSC.regions.tsv"
+            )
             aggregate_by_gene(
                 bed_path,
                 genes,

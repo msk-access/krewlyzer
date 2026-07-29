@@ -196,6 +196,40 @@ def _read_gzip_member_prefix(path: Path) -> "str | None":
     return data.decode("utf-8", errors="replace")
 
 
+
+TABLE_EXTENSIONS = (".tsv", ".tsv.gz", ".parquet")
+
+
+def strip_table_extension(name: str) -> str:
+    """Strip a known table extension, handling compound ones like ``.tsv.gz``.
+
+    ``Path.stem`` only removes the LAST dot-segment, so
+    ``Path("s.FSC.regions.tsv.gz").stem`` is ``"s.FSC.regions.tsv"`` -- which
+    silently corrupts any name derived from it.
+    """
+    for ext in (".tsv.gz", ".csv.gz", ".tsv", ".csv", ".parquet"):
+        if name.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def resolve_table_path(base: Path) -> "Path | None":
+    """Find the file actually written for ``base``, whatever the output format.
+
+    ``base`` may be given with or without an extension. Writers honour
+    ``--output-format`` and ``--compress``, so the same logical output can land
+    as ``.tsv``, ``.tsv.gz`` or ``.parquet``; probing a single hard-coded
+    extension silently misses the file.
+    """
+    base = Path(base)
+    stem = strip_table_extension(base.name)
+    for ext in TABLE_EXTENSIONS:
+        candidate = base.parent / f"{stem}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
     """Parquet-first reader with TSV and ``.tsv.gz`` fallback.
 

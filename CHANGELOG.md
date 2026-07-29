@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **`--generate-json` silently dropped most features for compressed and Parquet
+  runs.** Every probe in `FeatureSerializer.from_outputs()` was
+  `Path(f"{sample}.FOO.tsv").exists()`, and that gate ran *before* `read_table()`
+  (which does understand `.tsv.gz` / `.parquet`). Reconstructing a real
+  MSK-ACCESS xs2 output directory (written with both `--output-format both` and
+  `--compress`, so every table exists as `.parquet` **and** `.tsv.gz`, but never
+  as bare `.tsv`) shows the payload going from **5 to 16 feature families**:
+
+  | | features captured |
+  |---|---|
+  | before | `mfsd`, `ocf`, `wps`, `wps_background`, `wps_panel` |
+  | after | the above plus `fsd`, `fsr`, `fsc`, `fsc_gene`, `fsc_region`, `fsc_counts`, `motif`, `tfbs`, `atac`, `gc_factors`, `region_mds` |
+
+  The three WPS entries survived only because they are probed as `.parquet`;
+  `mfsd` and `ocf` survived only because a separate cleanup defect leaves stray
+  uncompressed `.tsv` copies of those two outputs behind. Every fragmentomics
+  feature — the entire size, motif and regulatory signal — was absent from the
+  ML payload.
+
+  > **Note:** this means tidying up those stray `.tsv` leftovers *without* this
+  > fix would have made `features.json` strictly worse.
+
+- **E1-only FSC was never generated for compressed or Parquet runs, and was
+  misnamed when it was.** Two compounding bugs: `unified_processor` hard-coded
+  `outputs.fsc_region = ...FSC.regions.tsv`, so the `outputs.fsc_region.exists()`
+  guard was False whenever the real file was `.tsv.gz` / `.parquet` and E1
+  generation was skipped entirely; and `filter_fsc_to_e1()` derived its output
+  name via `Path.stem`, which strips only the last dot-segment, so a
+  `.tsv.gz` input produced `S1.FSC.regions.tsv.e1only.tsv.gz` instead of
+  `S1.FSC.regions.e1only.tsv.gz`. Added `strip_table_extension()` for compound
+  suffixes.
+
 - **EndMotif1mer was unreadable whenever `--compress` was used.**
   `write_end_motif_1mer()` gzipped the table via `write_table()` and then
   appended the `# c_fraction` / `# entropy` / `# c_bias` / `# sample` footer

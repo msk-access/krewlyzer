@@ -630,8 +630,13 @@ def filter_fsc_to_e1(
 
     # Default output base path: strip suffix so write_table appends the right one
     if output_path is None:
-        stem = fsc_regions_path.stem
-        # Strip existing extension (e.g., .tsv, .parquet) from stem
+        # NB: Path.stem strips only the LAST dot-segment, so for
+        # 'S1.FSC.regions.tsv.gz' it yields 'S1.FSC.regions.tsv' and the
+        # '.regions' test below misses -- producing the mangled name
+        # 'S1.FSC.regions.tsv.e1only.tsv.gz'. Strip compound extensions.
+        from .output_utils import strip_table_extension
+
+        stem = strip_table_extension(fsc_regions_path.name)
         if stem.endswith(".regions"):
             stem = stem.replace(".regions", ".regions.e1only")
         else:
