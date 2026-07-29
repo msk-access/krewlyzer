@@ -114,8 +114,17 @@ def test_uxm_mixed_fragments_are_classified_x(tmp_path):
     runner = CliRunner()
     result = runner.invoke(
         app,
-        ["uxm", "-i", str(bam_file), "-o", str(output_dir),
-         "-s", "sample", "-m", str(mark_file)],
+        [
+            "uxm",
+            "-i",
+            str(bam_file),
+            "-o",
+            str(output_dir),
+            "-s",
+            "sample",
+            "-m",
+            str(mark_file),
+        ],
     )
     assert result.exit_code == 0, f"CLI failed: {result.output}"
 

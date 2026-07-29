@@ -1,7 +1,6 @@
 """Regression test: PON without a matching baseline table must not crash."""
 
 import pandas as pd
-import pytest
 
 from krewlyzer.core import region_entropy_processor as rep
 

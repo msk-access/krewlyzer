@@ -172,7 +172,6 @@ def cleanup_intermediate_tsv(
 # ---------------------------------------------------------------------------
 
 
-
 def _read_gzip_member_prefix(path: Path) -> "str | None":
     """Decompress only the FIRST gzip member of ``path``, ignoring trailing bytes.
 
@@ -194,7 +193,6 @@ def _read_gzip_member_prefix(path: Path) -> "str | None":
     except zlib.error:
         return None
     return data.decode("utf-8", errors="replace")
-
 
 
 TABLE_EXTENSIONS = (".tsv", ".tsv.gz", ".parquet")

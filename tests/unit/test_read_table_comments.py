@@ -31,9 +31,9 @@ def test_read_table_ignores_hash_footer_lines(tmp_path):
     assert df is not None
     assert len(df) == 4, f"expected only the 4 base rows, got:\n{df}"
     assert sorted(df["base"].tolist()) == ["A", "C", "G", "T"]
-    assert not any(str(b).startswith("#") for b in df["base"]), (
-        "comment footer leaked into the data frame"
-    )
+    assert not any(
+        str(b).startswith("#") for b in df["base"]
+    ), "comment footer leaked into the data frame"
     # The numeric column must stay numeric (junk rows previously forced object dtype)
     assert df["fraction"].sum() > 0.99
 
@@ -96,8 +96,9 @@ def test_write_1mer_footer_is_written_through_gzip(tmp_path):
 
     em_counts = {"AAAA": 10, "CCCC": 20, "GGGG": 10, "TTTT": 10}
     base = tmp_path / "sample.EndMotif1mer"
-    write_end_motif_1mer(em_counts, base, output_format="tsv", compress=True,
-                         sample_name="sample")
+    write_end_motif_1mer(
+        em_counts, base, output_format="tsv", compress=True, sample_name="sample"
+    )
 
     path = tmp_path / "sample.EndMotif1mer.tsv.gz"
     assert path.exists()
