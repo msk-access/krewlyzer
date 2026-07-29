@@ -10,17 +10,27 @@ from krewlyzer.core.feature_serializer import FeatureSerializer, _resolve_output
 SID = "S1"
 
 TABLES = {
-    "FSD": pd.DataFrame([{"region": "chr1:0-125000000", "65-69": 1.0, "70-74": 2.0, "total": 3.0}]),
+    "FSD": pd.DataFrame(
+        [{"region": "chr1:0-125000000", "65-69": 1.0, "70-74": 2.0, "total": 3.0}]
+    ),
     "FSR": pd.DataFrame([{"region": "chr1", "core_short_long_ratio": 1.4}]),
-    "FSC": pd.DataFrame([{"chrom": "1", "start": 0, "end": 100, "core_short": 5.0, "total": 9.0}]),
+    "FSC": pd.DataFrame(
+        [{"chrom": "1", "start": 0, "end": 100, "core_short": 5.0, "total": 9.0}]
+    ),
     "FSC.gene": pd.DataFrame([{"gene": "TP53", "total": 10.0}]),
     "FSC.regions": pd.DataFrame([{"gene": "TP53", "region_name": "e1", "total": 4.0}]),
-    "FSC.regions.e1only": pd.DataFrame([{"gene": "TP53", "region_name": "e1", "total": 4.0}]),
+    "FSC.regions.e1only": pd.DataFrame(
+        [{"gene": "TP53", "region_name": "e1", "total": 4.0}]
+    ),
     "EndMotif": pd.DataFrame([{"AAAA": 0.01, "CCCC": 0.02}]),
     "MDS": pd.DataFrame([{"Sample": SID, "MDS": 0.97}]),
     "OCF": pd.DataFrame([{"tissue": "Liver", "OCF": 265.3}]),
-    "TFBS": pd.DataFrame([{"label": "CTCF", "count": 100.0, "entropy": 6.9, "z_score": 1.2}]),
-    "ATAC": pd.DataFrame([{"label": "LIHC", "count": 80.0, "entropy": 6.5, "z_score": 2.1}]),
+    "TFBS": pd.DataFrame(
+        [{"label": "CTCF", "count": 100.0, "entropy": 6.9, "z_score": 1.2}]
+    ),
+    "ATAC": pd.DataFrame(
+        [{"label": "LIHC", "count": 80.0, "entropy": 6.5, "z_score": 2.1}]
+    ),
     "metadata": pd.DataFrame([{"genome": "hg19", "assay": "xs2"}]),
 }
 
@@ -30,8 +40,12 @@ def _write(directory: Path, fmt: str) -> None:
         if fmt == "tsv":
             df.to_csv(directory / f"{SID}.{name}.tsv", sep="\t", index=False)
         elif fmt == "tsv.gz":
-            df.to_csv(directory / f"{SID}.{name}.tsv.gz", sep="\t",
-                      index=False, compression="gzip")
+            df.to_csv(
+                directory / f"{SID}.{name}.tsv.gz",
+                sep="\t",
+                index=False,
+                compression="gzip",
+            )
         elif fmt == "parquet":
             df.to_parquet(directory / f"{SID}.{name}.parquet", index=False)
 
@@ -52,12 +66,20 @@ def test_from_outputs_is_format_independent(tmp_path, fmt):
     serializer = FeatureSerializer.from_outputs(SID, out)
 
     expected = {
-        "fsd", "fsr", "fsc", "fsc_gene", "fsc_region", "fsc_region_e1",
-        "motif", "ocf", "tfbs", "atac",
+        "fsd",
+        "fsr",
+        "fsc",
+        "fsc_gene",
+        "fsc_region",
+        "fsc_region_e1",
+        "motif",
+        "ocf",
+        "tfbs",
+        "atac",
     }
-    assert expected.issubset(set(serializer.features)), (
-        f"{fmt}: missing {expected - set(serializer.features)}"
-    )
+    assert expected.issubset(
+        set(serializer.features)
+    ), f"{fmt}: missing {expected - set(serializer.features)}"
     assert serializer.metadata.get("assay") == "xs2", f"{fmt}: metadata not loaded"
 
 
@@ -70,6 +92,27 @@ def test_all_formats_agree(tmp_path):
         _write(out, fmt)
         seen[fmt] = set(FeatureSerializer.from_outputs(SID, out).features)
     assert seen["tsv"] == seen["tsv.gz"] == seen["parquet"], seen
+
+
+@pytest.mark.parametrize("fmt", ["tsv", "tsv.gz", "parquet"])
+def test_from_outputs_survives_missing_metadata(tmp_path, fmt):
+    """Regression: an output directory with no metadata table crashed.
+
+    The metadata probe was the one call site that handed its resolver result
+    straight to read_table() without an `is not None` guard, so any directory
+    lacking a metadata table raised AttributeError on NoneType.suffix. TABLES
+    always writes metadata, which is why the format matrix never reached it.
+    """
+    out = tmp_path / fmt.replace(".", "_")
+    out.mkdir()
+    _write(out, fmt)
+    for written in out.glob(f"{SID}.metadata.*"):
+        written.unlink()
+
+    serializer = FeatureSerializer.from_outputs(SID, out)
+
+    assert "fsr" in serializer.features, f"{fmt}: other features must still load"
+    assert serializer.metadata == {}, f"{fmt}: metadata must stay empty, not fabricated"
 
 
 def test_resolver_prefers_tsv_then_gz_then_parquet(tmp_path):
@@ -90,12 +133,36 @@ def test_resolver_prefers_tsv_then_gz_then_parquet(tmp_path):
 
 FSC_REGIONS = pd.DataFrame(
     [
-        {"chrom": "1", "start": 100, "end": 200, "gene": "TP53", "region_name": "t1",
-         "region_bp": 100, "ultra_short": 1.0, "core_short": 2.0, "mono_nucl": 3.0,
-         "di_nucl": 1.0, "long": 1.0, "total": 8.0, "normalized_depth": 10.0},
-        {"chrom": "1", "start": 300, "end": 400, "gene": "TP53", "region_name": "t2",
-         "region_bp": 100, "ultra_short": 1.0, "core_short": 2.0, "mono_nucl": 3.0,
-         "di_nucl": 1.0, "long": 1.0, "total": 8.0, "normalized_depth": 10.0},
+        {
+            "chrom": "1",
+            "start": 100,
+            "end": 200,
+            "gene": "TP53",
+            "region_name": "t1",
+            "region_bp": 100,
+            "ultra_short": 1.0,
+            "core_short": 2.0,
+            "mono_nucl": 3.0,
+            "di_nucl": 1.0,
+            "long": 1.0,
+            "total": 8.0,
+            "normalized_depth": 10.0,
+        },
+        {
+            "chrom": "1",
+            "start": 300,
+            "end": 400,
+            "gene": "TP53",
+            "region_name": "t2",
+            "region_bp": 100,
+            "ultra_short": 1.0,
+            "core_short": 2.0,
+            "mono_nucl": 3.0,
+            "di_nucl": 1.0,
+            "long": 1.0,
+            "total": 8.0,
+            "normalized_depth": 10.0,
+        },
     ]
 )
 

@@ -43,7 +43,6 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-
 def _resolve_output_path(output_dir: Path, sample_id: str, stem: str) -> "Path | None":
     """Locate ``{sample_id}.{stem}`` regardless of the writer's output format.
 
@@ -448,7 +447,9 @@ class FeatureSerializer:
         bpm_path = _resolve_output_path(output_dir, sample_id, "BreakPointMotif")
         mds_path = _resolve_output_path(output_dir, sample_id, "MDS")
         edm_on_path = _resolve_output_path(output_dir, sample_id, "EndMotif.ontarget")
-        bpm_on_path = _resolve_output_path(output_dir, sample_id, "BreakPointMotif.ontarget")
+        bpm_on_path = _resolve_output_path(
+            output_dir, sample_id, "BreakPointMotif.ontarget"
+        )
         mds_on_path = _resolve_output_path(output_dir, sample_id, "MDS.ontarget")
 
         motif_data: Dict[str, Any] = {}
@@ -637,8 +638,12 @@ class FeatureSerializer:
         # =====================================================================
         # GC Correction Factors
         # =====================================================================
-        gc_factors_path = _resolve_output_path(output_dir, sample_id, "correction_factors")
-        gc_factors_on_path = _resolve_output_path(output_dir, sample_id, "correction_factors.ontarget")
+        gc_factors_path = _resolve_output_path(
+            output_dir, sample_id, "correction_factors"
+        )
+        gc_factors_on_path = _resolve_output_path(
+            output_dir, sample_id, "correction_factors.ontarget"
+        )
 
         if gc_factors_path is not None or gc_factors_on_path is not None:
             gc_data = {}
@@ -693,9 +698,10 @@ class FeatureSerializer:
         # .metadata.json was removed; metadata is now consistent TSV/Parquet.
         # =====================================================================
         meta_tsv_path = _resolve_output_path(output_dir, sample_id, "metadata")
-        meta_df = _read_table(meta_tsv_path)
-        if meta_df is not None and not meta_df.empty:
-            serializer.set_metadata(meta_df.iloc[0].to_dict())  # type: ignore[arg-type]
+        if meta_tsv_path is not None:
+            meta_df = _rt(meta_tsv_path)
+            if not meta_df.empty:
+                serializer.set_metadata(meta_df.iloc[0].to_dict())  # type: ignore[arg-type]
 
         return serializer
 
