@@ -426,7 +426,17 @@ def aggregate_by_gene(
                 f"FSC {aggregate_by}: converted to format={output_format}, compress={compress}"
             )
 
-    return tsv_path
+    # Return what was actually written. Returning the pre-conversion .tsv meant
+    # callers guarding on .exists() saw a file cleanup_intermediate_tsv had just
+    # deleted, so E1 generation and FSC PON z-scoring were skipped on every
+    # compressed or Parquet run. parent/(name+ext) rather than with_suffix(),
+    # which would eat the compound extension.
+    written_ext = (
+        ".parquet"
+        if output_format == "parquet"
+        else (".tsv.gz" if compress else ".tsv")
+    )
+    return base_path.parent / (base_path.name + written_ext)
 
 
 def apply_fsc_gene_pon(

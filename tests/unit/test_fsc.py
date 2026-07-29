@@ -255,3 +255,52 @@ def test_filter_fsc_to_e1_nonexistent_file(tmp_path):
 
     result = filter_fsc_to_e1(tmp_path / "nonexistent.tsv")
     assert result is None
+
+
+@pytest.mark.unit
+@pytest.mark.rust
+@pytest.mark.parametrize(
+    "output_format,compress,expected_ext",
+    [
+        ("tsv", False, ".tsv"),
+        ("tsv", True, ".tsv.gz"),
+        ("parquet", False, ".parquet"),
+        ("both", True, ".tsv.gz"),
+    ],
+)
+def test_aggregate_by_gene_returns_the_path_it_wrote(
+    tmp_path, output_format, compress, expected_ext
+):
+    """Regression: the return value was the pre-conversion .tsv.
+
+    write_table() produced .tsv.gz/.parquet and cleanup_intermediate_tsv() then
+    deleted the .tsv, but the function still returned it. Callers guard on
+    .exists(), so E1 generation and FSC PON z-scoring were silently skipped on
+    every compressed or Parquet run — which is how production runs.
+    """
+    from pathlib import Path
+    from krewlyzer.core.fsc_processor import aggregate_by_gene
+
+    bed_file = tmp_path / "frags.bed"
+    bed_file.write_text("chr1\t100\t270\t0.5\nchr1\t300\t470\t0.5\n")
+    pysam.tabix_compress(str(bed_file), str(bed_file) + ".gz", force=True)
+    pysam.tabix_index(str(bed_file) + ".gz", preset="bed", force=True)
+
+    gene_bed = tmp_path / "genes.bed"
+    gene_bed.write_text("chr1\t0\t1000\tTP53\tTP53_target_01\n")
+
+    written = aggregate_by_gene(
+        Path(str(bed_file) + ".gz"),
+        {},
+        tmp_path / "S1.FSC.regions.tsv",
+        aggregate_by="region",
+        gene_bed_path=gene_bed,
+        output_format=output_format,
+        compress=compress,
+    )
+
+    assert written.name.endswith(expected_ext), written.name
+    assert written.exists(), (
+        f"{output_format}/compress={compress}: returned {written.name}, "
+        "which does not exist"
+    )
