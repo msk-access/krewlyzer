@@ -113,6 +113,28 @@ All notable changes to this project will be documented in this file.
   `gc_reference` bin-index test, which asserted a 68-bin ceiling although
   `get_length_bin_index` spans 60..999 across 188 bins.
 
+- **`--generate-json` crashed on any output directory without a metadata
+  table.** The metadata probe was the one call site that handed its resolver
+  result straight to `read_table()` without an `is not None` guard, raising
+  `AttributeError: 'NoneType' object has no attribute 'suffix'`. The
+  format-matrix test always wrote a metadata table, so it never reached the
+  branch; it now covers the absent case across tsv/tsv.gz/parquet.
+
+- **E1-only FSC and FSC PON z-scoring were still skipped on compressed and
+  Parquet runs.** `aggregate_by_gene()` returned the pre-conversion `.tsv` path
+  even after `cleanup_intermediate_tsv()` had deleted it, so every caller
+  guarding on `.exists()` saw a missing file. It now returns the path it
+  actually wrote, which fixes the E1 guard, `apply_fsc_region_pon` and
+  `apply_fsc_gene_pon` together; `outputs.fsc_gene` was additionally never
+  resolved at all. The two "✓ … (with PON z-scores)" log lines no longer claim
+  success when z-scoring bailed.
+
+- Removed `src/krewlyzer.libs`, a broken symlink into a build sandbox
+  (`/usr/local/lib/python3.11/dist-packages/`) committed by mistake.
+
+- Restored `black` and `ruff` cleanliness. Both pass on `develop` but were
+  broken by the changes above this line, and CI's lint job gates on them.
+
 ### Documentation
 
 - Corrected feature documentation against the implementation: the inverted
@@ -126,6 +148,19 @@ All notable changes to this project will be documented in this file.
   sum to 1; and that WPS `z_vector` / `shape_score` / `z_amplitude` are
   documented but never emitted, while `apply_pon_zscore` silently yields
   `z = (0 - mean) / std`.
+
+- Corrected three doc statements the pass above missed: `fsr.py`'s module
+  docstring still listed the retired 65-99/100-149/150-259/260-399/400+ channel
+  table (FSR reads FSC's per-bin counts, so it uses FSC's channels), and now
+  also records that `short_frac` / `long_frac` divide by a `total` spanning
+  65-1000bp; `estimate_periodicity`'s doc comment still claimed a 140-200bp
+  search band after the NRL fix widened it to 140-250bp; and `mfsd.md` still
+  asserted a KS floor of ≥5 in its tip and worked example, contradicting
+  `MIN_FOR_KS = 2` and its own column reference.
+
+  > Note: those retired FSR boundaries are not fictional — `GeneResult` in
+  > `fsc.rs` still uses exactly that split, so `mono_nucl` means 150-259bp in
+  > `FSC.gene`/`FSC.regions` but 150-220bp in `FSC`. Tracked separately.
 
 ## [0.8.3] - 2026-04-28
 

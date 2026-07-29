@@ -1569,7 +1569,7 @@ impl WpsBackgroundConsumer {
     /// 2. **Z-score normalize**: Standardize to mean=0, std=1
     /// 3. **Hann window**: Apply to reduce spectral leakage
     /// 4. **FFT**: Compute real-to-complex FFT via realfft
-    /// 5. **Peak finding**: Find dominant peak in 140-200bp period range
+    /// 5. **Peak finding**: Find dominant peak in 140-250bp period range
     /// 6. **Quality score**: SNR-based score capped at 1.0 (SNR > 3 = clear periodicity)
     /// 
     /// ## Returns
