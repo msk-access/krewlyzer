@@ -34,6 +34,10 @@ R1_REV, R2_FWD = 83, 163  # R1 rightmost, reverse -- the untested case
 
 DEFAULT_READ_LEN = 50
 
+# The CG-repeat block make_reference lays down on the first contig.
+CPG_BLOCK_START = 100_000
+CPG_BLOCK_LEN = 20_000
+
 
 @dataclass(frozen=True)
 class FragmentSpec:
@@ -69,6 +73,13 @@ class SynthProfile:
     # (mean, sd, weight) mixture of fragment lengths
     length_mixture: Sequence[Tuple[int, int, float]] = ((167, 25, 1.0),)
     reverse_r1_fraction: float = 0.5
+    stereotyped_ends: bool = False
+    """Place every fragment on the CpG block so all 5' end motifs are CGCG.
+
+    Gives the motif-diversity direction test a contrast: a sample whose
+    cutting is maximally stereotyped must score lower on MDS than one with
+    varied ends, and MDS scored the wrong way round in the docs for a year.
+    """
     seed: int = 0
     read_len: int = DEFAULT_READ_LEN
 
@@ -91,6 +102,7 @@ ALL_FORWARD = SynthProfile(
 ALL_REVERSE = SynthProfile(
     "all_reverse", reverse_r1_fraction=1.0, seed=_ORIENTATION_SEED
 )
+STEREOTYPED_ENDS = SynthProfile("stereotyped_ends", stereotyped_ends=True, seed=6)
 
 
 def make_reference(path: Path, contigs: Sequence[Contig], seed: int = 7) -> Path:
@@ -123,11 +135,18 @@ def make_fragments(
     for i in range(profile.n_fragments):
         mean, sd, _ = rng.choices(profile.length_mixture, weights=weights)[0]
         length = max(65, min(1000, int(round(rng.gauss(mean, sd)))))
-        contig = contigs[i % len(contigs)]
-        # Spread fragments out so interval-overlap tests are unambiguous, and
-        # keep clear of the contig ends.
-        span = contig.length - length - 2000
-        start = 1000 + (i * 997) % max(span, 1)
+        contig = contigs[0] if profile.stereotyped_ends else contigs[i % len(contigs)]
+        if profile.stereotyped_ends:
+            # make_reference lays a CG dinucleotide repeat over 100k-120k, so
+            # every even offset in it starts with the same CGCG 4-mer. Odd
+            # offsets would give GCGC -- also uniform, but mixing the two would
+            # halve the stereotypy for no reason.
+            start = CPG_BLOCK_START + 2 * ((i * 7) % ((CPG_BLOCK_LEN - length) // 2))
+        else:
+            # Spread fragments out so interval-overlap tests are unambiguous,
+            # and keep clear of the contig ends.
+            span = contig.length - length - 2000
+            start = 1000 + (i * 997) % max(span, 1)
         frags.append(
             FragmentSpec(
                 chrom=contig.name,
