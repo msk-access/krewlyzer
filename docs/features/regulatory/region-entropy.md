@@ -275,20 +275,20 @@ FOXA1   892     165.8       4.98      -0.32
 | Column | Type | Description |
 |--------|------|-------------|
 | `label` | TEXT | Transcription factor name (e.g., CTCF, FOXA1) |
-| `count` | INT | Number of fragments overlapping TF regions |
+| `count` | FLOAT | GC-weighted fragment count overlapping TF regions |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON) |
+| `z_score` | FLOAT | PON-normalized z-score (0 if no PON; `NaN` if the label is absent from the baseline) |
 
 ### ATAC Output: `{sample}.ATAC.tsv`
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `label` | TEXT | Cancer type (e.g., BRCA, LUAD, COAD) |
-| `count` | INT | Number of fragments overlapping cancer peaks |
+| `count` | FLOAT | GC-weighted fragment count overlapping cancer peaks |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON) |
+| `z_score` | FLOAT | PON-normalized z-score (0 if no PON; `NaN` if the label is absent from the baseline) |
 
 ---
 
@@ -296,13 +296,18 @@ FOXA1   892     165.8       4.98      -0.32
 
 ### Entropy Values
 
-| Range | Interpretation | Clinical Significance |
-|-------|----------------|----------------------|
-| 0-2 | Very low entropy | Single dominant fragment size |
-| 2-4 | Low entropy | Few distinct sizes |
-| 4-6 | Moderate entropy | Normal healthy range |
-| 6-8 | High entropy | Many distinct sizes |
-| > 8 | Very high entropy | Possible tumor signal |
+> [!WARNING]
+> **Do not use absolute entropy cut-offs.** Earlier revisions of this page gave
+> "4-6 = normal healthy range" and "> 8 = possible tumor signal". Those bands
+> are not anchored to any constant in the code and do not describe real output:
+> a healthy-like fragment-size distribution over a few thousand fragments
+> already measures **~6.9 bits**, and exceeding 8 bits would require ~2^8 = 256
+> near-equally-likely distinct fragment sizes, which nucleosome-peaked cfDNA
+> does not produce.
+>
+> Entropy magnitude also scales with fragment count per label, so it is not
+> comparable across labels or samples on its own. **Interpret the PON
+> `z_score`, not the raw entropy.**
 
 ### Z-Scores
 
@@ -323,7 +328,8 @@ Following the methodology from Helzer et al.:
 
 1. **Load regions**: Read BED.gz with label in 4th column
 2. **Intersect fragments**: For each region, collect fragments with minimum 1bp overlap
-3. **Build histograms**: Count fragments per size (20-500bp) per label
+3. **Build histograms**: Count fragments per size (bins 0..1000bp; the effective
+   range is whatever `extract` emitted, by default 65-1000bp)
 4. **Compute entropy**: Shannon entropy from normalized histogram
 5. **Output**: TSV with label, count, mean_size, entropy
 

@@ -122,11 +122,26 @@ FSR uses the Rust backend's 5-channel size bins:
 
 | Bin Name | Size Range | Biological Meaning |
 |----------|------------|-------------------|
-| `ultra_short` | 65-99bp | TF footprints, highly tumor-specific |
-| `core_short` | 100-149bp | **Primary tumor biomarker** |
-| `mono_nucl` | 150-259bp | Standard mono-nucleosomal |
-| `di_nucl` | 260-399bp | Di-nucleosomal, healthy-enriched |
-| `long` | 400+bp | Multi-nucleosomal (rare) |
+| `ultra_short` | 65-100bp | TF footprints, highly tumor-specific |
+| `core_short` | 101-149bp | **Primary tumor biomarker** |
+| `mono_nucl` | 150-220bp | Standard mono-nucleosomal |
+| `di_nucl` | 221-260bp | Di-nucleosomal |
+| `long` | 261-400bp | Multi-nucleosomal |
+
+> [!IMPORTANT]
+> FSR and FSC share **one** counter (`count_fragments_by_bins` in
+> `rust/src/fsc.rs`), so these are the same boundaries documented for
+> [FSC](fsc.md). Earlier revisions of this page listed a different set
+> (65-99 / 100-149 / 150-259 / 260-399 / 400+) that the code has never used.
+
+> [!WARNING]
+> **`total` is not the sum of the channels.** `total` counts every fragment
+> from 65-1000bp, but only five channels are returned, so fragments of
+> 401-1000bp inflate `total` while belonging to no channel. On a realistic
+> library with a long-fragment tail this can be >10% of the total, and the
+> shortfall varies per sample with its necrotic content. For ML features
+> prefer `channel / sum(channels)` over `channel / total`, or subtract the
+> long tail explicitly.
 
 ---
 

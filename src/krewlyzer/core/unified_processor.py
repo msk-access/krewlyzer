@@ -616,7 +616,7 @@ def run_features(
                         "Gene FSC: No on-target factors found, using raw counting"
                     )
 
-            aggregate_by_gene(
+            outputs.fsc_gene = aggregate_by_gene(
                 bed_path,
                 genes,
                 outputs.fsc_gene,
@@ -634,15 +634,21 @@ def run_features(
                 and pon.fsc_gene_baseline
                 and not skip_pon_zscore
             ):
-                apply_fsc_gene_pon(
+                zscored = apply_fsc_gene_pon(
                     outputs.fsc_gene,
                     pon,
                     output_format=resolved_output_format,
                     compress=resolved_compress,
                 )
-                logger.info(
-                    f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, with PON z-scores)"
-                )
+                if zscored is None:
+                    logger.warning(
+                        f"FSC gene: {outputs.fsc_gene.name} written, but PON "
+                        "z-scoring was skipped (file not found)"
+                    )
+                else:
+                    logger.info(
+                        f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, with PON z-scores)"
+                    )
             elif skip_pon_zscore and pon:
                 logger.info(
                     f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes, --skip-pon active)"
@@ -650,12 +656,16 @@ def run_features(
             else:
                 logger.info(f"✓ FSC gene: {outputs.fsc_gene.name} ({len(genes)} genes)")
 
-            # Also generate per-region FSC (exon/probe level)
-            outputs.fsc_region = output_dir / f"{sample_name}.FSC.regions.tsv"
-            aggregate_by_gene(
+            # Also generate per-region FSC (exon/probe level).
+            # Take the path from aggregate_by_gene rather than guessing it:
+            # writers honour --output-format/--compress, so the file may be
+            # .tsv, .tsv.gz or .parquet. Resolving beforehand cannot work — on a
+            # fresh run nothing exists yet — which left the E1 guard below
+            # pointing at a .tsv that was never written.
+            outputs.fsc_region = aggregate_by_gene(
                 bed_path,
                 genes,
-                outputs.fsc_region,
+                output_dir / f"{sample_name}.FSC.regions.tsv",
                 pon=pon_for_zscore,
                 correction_factors=gene_fsc_factors,
                 aggregate_by="region",
@@ -670,15 +680,21 @@ def run_features(
                 and pon.fsc_region_baseline
                 and not skip_pon_zscore
             ):
-                apply_fsc_region_pon(
+                zscored = apply_fsc_region_pon(
                     outputs.fsc_region,
                     pon,
                     output_format=resolved_output_format,
                     compress=resolved_compress,
                 )
-                logger.info(
-                    f"✓ FSC regions: {outputs.fsc_region.name} (with PON z-scores)"
-                )
+                if zscored is None:
+                    logger.warning(
+                        f"FSC regions: {outputs.fsc_region.name} written, but PON "
+                        "z-scoring was skipped (file not found)"
+                    )
+                else:
+                    logger.info(
+                        f"✓ FSC regions: {outputs.fsc_region.name} (with PON z-scores)"
+                    )
             elif skip_pon_zscore and pon:
                 logger.info(
                     f"✓ FSC regions: {outputs.fsc_region.name} (--skip-pon active)"
@@ -702,6 +718,16 @@ def run_features(
                 )
                 if outputs.fsc_region_e1:
                     logger.info(f"✓ FSC E1-only: {outputs.fsc_region_e1.name}")
+                else:
+                    # E1 was absent from every 0.8.3 output directory and no log
+                    # said why. Silence here is what made that hard to notice.
+                    logger.warning(
+                        f"FSC E1-only not produced from "
+                        f"{outputs.fsc_region.name}; downstream E1 features "
+                        "will be missing"
+                    )
+            elif not disable_e1_aggregation:
+                logger.warning("FSC E1-only skipped: no FSC regions file to filter")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
 

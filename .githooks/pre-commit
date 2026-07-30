@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# Tool-agnostic commit guard for krewlyzer. Runs whoever drives the commit --
+# a human at a terminal, Claude, Cursor, Codex. Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# Scope is the STAGED DIFF only, so it sees new content and nothing else. That
+# matters twice over: it keeps the hook fast, and it means the local Nextflow
+# work cache (nextflow/.nextflow/, ~300 cached sample ids) never enters the
+# picture. A filesystem scan would drown in it.
+#
+# Catching PHI here rather than at pre-push is deliberate: once it is in local
+# history the fix is a rebase, not an unstage.
+#
+# Heavy checks (mypy, cargo test, the output-contract gate) stay in CI.
+set -euo pipefail
+
+staged="$(git diff --cached --name-only --diff-filter=ACM)"
+[ -z "$staged" ] && exit 0
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+# ---------------------------------------------------------------------------
+# 1) Refuse to commit data/artifact files.
+#
+# krewlyzer legitimately ships reference data and test fixtures, so this cannot
+# be a blanket extension match -- src/krewlyzer/data/ holds the packaged PON and
+# GC parquets, tests/data/fixtures/ holds the test BAM, and nextflow/ holds the
+# samplesheet. Everything outside those is an accident.
+# ---------------------------------------------------------------------------
+DATA_RE='\.(parquet|bam|bai|cram|crai|tsv|tsv\.gz|csv|maf|dat|bed\.gz)$'
+ALLOWED_RE='^(src/krewlyzer/data/|tests/data/fixtures/|nextflow/samplesheet\.csv$)'
+
+offenders="$(printf '%s\n' "$staged" | grep -E "$DATA_RE" | grep -vE "$ALLOWED_RE" || true)"
+if [ -n "$offenders" ]; then
+    echo "pre-commit BLOCKED: data/artifact file staged." >&2
+    printf '  %s\n' $offenders >&2
+    echo "Unstage it. Reference data belongs in src/krewlyzer/data/, fixtures in" >&2
+    echo "tests/data/fixtures/; sample output belongs nowhere in this repo." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 2) Scan the staged content for PHI and secrets.
+#
+# A missing scanner is NOT a clean scan. Refuse rather than wave it through --
+# this hook is the only thing standing between a pasted patient id and a public
+# repository.
+# ---------------------------------------------------------------------------
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit BLOCKED: gitleaks is not installed, so staged content" >&2
+    echo "cannot be checked for PHI. Install it (brew install gitleaks) or, if" >&2
+    echo "you have judged this commit safe, bypass once with --no-verify." >&2
+    exit 1
+fi
+
+if ! git diff --cached | gitleaks stdin \
+        --config "$REPO_ROOT/.gitleaks.toml" \
+        --no-banner --redact --exit-code 1 >/dev/null 2>&1; then
+    echo "pre-commit BLOCKED: possible PHI or secret in the staged diff." >&2
+    echo "" >&2
+    git diff --cached | gitleaks stdin \
+        --config "$REPO_ROOT/.gitleaks.toml" \
+        --no-banner --redact --exit-code 0 2>&1 | sed 's/^/  /' >&2 || true
+    echo "" >&2
+    echo "Patient and sample identifiers must not enter this repository." >&2
+    echo "Use the P-0000000 / C-000000-L000 placeholders in docs and tests." >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 3) Fast Python lint on staged source/test files.
+# ---------------------------------------------------------------------------
+py="$(printf '%s\n' "$staged" | grep -E '^(src|tests|scripts)/.*\.py$' || true)"
+if [ -n "$py" ]; then
+    if command -v ruff >/dev/null 2>&1; then
+        echo "$py" | xargs ruff check \
+            || { echo "pre-commit BLOCKED: ruff. Fix, then re-stage." >&2; exit 1; }
+    fi
+    if command -v black >/dev/null 2>&1; then
+        echo "$py" | xargs black --check \
+            || { echo "pre-commit BLOCKED: black. Run 'black' then re-stage." >&2; exit 1; }
+    fi
+fi
+
+exit 0

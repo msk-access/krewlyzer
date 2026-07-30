@@ -126,8 +126,16 @@ Where:
 
 **Calculation Details:**
 1. Fragments are mapped relative to the **center** of the Open Chromatin Region (OCR)
-2. Left/Right ends counted in 10bp bins across ±1000bp window
-3. Counts normalized by total sequencing depth
+2. Left/Right ends counted at **1bp resolution** across a ±1000bp window; the
+   phased and background terms are summed over a ±10bp window (21 positions)
+   centred on ∓60bp
+3. Counts normalized **per 10,000** against per-tissue-label end totals
+   accumulated over OCR overlaps — not against global sequencing depth
+
+> [!NOTE]
+> Positions are measured from the **start** of each OCR interval, so the
+> "±1000bp around the centre" description holds only where OCR intervals are
+> 2000bp wide.
 
 ---
 

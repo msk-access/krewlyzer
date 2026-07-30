@@ -145,11 +145,31 @@ $$
 
 ## E1 (First Exon) Significance
 
-The first exon of each gene is identified by genomic position and tracked separately:
+The first exon of each gene is identified by **transcription order** (which
+depends on strand) and tracked separately:
 
 1. **Promoter proximity**: E1 is closest to the promoter region
 2. **Transcription start**: Contains or abuts the TSS
 3. **Cancer sensitivity**: Shows most pronounced MDS changes in cancer
+
+### Strand handling
+
+E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
+
+| Strand | E1 is the exon with the... |
+|--------|----------------------------|
+| `+`    | **lowest** start coordinate |
+| `-`    | **highest** start coordinate |
+
+> [!IMPORTANT]
+> Prior to this fix, strand was ignored and the lowest coordinate always won,
+> so `mds_e1` reported the **last** exon for every minus-strand gene — roughly
+> half of a typical panel. If you have `MDS.gene.tsv` outputs from an earlier
+> version, minus-strand `mds_e1` / `mds_e1_z` values are not comparable.
+
+> [!NOTE]
+> `mds_e1 = 0.0` means E1 itself had no qualifying fragments. It no longer
+> silently falls through to the next exon with coverage.
 
 !!! tip
     Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
@@ -230,7 +250,7 @@ See [Panel Mode](../../guides/panel-mode.md) for details on panel-specific proce
 
 | Metric | Healthy | Cancer (ctDNA) |
 |--------|---------|----------------|
-| Gene MDS Mean | Higher (~7.5-8.0) | Lower at affected genes |
+| Gene MDS Mean | Higher (~0.95-1.0) | Lower at affected genes |
 | E1 MDS | Similar to mean | **Decreased at oncogenes/TSGs** |
 | Cross-gene std | Low (consistent) | Variable (heterogeneous) |
 

@@ -48,6 +48,7 @@ from krewlyzer.wrapper import run_all
 from krewlyzer.pon.build import build_pon
 from krewlyzer.build_gc_reference import build_gc_reference
 from krewlyzer.region_mds import region_mds
+from krewlyzer.validate.cli import validate_cohort, validate_output
 from krewlyzer import __version__
 
 
@@ -165,6 +166,8 @@ app.command()(run_all)
 app.command(name="build-pon")(build_pon)
 app.command(name="build-gc-reference")(build_gc_reference)
 app.command()(validate)
+app.command(name="validate-output")(validate_output)
+app.command(name="validate-cohort")(validate_cohort)
 
 
 @app.callback(invoke_without_command=True)

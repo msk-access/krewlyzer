@@ -1317,7 +1317,21 @@ pub struct WpsBackgroundConsumer {
 }
 
 impl WpsBackgroundConsumer {
-    const PROFILE_LENGTH: usize = 300;  // Alu ~300bp
+    /// Length of the Alu body itself (~300bp).
+    const ALU_BODY_BP: usize = 300;
+    /// Flank stacked on each side of the Alu body.
+    ///
+    /// The nucleosome repeat length we are trying to measure is ~190bp. A
+    /// 300bp profile spans only ~1.5 repeats, which is not enough to resolve
+    /// that period at all: with 10bp bins the DFT period grid is
+    /// `profile_len / i`, and for a 300bp profile the ONLY index landing in a
+    /// nucleosomal search band is i = 2 (150bp). That made `nrl_bp`,
+    /// `periodicity_score` and `adjusted_score` constants independent of the
+    /// data. Stacking +/- 850bp of flank gives a 2000bp profile spanning
+    /// ~10 nucleosome repeats.
+    const FLANK_BP: usize = 850;
+    /// Total stacked profile: 850 + 300 + 850 = 2000bp, Alu body centred.
+    const PROFILE_LENGTH: usize = Self::FLANK_BP * 2 + Self::ALU_BODY_BP;
     
     pub fn new(regions: Vec<AluRegion>, chrom_map: &mut crate::bed::ChromosomeMap) -> Self {
         use coitrees::{COITree, IntervalNode};
@@ -1355,7 +1369,11 @@ impl WpsBackgroundConsumer {
         
         for (i, region) in regions.iter().enumerate() {
             let chrom_id = chrom_map.get_id(&region.chrom);
-            let node = IntervalNode::new(region.start as i32, region.end as i32, i);
+            // Widen by FLANK_BP so fragments sitting in the flanking window
+            // (not just inside the Alu body) are retrieved and stacked.
+            let lo = (region.start as i64 - Self::FLANK_BP as i64).max(0) as i32;
+            let hi = (region.end as i64 + Self::FLANK_BP as i64) as i32;
+            let node = IntervalNode::new(lo, hi, i);
             nodes_by_chrom.entry(chrom_id).or_default().push(node);
         }
         
@@ -1399,8 +1417,9 @@ impl WpsBackgroundConsumer {
         use parquet::file::properties::WriterProperties;
         use std::sync::Arc as StdArc;
         
-        const NUM_BINS: usize = 30;
-        const BIN_SIZE: usize = 10;  // 300 / 30
+        const BIN_SIZE: usize = 10;
+        // 2000bp profile / 10bp bins = 200 bins.
+        const NUM_BINS: usize = WpsBackgroundConsumer::PROFILE_LENGTH / BIN_SIZE;
         
         info!("WPS Background: Writing hierarchical Parquet ({} groups)", self.accumulators.len());
         
@@ -1484,11 +1503,14 @@ impl WpsBackgroundConsumer {
             let mean_nuc = wps_nuc.iter().sum::<f64>() / Self::PROFILE_LENGTH as f64;
             let mean_tf = wps_tf.iter().sum::<f64>() / Self::PROFILE_LENGTH as f64;
             let frag_ratio = if *nuc_frags > 0 { *tf_frags as f32 / *nuc_frags as f32 } else { 0.0 };
-            let (nrl_bp, periodicity_score) = self.estimate_periodicity(&binned_nuc);
+            let (nrl_bp, periodicity_score) = Self::estimate_periodicity(&binned_nuc);
             
             // Calculate deviation from expected NRL (190bp) and penalized score
             const EXPECTED_NRL_BP: f32 = 190.0;
-            const TOLERANCE_BP: f32 = 20.0;
+            // Documented as 50bp in docs/features/core/wps.md; the code used
+            // 20bp, which combined with the pinned 150bp NRL forced
+            // adjusted_score to 0.0 for every sample.
+            const TOLERANCE_BP: f32 = 50.0;
             let nrl_deviation = (nrl_bp - EXPECTED_NRL_BP).abs();
             let deviation_penalty = (1.0 - nrl_deviation / TOLERANCE_BP).max(0.0);
             let adjusted_score = periodicity_score * deviation_penalty;
@@ -1547,14 +1569,14 @@ impl WpsBackgroundConsumer {
     /// 2. **Z-score normalize**: Standardize to mean=0, std=1
     /// 3. **Hann window**: Apply to reduce spectral leakage
     /// 4. **FFT**: Compute real-to-complex FFT via realfft
-    /// 5. **Peak finding**: Find dominant peak in 140-200bp period range
+    /// 5. **Peak finding**: Find dominant peak in 140-250bp period range
     /// 6. **Quality score**: SNR-based score capped at 1.0 (SNR > 3 = clear periodicity)
     /// 
     /// ## Returns
     /// `(nrl_bp, quality_score)` tuple:
     /// - `nrl_bp`: Nucleosome Repeat Length in bp (expected ~190bp for healthy cfDNA)
     /// - `quality_score`: SNR-based quality 0-1 (higher = clearer periodicity signal)
-    fn estimate_periodicity(&self, profile: &[f32]) -> (f32, f32) {
+    fn estimate_periodicity(profile: &[f32]) -> (f32, f32) {
         use realfft::RealFftPlanner;
         use std::f64::consts::PI;
         
@@ -1603,24 +1625,35 @@ impl WpsBackgroundConsumer {
             *val *= window;
         }
         
-        // 4. Compute FFT using realfft
+        // 4. Compute FFT using realfft, zero-padded for frequency resolution
+        const PAD_FACTOR: usize = 8;
+        let n_fft = n * PAD_FACTOR;
+
         let mut planner = RealFftPlanner::<f64>::new();
-        let fft = planner.plan_fft_forward(n);
-        
-        let mut indata = data.clone();
+        let fft = planner.plan_fft_forward(n_fft);
+
+        // Hann-windowed signal in the first n samples, zeros thereafter.
+        let mut indata = vec![0.0f64; n_fft];
+        indata[..n].copy_from_slice(&data);
         let mut spectrum = fft.make_output_vec();
-        
+
         if fft.process(&mut indata, &mut spectrum).is_err() {
             return (0.0, 0.0);
         }
         
-        // 5. Find peak in target period range (140-200bp for nucleosomes)
-        // With 10bp bins, 30 bins = 300bp, so periods in range:
-        // Frequency f = 1/period, and freq[i] = i / (n * bin_size)
-        // So period[i] = n * bin_size / i
+        // 5. Find peak in the nucleosomal period band.
+        //
+        // freq[i] = i / (n_fft * bin_size)  =>  period[i] = n_fft * bin_size / i
+        //
+        // The native grid is coarse, so we zero-pad by PAD_FACTOR before the
+        // transform. Zero-padding interpolates the spectrum: it does not add
+        // information, but it does let the peak be located between native
+        // bins, and it gives the SNR denominator more than one sample to
+        // average over. Without it a 2000bp profile offers only 5 candidate
+        // periods in the band (200.0, 181.8, 166.7, 153.8, 142.9bp).
         let bin_size_bp = 10.0;
         let min_period_bp = 140.0;
-        let max_period_bp = 200.0;
+        let max_period_bp = 250.0;
         
         let amplitudes: Vec<f64> = spectrum.iter().map(|c| c.norm()).collect();
         
@@ -1630,7 +1663,7 @@ impl WpsBackgroundConsumer {
         let mut count_in_range = 0;
         
         for (i, &amp) in amplitudes.iter().enumerate().skip(1) {
-            let period_bp = (n as f64 * bin_size_bp) / i as f64;
+            let period_bp = (n_fft as f64 * bin_size_bp) / i as f64;
             
             if period_bp >= min_period_bp && period_bp <= max_period_bp {
                 sum_amplitude += amp;
@@ -1652,7 +1685,7 @@ impl WpsBackgroundConsumer {
         let snr = if background > 0.0 { peak_amplitude / background } else { 0.0 };
         
         // Calculate NRL (nucleosome repeat length) from peak index
-        let nrl_bp = (n as f64 * bin_size_bp) / peak_idx as f64;
+        let nrl_bp = (n_fft as f64 * bin_size_bp) / peak_idx as f64;
         
         // Quality score: SNR-based, capped at 1.0 (SNR > 3 indicates clear periodicity)
         let quality_score = (snr / 3.0).min(1.0) as f32;
@@ -1695,9 +1728,12 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
                 let chrom = region.chrom.clone();
                 let r_start = region.start;
                 
-                // Fragment position relative to Alu
-                let f_start = (fragment.start + 1) as i64 - r_start as i64;
-                let f_end = fragment.end as i64 - r_start as i64;
+                // Fragment position relative to the Alu, shifted into the
+                // flanked profile frame: index FLANK_BP == Alu start.
+                let f_start = (fragment.start + 1) as i64 - r_start as i64
+                    + Self::FLANK_BP as i64;
+                let f_end = fragment.end as i64 - r_start as i64
+                    + Self::FLANK_BP as i64;
                 
                 let p_nuc = self.config.nuc_window;
                 
@@ -2000,4 +2036,95 @@ fn load_wps_baseline_from_parquet(path: &std::path::Path) -> anyhow::Result<crat
     info!("Loaded WPS baseline: {} regions", regions.len());
     
     Ok(crate::pon_model::WpsBaseline { regions })
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod background_periodicity_tests {
+    use super::*;
+
+    const BIN_SIZE_BP: f64 = 10.0;
+
+    /// Build a binned background profile carrying a known period.
+    fn synth_profile(period_bp: f64, n_bins: usize, amplitude: f64, noise: f64) -> Vec<f32> {
+        (0..n_bins)
+            .map(|i| {
+                let x = i as f64 * BIN_SIZE_BP;
+                // deterministic pseudo-noise so the test is reproducible
+                let jitter = ((i * 2654435761) % 1000) as f64 / 1000.0 - 0.5;
+                (amplitude * (2.0 * std::f64::consts::PI * x / period_bp).cos()
+                    + noise * jitter) as f32
+            })
+            .collect()
+    }
+
+    #[test]
+    fn profile_length_spans_multiple_nucleosome_repeats() {
+        // A 300bp profile cannot resolve a ~190bp period; 2000bp spans ~10.
+        assert_eq!(WpsBackgroundConsumer::PROFILE_LENGTH, 2000);
+        let repeats = WpsBackgroundConsumer::PROFILE_LENGTH as f64 / 190.0;
+        assert!(repeats >= 5.0, "profile spans only {repeats:.1} repeats");
+    }
+
+    #[test]
+    fn recovers_a_190bp_nucleosome_repeat_length() {
+        let n_bins = WpsBackgroundConsumer::PROFILE_LENGTH / 10;
+        let profile = synth_profile(190.0, n_bins, 1.0, 0.05);
+
+        let (nrl_bp, score) = WpsBackgroundConsumer::estimate_periodicity(&profile);
+
+        assert!(
+            (nrl_bp - 190.0).abs() < 10.0,
+            "expected NRL near 190bp, got {nrl_bp}"
+        );
+        assert!(score > 0.0, "expected non-zero periodicity score, got {score}");
+    }
+
+    #[test]
+    fn distinguishes_different_periods() {
+        // Regression: NRL used to be pinned at 150.0 for every input, so two
+        // genuinely different profiles produced identical output.
+        let n_bins = WpsBackgroundConsumer::PROFILE_LENGTH / 10;
+
+        let (nrl_a, _) = WpsBackgroundConsumer::estimate_periodicity(
+            &synth_profile(190.0, n_bins, 1.0, 0.05),
+        );
+        let (nrl_b, _) = WpsBackgroundConsumer::estimate_periodicity(
+            &synth_profile(160.0, n_bins, 1.0, 0.05),
+        );
+
+        assert!(
+            (nrl_a - nrl_b).abs() > 10.0,
+            "NRL must track the input period, got {nrl_a} and {nrl_b}"
+        );
+        assert!(nrl_a > nrl_b, "190bp input should yield a longer NRL than 160bp");
+    }
+
+    #[test]
+    fn adjusted_score_is_not_forced_to_zero_at_expected_nrl() {
+        // With NRL == 190 the deviation penalty must be 1.0 (no penalty).
+        const EXPECTED_NRL_BP: f32 = 190.0;
+        const TOLERANCE_BP: f32 = 50.0;
+
+        let n_bins = WpsBackgroundConsumer::PROFILE_LENGTH / 10;
+        let (nrl_bp, score) = WpsBackgroundConsumer::estimate_periodicity(
+            &synth_profile(190.0, n_bins, 1.0, 0.05),
+        );
+
+        let penalty = (1.0 - (nrl_bp - EXPECTED_NRL_BP).abs() / TOLERANCE_BP).max(0.0);
+        let adjusted = score * penalty;
+
+        assert!(penalty > 0.5, "penalty collapsed at the expected NRL: {penalty}");
+        assert!(adjusted > 0.0, "adjusted_score must be non-zero for healthy-like input");
+    }
+
+    #[test]
+    fn flat_profile_yields_no_periodicity() {
+        let profile = vec![0.0f32; WpsBackgroundConsumer::PROFILE_LENGTH / 10];
+        let (nrl_bp, score) = WpsBackgroundConsumer::estimate_periodicity(&profile);
+        assert_eq!((nrl_bp, score), (0.0, 0.0));
+    }
 }

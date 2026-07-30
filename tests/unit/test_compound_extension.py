@@ -104,7 +104,7 @@ class TestRegionMdsOutputPaths:
     @pytest.mark.unit
     def test_exon_gene_paths_distinct(self, tmp_path):
         """Safe pattern produces distinct exon and gene output paths."""
-        sample = "P-0000113-T02-XS1"
+        sample = "P-0000000-T02-XS1"
         exon_base = tmp_path / f"{sample}.MDS.exon"
         gene_base = tmp_path / f"{sample}.MDS.gene"
 
@@ -137,7 +137,7 @@ class TestMotifTrackingPaths:
     @pytest.mark.unit
     def test_motif_paths_all_distinct(self, tmp_path):
         """EndMotif, BreakPointMotif, and MDS tracking paths are distinct."""
-        sample = "P-0000113-T02-XS1"
+        sample = "P-0000000-T02-XS1"
         ext = ".tsv"
 
         edm_base = tmp_path / f"{sample}.EndMotif"

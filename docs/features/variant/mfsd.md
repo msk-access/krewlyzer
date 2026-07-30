@@ -231,8 +231,13 @@ $$
 $$
 
 Using Gaussian models:
-- **Healthy**: μ = 167bp, σ = 35bp (nucleosomal periodicity)
-- **Tumor**: μ = 145bp, σ = 25bp (sub-nucleosomal fragments)
+- **Healthy**: μ = 167bp, σ = 30bp (nucleosomal periodicity)
+- **Tumor**: μ = 145bp, σ = 35bp (sub-nucleosomal fragments)
+
+> [!NOTE]
+> These are the values compiled into `LLRModelParams::human()`
+> (`rust/src/mfsd.rs`). Earlier revisions of this page quoted σ = 35 / σ = 25,
+> which the code has never used.
 
 ### LLR Output Columns
 
@@ -251,19 +256,24 @@ Using Gaussian models:
 | **< -5** | Strong healthy signal | Consistent with healthy cfDNA |
 
 !!! tip
-    For low-N variants (ALT_Count < 5), use `ALT_LLR` instead of `KS_Pval_ALT_REF`.
-    The LLR is robust with even 1-2 fragments, while KS tests require ≥5.
+    For low-N variants, prefer `ALT_LLR` over `KS_Pval_ALT_REF`. The LLR is
+    robust with even 1-2 fragments. `MIN_FOR_KS` is **2**, so the tool will
+    report `KS_Valid = TRUE` from as few as 2 ALT and 2 REF fragments — treat
+    p-values computed from single-digit counts with suspicion even though the
+    tool marks them valid.
 
 ### Clinical Example: MRD Detection
 
 ```
 Variant at TP53:chr17:7577539
-  ALT_Count = 3           # Too few for KS test
-  KS_Valid  = FALSE       # KS test unreliable
+  ALT_Count = 3           # Above MIN_FOR_KS (2), so KS runs
+  KS_Valid  = TRUE        # ...but 3 fragments is thin evidence
   ALT_LLR   = 4.2         # Positive = tumor-like fragments
   REF_LLR   = -89.5       # Negative = healthy-like REF population
-  
-  → Interpretation: ALT fragments show tumor signature despite low count
+
+  → Interpretation: ALT fragments show tumor signature despite low count.
+    Lead on ALT_LLR here; KS_Valid = TRUE does not mean the p-value is
+    well-powered at n = 3.
 ```
 
 ---
@@ -276,9 +286,15 @@ The LLR model uses Gaussian distributions for healthy and tumor fragment length 
 
 | Preset | Healthy μ | Healthy σ | Tumor μ | Tumor σ | Use Case |
 |--------|-----------|-----------|---------|---------|----------|
-| **human** (default) | 167bp | 35bp | 145bp | 25bp | Human cfDNA |
-| **canine** | 153bp | 30bp | 135bp | 22bp | Canine cfDNA |
-| **ssdna** | 160bp | 40bp | 140bp | 30bp | Single-stranded library prep |
+| **human** (default) | 167bp | 30bp | 145bp | 35bp | Human cfDNA |
+| **canine** | 153bp | 25bp | 130bp | 30bp | Canine cfDNA |
+| **ssdna** | 157bp | 30bp | 135bp | 35bp | Single-stranded library prep |
+
+> [!WARNING]
+> Only `human()` is reachable today. `calc_log_likelihood_ratio()` hardcodes it
+> and `calculate_mfsd()` exposes no model parameter, so `canine()`, `ssdna()`
+> and `custom()` are currently dead code and the Python snippet below does not
+> affect a run.
 
 ### Biological Rationale
 

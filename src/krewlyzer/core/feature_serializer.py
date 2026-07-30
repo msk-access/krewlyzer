@@ -43,6 +43,26 @@ class NumpyEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
+def _resolve_output_path(output_dir: Path, sample_id: str, stem: str) -> "Path | None":
+    """Locate ``{sample_id}.{stem}`` regardless of the writer's output format.
+
+    krewlyzer emits every tabular feature as ``.tsv``, ``.tsv.gz`` (``--compress``)
+    or ``.parquet`` (``--output-format parquet``). Probing only for the bare
+    ``.tsv`` name silently skips the feature for any non-default format, which
+    produced an EMPTY ``features.json`` for compressed and Parquet runs.
+
+    Args:
+        stem: Feature suffix without extension, e.g. ``"FSD"`` or
+            ``"FSC.regions.e1only"``.
+
+    Returns:
+        The first existing candidate, or ``None`` if the feature was not written.
+    """
+    from .output_utils import resolve_table_path
+
+    return resolve_table_path(output_dir / f"{sample_id}.{stem}")
+
+
 class FeatureSerializer:
     """
     Unified JSON serializer for krewlyzer features.
@@ -324,15 +344,15 @@ class FeatureSerializer:
         # =====================================================================
         # FSD - Fragment Size Distribution
         # =====================================================================
-        fsd_path = output_dir / f"{sample_id}.FSD.tsv"
-        fsd_on_path = output_dir / f"{sample_id}.FSD.ontarget.tsv"
+        fsd_path = _resolve_output_path(output_dir, sample_id, "FSD")
+        fsd_on_path = _resolve_output_path(output_dir, sample_id, "FSD.ontarget")
 
-        if fsd_path.exists() or fsd_on_path.exists():
+        if fsd_path is not None or fsd_on_path is not None:
             fsd_data = {}
-            if fsd_path.exists():
+            if fsd_path is not None:
                 fsd_df = _rt(fsd_path)
                 fsd_data["off_target"] = cls._parse_fsd(fsd_df)
-            if fsd_on_path.exists():
+            if fsd_on_path is not None:
                 fsd_on_df = _rt(fsd_on_path)
                 fsd_data["on_target"] = cls._parse_fsd(fsd_on_df)
             serializer.features["fsd"] = fsd_data
@@ -340,36 +360,36 @@ class FeatureSerializer:
         # =====================================================================
         # FSR - Fragment Size Ratio
         # =====================================================================
-        fsr_path = output_dir / f"{sample_id}.FSR.tsv"
-        fsr_on_path = output_dir / f"{sample_id}.FSR.ontarget.tsv"
+        fsr_path = _resolve_output_path(output_dir, sample_id, "FSR")
+        fsr_on_path = _resolve_output_path(output_dir, sample_id, "FSR.ontarget")
 
-        if fsr_path.exists() or fsr_on_path.exists():
+        if fsr_path is not None or fsr_on_path is not None:
             fsr_data = {}
-            if fsr_path.exists():
+            if fsr_path is not None:
                 fsr_data["off_target"] = _rt(fsr_path).to_dict(orient="records")
-            if fsr_on_path.exists():
+            if fsr_on_path is not None:
                 fsr_data["on_target"] = _rt(fsr_on_path).to_dict(orient="records")
             serializer.features["fsr"] = fsr_data
 
         # =====================================================================
         # FSC - Fragment Size Coverage
         # =====================================================================
-        fsc_path = output_dir / f"{sample_id}.FSC.tsv"
-        fsc_on_path = output_dir / f"{sample_id}.FSC.ontarget.tsv"
+        fsc_path = _resolve_output_path(output_dir, sample_id, "FSC")
+        fsc_on_path = _resolve_output_path(output_dir, sample_id, "FSC.ontarget")
 
-        if fsc_path.exists() or fsc_on_path.exists():
+        if fsc_path is not None or fsc_on_path is not None:
             fsc_data = {}
-            if fsc_path.exists():
+            if fsc_path is not None:
                 fsc_data["off_target"] = _rt(fsc_path).to_dict(orient="records")
-            if fsc_on_path.exists():
+            if fsc_on_path is not None:
                 fsc_data["on_target"] = _rt(fsc_on_path).to_dict(orient="records")
             serializer.features["fsc"] = fsc_data
 
         # =====================================================================
         # FSC Gene - Gene-Centric Fragment Size Coverage (for panel mode)
         # =====================================================================
-        fsc_gene_path = output_dir / f"{sample_id}.FSC.gene.tsv"
-        if fsc_gene_path.exists():
+        fsc_gene_path = _resolve_output_path(output_dir, sample_id, "FSC.gene")
+        if fsc_gene_path is not None:
             serializer.features["fsc_gene"] = _rt(fsc_gene_path).to_dict(
                 orient="records"
             )
@@ -377,8 +397,8 @@ class FeatureSerializer:
         # =====================================================================
         # FSC Regions - Per-Exon/Target Fragment Size Coverage (for panel mode)
         # =====================================================================
-        fsc_region_path = output_dir / f"{sample_id}.FSC.regions.tsv"
-        if fsc_region_path.exists():
+        fsc_region_path = _resolve_output_path(output_dir, sample_id, "FSC.regions")
+        if fsc_region_path is not None:
             serializer.features["fsc_region"] = _rt(fsc_region_path).to_dict(
                 orient="records"
             )
@@ -387,8 +407,8 @@ class FeatureSerializer:
         # FSC E1-Only - First Exon Per Gene (promoter-proximal sensitivity)
         # Per Helzer et al. (2025): E1 has stronger cancer signal than whole-gene
         # =====================================================================
-        fsc_e1_path = output_dir / f"{sample_id}.FSC.regions.e1only.tsv"
-        if fsc_e1_path.exists():
+        fsc_e1_path = _resolve_output_path(output_dir, sample_id, "FSC.regions.e1only")
+        if fsc_e1_path is not None:
             serializer.features["fsc_region_e1"] = _rt(fsc_e1_path).to_dict(
                 orient="records"
             )
@@ -397,14 +417,14 @@ class FeatureSerializer:
         # =====================================================================
         # WPS - Windowed Protection Score
         # =====================================================================
-        wps_path = output_dir / f"{sample_id}.WPS.parquet"
-        wps_panel_path = output_dir / f"{sample_id}.WPS.panel.parquet"
+        wps_path = _resolve_output_path(output_dir, sample_id, "WPS")
+        wps_panel_path = _resolve_output_path(output_dir, sample_id, "WPS.panel")
 
-        if wps_path.exists():
+        if wps_path is not None:
             serializer.add_wps(pd.read_parquet(wps_path))
 
         # Panel-specific WPS (for panel mode with --assay)
-        if wps_panel_path.exists():
+        if wps_panel_path is not None:
             panel_df = pd.read_parquet(wps_panel_path)
             serializer.features["wps_panel"] = {
                 "n_anchors": len(panel_df),
@@ -412,8 +432,8 @@ class FeatureSerializer:
             }
 
         # WPS Background (Alu element stacking)
-        wps_bg_path = output_dir / f"{sample_id}.WPS_background.parquet"
-        if wps_bg_path.exists():
+        wps_bg_path = _resolve_output_path(output_dir, sample_id, "WPS_background")
+        if wps_bg_path is not None:
             bg_df = pd.read_parquet(wps_bg_path)
             serializer.features["wps_background"] = {
                 "n_elements": len(bg_df),
@@ -423,31 +443,33 @@ class FeatureSerializer:
         # =====================================================================
         # Motif - EDM, BPM, MDS
         # =====================================================================
-        edm_path = output_dir / f"{sample_id}.EndMotif.tsv"
-        bpm_path = output_dir / f"{sample_id}.BreakPointMotif.tsv"
-        mds_path = output_dir / f"{sample_id}.MDS.tsv"
-        edm_on_path = output_dir / f"{sample_id}.EndMotif.ontarget.tsv"
-        bpm_on_path = output_dir / f"{sample_id}.BreakPointMotif.ontarget.tsv"
-        mds_on_path = output_dir / f"{sample_id}.MDS.ontarget.tsv"
+        edm_path = _resolve_output_path(output_dir, sample_id, "EndMotif")
+        bpm_path = _resolve_output_path(output_dir, sample_id, "BreakPointMotif")
+        mds_path = _resolve_output_path(output_dir, sample_id, "MDS")
+        edm_on_path = _resolve_output_path(output_dir, sample_id, "EndMotif.ontarget")
+        bpm_on_path = _resolve_output_path(
+            output_dir, sample_id, "BreakPointMotif.ontarget"
+        )
+        mds_on_path = _resolve_output_path(output_dir, sample_id, "MDS.ontarget")
 
         motif_data: Dict[str, Any] = {}
 
         # Off-target motifs
-        if edm_path.exists():
+        if edm_path is not None:
             edm_df = _rt(edm_path)
             motif_data["edm"] = (
                 edm_df.iloc[0].to_dict()
                 if len(edm_df) == 1
                 else edm_df.to_dict(orient="records")
             )
-        if bpm_path.exists():
+        if bpm_path is not None:
             bpm_df = _rt(bpm_path)
             motif_data["bpm"] = (
                 bpm_df.iloc[0].to_dict()
                 if len(bpm_df) == 1
                 else bpm_df.to_dict(orient="records")
             )
-        if mds_path.exists():
+        if mds_path is not None:
             mds_df = _rt(mds_path)
             for col in mds_df.columns:
                 if col.lower() == "mds":
@@ -460,21 +482,21 @@ class FeatureSerializer:
                     motif_data["mds_z"] = float(val)  # type: ignore[index]
 
         # On-target motifs
-        if edm_on_path.exists():
+        if edm_on_path is not None:
             edm_on_df = _rt(edm_on_path)
             motif_data["edm_on_target"] = (
                 edm_on_df.iloc[0].to_dict()
                 if len(edm_on_df) == 1
                 else edm_on_df.to_dict(orient="records")
             )
-        if bpm_on_path.exists():
+        if bpm_on_path is not None:
             bpm_on_df = _rt(bpm_on_path)
             motif_data["bpm_on_target"] = (
                 bpm_on_df.iloc[0].to_dict()
                 if len(bpm_on_df) == 1
                 else bpm_on_df.to_dict(orient="records")
             )
-        if mds_on_path.exists():
+        if mds_on_path is not None:
             mds_on_df = _rt(mds_on_path)
             for col in mds_on_df.columns:
                 if col.lower() == "mds":
@@ -492,8 +514,8 @@ class FeatureSerializer:
         # =====================================================================
         # EndMotif 1-mer (single-base composition at fragment ends)
         # =====================================================================
-        edm1_path = output_dir / f"{sample_id}.EndMotif1mer.tsv"
-        if edm1_path.exists():
+        edm1_path = _resolve_output_path(output_dir, sample_id, "EndMotif1mer")
+        if edm1_path is not None:
             edm1_df = _rt(edm1_path)
             # Convert to dict: {"A": 0.197, "C": 0.345, ...}
             serializer.features.setdefault("motif", {})["edm_1mer"] = {
@@ -504,20 +526,20 @@ class FeatureSerializer:
         # =====================================================================
         # OCF - Orientation-aware cfDNA Fragmentation
         # =====================================================================
-        ocf_path = output_dir / f"{sample_id}.OCF.tsv"
-        ocf_on_path = output_dir / f"{sample_id}.OCF.ontarget.tsv"
+        ocf_path = _resolve_output_path(output_dir, sample_id, "OCF")
+        ocf_on_path = _resolve_output_path(output_dir, sample_id, "OCF.ontarget")
 
-        if ocf_path.exists() or ocf_on_path.exists():
+        if ocf_path is not None or ocf_on_path is not None:
             ocf_data = {}
-            if ocf_path.exists():
+            if ocf_path is not None:
                 ocf_data["off_target"] = _rt(ocf_path).to_dict(orient="records")
-            if ocf_on_path.exists():
+            if ocf_on_path is not None:
                 ocf_data["on_target"] = _rt(ocf_on_path).to_dict(orient="records")
             serializer.features["ocf"] = ocf_data
 
         # OCF off-target (panel-specific off-target scores)
-        ocf_off_path = output_dir / f"{sample_id}.OCF.offtarget.tsv"
-        if ocf_off_path.exists():
+        ocf_off_path = _resolve_output_path(output_dir, sample_id, "OCF.offtarget")
+        if ocf_off_path is not None:
             serializer.features.setdefault("ocf", {})["offtarget"] = _rt(
                 ocf_off_path
             ).to_dict(orient="records")
@@ -529,8 +551,10 @@ class FeatureSerializer:
             (".OCF.offtarget.sync.tsv", "sync_offtarget"),
             (".OCF.ontarget.sync.tsv", "sync_ontarget"),
         ]:
-            sync_path = output_dir / f"{sample_id}{suffix}"
-            if sync_path.exists():
+            sync_path = _resolve_output_path(
+                output_dir, sample_id, suffix.lstrip(".").removesuffix(".tsv")
+            )
+            if sync_path is not None:
                 serializer.features.setdefault("ocf", {})[key] = _rt(sync_path).to_dict(
                     orient="records"
                 )
@@ -539,15 +563,15 @@ class FeatureSerializer:
         # =====================================================================
         # UXM - Methylation (optional)
         # =====================================================================
-        uxm_path = output_dir / f"{sample_id}.UXM.tsv"
-        if uxm_path.exists():
+        uxm_path = _resolve_output_path(output_dir, sample_id, "UXM")
+        if uxm_path is not None:
             serializer.add_uxm(_rt(uxm_path))
 
         # =====================================================================
         # mFSD - Mutant Fragment Size Distribution (optional)
         # =====================================================================
-        mfsd_path = output_dir / f"{sample_id}.mFSD.tsv"
-        if mfsd_path.exists():
+        mfsd_path = _resolve_output_path(output_dir, sample_id, "mFSD")
+        if mfsd_path is not None:
             mfsd_df = _rt(mfsd_path)
             serializer.features["mfsd"] = {
                 "enabled": True,
@@ -558,14 +582,14 @@ class FeatureSerializer:
         # =====================================================================
         # TFBS - Transcription Factor Binding Site Region Entropy
         # =====================================================================
-        tfbs_path = output_dir / f"{sample_id}.TFBS.tsv"
-        tfbs_on_path = output_dir / f"{sample_id}.TFBS.ontarget.tsv"
+        tfbs_path = _resolve_output_path(output_dir, sample_id, "TFBS")
+        tfbs_on_path = _resolve_output_path(output_dir, sample_id, "TFBS.ontarget")
 
-        if tfbs_path.exists() or tfbs_on_path.exists():
+        if tfbs_path is not None or tfbs_on_path is not None:
             tfbs_data = {}
-            if tfbs_path.exists():
+            if tfbs_path is not None:
                 tfbs_data["off_target"] = _rt(tfbs_path).to_dict(orient="records")
-            if tfbs_on_path.exists():
+            if tfbs_on_path is not None:
                 tfbs_data["on_target"] = _rt(tfbs_on_path).to_dict(orient="records")
             serializer.features["tfbs"] = tfbs_data
 
@@ -574,8 +598,10 @@ class FeatureSerializer:
             (".TFBS.sync.tsv", "sync"),
             (".TFBS.ontarget.sync.tsv", "sync_ontarget"),
         ]:
-            sync_path = output_dir / f"{sample_id}{suffix}"
-            if sync_path.exists():
+            sync_path = _resolve_output_path(
+                output_dir, sample_id, suffix.lstrip(".").removesuffix(".tsv")
+            )
+            if sync_path is not None:
                 serializer.features.setdefault("tfbs", {})[key] = _rt(
                     sync_path
                 ).to_dict(orient="records")
@@ -584,14 +610,14 @@ class FeatureSerializer:
         # =====================================================================
         # ATAC - ATAC-seq Region Entropy
         # =====================================================================
-        atac_path = output_dir / f"{sample_id}.ATAC.tsv"
-        atac_on_path = output_dir / f"{sample_id}.ATAC.ontarget.tsv"
+        atac_path = _resolve_output_path(output_dir, sample_id, "ATAC")
+        atac_on_path = _resolve_output_path(output_dir, sample_id, "ATAC.ontarget")
 
-        if atac_path.exists() or atac_on_path.exists():
+        if atac_path is not None or atac_on_path is not None:
             atac_data = {}
-            if atac_path.exists():
+            if atac_path is not None:
                 atac_data["off_target"] = _rt(atac_path).to_dict(orient="records")
-            if atac_on_path.exists():
+            if atac_on_path is not None:
                 atac_data["on_target"] = _rt(atac_on_path).to_dict(orient="records")
             serializer.features["atac"] = atac_data
 
@@ -600,8 +626,10 @@ class FeatureSerializer:
             (".ATAC.sync.tsv", "sync"),
             (".ATAC.ontarget.sync.tsv", "sync_ontarget"),
         ]:
-            sync_path = output_dir / f"{sample_id}{suffix}"
-            if sync_path.exists():
+            sync_path = _resolve_output_path(
+                output_dir, sample_id, suffix.lstrip(".").removesuffix(".tsv")
+            )
+            if sync_path is not None:
                 serializer.features.setdefault("atac", {})[key] = _rt(
                     sync_path
                 ).to_dict(orient="records")
@@ -610,22 +638,26 @@ class FeatureSerializer:
         # =====================================================================
         # GC Correction Factors
         # =====================================================================
-        gc_factors_path = output_dir / f"{sample_id}.correction_factors.tsv"
-        gc_factors_on_path = output_dir / f"{sample_id}.correction_factors.ontarget.tsv"
+        gc_factors_path = _resolve_output_path(
+            output_dir, sample_id, "correction_factors"
+        )
+        gc_factors_on_path = _resolve_output_path(
+            output_dir, sample_id, "correction_factors.ontarget"
+        )
 
-        if gc_factors_path.exists() or gc_factors_on_path.exists():
+        if gc_factors_path is not None or gc_factors_on_path is not None:
             gc_data = {}
-            if gc_factors_path.exists():
+            if gc_factors_path is not None:
                 gc_data["off_target"] = _rt(gc_factors_path).to_dict(orient="records")
-            if gc_factors_on_path.exists():
+            if gc_factors_on_path is not None:
                 gc_data["on_target"] = _rt(gc_factors_on_path).to_dict(orient="records")
             serializer.features["gc_factors"] = gc_data
 
         # =====================================================================
         # FSC Counts (raw per-bin size-class counts with GC)
         # =====================================================================
-        fsc_counts_path = output_dir / f"{sample_id}.fsc_counts.tsv"
-        if fsc_counts_path.exists():
+        fsc_counts_path = _resolve_output_path(output_dir, sample_id, "fsc_counts")
+        if fsc_counts_path is not None:
             serializer.features["fsc_counts"] = _rt(fsc_counts_path).to_dict(
                 orient="records"
             )
@@ -634,13 +666,13 @@ class FeatureSerializer:
         # =====================================================================
         # Region MDS - Per-Exon/Target Motif Diversity Score (Helzer et al.)
         # =====================================================================
-        mds_exon_path = output_dir / f"{sample_id}.MDS.exon.tsv"
-        mds_gene_path = output_dir / f"{sample_id}.MDS.gene.tsv"
+        mds_exon_path = _resolve_output_path(output_dir, sample_id, "MDS.exon")
+        mds_gene_path = _resolve_output_path(output_dir, sample_id, "MDS.gene")
 
-        if mds_exon_path.exists() or mds_gene_path.exists():
+        if mds_exon_path is not None or mds_gene_path is not None:
             region_mds_data: Dict[str, Any] = {}
 
-            if mds_exon_path.exists():
+            if mds_exon_path is not None:
                 exon_df = _rt(mds_exon_path)
                 region_mds_data["exon"] = exon_df.to_dict(orient="records")
                 region_mds_data["n_exons"] = len(exon_df)
@@ -650,7 +682,7 @@ class FeatureSerializer:
                     region_mds_data["mds_exon_mean"] = float(exon_df["mds"].mean())  # type: ignore[index]
                     region_mds_data["mds_exon_std"] = float(exon_df["mds"].std())  # type: ignore[index]
 
-            if mds_gene_path.exists():
+            if mds_gene_path is not None:
                 gene_df = _rt(mds_gene_path)
                 region_mds_data["gene"] = gene_df.to_dict(orient="records")
                 region_mds_data["n_genes"] = len(gene_df)  # type: ignore[index]
@@ -665,10 +697,11 @@ class FeatureSerializer:
         # Metadata — read from .metadata.tsv (Parquet-first, TSV fallback).
         # .metadata.json was removed; metadata is now consistent TSV/Parquet.
         # =====================================================================
-        meta_tsv_path = output_dir / f"{sample_id}.metadata.tsv"
-        meta_df = _read_table(meta_tsv_path)
-        if meta_df is not None and not meta_df.empty:
-            serializer.set_metadata(meta_df.iloc[0].to_dict())  # type: ignore[arg-type]
+        meta_tsv_path = _resolve_output_path(output_dir, sample_id, "metadata")
+        if meta_tsv_path is not None:
+            meta_df = _rt(meta_tsv_path)
+            if not meta_df.empty:
+                serializer.set_metadata(meta_df.iloc[0].to_dict())  # type: ignore[arg-type]
 
         return serializer
 

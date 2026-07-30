@@ -410,9 +410,19 @@ def aggregate_by_gene(
 
     # Post-Rust format conversion: read TSV, write in selected format
     base_path = Path(str(output_path).removesuffix(".tsv"))
+    converted = False
     if output_format != "tsv" or compress:
         df = read_table(tsv_path)
-        if df is not None:
+        if df is None:
+            # Do not fall through quietly: the caller would then be handed a
+            # path for a format that was never produced. Keep the .tsv Rust
+            # wrote and say so.
+            logger.warning(
+                f"FSC {aggregate_by}: could not read {tsv_path.name} back for "
+                f"conversion to format={output_format}, compress={compress}; "
+                f"leaving the uncompressed TSV in place"
+            )
+        else:
             write_table(
                 df,
                 base_path,
@@ -422,11 +432,24 @@ def aggregate_by_gene(
             )
             # Clean up original Rust TSV now that write_table() produced target format
             cleanup_intermediate_tsv(tsv_path, output_format, compress)
+            converted = True
             logger.debug(
                 f"FSC {aggregate_by}: converted to format={output_format}, compress={compress}"
             )
 
-    return tsv_path
+    # Return what was actually written. Returning the pre-conversion .tsv meant
+    # callers guarding on .exists() saw a file cleanup_intermediate_tsv had just
+    # deleted, so E1 generation and FSC PON z-scoring were skipped on every
+    # compressed or Parquet run. parent/(name+ext) rather than with_suffix(),
+    # which would eat the compound extension.
+    if not converted:
+        return tsv_path
+    written_ext = (
+        ".parquet"
+        if output_format == "parquet"
+        else (".tsv.gz" if compress else ".tsv")
+    )
+    return base_path.parent / (base_path.name + written_ext)
 
 
 def apply_fsc_gene_pon(
@@ -630,8 +653,13 @@ def filter_fsc_to_e1(
 
     # Default output base path: strip suffix so write_table appends the right one
     if output_path is None:
-        stem = fsc_regions_path.stem
-        # Strip existing extension (e.g., .tsv, .parquet) from stem
+        # NB: Path.stem strips only the LAST dot-segment, so for
+        # 'S1.FSC.regions.tsv.gz' it yields 'S1.FSC.regions.tsv' and the
+        # '.regions' test below misses -- producing the mangled name
+        # 'S1.FSC.regions.tsv.e1only.tsv.gz'. Strip compound extensions.
+        from .output_utils import strip_table_extension
+
+        stem = strip_table_extension(fsc_regions_path.name)
         if stem.endswith(".regions"):
             stem = stem.replace(".regions", ".regions.e1only")
         else:

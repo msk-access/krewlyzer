@@ -2,6 +2,221 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Added
+- **`krewlyzer validate-output`** — checks a finished output directory against
+  the contract its consumers rely on. Three layers, in increasing order of what
+  a schema alone can catch: every consumed table present and shaped correctly;
+  domain invariants (frequencies sum to 1, chromosomes `chr`-prefixed, the six
+  FSC channels partition `total`, FSD carries only size-bin columns); and
+  **anti-degeneracy** — a metric that is identical across every sample is an
+  error, not a pass.
+
+  That last layer is the point. Run against a real 0.8.3 cohort the schema
+  passes completely, while `WPS_background.nrl_bp` ≡ 150.0,
+  `nrl_deviation_bp` ≡ 40.0, `periodicity_score` ≡ 0.3333 and
+  `adjusted_score` ≡ 0.0 in every sample: four of the five columns that table
+  contributes carry no information. A schema-only gate certifies that directory
+  as good.
+
+  Exit codes are `0` satisfied, `1` contract violation, `2` structural (missing
+  directory, unreadable Parquet) so a workflow can retry on 2 and escalate on 1.
+  Cross-sample degeneracy below two samples is reported SKIP, never PASS.
+  Declaring a column legitimately constant requires a written
+  `constant_reason`, so silencing a finding costs a justification.
+
+  `--json-report` emits stable finding ids for trend tracking.
+  `scripts/validate_output.py` runs it from a checkout.
+
+- **`krewlyzer validate-cohort`** plus the `KREWLYZER_VALIDATE_SAMPLE` and
+  `KREWLYZER_VALIDATE_COHORT` Nextflow modules — the gate split into a scatter
+  and a gather so it scales to a real cohort.
+
+  A sample directory is ~1.5 GB (`WPS.parquet` alone is ~120 MB), so re-reading
+  tens of thousands of them is not viable. `validate-output --fingerprint-out`
+  reduces each sample to a ~20 KB fingerprint — a hash and two counts per
+  column — and `validate-cohort` compares those. Reading is projected to the
+  declared columns and bounded by `TableRule.scan_rows`, which roughly halves
+  per-sample time and, more importantly, makes memory independent of cohort
+  size.
+
+  The split is not just an optimisation: degeneracy is inherently cross-sample.
+  On a real cohort every sample passes `validate-output` individually while
+  `validate-cohort` fails, because no single sample can distinguish "this
+  metric is a constant" from "this is its value here".
+
+- **`run-all` now writes `{sample}.validation.json` and
+  `{sample}.fingerprint.json`** on Parquet runs, and `--strict-validation`
+  makes a contract violation fail the run.
+
+  Emitting is on by default because the fingerprint is a cheap byproduct here —
+  the tables are already written — and it is what makes `validate-cohort`
+  affordable later; leaving it opt-in would in practice disable the only check
+  that catches a constant metric. Failing is opt-in because a contract rule
+  that turns out too strict should not take down a cohort. Skipped entirely for
+  `tsv`-only runs, since the contract describes the Parquet surface downstream
+  reads. A checker that throws is caught and logged: it must never lose a
+  completed run.
+
+### Fixed
+- **`--generate-json` silently dropped most features for compressed and Parquet
+  runs.** Every probe in `FeatureSerializer.from_outputs()` was
+  `Path(f"{sample}.FOO.tsv").exists()`, and that gate ran *before* `read_table()`
+  (which does understand `.tsv.gz` / `.parquet`). Reconstructing a real
+  MSK-ACCESS xs2 output directory (written with both `--output-format both` and
+  `--compress`, so every table exists as `.parquet` **and** `.tsv.gz`, but never
+  as bare `.tsv`) shows the payload going from **5 to 16 feature families**:
+
+  | | features captured |
+  |---|---|
+  | before | `mfsd`, `ocf`, `wps`, `wps_background`, `wps_panel` |
+  | after | the above plus `fsd`, `fsr`, `fsc`, `fsc_gene`, `fsc_region`, `fsc_counts`, `motif`, `tfbs`, `atac`, `gc_factors`, `region_mds` |
+
+  The three WPS entries survived only because they are probed as `.parquet`;
+  `mfsd` and `ocf` survived only because a separate cleanup defect leaves stray
+  uncompressed `.tsv` copies of those two outputs behind. Every fragmentomics
+  feature — the entire size, motif and regulatory signal — was absent from the
+  ML payload.
+
+  > **Note:** this means tidying up those stray `.tsv` leftovers *without* this
+  > fix would have made `features.json` strictly worse.
+
+- **E1-only FSC was never generated for compressed or Parquet runs, and was
+  misnamed when it was.** Two compounding bugs: `unified_processor` hard-coded
+  `outputs.fsc_region = ...FSC.regions.tsv`, so the `outputs.fsc_region.exists()`
+  guard was False whenever the real file was `.tsv.gz` / `.parquet` and E1
+  generation was skipped entirely; and `filter_fsc_to_e1()` derived its output
+  name via `Path.stem`, which strips only the last dot-segment, so a
+  `.tsv.gz` input produced `S1.FSC.regions.tsv.e1only.tsv.gz` instead of
+  `S1.FSC.regions.e1only.tsv.gz`. Added `strip_table_extension()` for compound
+  suffixes.
+
+- **EndMotif1mer was unreadable whenever `--compress` was used.**
+  `write_end_motif_1mer()` gzipped the table via `write_table()` and then
+  appended the `# c_fraction` / `# entropy` / `# c_bias` / `# sample` footer
+  with a plain `open(path, "a")`. The result is a valid gzip member followed by
+  raw bytes, which `gzip.decompress()` and pandas both reject with
+  `BadGzipFile: Not a gzipped file (b'# ')` — so the **entire table** was lost,
+  not merely polluted with footer rows. Every run using `--compress` (i.e. any
+  pipeline emitting `.tsv.gz`) is affected. The footer is now written through
+  the gzip codec, and `read_table()` gained a recovery path that decompresses
+  the first gzip member and skips trailing bytes, so files already produced by
+  <= 0.8.3 remain readable.
+
+
+- **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
+  The Alu background profile covered only the ~300bp Alu body in 30 bins, so
+  the DFT period grid was `300 / i` and the *only* index falling inside the
+  nucleosomal search band was `i = 2` (150bp). Every sample therefore produced
+  `nrl_bp = 150.0`, `periodicity_score = 0.3333` and `adjusted_score = 0.0`
+  regardless of its data, and the documented "healthy NRL ~190bp, quality >
+  0.7" was unreachable. The profile is now 2000bp (850bp flank + 300bp body +
+  850bp flank) binned at 200 x 10bp, the DFT is zero-padded 8x, the search band
+  is 140-250bp, and the deviation tolerance is the 50bp already documented
+  (the code used 20bp, which forced `adjusted_score` to 0 given the pinned
+  150bp NRL).
+
+  > **Output change:** `{sample}.WPS_background.parquet` `nrl_bp`,
+  > `nrl_deviation_bp`, `periodicity_score` and `adjusted_score` become
+  > data-dependent. Earlier values are constants and must be discarded, not
+  > compared.
+
+- **UXM: the `X` (mixed-methylation) class was unreachable.** The CLI passed
+  `methy_threshold = unmethy_threshold = 0.5`. Because the backend evaluates
+  `ratio >= methy_threshold` first, every fragment collapsed into `M` or `U`
+  and the published `X` column was identically `0.0` for every region of every
+  sample. Thresholds are now `METHY_THRESHOLD = 0.75` / `UNMETHY_THRESHOLD =
+  0.25`, matching the documented Loyfer et al. (2022) definition.
+
+  > **Output change:** `{sample}.UXM.tsv` `X` becomes non-zero and `U`/`M`
+  > shrink correspondingly. Models trained on the previous columns must be
+  > refit.
+
+- **region-MDS: E1 (first exon) selection ignored strand.** `identify_e1_regions`
+  always chose the lowest start coordinate, so for every **minus-strand gene**
+  the reported `mds_e1` was the gene's *last* exon — roughly half of a typical
+  panel. E1 is now selected by transcription order (lowest start on `+`,
+  highest on `-`). `write_gene_output` no longer re-derives E1 by coordinate;
+  it reads the strand-aware `is_e1` flag, so `mds_e1` also stops silently
+  falling through to the next covered exon when E1 has no fragments.
+
+  > **Output change:** `{sample}.MDS.gene.tsv` `mds_e1` / `mds_e1_z` change for
+  > all minus-strand genes. Earlier values are not comparable.
+
+- **region-entropy crashed when the PON lacked a matching baseline.** The Rust
+  `apply_pon_zscore` returns early *without writing an output file* if the PON
+  has no `tfbs_baseline` / `atac_baseline` table. The Python caller then ran
+  `load_entropy_tsv()` on the missing file, tripping its `assert df is not
+  None`, and the raw Rust output was unlinked afterwards — losing the entropy
+  results entirely. It now degrades to the documented no-PON behaviour
+  (`z_score = 0`) with a warning.
+
+- **Metadata footers parsed as data (`read_table`).** `{sample}.EndMotif1mer.tsv`
+  appends `# c_fraction`, `# entropy`, `# c_bias` and `# sample` after the data
+  rows, but `read_table()` called `pd.read_csv` without `comment="#"`. Those
+  lines became data rows and `FeatureSerializer` propagated them into
+  `features.motif.edm_1mer` as junk keys with NaN values. `read_table()` now
+  defaults to `comment="#"` (callers may override).
+
+  > **Output change:** `features.motif.edm_1mer` loses the four `"# ..."` keys.
+
+- **Rust test suite did not compile.** `src/output_utils.rs` used
+  `tempfile::tempdir` with no `[dev-dependencies]` section in `rust/Cargo.toml`
+  and referenced `Arc` without importing it, so `cargo test` failed to build
+  and no Rust unit test was running in CI. Also corrected the stale
+  `gc_reference` bin-index test, which asserted a 68-bin ceiling although
+  `get_length_bin_index` spans 60..999 across 188 bins.
+
+- **`--generate-json` crashed on any output directory without a metadata
+  table.** The metadata probe was the one call site that handed its resolver
+  result straight to `read_table()` without an `is not None` guard, raising
+  `AttributeError: 'NoneType' object has no attribute 'suffix'`. The
+  format-matrix test always wrote a metadata table, so it never reached the
+  branch; it now covers the absent case across tsv/tsv.gz/parquet.
+
+- **E1-only FSC and FSC PON z-scoring were still skipped on compressed and
+  Parquet runs.** `aggregate_by_gene()` returned the pre-conversion `.tsv` path
+  even after `cleanup_intermediate_tsv()` had deleted it, so every caller
+  guarding on `.exists()` saw a missing file. It now returns the path it
+  actually wrote, which fixes the E1 guard, `apply_fsc_region_pon` and
+  `apply_fsc_gene_pon` together; `outputs.fsc_gene` was additionally never
+  resolved at all. The two "✓ … (with PON z-scores)" log lines no longer claim
+  success when z-scoring bailed.
+
+- Removed `src/krewlyzer.libs`, a broken symlink into a build sandbox
+  (`/usr/local/lib/python3.11/dist-packages/`) committed by mistake.
+
+- Restored `black` and `ruff` cleanliness. Both pass on `develop` but were
+  broken by the changes above this line, and CI's lint job gates on them.
+
+### Documentation
+
+- Corrected feature documentation against the implementation: the inverted
+  "higher MDS = tumor" summary in `motif.md`; mFSD LLR sigmas (`human()` is
+  167/30 and 145/35, not 167/35 and 145/25), the canine/ssdna presets, their
+  unreachability, and the `MIN_FOR_KS = 2` floor; the non-existent 20-500bp
+  region-entropy window and its unusable absolute entropy bands; OCF's 1bp
+  resolution and per-10,000 per-label normalization; the FSR channel table
+  (FSR and FSC share one counter) and the fact that `total` spans 65-1000bp
+  while only five channels are returned, so `channel / total` ratios do not
+  sum to 1; and that WPS `z_vector` / `shape_score` / `z_amplitude` are
+  documented but never emitted, while `apply_pon_zscore` silently yields
+  `z = (0 - mean) / std`.
+
+- Corrected three doc statements the pass above missed: `fsr.py`'s module
+  docstring still listed the retired 65-99/100-149/150-259/260-399/400+ channel
+  table (FSR reads FSC's per-bin counts, so it uses FSC's channels), and now
+  also records that `short_frac` / `long_frac` divide by a `total` spanning
+  65-1000bp; `estimate_periodicity`'s doc comment still claimed a 140-200bp
+  search band after the NRL fix widened it to 140-250bp; and `mfsd.md` still
+  asserted a KS floor of ≥5 in its tip and worked example, contradicting
+  `MIN_FOR_KS = 2` and its own column reference.
+
+  > Note: those retired FSR boundaries are not fictional — `GeneResult` in
+  > `fsc.rs` still uses exactly that split, so `mono_nucl` means 150-259bp in
+  > `FSC.gene`/`FSC.regions` but 150-220bp in `FSC`. Tracked separately.
+
 ## [0.8.3] - 2026-04-28
 
 ### Fixed
