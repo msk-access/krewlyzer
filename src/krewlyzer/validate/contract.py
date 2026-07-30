@@ -280,6 +280,22 @@ CONTRACT: Tuple[TableRule, ...] = (
             metric("periodicity_score"),
             metric("adjusted_score"),
             metric("fragment_ratio", Vary.BOTH),
+            # Right-censoring indicator: True means nrl_bp is the edge of the
+            # search band, not a peak. Not required, so a pre-0.9 directory
+            # still validates; Vary.NEVER because a cohort where nothing is
+            # censored is a perfectly good outcome and must not read as a dead
+            # column.
+            ColumnRule(
+                "nrl_at_band_limit",
+                Kind.NUMERIC,
+                Vary.NEVER,
+                required=False,
+                constant_reason=(
+                    "a boolean censoring flag; all-False across a cohort means "
+                    "every NRL estimate resolved inside the band, which is the "
+                    "desired outcome rather than a degenerate column"
+                ),
+            ),
         ),
         checks=("unique_group_id",),
     ),
