@@ -214,7 +214,7 @@ jobs:
             -A clippy::type_complexity
 
       # Static gate: every output-writing call site must pass output_format=
-      # and compress=. .agent/rules/development.md already claims CI enforces
+      # and compress=. .agents/rules/development.md already claims CI enforces
       # this, but it was not wired into any workflow.
       - name: Check output-format call sites
         run: |
