@@ -80,4 +80,5 @@ def to_json(result: Result, path: Path, version: str) -> None:
         "exit_code": result.exit_code,
         "findings": [f.to_dict() for f in _sorted(result.findings)],
     }
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2))

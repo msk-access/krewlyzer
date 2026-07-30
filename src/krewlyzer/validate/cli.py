@@ -64,10 +64,11 @@ def validate_output(
         console.print(f"[dim]wrote {json_report}[/dim]")
 
     if fingerprint_out is not None:
+        # One sample writes the file you named; a cohort writes a directory of
+        # them, since a single path cannot hold many.
         if len(result.fingerprints) == 1:
             result.fingerprints[0].save(fingerprint_out)
         else:
-            fingerprint_out.mkdir(parents=True, exist_ok=True)
             for fp in result.fingerprints:
                 fp.save(fingerprint_out / f"{fp.sample}.fingerprint.json")
         console.print(f"[dim]wrote fingerprint(s) to {fingerprint_out}[/dim]")

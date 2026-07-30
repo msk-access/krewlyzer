@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from . import checks as check_registry
@@ -76,6 +77,7 @@ class Fingerprint:
         return cls.from_dict(json.loads(path.read_text()))
 
     def save(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.to_dict(), indent=2))
 
 
@@ -163,8 +165,6 @@ def _read_table(path: Path, rule: TableRule) -> Tuple[pd.DataFrame, int]:
             break
     if not batches:
         return pd.DataFrame(), n_rows
-    import pyarrow as pa
-
     return pa.Table.from_batches(batches).to_pandas(), n_rows
 
 
