@@ -28,6 +28,8 @@ process KREWLYZER_UXM {
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
     
     """
     krewlyzer uxm \\
@@ -37,6 +39,8 @@ process KREWLYZER_UXM {
         --threads $task.cpus \\
         $genome_arg \\
         $verbose_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

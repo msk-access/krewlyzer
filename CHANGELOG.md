@@ -77,6 +77,25 @@ All notable changes to this project will be documented in this file.
   Additive and optional, so existing consumers are unaffected; the contract
   gate accepts directories written before it existed.
 
+- **Every feature tool now accepts `--output-format` and `--compress`.** Eight
+  of eleven had neither, so `krewlyzer fsc` could only write TSV while
+  `run-all --output-format parquet` wrote Parquet -- and Parquet is all the
+  downstream consumer reads. Anyone running a single tool got output nothing
+  could load, with no error.
+
+  The computation was never the problem: standalone `wps` and `run-all` produce
+  byte-identical `WPS_background` on the same input, because both route through
+  the same single-pass `run_features()`. Only the CLI layer hardcoded the
+  format defaults, and the underlying processors already accepted both
+  parameters.
+
+  `scripts/check_output_format.py` could not catch this -- it verifies that
+  internal call sites *forward* the parameters, not that the CLI ever lets
+  anyone set them. A new test asserts every feature command exposes both.
+
+  The eleven per-tool Nextflow modules now pass `params.output_format` and
+  `params.compress_tsv` through as well; previously only `runall` did.
+
 ### Fixed
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was
@@ -178,6 +197,14 @@ All notable changes to this project will be documented in this file.
   defaults to `comment="#"` (callers may override).
 
   > **Output change:** `features.motif.edm_1mer` loses the four `"# ..."` keys.
+
+- **The tool-level Nextflow path could not run at all.**
+  `modules/local/krewlyzer/extract/main.nf` declared `path("*.json")` as a
+  required output, but metadata moved from `.metadata.json` to
+  `.metadata.tsv`/`.parquet` in **0.7.0**. The tool has not written a `.json`
+  since, so the process failed on a missing required output. Unnoticed because
+  `use_runall = true` is the default. Now emits the three real metadata
+  variants as optional outputs, and the stub writes TSV to match.
 
 - **Rust test suite did not compile.** `src/output_utils.rs` used
   `tempfile::tempdir` with no `[dev-dependencies]` section in `rust/Cargo.toml`

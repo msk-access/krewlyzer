@@ -1,4 +1,6 @@
 import re
+
+import pytest
 from typer.testing import CliRunner
 from krewlyzer.cli import app
 
@@ -126,3 +128,50 @@ def test_run_all_help():
 #     result = runner.invoke(app, ["fsc", str(bedgz), "-o", str(out)])
 #     assert result.exit_code == 0
 #     # Check output files exist, etc.
+
+
+# ---------------------------------------------------------------------------
+# Output-format parity between run-all and the individual tools
+# ---------------------------------------------------------------------------
+
+# Commands that write feature tables a downstream consumer reads. Excludes
+# build-pon and build-gc-reference, which write models rather than features,
+# and validate/validate-output/validate-cohort, which write reports.
+FEATURE_COMMANDS = [
+    "extract",
+    "motif",
+    "fsc",
+    "fsr",
+    "fsd",
+    "wps",
+    "ocf",
+    "uxm",
+    "mfsd",
+    "region-entropy",
+    "region-mds",
+]
+
+
+@pytest.mark.parametrize("command", FEATURE_COMMANDS)
+def test_feature_command_exposes_output_format(command):
+    """Every feature tool must offer the same output options as run-all.
+
+    Eight of these had neither flag, so they could only ever write TSV while
+    `run-all --output-format parquet` wrote Parquet -- and Parquet is all the
+    downstream consumer reads. The underlying processors already accepted both
+    parameters; only the CLI hardcoded the defaults, so a user running a single
+    tool silently got output nothing downstream could load.
+
+    scripts/check_output_format.py cannot catch this: it verifies that internal
+    call sites forward the parameters, not that the CLI ever lets anyone set
+    them.
+    """
+    result = runner.invoke(app, [command, "--help"])
+    output = strip_ansi(result.output)
+
+    assert result.exit_code == 0, f"{command} --help failed"
+    assert "--output-format" in output, (
+        f"'{command}' does not expose --output-format, so it cannot produce "
+        "Parquet and its output is unreadable downstream"
+    )
+    assert "--compress" in output, f"'{command}' does not expose --compress"

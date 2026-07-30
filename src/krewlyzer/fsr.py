@@ -105,6 +105,17 @@ def fsr(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
+    ),
 ):
     """
     Calculate Fragment Size Ratio (FSR) features for a single sample.
@@ -201,6 +212,8 @@ def fsr(
             gc_correct=gc_correct,
             threads=threads,
             verbose=verbose,
+            output_format=output_format,
+            compress=compress,
         )
 
         if outputs.fsr and outputs.fsr.exists():
