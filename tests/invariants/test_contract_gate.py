@@ -191,6 +191,34 @@ def test_scatter_gather_matches_a_single_pass(tmp_path):
     ), "the gather step must catch what no single sample can"
 
 
+def test_run_all_validation_artifacts(tmp_path):
+    """Pins the composition run-all uses, so a signature change can't break it.
+
+    run-all writes both artifacts on every Parquet run and never changes its
+    exit code without --strict-validation. The fingerprint in particular has to
+    land: it is what makes validate-cohort affordable later.
+    """
+    from krewlyzer.validate.gate import Result, check_sample
+    from krewlyzer.validate.report import to_json
+
+    from .synth_outputs import write_sample
+
+    write_sample(tmp_path, "S0", 0)
+    sample_dir = tmp_path / "S0"
+
+    findings, fingerprint = check_sample("S0", sample_dir)
+    fingerprint.save(sample_dir / "S0.fingerprint.json")
+    to_json(
+        Result(findings=findings, samples=["S0"], fingerprints=[fingerprint]),
+        sample_dir / "S0.validation.json",
+        "0.8.3",
+    )
+
+    assert (sample_dir / "S0.fingerprint.json").exists()
+    assert (sample_dir / "S0.validation.json").exists()
+    assert not [f for f in findings if f.severity is Severity.ERROR]
+
+
 def test_fingerprint_version_mismatch_is_rejected(tmp_path):
     """A stale fingerprint must not be silently compared against a fresh one."""
     from krewlyzer.validate.gate import Fingerprint

@@ -46,6 +46,19 @@ All notable changes to this project will be documented in this file.
   `validate-cohort` fails, because no single sample can distinguish "this
   metric is a constant" from "this is its value here".
 
+- **`run-all` now writes `{sample}.validation.json` and
+  `{sample}.fingerprint.json`** on Parquet runs, and `--strict-validation`
+  makes a contract violation fail the run.
+
+  Emitting is on by default because the fingerprint is a cheap byproduct here —
+  the tables are already written — and it is what makes `validate-cohort`
+  affordable later; leaving it opt-in would in practice disable the only check
+  that catches a constant metric. Failing is opt-in because a contract rule
+  that turns out too strict should not take down a cohort. Skipped entirely for
+  `tsv`-only runs, since the contract describes the Parquet surface downstream
+  reads. A checker that throws is caught and logged: it must never lose a
+  completed run.
+
 ### Fixed
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was

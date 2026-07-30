@@ -206,6 +206,14 @@ def run_all(
         "--generate-json",
         help="Generate unified sample.features.json with ALL data for ML pipelines",
     ),
+    strict_validation: bool = typer.Option(
+        False,
+        "--strict-validation",
+        help="Fail the run if the outputs violate the downstream contract. "
+        "Off by default: the validation report and fingerprint are always "
+        "written for Parquet runs, but a violation does not change the exit "
+        "code unless you ask for it.",
+    ),
     # Output format options
     output_format: str = typer.Option(
         "tsv",
@@ -1012,5 +1020,51 @@ def run_all(
             logger.info(f"Unified JSON saved: {json_path}.features.json")
         except Exception as e:
             logger.warning(f"JSON generation failed: {e}")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # OUTPUT CONTRACT CHECK
+    # ═══════════════════════════════════════════════════════════════════
+    # Always run for Parquet output, and always non-fatal unless asked. The
+    # fingerprint is the point: it is a cheap byproduct here (the tables are
+    # already written) and it is what lets `krewlyzer validate-cohort` find
+    # metrics that never vary without re-reading the whole cohort. Degeneracy
+    # cannot be judged from one sample, so if this did not run by default the
+    # cross-sample check would be impractical at cohort scale.
+    #
+    # Skipped for tsv-only runs: the contract describes what downstream reads,
+    # which is Parquet, so a tsv run would report every table as absent.
+    if resolved_output_format in ("parquet", "both"):
+        try:
+            from .validate.gate import Result, check_sample
+            from .validate.findings import Severity
+            from .validate.report import to_json as _validation_json
+
+            findings, fingerprint = check_sample(sample, output)
+            fingerprint.save(output / f"{sample}.fingerprint.json")
+
+            result = Result(
+                findings=findings, samples=[sample], fingerprints=[fingerprint]
+            )
+            _validation_json(result, output / f"{sample}.validation.json", __version__)
+
+            errors = [f for f in findings if f.severity is Severity.ERROR]
+            if errors:
+                for finding in errors[:5]:
+                    logger.warning(f"contract: {finding.message}")
+                if len(errors) > 5:
+                    logger.warning(f"contract: ...and {len(errors) - 5} more")
+                if strict_validation:
+                    logger.error(
+                        f"{len(errors)} output-contract violation(s); failing "
+                        "because --strict-validation is set"
+                    )
+                    raise typer.Exit(1)
+            else:
+                logger.info("✓ Output contract satisfied")
+        except typer.Exit:
+            raise
+        except Exception as e:
+            # A broken checker must never lose a completed run.
+            logger.warning(f"Output validation failed to run: {e}")
 
     logger.info(f"✅ All feature extraction complete: {output}")
