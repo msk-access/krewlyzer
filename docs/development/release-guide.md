@@ -70,10 +70,12 @@ VERSION="X.Y.Z"
 OLD_VERSION="A.B.C"  # Current version before bump
 
 # Python
+# src/krewlyzer/__init__.py is the single source of truth for the Python side.
+# wrapper.py and core/feature_serializer.py used to carry their own copies and
+# needed their own sed lines; they now import __version__, so there is nothing
+# to substitute. tests/unit/test_version_stamp.py fails if a copy reappears.
 sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/g" src/krewlyzer/__init__.py
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" pyproject.toml
-sed -i '' "s/version=\"${OLD_VERSION}\"/version=\"${VERSION}\"/g" src/krewlyzer/wrapper.py
-sed -i '' "s/\"${OLD_VERSION}\"/\"${VERSION}\"/g" src/krewlyzer/core/feature_serializer.py
 
 # Rust
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" rust/Cargo.toml
@@ -84,6 +86,27 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/nextflow.config
 sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/main.nf
 find nextflow/modules -name "main.nf" -exec sed -i '' "s/${OLD_VERSION}/${VERSION}/g" {} \;
 ```
+
+!!! warning "Verify the bump landed"
+    Every command above depends on `OLD_VERSION` being exactly right, and
+    nothing in `sed` reports a pattern that matched nothing. Run this
+    afterwards — it fails if `__init__.py`, `pyproject.toml` and
+    `rust/Cargo.toml` disagree, or if any module has reintroduced a version
+    literal of its own:
+
+    ```bash
+    pytest tests/unit/test_version_stamp.py -q
+    ```
+
+    Then confirm nothing is left behind:
+
+    ```bash
+    git grep -n "${OLD_VERSION}" -- . ':!CHANGELOG.md' ':!docs'
+    ```
+
+    Remaining hits in `CHANGELOG.md` and `docs/` are expected: those are
+    historical references to how an older release behaved, and rewriting them
+    would falsify the record.
 
 ---
 
