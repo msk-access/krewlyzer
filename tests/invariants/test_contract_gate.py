@@ -156,6 +156,52 @@ def test_missing_consumed_table_is_an_error(tmp_path):
     )
 
 
+def test_scatter_gather_matches_a_single_pass(tmp_path):
+    """Per-sample fingerprints plus a gather must equal the monolithic run.
+
+    This is the property the Nextflow split depends on: the scatter step never
+    sees another sample, so degeneracy has to survive the round trip through
+    fingerprints intact.
+    """
+    from krewlyzer.validate.gate import Fingerprint, check_sample, evaluate_cohort
+
+    write_cohort(tmp_path, n_samples=3)
+    for sample in ("S0", "S1", "S2"):
+        path = tmp_path / sample / f"{sample}.WPS_background.parquet"
+        df = pd.read_parquet(path)
+        df["nrl_bp"] = 150.0
+        df.to_parquet(path, index=False)
+
+    fps = []
+    for sample in ("S0", "S1", "S2"):
+        sample_findings, fp = check_sample(sample, tmp_path / sample)
+        assert not [f for f in sample_findings if f.severity is Severity.ERROR], (
+            "a constant column is invisible to a single sample -- that is why "
+            "the cohort step exists"
+        )
+        out = tmp_path / f"{sample}.fingerprint.json"
+        fp.save(out)
+        fps.append(Fingerprint.load(out))
+
+    cohort = evaluate_cohort(fps)
+
+    assert any(
+        f.id == "WPS_background.DEGENERACY.nrl_bp" and f.severity is Severity.ERROR
+        for f in cohort
+    ), "the gather step must catch what no single sample can"
+
+
+def test_fingerprint_version_mismatch_is_rejected(tmp_path):
+    """A stale fingerprint must not be silently compared against a fresh one."""
+    from krewlyzer.validate.gate import Fingerprint
+
+    path = tmp_path / "old.json"
+    path.write_text('{"fingerprint_version": "0", "sample": "S0", "observations": {}}')
+
+    with pytest.raises(ValueError, match="fingerprint version"):
+        Fingerprint.load(path)
+
+
 def test_declaring_a_column_constant_requires_a_reason():
     """Silencing a degeneracy finding must cost a written justification."""
     with pytest.raises(ValueError, match="constant_reason"):

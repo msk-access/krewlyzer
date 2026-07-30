@@ -19,7 +19,8 @@ how a gate ends up certifying a constant.
 from __future__ import annotations
 
 import hashlib
-from typing import Dict, List, Optional, Sequence, Tuple
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -74,10 +75,49 @@ def _constant_value(series: pd.Series) -> Optional[float]:
     return None
 
 
+@dataclass(frozen=True)
+class Observation:
+    """What one sample contributes about one column.
+
+    Deliberately not the data. Retaining a Series per column per sample is fine
+    for a handful of samples and an out-of-memory error at cohort scale, so the
+    reduction happens at read time and only this survives.
+    """
+
+    sample: str
+    signature: str
+    n_distinct: int
+    n_rows: int
+    constant_value: Optional[float]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, raw: Dict[str, Any]) -> "Observation":
+        return cls(
+            sample=raw["sample"],
+            signature=raw["signature"],
+            n_distinct=int(raw["n_distinct"]),
+            n_rows=int(raw["n_rows"]),
+            constant_value=raw.get("constant_value"),
+        )
+
+
+def observe(sample: str, series: pd.Series, kind: Kind) -> Observation:
+    return Observation(
+        sample=sample,
+        signature=column_signature(series, kind),
+        n_distinct=_nunique(series, kind),
+        n_rows=len(series),
+        constant_value=_constant_value(series),
+    )
+
+
 def evaluate(
     suffix: str,
     rule: ColumnRule,
-    per_sample: Sequence[Tuple[str, pd.Series]],
+    per_sample: Sequence[Observation],
     min_samples: int,
 ) -> List[Finding]:
     """Judge one column across the samples that contained it."""
@@ -107,17 +147,14 @@ def evaluate(
                     ),
                     table=suffix,
                     column=rule.name,
-                    samples=[s for s, _ in per_sample],
+                    samples=[o.sample for o in per_sample],
                     evidence={"n_samples": len(per_sample), "min_samples": min_samples},
                 )
             )
         else:
-            signatures: Dict[str, str] = {
-                sample: column_signature(series, rule.kind)
-                for sample, series in per_sample
-            }
+            signatures = {o.sample: o.signature for o in per_sample}
             if len(set(signatures.values())) == 1:
-                const = _constant_value(per_sample[0][1])
+                const = per_sample[0].constant_value
                 shown = "identical" if const is None else f"identically {const:g}"
                 findings.append(
                     Finding(
@@ -131,7 +168,7 @@ def evaluate(
                         ),
                         table=suffix,
                         column=rule.name,
-                        samples=[s for s, _ in per_sample],
+                        samples=[o.sample for o in per_sample],
                         evidence={
                             "n_samples": len(per_sample),
                             "constant_value": const,
@@ -141,10 +178,8 @@ def evaluate(
                 )
 
     if wants_within:
-        flat = [s for s, series in per_sample if _nunique(series, rule.kind) <= 1]
-        if len(flat) == len(per_sample) and any(
-            len(series) > 1 for _, series in per_sample
-        ):
+        flat = [o.sample for o in per_sample if o.n_distinct <= 1]
+        if len(flat) == len(per_sample) and any(o.n_rows > 1 for o in per_sample):
             findings.append(
                 Finding(
                     id=f"{family}.FLAT.{rule.name}",

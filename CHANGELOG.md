@@ -29,6 +29,23 @@ All notable changes to this project will be documented in this file.
   `--json-report` emits stable finding ids for trend tracking.
   `scripts/validate_output.py` runs it from a checkout.
 
+- **`krewlyzer validate-cohort`** plus the `KREWLYZER_VALIDATE_SAMPLE` and
+  `KREWLYZER_VALIDATE_COHORT` Nextflow modules — the gate split into a scatter
+  and a gather so it scales to a real cohort.
+
+  A sample directory is ~1.5 GB (`WPS.parquet` alone is ~120 MB), so re-reading
+  tens of thousands of them is not viable. `validate-output --fingerprint-out`
+  reduces each sample to a ~20 KB fingerprint — a hash and two counts per
+  column — and `validate-cohort` compares those. Reading is projected to the
+  declared columns and bounded by `TableRule.scan_rows`, which roughly halves
+  per-sample time and, more importantly, makes memory independent of cohort
+  size.
+
+  The split is not just an optimisation: degeneracy is inherently cross-sample.
+  On a real cohort every sample passes `validate-output` individually while
+  `validate-cohort` fails, because no single sample can distinguish "this
+  metric is a constant" from "this is its value here".
+
 ### Fixed
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was

@@ -91,6 +91,15 @@ class TableRule:
     consumed_by_kreview: bool = True
     checks: Tuple[str, ...] = ()  # names resolved in checks.py
     optional: bool = False  # absent file is a warning, not a failure
+    scan_rows: Optional[int] = None
+    """Rows the domain checks need. ``None`` means all of them.
+
+    Set it wherever reading the whole table is disproportionate: WPS carries
+    200-float vectors over ~15k anchors and is ~120 MB per sample, but its only
+    check inspects the first row, and fingerprinting for degeneracy needs a
+    bounded slice rather than the lot. At cohort scale (>14k samples) the
+    difference is hours of I/O.
+    """
 
     @property
     def family(self) -> str:
@@ -256,11 +265,14 @@ CONTRACT: Tuple[TableRule, ...] = (
     TableRule(".ATAC.parquet", _ENTROPY_COLS),
     TableRule(".ATAC.ontarget.parquet", _ENTROPY_COLS),
     # -- nucleosome ---------------------------------------------------------
-    TableRule(".WPS.parquet", _WPS_COLS, checks=("wps_arrays_nonempty",)),
+    TableRule(
+        ".WPS.parquet", _WPS_COLS, checks=("wps_arrays_nonempty",), scan_rows=256
+    ),
     TableRule(
         ".WPS.panel.parquet",
         (*_WPS_COLS, metric("local_depth", Vary.BOTH)),
         checks=("wps_arrays_nonempty",),
+        scan_rows=256,
     ),
     TableRule(
         ".WPS_background.parquet",
