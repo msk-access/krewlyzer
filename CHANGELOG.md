@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`scripts/build_gene_bed.py`, and gene BED assets rebuilt from GENCODE.**
+  The bundled gene BEDs could not answer "which exon is first". The panel
+  assets (`xs1`/`xs2`) had five columns and **no strand at all**; the WGS asset
+  numbered exons in *coordinate* order, so MTOR — minus strand — carried
+  `exon_num 0` at its lowest coordinate while its real exon 1 is at its
+  highest. Anything deriving E1 from those files got the wrong end of every
+  minus-strand gene.
+
+  GENCODE's `exon_number` is transcription-ordered and `MANE_Select` names the
+  agreed transcript, so the question is resolved once at build time and written
+  into the asset as an explicit `is_e1` column. Canonical-transcript policy is
+  MANE Select → Ensembl canonical → longest CDS; the build **fails** if the GTF
+  carries no MANE tags at all, which is what silently happens with Ensembl's
+  frozen GRCh37 release 87.
+
+  New columns are additive — the first five are unchanged and the existing
+  parser produces identical genes and coordinates: `transcript_id`,
+  `exon_number`, `strand`, `is_e1`, `is_first_captured`.
+
+  Three panel symbols (`H3F3A`, `HIST1H3B`, `PAK7`) were renamed by HGNC and
+  match nothing in a current GTF. They are carried by an explicit alias table
+  and asserted, because the failure mode is a gene silently losing its
+  annotation rather than an error.
+
+  **E1 is far sparser on a panel than it looks.** Only **25 of 128** `xs1`
+  genes (33 of 146 for `xs2`) have a probe tile overlapping the canonical
+  transcript's exon 1. MSK-ACCESS tiles coding hotspot exons, and exon 1 is
+  usually 5′UTR and outside the capture design — AKT1's sits 15 kb past the
+  panel's most 5′ tile. `is_first_captured` marks the most 5′ *captured* tile
+  in transcription order, which exists for every gene, but an internal exon is
+  not a promoter proxy and must not be read as E1. Both are emitted so the
+  modelling step can weigh them separately.
+
+  This also bounds the existing `filter_fsc_to_e1` defect: of the 25 `xs1`
+  genes that do have a real E1 tile, its lowest-start pick is correct for 18
+  and wrong for 7 (6 minus-strand). The larger issue is the other 103, for
+  which it emits a row labelled E1 that is an arbitrary internal exon.
+
 - **`krewlyzer validate-output`** — checks a finished output directory against
   the contract its consumers rely on. Three layers, in increasing order of what
   a schema alone can catch: every consumed table present and shaped correctly;
