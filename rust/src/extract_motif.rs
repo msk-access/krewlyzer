@@ -34,7 +34,11 @@ struct Chunk {
 
 // Result from a single chunk
 struct ChunkResult {
-    fragments: Vec<String>,
+    /// (fragment start, BED line). The start is kept alongside so the
+    /// writer can restore coordinate order: a reverse-oriented fragment
+    /// begins before the read that produced it, so read order is no longer
+    /// fragment order and tabix would reject the output.
+    fragments: Vec<(u64, String)>,
     // Off-target motifs (primary - unbiased)
     end_motifs: HashMap<String, u64>,
     bp_motifs: HashMap<String, u64>,
@@ -279,11 +283,34 @@ pub fn process_bam_parallel(
             // --- Extract Logic (BED Output) ---
             // Only process R1 for Fragment definition to avoid double counting
             if config.output_bed && record.is_first_in_template() {
-                 let tlen = record.insert_size().abs();
+                 let tlen_signed = record.insert_size();
+                 let tlen = tlen_signed.abs();
                  if tlen >= config.min_len as i64 && tlen <= config.max_len as i64 {
-                     let start = record.pos() as u64; // 0-based
-                     let end = start + tlen as u64;
-                     
+                     // The fragment spans the outermost bases of the pair, which
+                     // is not `pos() + |tlen|` when R1 is the rightmost mate:
+                     // there `pos()` is near the fragment's 3' end and the
+                     // interval lands ~(tlen - read_length) too far right. Same
+                     // sign handling as the motif block below, and the same
+                     // construction the pre-Rust implementation used before the
+                     // reverse branch was dropped in the rewrite.
+                     //
+                     // Consensus BAMs normalise R1 to forward so this is rare
+                     // there (<1%), but uncollapsed and WGS input run ~50%.
+                     //
+                     // Branch on the TLEN sign, not on is_reverse(). htslib
+                     // gives the rightmost segment of a pair a negative TLEN,
+                     // and "am I the rightmost mate" is exactly the question
+                     // here. The two agree for well-formed FR pairs and diverge
+                     // for malformed ones -- real data contains records flagged
+                     // forward whose mate lies to their left.
+                     let (start, end) = if tlen_signed >= 0 {
+                         let s = record.pos() as u64;
+                         (s, s + tlen as u64)
+                     } else {
+                         let e = record.cigar().end_pos() as u64;
+                         (e.saturating_sub(tlen as u64), e)
+                     };
+
                      // Blacklist Check
                      if !exclude_arc.is_empty() && overlaps_exclude(&chunk.chrom, start, end, &exclude_arc) {
                          continue;
@@ -299,7 +326,9 @@ pub fn process_bam_parallel(
                          } else { 0.0 }
                      } else { 0.0 };
                      
-                     result.fragments.push(format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc));
+                     result
+                         .fragments
+                         .push((start, format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc)));
                      result.count += 1;
                      
                      // Accumulate GC observation for correction factor computation
@@ -446,10 +475,41 @@ pub fn process_bam_parallel(
         info!("Writing BED to {}...", path);
         let file = File::create(path)?;
         let mut writer = bgzf::io::Writer::new(file);
-        for res in &results {
-            for line in &res.fragments {
-                writeln!(writer, "{}", line)?;
+
+        // Emit each chromosome's fragments in coordinate order.
+        //
+        // Chunks arrive in header order, and every chunk of a chromosome is
+        // contiguous, so buffering one chromosome at a time is enough -- no
+        // need to hold the genome. Sorting is required because a fragment whose
+        // R1 is the rightmost mate starts before the read that produced it, by
+        // up to (max_len - read_length). That is small next to a 10Mb chunk but
+        // it does cross chunk boundaries, so a per-chunk sort would not be
+        // enough. Unsorted output makes tabix indexing fail outright, which
+        // takes every downstream feature with it.
+        let mut pending: Vec<(u64, &String)> = Vec::new();
+        let mut pending_chrom: Option<&str> = None;
+
+        let flush = |buf: &mut Vec<(u64, &String)>,
+                         w: &mut bgzf::io::Writer<File>|
+         -> std::io::Result<()> {
+            buf.sort_by_key(|(start, _)| *start);
+            for (_, line) in buf.iter() {
+                writeln!(w, "{}", line)?;
             }
+            buf.clear();
+            Ok(())
+        };
+
+        for (chunk, res) in chunks.iter().zip(results.iter()) {
+            if pending_chrom != Some(chunk.chrom.as_str()) {
+                flush(&mut pending, &mut writer)?;
+                pending_chrom = Some(chunk.chrom.as_str());
+            }
+            pending.extend(res.fragments.iter().map(|(s, line)| (*s, line)));
+        }
+        flush(&mut pending, &mut writer)?;
+
+        for res in &results {
             total_count += res.count;
             // Merge GC observations (off-target)
             for ((len_bin, gc_pct), count) in &res.gc_observations {
