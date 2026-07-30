@@ -26,7 +26,15 @@ import pytest
 import krewlyzer
 from krewlyzer.core.feature_serializer import FeatureSerializer
 
-_SRC = Path(krewlyzer.__file__).resolve().parent
+#: Anchored on this file, not on ``krewlyzer.__file__``.
+#:
+#: An editable install puts the package inside the checkout, so
+#: ``Path(krewlyzer.__file__).parents[1]`` is the repo root locally -- and is
+#: ``.venv/lib/python3.10`` in CI, where the package is installed properly.
+#: The first version of this test used that and passed locally while failing
+#: on the runner.
+_REPO = Path(__file__).resolve().parents[2]
+_SRC = _REPO / "src" / "krewlyzer"
 
 #: Where a version literal is legitimate: the single source of truth itself.
 _ALLOWED = {"__init__.py"}
@@ -121,8 +129,7 @@ def test_the_declared_versions_agree(path, pattern):
     Catches a partial bump -- the guide runs four separate sed commands and
     nothing verifies they all landed.
     """
-    root = _SRC.parents[1]
-    text = (root / path).read_text()
+    text = (_REPO / path).read_text()
     match = re.search(pattern, text, re.MULTILINE)
     assert match, f"no version found in {path} with {pattern!r}"
     assert match.group(1) == krewlyzer.__version__, (
