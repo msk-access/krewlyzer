@@ -3006,7 +3006,104 @@
   <code>tsv</code>-only runs, since the contract describes the Parquet surface downstream
   reads. A checker that throws is caught and logged: it must never lose a
   completed run.</p>
+<ul>
+<li><strong><code>WPS_background.nrl_at_band_limit</code></strong> — marks a right-censored NRL estimate,
+  where the spectral peak sat on the edge of the 140-250bp search band so
+  <code>nrl_bp</code> is that bound rather than a measurement.</li>
+</ul>
+<p>On real plasma this is <strong>21% of Alu groups for XS1 and 43% for XS2</strong>, and
+  those groups are indistinguishable from interior ones by <code>periodicity_score</code>
+  or fragment support — so a consumer reading <code>nrl_bp = 250.0</code> had no way to
+  tell "the repeat length is 250bp" from "no nucleosomal peak was found". The
+  same <em>present, plausible, wrong</em> failure mode the NRL fix itself addressed,
+  one level down.</p>
+<p>Not triggered by a long period: 400bp and 2000bp synthetic signals both
+  resolve to 225-235bp inside the band. Only the <em>absence</em> of periodicity pins
+  the edge, so the flag means "no peak found", not "period too long".</p>
+<p>Additive and optional, so existing consumers are unaffected; the contract
+  gate accepts directories written before it existed.</p>
+<ul>
+<li><strong>Every feature tool now accepts <code>--output-format</code> and <code>--compress</code>.</strong> Eight
+  of eleven had neither, so <code>krewlyzer fsc</code> could only write <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> while
+  <code>run-all --output-format parquet</code> wrote Parquet -- and Parquet is all the
+  downstream consumer reads. Anyone running a single tool got output nothing
+  could load, with no error.</li>
+</ul>
+<p>The computation was never the problem: standalone <code>wps</code> and <code>run-all</code> produce
+  byte-identical <code>WPS_background</code> on the same input, because both route through
+  the same single-pass <code>run_features()</code>. Only the CLI layer hardcoded the
+  format defaults, and the underlying processors already accepted both
+  parameters.</p>
+<p><code>scripts/check_output_format.py</code> could not catch this -- it verifies that
+  internal call sites <em>forward</em> the parameters, not that the CLI ever lets
+  anyone set them. A new test asserts every feature command exposes both.</p>
+<p>The eleven per-tool Nextflow modules now pass <code>params.output_format</code> and
+  <code>params.compress_tsv</code> through as well; previously only <code>runall</code> did.</p>
 <h3 id="fixed">Fixed</h3>
+<ul>
+<li><strong>Fragment coordinates were wrong whenever R1 was the rightmost mate.</strong> The
+  <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> writer computed <code>pos() + |tlen|</code>, correct only when R1 is leftmost. For
+  the other orientation the interval was shifted right by roughly
+  <code>tlen - read_length</code> — measured at 105bp on a real read.</li>
+</ul>
+<blockquote>
+<p><strong>Output change:</strong> <code>{sample}.bed.gz</code> moves for every affected fragment, and
+with it every positional feature — <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> end phasing, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> fragment centres,
+<abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> and gene/exon overlap, and the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> value in <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> column 4. Fragment
+<em>lengths</em> are unchanged, so <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>/<abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> size distributions are unaffected.
+<strong>Values from before this fix are not comparable</strong>; <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> baselines built on
+uncollapsed input should be rebuilt.</p>
+</blockquote>
+<p>Measured incidence: <strong>~48% of R1 reads on an uncollapsed <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr></strong>, versus 0.4%
+  after collapsing, 0.8% simplex and 0.0% duplex. Consensus callers normalise
+  R1 to forward — Marianas (XS1) and fgbio (XS2) both — which is why this
+  survived: the primary MSK-ACCESS path barely triggers it, while WGS and
+  uncollapsed input run at the full rate.</p>
+<p>The pre-Rust implementation was strand-aware; the 2025-12 rewrite dropped the
+  reverse branch while writing a correct sign-aware version forty lines below,
+  in the same function. No commit message, doc, comment or test ever mentioned
+  it. The same pattern was later copied into <code>region_mds.rs</code>, fixed here too.</p>
+<p>Branches on the TLEN sign rather than <code>is_reverse()</code>: htslib gives the
+  rightmost segment a negative TLEN, and real data contains records flagged
+  forward whose mate lies to their left, where the two disagree.</p>
+<ul>
+<li><strong>The fragment <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> could be emitted unsorted</strong>, which makes tabix indexing
+  fail and takes every downstream feature with it. A consequence of the fix
+  above: a fragment whose R1 is rightmost begins before the read that produced
+  it, so read order stopped being coordinate order. The writer now sorts each
+  chromosome before writing. Caught by the invariant suite, not by review.</li>
+<li><strong>Gene- and region-level <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> used different size bands than the genome-level
+  table, so identically-named columns meant different things.</strong> The genome-bin
+  counter split at <code>&lt;=100 / &lt;=149 / &lt;=220 / &lt;=260 / &lt;=400</code> with a sixth
+  <code>ultra_long</code> channel. The gene/region aggregator split at
+  <code>&lt;100 / &lt;150 / &lt;260 / &lt;400</code> with no sixth channel. <code>mono_nucl</code> therefore meant
+  150–220 bp in <code>FSC.parquet</code> and 150–259 bp in <code>FSC.gene.parquet</code>; a column
+  labelled <code>di_nucl</code> held the genome table's <code>long</code> range; and gene <code>long</code> held
+  what the genome table called <code>ultra_long</code>. A consumer reading both tables into
+  one feature matrix was combining channels that do not describe the same thing.</li>
+</ul>
+<p>The bands were never a deliberate gene-level choice. Three places already
+  documented the <em>correct</em> (genome) bands for these tables: the column table in
+  <code>docs/features/core/fsc.md</code>, the column table in
+  <code>docs/reference/output-files.md</code>, and a line in the latter describing
+  "146 genes × 6 channels" against an implementation that emitted five. Only the
+  code disagreed, so this is a correction, not a redefinition.</p>
+<p>Both paths now call a single <code>SizeChannel::of</code>, and the bounds exist in
+  exactly one place. Duplicating them is what allowed the drift, so the fix is
+  the deduplication rather than a second edit to the same numbers. Gene and
+  region tables gain <code>ultra_long</code> and <code>ultra_long_ratio</code>.</p>
+<p>A fragment that passes the length filter but matches no channel is now
+  counted and reported once at write time. It is <em>not</em> logged where it is
+  detected: that point is inside the rayon loop, and routing a per-fragment
+  warning through pyo3-log into Python deadlocks under the GIL — observed while
+  testing this change, where it hung the run outright rather than reporting
+  anything.</p>
+<p><strong>Output-contract impact.</strong> <code>FSC.gene.*</code> and <code>FSC.regions.*</code> change value for
+  every fragment in a moved band, and gain two columns. The six ratios sum to 1;
+  the five that existed before sum to <code>1 - ultra_long_ratio</code>, and the contract
+  gate now asserts both so a downstream renormalisation cannot quietly use the
+  wrong base. Values from before this fix are not comparable. <code>FSC.parquet</code> and
+  <code>FSC.ontarget.parquet</code> are unchanged — the genome path was always correct.</p>
 <ul>
 <li><strong><code>--generate-json</code> silently dropped most features for compressed and Parquet
   runs.</strong> Every probe in <code>FeatureSerializer.from_outputs()</code> was
@@ -3137,6 +3234,15 @@ all minus-strand genes. Earlier values are not comparable.</p>
 <p><strong>Output change:</strong> <code>features.motif.edm_1mer</code> loses the four <code>"# ..."</code> keys.</p>
 </blockquote>
 <ul>
+<li>
+<p><strong>The tool-level Nextflow path could not run at all.</strong>
+<code>modules/local/krewlyzer/extract/main.nf</code> declared <code>path("*.json")</code> as a
+  required output, but metadata moved from <code>.metadata.json</code> to
+  <code>.metadata.tsv</code>/<code>.parquet</code> in <strong>0.7.0</strong>. The tool has not written a <code>.json</code>
+  since, so the process failed on a missing required output. Unnoticed because
+  <code>use_runall = true</code> is the default. Now emits the three real metadata
+  variants as optional outputs, and the stub writes <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> to match.</p>
+</li>
 <li>
 <p><strong>Rust test suite did not compile.</strong> <code>src/output_utils.rs</code> used
   <code>tempfile::tempdir</code> with no <code>[dev-dependencies]</code> section in <code>rust/Cargo.toml</code>
