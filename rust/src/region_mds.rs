@@ -452,7 +452,8 @@ pub fn run_region_mds(
             }
 
             // Fragment length filter
-            let tlen = record.insert_size().unsigned_abs();
+            let tlen_signed = record.insert_size();
+            let tlen = tlen_signed.unsigned_abs();
             if tlen < min_len as u64 || tlen > max_len as u64 {
                 continue;
             }
@@ -462,14 +463,28 @@ pub fn run_region_mds(
                 continue;
             }
 
-            // Fragment coordinates
-            let frag_start = record.pos() as i32;
-            let frag_end = frag_start + tlen as i32;
-
-            // Deduplicate by chunk boundary
-            if (frag_start as u64) < chunk.start || (frag_start as u64) >= chunk.end {
+            // Deduplicate by chunk boundary BEFORE deriving fragment
+            // coordinates. Chunks overlap, so each read must be claimed by
+            // exactly one of them; the read's own alignment start is the only
+            // key that guarantees that. Keying on the fragment start instead
+            // would move with orientation and could claim a read twice or not
+            // at all.
+            if (record.pos() as u64) < chunk.start || (record.pos() as u64) >= chunk.end {
                 continue;
             }
+
+            // Fragment coordinates span the outermost bases of the pair, so
+            // pos() + |tlen| is wrong when R1 is the rightmost mate -- see the
+            // same correction in extract_motif.rs. These feed the interval
+            // query below, so a shifted fragment is attributed to the wrong
+            // exon.
+            let (frag_start, frag_end) = if tlen_signed >= 0 {
+                let s = record.pos() as i32;
+                (s, s + tlen as i32)
+            } else {
+                let e = record.cigar().end_pos() as i32;
+                (e - tlen as i32, e)
+            };
 
             // Get sequence and extract motif
             let seq = record.seq().as_bytes();
