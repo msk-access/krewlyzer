@@ -304,3 +304,42 @@ def test_aggregate_by_gene_returns_the_path_it_wrote(
         f"{output_format}/compress={compress}: returned {written.name}, "
         "which does not exist"
     )
+
+
+@pytest.mark.unit
+@pytest.mark.rust
+def test_aggregate_by_gene_returns_the_tsv_when_conversion_is_skipped(
+    tmp_path, monkeypatch
+):
+    """A failed read-back must not yield a path for a format never written.
+
+    The conversion is guarded on read_table() returning a frame. If it returns
+    None the write and cleanup are skipped, so reporting the converted
+    extension would hand the caller a path that does not exist -- the same
+    defect the return value was fixed for, reached down a different branch.
+    """
+    from pathlib import Path
+    from krewlyzer.core import fsc_processor
+
+    bed_file = tmp_path / "frags.bed"
+    bed_file.write_text("chr1\t100\t270\t0.5\n")
+    pysam.tabix_compress(str(bed_file), str(bed_file) + ".gz", force=True)
+    pysam.tabix_index(str(bed_file) + ".gz", preset="bed", force=True)
+
+    gene_bed = tmp_path / "genes.bed"
+    gene_bed.write_text("chr1\t0\t1000\tTP53\tTP53_target_01\n")
+
+    monkeypatch.setattr(fsc_processor, "read_table", lambda *a, **k: None)
+
+    written = fsc_processor.aggregate_by_gene(
+        Path(str(bed_file) + ".gz"),
+        {},
+        tmp_path / "S1.FSC.regions.tsv",
+        aggregate_by="region",
+        gene_bed_path=gene_bed,
+        output_format="parquet",
+        compress=False,
+    )
+
+    assert written.exists(), f"returned {written.name}, which does not exist"
+    assert written.suffix == ".tsv", "should fall back to the file Rust wrote"
