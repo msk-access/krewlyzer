@@ -11,7 +11,7 @@ from pathlib import Path
 # Skip entire module if test data not available
 pytestmark = [
     pytest.mark.skipif(
-        not Path("/Users/shahr2/Documents/Github/krewlyzer/tests/data").exists(),
+        not (Path(__file__).resolve().parents[1] / "data").exists(),
         reason="Test data not available",
     ),
     pytest.mark.slow,

@@ -8,7 +8,7 @@ import pytest
 from pathlib import Path
 
 pytestmark = pytest.mark.skipif(
-    not Path("/Users/shahr2/Documents/Github/krewlyzer/tests/data").exists(),
+    not (Path(__file__).resolve().parents[1] / "data").exists(),
     reason="Test data not available",
 )
 

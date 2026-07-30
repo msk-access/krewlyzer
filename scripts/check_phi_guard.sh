@@ -65,7 +65,12 @@ echo "        OK -- no findings in tracked files"
 # ---------------------------------------------------------------------------
 echo "  [2/5] every rule still fires ..."
 # Read the rule ids out of the config so a newly added rule cannot go unprobed.
-mapfile -t RULE_IDS < <(grep -E '^\s*id\s*=' "$CONFIG" | sed -E 's/.*"([^"]+)".*/\1/')
+# Not `mapfile`: macOS ships bash 3.2, so that would pass CI on Ubuntu and fail
+# for every developer running this locally -- the worst way for a guard to break.
+RULE_IDS=()
+while IFS= read -r rule_id; do
+    [ -n "$rule_id" ] && RULE_IDS+=("$rule_id")
+done < <(grep -E '^[[:space:]]*id[[:space:]]*=' "$CONFIG" | sed -E 's/.*"([^"]+)".*/\1/')
 [ "${#RULE_IDS[@]}" -gt 0 ] || fail "assertion 2: no rule ids found in $CONFIG"
 
 # Probe values are assembled at runtime. Written as literals they would make
