@@ -124,22 +124,34 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 
 ### Motif Diversity Score (MDS)
 
-MDS quantifies the randomness of 4-mer end motifs using Shannon entropy:
+MDS is the Shannon entropy of the 4-mer end-motif distribution, **normalised by
+the maximum possible entropy** so it lands in `[0, 1]`:
 
 $$
-\text{MDS} = -\sum_{i} p_i \times \log_2(p_i)
+\text{MDS} = \frac{-\sum_{i} p_i \times \log_2(p_i)}{\log_2(256)}
 $$
 
 **Variables:**
 - $p_i$ = frequency of the i-th 4-mer motif (256 possible)
-- Result range: ~6.0 to ~8.0 (higher = more diverse)
+- $\log_2(256) = 8$ — the entropy of a perfectly uniform 4-mer distribution
+- Result range: **0 to 1** (higher = more diverse)
 
 **Interpretation:**
 
 | MDS Value | Meaning |
 |-----------|---------|
-| Higher (~7.5-8.0) | Random/diverse motifs (healthy) |
-| Lower (~6.0-7.0) | Stereotyped motifs (potentially aberrant) |
+| Higher (~0.95–1.0) | Random/diverse motifs (healthy) |
+| Lower (~0.75–0.90) | Stereotyped motifs (potentially aberrant) |
+
+> [!IMPORTANT]
+> This section previously showed the **unnormalised** formula and a "~6.0 to
+> ~8.0" range — the raw entropy in bits, which the tool has never emitted. The
+> clinical table further down this same page quoted ~0.95–1.0, so the page
+> contradicted itself. `motif_utils.rs` divides by 8, and
+> `tests/invariants/test_biological_direction.py` asserts the result stays
+> inside `[0, 1]`.
+>
+> If you built a threshold from the old numbers, it is off by a factor of 8.
 
 ---
 
