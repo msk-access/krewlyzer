@@ -94,6 +94,15 @@ jobs:
         with:
           lfs: true
 
+      # pyo3 builds against whatever interpreter it finds, and the macOS runner
+      # ships one newer than pyo3 0.23 supports ("configured Python interpreter
+      # version (3.14) is newer than PyO3's maximum supported version (3.13)").
+      # Pin to the version the rest of the workflow uses.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 

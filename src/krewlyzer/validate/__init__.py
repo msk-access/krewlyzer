@@ -6,9 +6,18 @@ actually rely on? See :mod:`krewlyzer.validate.contract` for what is asserted
 and why.
 """
 
-from .contract import CONTRACT, COMPLETION_MARKER, kreview_suffixes
+from .contract import CONTRACT, COMPLETION_MARKER
 from .findings import Category, Finding, Severity
-from .gate import EXIT_PASS, EXIT_STRUCTURAL, EXIT_VIOLATION, Result, run
+from .gate import (
+    EXIT_PASS,
+    EXIT_STRUCTURAL,
+    EXIT_VIOLATION,
+    Fingerprint,
+    Result,
+    check_sample,
+    evaluate_cohort,
+    run,
+)
 
 __all__ = [
     "CONTRACT",
@@ -18,8 +27,10 @@ __all__ = [
     "EXIT_STRUCTURAL",
     "EXIT_VIOLATION",
     "Finding",
+    "Fingerprint",
     "Result",
     "Severity",
-    "kreview_suffixes",
+    "check_sample",
+    "evaluate_cohort",
     "run",
 ]

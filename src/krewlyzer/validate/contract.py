@@ -46,7 +46,6 @@ class Kind(str, Enum):
     NUMERIC = "numeric"
     STRING = "string"
     LIST = "list"
-    ANY = "any"
 
 
 @dataclass(frozen=True)
@@ -88,9 +87,7 @@ class TableRule:
     suffix: str
     columns: Tuple[ColumnRule, ...]
     rows: Rows = field(default_factory=lambda: Rows(at_least=1))
-    consumed_by_kreview: bool = True
     checks: Tuple[str, ...] = ()  # names resolved in checks.py
-    optional: bool = False  # absent file is a warning, not a failure
     scan_rows: Optional[int] = None
     """Rows the domain checks need. ``None`` means all of them.
 
@@ -306,7 +303,3 @@ NOT_CONSUMED: Tuple[str, ...] = (
     ".correction_factors.parquet",
     ".OCF.parquet",
 )
-
-
-def kreview_suffixes() -> Tuple[str, ...]:
-    return tuple(r.suffix for r in CONTRACT if r.consumed_by_kreview)

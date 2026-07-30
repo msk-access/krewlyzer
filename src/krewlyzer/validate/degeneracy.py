@@ -34,37 +34,41 @@ from .findings import Category, Finding, Severity
 _SIGNATURE_ROWS = 2000
 
 
+def _reduce_lists(head: pd.Series) -> pd.Series:
+    """Collapse array-valued rows to one float each.
+
+    Array columns cannot be hashed or counted directly -- ``Series.nunique``
+    raises on the numpy arrays backing the WPS vectors -- and hashing millions
+    of floats to compare two samples is wasteful. The mean moves whenever any
+    position in the vector moves, which is all either caller needs.
+    """
+    return pd.Series(
+        [float(np.mean(v)) if v is not None and len(v) else np.nan for v in head],
+        dtype=float,
+    )
+
+
 def column_signature(series: pd.Series, kind: Kind) -> str:
     """A stable fingerprint of a column's contents."""
     head = series.iloc[:_SIGNATURE_ROWS]
-    if kind is Kind.LIST:
-        # Reduce each array to its mean; a change anywhere in the vector moves
-        # it, and it avoids hashing millions of floats.
-        values = np.array(
-            [float(np.mean(v)) if v is not None and len(v) else np.nan for v in head],
-            dtype=float,
-        )
-    elif kind is Kind.STRING:
+    if kind is Kind.STRING:
         return hashlib.sha1("\x00".join(head.astype(str)).encode()).hexdigest()[:16]
-    else:
-        values = pd.to_numeric(head, errors="coerce").to_numpy(dtype=float)
-    rounded = np.round(np.nan_to_num(values, nan=-9.87e30), 9)
+    reduced = (
+        _reduce_lists(head)
+        if kind is Kind.LIST
+        else pd.to_numeric(head, errors="coerce")
+    )
+    # NaN has no stable byte pattern to hash, so map it to a sentinel that no
+    # real measurement produces.
+    rounded = np.round(np.nan_to_num(reduced.to_numpy(dtype=float), nan=-9.87e30), 9)
     return hashlib.sha1(rounded.tobytes()).hexdigest()[:16]
 
 
 def _nunique(series: pd.Series, kind: Kind) -> int:
-    """Distinct-value count that also works for array-valued columns.
-
-    ``Series.nunique`` hashes its values, which raises on the numpy arrays that
-    back the WPS vector columns. Reduce each array to its mean first -- enough
-    to tell rows apart, which is all this needs to decide.
-    """
+    """Distinct-value count that also works for array-valued columns."""
+    head = series.iloc[:_SIGNATURE_ROWS]
     if kind is Kind.LIST:
-        means = [
-            float(np.mean(v)) if v is not None and len(v) else np.nan
-            for v in series.iloc[:_SIGNATURE_ROWS]
-        ]
-        return int(pd.Series(means).nunique(dropna=False))
+        return int(_reduce_lists(head).nunique(dropna=False))
     return int(series.nunique(dropna=False))
 
 

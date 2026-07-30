@@ -121,8 +121,6 @@ def discover_samples(results_dir: Path) -> List[Tuple[str, Path]]:
 
 
 def _kind_matches(series: pd.Series, kind: Kind) -> bool:
-    if kind is Kind.ANY:
-        return True
     non_null = series.dropna()
     if non_null.empty:
         return True
@@ -250,6 +248,7 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
     This is the scatter half: it never needs another sample, so a workflow can
     fan it out per sample with no coordination.
     """
+    logger.debug("validating %s in %s", sample, sample_dir)
     findings: List[Finding] = []
     fingerprint = Fingerprint(sample=sample)
 
@@ -276,7 +275,7 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
             findings.append(
                 Finding(
                     id=f"{rule.family}.ABSENT".replace(".parquet", ""),
-                    severity=Severity.WARN if rule.optional else Severity.ERROR,
+                    severity=Severity.ERROR,
                     category=Category.MISSING,
                     message=f"{rule.suffix.lstrip('.')} is absent",
                     table=rule.suffix,
@@ -303,6 +302,13 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
         findings.extend(table_findings)
         for name, observation in observations.items():
             fingerprint.observations[f"{rule.suffix}::{name}"] = observation
+        logger.debug(
+            "  %s: %d rows, %d column(s) fingerprinted, %d finding(s)",
+            rule.suffix.lstrip("."),
+            n_rows,
+            len(observations),
+            len(table_findings),
+        )
         del df  # the fingerprint is all the cohort stage needs
 
     for suffix in NOT_CONSUMED:
@@ -386,13 +392,25 @@ def run(
         return result
 
     result.samples = [s for s, _ in samples]
-    for sample, sample_dir in samples:
+    total = len(samples)
+    logger.info("validating %d sample(s) under %s", total, results_dir)
+    for index, (sample, sample_dir) in enumerate(samples, start=1):
         findings, fingerprint = check_sample(sample, sample_dir)
         result.findings.extend(findings)
         result.fingerprints.append(fingerprint)
+        # Progress matters here: a cohort run reads gigabytes per sample, and a
+        # silent hour is indistinguishable from a hang.
+        logger.info("[%d/%d] %s: %d finding(s)", index, total, sample, len(findings))
 
+    logger.info(
+        "comparing %d fingerprint(s) across the cohort", len(result.fingerprints)
+    )
     result.findings.extend(evaluate_cohort(result.fingerprints, min_samples))
     result.findings = _merge(result.findings)
+    logger.info(
+        "validation complete: %s",
+        ", ".join(f"{k}={v}" for k, v in result.counts().items()),
+    )
     return result
 
 
