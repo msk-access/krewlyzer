@@ -1,12 +1,14 @@
 """Fragment intervals must not depend on which mate is R1.
 
-The BED writer computes ``pos() + |tlen|``, which is correct only when R1 is
-the leftmost mate. For a reverse-strand R1 -- R1 rightmost, negative insert
-size -- the interval is shifted right by roughly ``tlen - read_length``.
+The BED writer used to compute ``pos() + |tlen|``, which is correct only when
+R1 is the leftmost mate. For a reverse-strand R1 -- R1 rightmost, negative
+insert size -- the interval was shifted right by roughly ``tlen - read_length``.
 
-Nothing caught it because every paired fixture in this repository uses flags
-99/147 (R1 forward). Flags 83/163 appear nowhere else, and the one coordinate
-assertion in the suite is on a flag-99 read.
+Nothing caught it because every paired fixture in this repository used flags
+99/147 (R1 forward). Flags 83/163 appeared nowhere else, and the one coordinate
+assertion in the suite was on a flag-99 read. Measured on a real uncollapsed
+BAM, ~48% of R1 reads are reverse; consensus calling normalises that to under
+1%, which is why it stayed invisible.
 
 The interval feeds OCF's ±1bp end phasing, WPS fragment centres, FSC/FSD/
 region-entropy overlap queries, and the GC value in BED column 4 -- so this is
@@ -46,6 +48,38 @@ def _read_bed(path: Path) -> List[Tuple[str, int, int]]:
     return sorted(rows)
 
 
+def _read_bed_unsorted(tmp_path: Path, sample) -> List[Tuple[str, int, int]]:
+    """Rows in the order the writer emitted them, for the sort-order check."""
+    bed_out = tmp_path / "unsorted.bed"
+    _core.extract_motif.process_bam_parallel(
+        str(sample.bam),
+        str(sample.reference),
+        20,
+        65,
+        1000,
+        4,
+        1,
+        str(bed_out),
+        None,
+        None,
+        None,
+        True,
+        True,
+        True,
+    )
+    path = next(p for p in (Path(str(bed_out) + ".gz"), bed_out) if p.exists())
+    with open(path, "rb") as fh:
+        is_gz = fh.read(2) == b"\x1f\x8b"
+    opener = gzip.open if is_gz else open
+    rows = []
+    with opener(path, "rt") as fh:
+        for line in fh:
+            if line.strip():
+                chrom, start, end = line.split("\t")[:3]
+                rows.append((chrom, int(start), int(end)))
+    return rows
+
+
 def _extract_bed(tmp_path: Path, sample) -> List[Tuple[str, int, int]]:
     """Run the real extractor and return the intervals it wrote."""
     bed_out = tmp_path / "out.bed"
@@ -77,23 +111,12 @@ def test_forward_r1_intervals_match_truth(tmp_path):
     assert _extract_bed(tmp_path / "fwd", sample) == _read_bed(sample.truth_bed)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="pos() + |tlen| is wrong for reverse-strand R1; the fragment is "
-    "shifted right by tlen - read_length. Strict, so the fix must remove "
-    "this marker rather than quietly satisfying it.",
-)
 def test_reverse_r1_intervals_match_truth(tmp_path):
     """The same fragments, differing only in which mate carries the R1 flag."""
     sample = make_sample(tmp_path / "rev", ALL_REVERSE, CONTIGS)
     assert _extract_bed(tmp_path / "rev", sample) == _read_bed(sample.truth_bed)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="same defect, stated as the invariant it violates: a fragment's "
-    "coordinates cannot depend on which mate was sequenced first.",
-)
 def test_interval_is_independent_of_mate_orientation(tmp_path):
     """The sharpest form of the claim.
 
@@ -121,6 +144,32 @@ def test_interval_is_independent_of_mate_orientation(tmp_path):
     assert intervals["forward"] == intervals["reverse"], (
         f"the same fragment produced {intervals['forward']} with a forward R1 "
         f"and {intervals['reverse']} with a reverse R1"
+    )
+
+
+def test_emitted_bed_is_coordinate_sorted(tmp_path):
+    """The BED must stay sorted, or tabix indexing fails and takes every
+    downstream feature with it.
+
+    Not hypothetical: correcting the reverse-strand interval broke this. A
+    fragment whose R1 is the rightmost mate begins before the read that
+    produced it, so read order stopped being fragment order and the writer
+    emitted an unsorted file. Caught by the conservation suite failing to build
+    an index, not by anything checking coordinates.
+    """
+    from .synth import ULTRA_LONG_HEAVY  # long fragments shift furthest back
+
+    sample = make_sample(tmp_path, ULTRA_LONG_HEAVY, CONTIGS)
+    rows = _read_bed_unsorted(tmp_path, sample)
+
+    inversions = [
+        i
+        for i in range(1, len(rows))
+        if rows[i][0] == rows[i - 1][0] and rows[i][1] < rows[i - 1][1]
+    ]
+    assert not inversions, (
+        f"{len(inversions)} out-of-order row(s), first at index {inversions[0]}: "
+        f"{rows[inversions[0] - 1]} then {rows[inversions[0]]}"
     )
 
 

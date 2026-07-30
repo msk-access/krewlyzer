@@ -97,6 +97,39 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **Fragment coordinates were wrong whenever R1 was the rightmost mate.** The
+  BED writer computed `pos() + |tlen|`, correct only when R1 is leftmost. For
+  the other orientation the interval was shifted right by roughly
+  `tlen - read_length` — measured at 105bp on a real read.
+
+  > **Output change:** `{sample}.bed.gz` moves for every affected fragment, and
+  > with it every positional feature — OCF end phasing, WPS fragment centres,
+  > TFBS/ATAC and gene/exon overlap, and the GC value in BED column 4. Fragment
+  > *lengths* are unchanged, so FSD/FSR/FSC size distributions are unaffected.
+  > **Values from before this fix are not comparable**; PON baselines built on
+  > uncollapsed input should be rebuilt.
+
+  Measured incidence: **~48% of R1 reads on an uncollapsed BAM**, versus 0.4%
+  after collapsing, 0.8% simplex and 0.0% duplex. Consensus callers normalise
+  R1 to forward — Marianas (XS1) and fgbio (XS2) both — which is why this
+  survived: the primary MSK-ACCESS path barely triggers it, while WGS and
+  uncollapsed input run at the full rate.
+
+  The pre-Rust implementation was strand-aware; the 2025-12 rewrite dropped the
+  reverse branch while writing a correct sign-aware version forty lines below,
+  in the same function. No commit message, doc, comment or test ever mentioned
+  it. The same pattern was later copied into `region_mds.rs`, fixed here too.
+
+  Branches on the TLEN sign rather than `is_reverse()`: htslib gives the
+  rightmost segment a negative TLEN, and real data contains records flagged
+  forward whose mate lies to their left, where the two disagree.
+
+- **The fragment BED could be emitted unsorted**, which makes tabix indexing
+  fail and takes every downstream feature with it. A consequence of the fix
+  above: a fragment whose R1 is rightmost begins before the read that produced
+  it, so read order stopped being coordinate order. The writer now sorts each
+  chromosome before writing. Caught by the invariant suite, not by review.
+
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was
   `Path(f"{sample}.FOO.tsv").exists()`, and that gate ran *before* `read_table()`
