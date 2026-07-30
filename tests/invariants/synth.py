@@ -20,7 +20,7 @@ a test can diff against what extraction actually emits.
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -69,7 +69,6 @@ class SynthProfile:
     # (mean, sd, weight) mixture of fragment lengths
     length_mixture: Sequence[Tuple[int, int, float]] = ((167, 25, 1.0),)
     reverse_r1_fraction: float = 0.5
-    end_motif_bias: Optional[str] = None  # force this 4-mer at fragment starts
     seed: int = 0
     read_len: int = DEFAULT_READ_LEN
 
@@ -238,7 +237,6 @@ class AssetBundle:
     alu: Path
     anchors: Path
     regions: Path
-    extra: Dict[str, Path] = field(default_factory=dict)
 
 
 def make_assets(directory: Path, contigs: Sequence[Contig]) -> AssetBundle:
