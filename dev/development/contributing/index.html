@@ -18,7 +18,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -26,7 +26,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2208,6 +2208,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#before-your-first-commit-enable-the-guards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before your first commit: enable the guards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#code-style" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2748,6 +2759,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#before-your-first-commit-enable-the-guards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Before your first commit: enable the guards
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#code-style" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3118,39 +3140,58 @@
 <a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"from krewlyzer import _core; print('Rust core:', _core.version())"</span>
 </code></pre></div>
 <hr>
+<h2 id="before-your-first-commit-enable-the-guards">Before your first commit: enable the guards</h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>git<span class="w"> </span>config<span class="w"> </span>core.hooksPath<span class="w"> </span>.githooks
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>brew<span class="w"> </span>install<span class="w"> </span>gitleaks<span class="w">   </span><span class="c1"># or see github.com/gitleaks/gitleaks</span>
+</code></pre></div>
+<p>krewlyzer is developed against MSK-ACCESS clinical output, so a pasted path, a
+debug print or a commit message can publish a patient identifier without anyone
+deciding to. Once pushed it cannot be removed without rewriting history, which
+is why the check sits before the push.</p>
+<p>The hooks are tool-agnostic — they run whether a human, Claude, Cursor or Codex
+drives the commit. <code>pre-commit</code> scans the staged diff and refuses stray data
+artifacts; <code>pre-push</code> scans the outgoing commits <strong>and their messages</strong>, and
+blocks direct pushes to <code>main</code>. CI repeats all of it as a backstop for anyone
+who skipped the <code>git config</code> line above.</p>
+<p>Use the <code>P-0000000</code> and <code>C-000000-L000</code> placeholders in docs and tests. Never a
+real identifier, and never inside <code>.gitleaks.toml</code> itself — gitleaks skips its
+own config, so only <code>scripts/check_phi_guard.sh</code> would catch it.</p>
+<p>To check the guard is healthy:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>bash<span class="w"> </span>scripts/check_phi_guard.sh
+</code></pre></div>
 <h2 id="code-style">Code Style</h2>
 <h3 id="python">Python</h3>
 <p>We use <a href="https://docs.astral.sh/ruff/">Ruff</a> for linting and formatting:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Format</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>ruff<span class="w"> </span>format<span class="w"> </span>src/<span class="w"> </span>tests/
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Lint</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/<span class="w"> </span>tests/
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Auto-fix</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>ruff<span class="w"> </span>check<span class="w"> </span>--fix<span class="w"> </span>src/<span class="w"> </span>tests/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Format</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>ruff<span class="w"> </span>format<span class="w"> </span>src/<span class="w"> </span>tests/
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Lint</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>ruff<span class="w"> </span>check<span class="w"> </span>src/<span class="w"> </span>tests/
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Auto-fix</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>ruff<span class="w"> </span>check<span class="w"> </span>--fix<span class="w"> </span>src/<span class="w"> </span>tests/
 </code></pre></div>
 <h3 id="rust">Rust</h3>
 <p>We use <code>cargo fmt</code> and <code>cargo clippy</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nb">cd</span><span class="w"> </span>rust
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>cargo<span class="w"> </span>fmt
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>cargo<span class="w"> </span>clippy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nb">cd</span><span class="w"> </span>rust
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>cargo<span class="w"> </span>fmt
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>cargo<span class="w"> </span>clippy
 </code></pre></div>
 <hr>
 <h2 id="running-tests">Running Tests</h2>
 <h3 id="all-tests">All Tests</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pytest
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pytest
 </code></pre></div>
 <h3 id="with-coverage">With Coverage</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pytest<span class="w"> </span>--cov<span class="o">=</span>krewlyzer<span class="w"> </span>--cov-report<span class="o">=</span>html
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>open<span class="w"> </span>htmlcov/index.html
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pytest<span class="w"> </span>--cov<span class="o">=</span>krewlyzer<span class="w"> </span>--cov-report<span class="o">=</span>html
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>open<span class="w"> </span>htmlcov/index.html
 </code></pre></div>
 <h3 id="specific-test-file">Specific Test File</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pytest<span class="w"> </span>tests/integration/test_fsc_cli.py<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pytest<span class="w"> </span>tests/integration/test_fsc_cli.py<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="real-data-tests">Real Data Tests</h3>
 <p>Tests in <code>tests/integration/test_real_data.py</code> use fixtures in <code>tests/data/fixtures/</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pytest<span class="w"> </span>tests/integration/test_real_data.py<span class="w"> </span>-v
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>pytest<span class="w"> </span>tests/integration/test_real_data.py<span class="w"> </span>-v
 </code></pre></div>
 <hr>
 <h2 id="making-changes">Making Changes</h2>
@@ -3166,17 +3207,17 @@
 </ol>
 <h3 id="commit-messages">Commit Messages</h3>
 <p>Follow <a href="https://www.conventionalcommits.org/">Conventional Commits</a>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>feat: add new FSR output column
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>fix: resolve GC correction edge case
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>docs: update WPS usage example
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>test: add integration test for mFSD
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>refactor: consolidate PON loading logic
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>feat: add new FSR output column
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>fix: resolve GC correction edge case
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>docs: update WPS usage example
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>test: add integration test for mFSD
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>refactor: consolidate PON loading logic
 </code></pre></div>
 <hr>
 <h2 id="rust-development">Rust Development</h2>
 <h3 id="building-the-extension">Building the Extension</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">cd</span><span class="w"> </span>rust
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>maturin<span class="w"> </span>develop<span class="w"> </span>--release
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">cd</span><span class="w"> </span>rust
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>maturin<span class="w"> </span>develop<span class="w"> </span>--release
 </code></pre></div>
 <h3 id="adding-a-new-function">Adding a New Function</h3>
 <ol>
@@ -3184,17 +3225,17 @@
 <li>Export via PyO3 in <code>rust/src/lib.rs</code></li>
 <li>Test from Python:</li>
 </ol>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">krewlyzer</span><span class="w"> </span><span class="kn">import</span> <span class="n">_core</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">_core</span><span class="o">.</span><span class="n">my_module</span><span class="o">.</span><span class="n">my_function</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">krewlyzer</span><span class="w"> </span><span class="kn">import</span> <span class="n">_core</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">result</span> <span class="o">=</span> <span class="n">_core</span><span class="o">.</span><span class="n">my_module</span><span class="o">.</span><span class="n">my_function</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="debugging-rust">Debugging Rust</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">RUST_LOG</span><span class="o">=</span>debug<span class="w"> </span>krewlyzer<span class="w"> </span>extract<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>out/
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nv">RUST_LOG</span><span class="o">=</span>debug<span class="w"> </span>krewlyzer<span class="w"> </span>extract<span class="w"> </span>sample.bam<span class="w"> </span>-r<span class="w"> </span>hg19.fa<span class="w"> </span>-o<span class="w"> </span>out/
 </code></pre></div>
 <hr>
 <h2 id="documentation">Documentation</h2>
 <h3 id="local-preview">Local Preview</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>mkdocs<span class="w"> </span>serve
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="c1"># Open http://127.0.0.1:8000</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>mkdocs<span class="w"> </span>serve
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="c1"># Open http://127.0.0.1:8000</span>
 </code></pre></div>
 <h3 id="adding-a-page">Adding a Page</h3>
 <ol>
@@ -3339,7 +3380,7 @@ Built with <a href="https://antigravity.google/">Antigravity</a> |
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.path", "toc.follow", "content.code.copy", "content.code.annotate"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "stable", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
         <script src="../../js/timeago.min.js"></script>
       

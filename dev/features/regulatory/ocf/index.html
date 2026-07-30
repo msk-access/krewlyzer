@@ -5,9 +5,9 @@
 <link href="../motif/" rel="prev">
 <link href="../region-entropy/" rel="next">
 <link href="../../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.6" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.7" name="generator">
 <title>OCF - Krewlyzer</title>
-<link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
+<link href="../../../assets/stylesheets/main.ec1eaa64.min.css" rel="stylesheet">
 <link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
 <link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet">
@@ -1753,8 +1753,17 @@ Use mouse to pan and zoom
 - <span class="arithmatex">\(\text{Left}_{-60}\)</span>, <span class="arithmatex">\(\text{Right}_{+60}\)</span> = Background (unphased)</p>
 <p><strong>Calculation Details:</strong>
 1. Fragments are mapped relative to the <strong>center</strong> of the Open Chromatin Region (OCR)
-2. Left/Right ends counted in 10bp bins across ±1000bp window
-3. Counts normalized by total sequencing depth</p>
+2. Left/Right ends counted at <strong>1bp resolution</strong> across a ±1000bp window; the
+   phased and background terms are summed over a ±10bp window (21 positions)
+   centred on ∓60bp
+3. Counts normalized <strong>per 10,000</strong> against per-tissue-label end totals
+   accumulated over OCR overlaps — not against global sequencing depth</p>
+<blockquote>
+<p>[!NOTE]
+Positions are measured from the <strong>start</strong> of each OCR interval, so the
+"±1000bp around the centre" description holds only where OCR intervals are
+2000bp wide.</p>
+</blockquote>
 <hr>
 <h2 id="pon-normalization"><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> Normalization</h2>
 <p>When <code>--pon-model</code> is provided, <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> output includes z-score columns:</p>
@@ -2106,7 +2115,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 28, 2026 15:49:06 UTC"><span class="timeago" datetime="2026-07-28T15:49:06+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 28, 2026 15:49:06 UTC">2026-07-28</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
@@ -2148,7 +2157,7 @@ Built with <a href="https://antigravity.google/">Antigravity</a> |
 <div class="md-dialog__inner md-typeset"></div>
 </div>
 <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.path", "toc.follow", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "stable", "provider": "mike"}}</script>
-<script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
 <script src="../../../js/timeago.min.js"></script>
 <script src="../../../js/timeago_mkdocs_material.js"></script>
 <script src="../../../javascripts/mathjax.js"></script>

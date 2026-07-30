@@ -5,9 +5,9 @@
 <link href="../ocf/" rel="prev">
 <link href="../region-mds/" rel="next">
 <link href="../../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.7.6" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.7.7" name="generator">
 <title>Region Entropy - Krewlyzer</title>
-<link href="../../../assets/stylesheets/main.484c7ddc.min.css" rel="stylesheet">
+<link href="../../../assets/stylesheets/main.ec1eaa64.min.css" rel="stylesheet">
 <link href="../../../assets/stylesheets/palette.ab4e12ef.min.css" rel="stylesheet">
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect">
 <link href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&amp;display=fallback" rel="stylesheet">
@@ -2065,8 +2065,8 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 </tr>
 <tr>
 <td><code>count</code></td>
-<td>INT</td>
-<td>Number of fragments overlapping TF regions</td>
+<td>FLOAT</td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted fragment count overlapping TF regions</td>
 </tr>
 <tr>
 <td><code>mean_size</code></td>
@@ -2081,7 +2081,7 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 <tr>
 <td><code>z_score</code></td>
 <td>FLOAT</td>
-<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized z-score (0 if no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>)</td>
+<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized z-score (0 if no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>; <code>NaN</code> if the label is absent from the baseline)</td>
 </tr>
 </tbody>
 </table>
@@ -2102,8 +2102,8 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 </tr>
 <tr>
 <td><code>count</code></td>
-<td>INT</td>
-<td>Number of fragments overlapping cancer peaks</td>
+<td>FLOAT</td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted fragment count overlapping cancer peaks</td>
 </tr>
 <tr>
 <td><code>mean_size</code></td>
@@ -2118,49 +2118,26 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 <tr>
 <td><code>z_score</code></td>
 <td>FLOAT</td>
-<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized z-score (0 if no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>)</td>
+<td><abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-normalized z-score (0 if no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>; <code>NaN</code> if the label is absent from the baseline)</td>
 </tr>
 </tbody>
 </table>
 <hr>
 <h2 id="interpretation">Interpretation</h2>
 <h3 id="entropy-values">Entropy Values</h3>
-<table>
-<thead>
-<tr>
-<th>Range</th>
-<th>Interpretation</th>
-<th>Clinical Significance</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>0-2</td>
-<td>Very low entropy</td>
-<td>Single dominant fragment size</td>
-</tr>
-<tr>
-<td>2-4</td>
-<td>Low entropy</td>
-<td>Few distinct sizes</td>
-</tr>
-<tr>
-<td>4-6</td>
-<td>Moderate entropy</td>
-<td>Normal healthy range</td>
-</tr>
-<tr>
-<td>6-8</td>
-<td>High entropy</td>
-<td>Many distinct sizes</td>
-</tr>
-<tr>
-<td>&gt; 8</td>
-<td>Very high entropy</td>
-<td>Possible tumor signal</td>
-</tr>
-</tbody>
-</table>
+<blockquote>
+<p>[!WARNING]
+<strong>Do not use absolute entropy cut-offs.</strong> Earlier revisions of this page gave
+"4-6 = normal healthy range" and "&gt; 8 = possible tumor signal". Those bands
+are not anchored to any constant in the code and do not describe real output:
+a healthy-like fragment-size distribution over a few thousand fragments
+already measures <strong>~6.9 bits</strong>, and exceeding 8 bits would require ~2^8 = 256
+near-equally-likely distinct fragment sizes, which nucleosome-peaked <abbr title="Cell-free DNA - Circulating DNA fragments in blood plasma">cfDNA</abbr>
+does not produce.</p>
+<p>Entropy magnitude also scales with fragment count per label, so it is not
+comparable across labels or samples on its own. <strong>Interpret the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
+<code>z_score</code>, not the raw entropy.</strong></p>
+</blockquote>
 <h3 id="z-scores">Z-Scores</h3>
 <table>
 <thead>
@@ -2195,7 +2172,8 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 <ol>
 <li><strong>Load regions</strong>: Read <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>.gz with label in 4th column</li>
 <li><strong>Intersect fragments</strong>: For each region, collect fragments with minimum 1bp overlap</li>
-<li><strong>Build histograms</strong>: Count fragments per size (20-500bp) per label</li>
+<li><strong>Build histograms</strong>: Count fragments per size (bins 0..1000bp; the effective
+   range is whatever <code>extract</code> emitted, by default 65-1000bp)</li>
 <li><strong>Compute entropy</strong>: Shannon entropy from normalized histogram</li>
 <li><strong>Output</strong>: <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> with label, count, mean_size, entropy</li>
 </ol>
@@ -2255,7 +2233,7 @@ Z = \frac{\text{entropy} - \mu_{\text{PON}}}{\sigma_{\text{PON}}}
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 6, 2026 07:02:17 UTC"><span class="timeago" datetime="2026-02-06T07:02:17+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 6, 2026 07:02:17 UTC">2026-02-06</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 28, 2026 15:49:06 UTC"><span class="timeago" datetime="2026-07-28T15:49:06+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 28, 2026 15:49:06 UTC">2026-07-28</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
@@ -2297,7 +2275,7 @@ Built with <a href="https://antigravity.google/">Antigravity</a> |
 <div class="md-dialog__inner md-typeset"></div>
 </div>
 <script id="__config" type="application/json">{"annotate": null, "base": "../../..", "features": ["navigation.instant", "navigation.tracking", "navigation.sections", "navigation.expand", "navigation.top", "navigation.indexes", "navigation.path", "toc.follow", "content.code.copy", "content.code.annotate"], "search": "../../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "stable", "provider": "mike"}}</script>
-<script src="../../../assets/javascripts/bundle.79ae519e.min.js"></script>
+<script src="../../../assets/javascripts/bundle.d7400e89.min.js"></script>
 <script src="../../../js/timeago.min.js"></script>
 <script src="../../../js/timeago_mkdocs_material.js"></script>
 <script src="../../../javascripts/mathjax.js"></script>
