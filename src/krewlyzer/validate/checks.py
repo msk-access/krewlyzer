@@ -200,30 +200,65 @@ def fsc_channels_sum_to_total(df: pd.DataFrame) -> List[str]:
     return []
 
 
+#: The five ratio columns kreview consumed before ``ultra_long_ratio`` existed.
+#:
+#: They sum to ``1 - ultra_long_ratio``, **not** to 1. A consumer that selects
+#: only these five and renormalises is dividing by the wrong base. Kept as a
+#: named list so that relation has somewhere to be written down, and so a
+#: change to the column set is a change to this line rather than a silent
+#: shift in what the five mean.
+KREVIEW_FSC_RATIOS = [
+    "ultra_short_ratio",
+    "core_short_ratio",
+    "mono_nucl_ratio",
+    "di_nucl_ratio",
+    "long_ratio",
+]
+
+FSC_GENE_RATIOS = KREVIEW_FSC_RATIOS + ["ultra_long_ratio"]
+
+
 def fsc_gene_ratios_sum_to_one(df: pd.DataFrame) -> List[str]:
-    ratios = [
-        "ultra_short_ratio",
-        "core_short_ratio",
-        "mono_nucl_ratio",
-        "di_nucl_ratio",
-        "long_ratio",
-    ]
-    present = [c for c in ratios if c in df.columns]
-    if len(present) != len(ratios):
+    """All six gene/region ratios must partition the fragments.
+
+    ``ultra_long_ratio`` is the sixth channel, added when the gene-level bands
+    were aligned to the genome-bin bands. Before that the gene path had five
+    channels whose ``long`` silently absorbed everything over 400bp, so those
+    five summed to 1 -- which is part of why nobody noticed the bands had
+    drifted.
+
+    Only one relation is asserted, because there is only one. The statement
+    that kreview's original five sum to ``1 - ultra_long_ratio`` is the *same*
+    equation rearranged::
+
+        legacy5 - (1 - ultra_long) == (legacy5 + ultra_long) - 1
+
+    so a separate check for it can never fail independently. It is documented
+    on :data:`KREVIEW_FSC_RATIOS` and pinned end to end by
+    ``tests/invariants/test_fsc_band_alignment.py`` against real output, where
+    it guards against the column set changing rather than the arithmetic.
+    """
+    missing = [c for c in FSC_GENE_RATIOS if c not in df.columns]
+    if missing:
+        return []  # schema check already reports the absence
+    if df.empty:
         return []
-    extra = "ultra_long_ratio"
-    if extra in df.columns:
-        present = present + [extra]
-    summed = df[present].sum(axis=1)
-    tol = quantization_tolerance(len(present), written_decimals(df[present[0]]))
+
+    tol = quantization_tolerance(
+        len(FSC_GENE_RATIOS), written_decimals(df["ultra_short_ratio"])
+    )
+    summed = df[FSC_GENE_RATIOS].sum(axis=1)
     off = int(((summed - 1.0).abs() > tol).sum())
-    if off:
-        worst = float((summed - 1.0).abs().max())
-        return [
-            f"{off} gene(s) whose ratios sum to 1 +/- more than {tol:g} "
-            f"(worst deviation {worst:.6f})"
-        ]
-    return []
+    if not off:
+        return []
+
+    worst = float((summed - 1.0).abs().max())
+    return [
+        f"{off} row(s) whose six ratios sum to 1 +/- more than {tol:g} "
+        f"(worst deviation {worst:.6f}); the size channels no longer partition "
+        "the counted fragments, so every channel/total ratio is against the "
+        "wrong base"
+    ]
 
 
 def wps_arrays_nonempty(df: pd.DataFrame) -> List[str]:

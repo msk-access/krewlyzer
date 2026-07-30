@@ -383,13 +383,26 @@ krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
 | `mono_nucl` | float | GC-weighted count (150–220 bp) |
 | `di_nucl` | float | GC-weighted count (221–260 bp) |
 | `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
 | `total` | float | GC-weighted total count |
 | `ultra_short_ratio` | float | `ultra_short / total` |
 | `core_short_ratio` | float | `core_short / total` |
 | `mono_nucl_ratio` | float | `mono_nucl / total` |
 | `di_nucl_ratio` | float | `di_nucl / total` |
 | `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
 | `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
+
+!!! warning "Band boundaries changed in 0.9.0"
+    Before 0.9.0 the gene and region tables used their own size bands, which had
+    drifted from the genome-bin bands documented above: `mono_nucl` covered
+    150–259 bp, `di_nucl` covered 260–399 bp, and `long` covered everything from
+    400 bp up. A column named `di_nucl` therefore held the genome table's `long`
+    range. The bands are now shared with the genome path, and `ultra_long` is
+    emitted as a sixth channel rather than being folded into `long`.
+
+    The six ratios sum to 1. The five that existed before sum to
+    `1 - ultra_long_ratio`. Values from earlier releases are not comparable.
 
 ### Region FSC Output Format (`{sample}.FSC.regions.tsv`)
 
@@ -408,13 +421,17 @@ Per-exon/target output for fine-grained copy number analysis:
 | `mono_nucl` | float | GC-weighted count (150–220 bp) |
 | `di_nucl` | float | GC-weighted count (221–260 bp) |
 | `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
 | `total` | float | GC-weighted total count |
 | `ultra_short_ratio` | float | `ultra_short / total` |
 | `core_short_ratio` | float | `core_short / total` |
 | `mono_nucl_ratio` | float | `mono_nucl / total` |
 | `di_nucl_ratio` | float | `di_nucl / total` |
 | `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
 | `normalized_depth` | float | RPKM-like depth |
+
+The same 0.9.0 band correction applies here — see the warning above.
 
 ### E1-Only FSC Output
 

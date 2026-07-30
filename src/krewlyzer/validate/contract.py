@@ -134,12 +134,17 @@ _MOTIF_COLS = (
     metric("Frequency", Vary.BOTH),
 )
 
+# Six channels, matching the genome-bin bands exactly. `ultra_long_ratio` is
+# the newest; before it, the gene path's `long` absorbed everything over 400bp
+# and the remaining five summed to 1, which hid the fact that the gene bands
+# had drifted away from the genome bands entirely.
 _FSC_RATIOS = (
     metric("ultra_short_ratio", Vary.BOTH),
     metric("core_short_ratio", Vary.BOTH),
     metric("mono_nucl_ratio", Vary.BOTH),
     metric("di_nucl_ratio", Vary.BOTH),
     metric("long_ratio", Vary.BOTH),
+    metric("ultra_long_ratio", Vary.BOTH),
 )
 
 _FSR_COLS = (
@@ -194,6 +199,9 @@ CONTRACT: Tuple[TableRule, ...] = (
     TableRule(
         ".FSC.regions.parquet",
         (label("gene", _ID), metric("total", Vary.BOTH), *_FSC_RATIOS),
+        # Same six-channel partition as the gene rollup; the gene table is a
+        # sum over these rows, so a partition break here propagates upward.
+        checks=("fsc_gene_ratios_sum_to_one",),
     ),
     # -- motif --------------------------------------------------------------
     TableRule(

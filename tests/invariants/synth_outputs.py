@@ -78,11 +78,22 @@ def build_frame(rule: TableRule, sample_idx: int) -> pd.DataFrame:
             }
         )
     if suffix.startswith(".FSC.gene") or suffix.startswith(".FSC.regions"):
-        ratios = np.array([_normalised(5, sample_idx * 7 + i) for i in range(n)])
+        # Six channels, matching the genome-bin table. The gene path emitted
+        # five until the bands were aligned in 0.9.0; five ratios summing to 1
+        # is exactly what a well-formed cohort must no longer look like.
+        names = [
+            "ultra_short",
+            "core_short",
+            "mono_nucl",
+            "di_nucl",
+            "long",
+            "ultra_long",
+        ]
+        ratios = np.array(
+            [_normalised(len(names), sample_idx * 7 + i) for i in range(n)]
+        )
         frame = {"gene": [f"GENE{i}" for i in range(n)], "total": rng.random(n) * 500}
-        for i, name in enumerate(
-            ["ultra_short", "core_short", "mono_nucl", "di_nucl", "long"]
-        ):
+        for i, name in enumerate(names):
             frame[f"{name}_ratio"] = ratios[:, i]
         frame["normalized_depth"] = rng.random(n) * 3
         return pd.DataFrame(frame)
