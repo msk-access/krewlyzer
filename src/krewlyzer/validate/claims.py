@@ -209,24 +209,24 @@ CLAIMS: Tuple[Claim, ...] = (
         "below this a fragment is U; the gap between the two is the X class",
     ),
     # -- FSC channels -------------------------------------------------------
-    # Inline comparisons, not named constants, so the shape is what is pinned.
     # Non-overlapping by design: overlapping channels would make the ML
     # features collinear.
+    #
+    # There is one entry here because there is now one definition. The genome
+    # and gene paths used to carry separate inline comparison chains and had
+    # drifted apart; both now call `SizeChannel::of`. If a second set of bounds
+    # reappears anywhere, this claim keeps matching the shared one and says
+    # nothing -- which is why `fsc_gene_ratios_sum_to_one` checks the emitted
+    # values too.
     Claim(
-        "fsc.genome_channel_bounds",
-        "100,149,220,260,400",
+        "fsc.channel_upper_bounds",
+        "100,149,220,260,400,1000",
         RustPattern(
             "fsc.rs",
-            r"if\s+fragment\.length\s*<=\s*(\d+)",
-            "genome-bin channel boundaries",
+            r"\d+\.\.=(\d+)\s*=>\s*Some\(Self::",
+            "SizeChannel::of upper bounds",
         ),
-        "the documented FSC channels; FSR divides the same counts",
-    ),
-    Claim(
-        "fsc.gene_channel_bounds",
-        "100,150,260,400",
-        RustPattern("fsc.rs", r"if\s+len\s*<\s*(\d+)", "gene-level channel boundaries"),
-        "gene/region aggregation uses its own split; see the divergence below",
+        "the six documented FSC channels, shared by genome bins and genes",
     ),
 )
 
@@ -255,22 +255,13 @@ KNOWN_DIVERGENCES: Tuple[Divergence, ...] = (
             "the fragments it was added to measure."
         ),
     ),
-    Divergence(
-        "fsc.channel_bounds",
-        left=RustPattern(
-            "fsc.rs", r"if\s+fragment\.length\s*<=\s*(\d+)", "genome-bin boundaries"
-        ),
-        left_value="100,149,220,260,400",
-        right=RustPattern("fsc.rs", r"if\s+len\s*<\s*(\d+)", "gene-level boundaries"),
-        right_value="100,150,260,400",
-        why=(
-            "The gene/region aggregator splits at <100/<150/<260/<400 while the "
-            "genome-bin counter splits at <=100/<=149/<=220/<=260/<=400 plus an "
-            "ultra_long channel. Columns of the same name mean different "
-            "things: mono_nucl is 150-220bp in FSC.parquet and 150-259bp in "
-            "FSC.gene.parquet. Git history shows the gene path was written from "
-            "a documentation table that had already been retired, so this is "
-            "drift rather than a deliberate gene-level choice."
-        ),
-    ),
 )
+
+# Resolved, kept as a note rather than an entry:
+#
+# `fsc.channel_bounds` recorded that the gene/region aggregator split at
+# <100/<150/<260/<400 while the genome-bin counter split at
+# <=100/<=149/<=220/<=260/<=400 plus an ultra_long channel, so `mono_nucl`
+# meant 150-220bp in FSC.parquet and 150-259bp in FSC.gene.parquet. Both paths
+# now call `SizeChannel::of`, pinned by `fsc.channel_upper_bounds` above, and
+# the divergence cannot recur without deleting that call.

@@ -340,10 +340,16 @@ Aggregates FSC across all exons for each panel gene. Rows = genes.
 | `gene` | str | HGNC symbol (e.g. `ATM`, `TP53`) |
 | `n_regions` | int | Number of exons/targets captured |
 | `total_bp` | int | Total base pairs covered |
-| `ultra_short` … `long` | float | GC-corrected count per size class |
+| `ultra_short` … `ultra_long` | float | GC-corrected count per size class, same six bands as [FSC genome bins](#fsc-genome-bins) |
 | `total` | float | Total GC-corrected count |
-| `ultra_short_ratio` … `long_ratio` | float | `channel / total` — size composition |
+| `ultra_short_ratio` … `ultra_long_ratio` | float | `channel / total` — size composition, sums to 1 |
 | `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
+
+!!! warning "Band boundaries changed in 0.9.0"
+    Earlier releases used different size bands here than in the genome-bin
+    table, and emitted five channels instead of six. Values are not comparable
+    across the 0.9.0 boundary. See [FSC feature docs](../features/core/fsc.md)
+    for the old bands.
 
 #### Purpose & Use Cases
 
@@ -359,9 +365,10 @@ df = pd.read_csv("sample.FSC.gene.tsv", sep="\t").set_index("gene")
 # Gene-level short enrichment
 df["tumor_signal"] = df["ultra_short_ratio"] + df["core_short_ratio"]
 
-# Full channel composition feature matrix: 146 genes × 5 ratios
-ratio_cols = ["ultra_short_ratio", "core_short_ratio", "mono_nucl_ratio", "di_nucl_ratio", "long_ratio"]
-X = df[ratio_cols].values  # shape: (146, 5) per sample
+# Full channel composition feature matrix: 146 genes × 6 ratios
+ratio_cols = ["ultra_short_ratio", "core_short_ratio", "mono_nucl_ratio",
+              "di_nucl_ratio", "long_ratio", "ultra_long_ratio"]
+X = df[ratio_cols].values  # shape: (146, 6) per sample
 
 # Normalized depth for CNV
 cnv_proxy = df["normalized_depth"]  # pivot across samples → CNV log-ratio
@@ -387,10 +394,12 @@ Per-exon/target fragment size coverage. Most granular FSC output.
 | `gene` | str | Gene symbol |
 | `region_name` | str | Unique exon/target identifier |
 | `region_bp` | int | Region size in bp |
-| `ultra_short` … `long` | float | GC-corrected counts |
+| `ultra_short` … `ultra_long` | float | GC-corrected counts, same six bands as the genome-bin table |
 | `total` | float | Total count |
-| `ultra_short_ratio` … `long_ratio` | float | `channel / total` |
+| `ultra_short_ratio` … `ultra_long_ratio` | float | `channel / total`, sums to 1 |
 | `normalized_depth` | float | RPKM-like depth |
+
+The same 0.9.0 band correction applies here.
 
 #### Purpose & Use Cases
 

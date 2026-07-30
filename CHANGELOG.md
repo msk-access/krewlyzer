@@ -97,6 +97,42 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **Gene- and region-level FSC used different size bands than the genome-level
+  table, so identically-named columns meant different things.** The genome-bin
+  counter split at `<=100 / <=149 / <=220 / <=260 / <=400` with a sixth
+  `ultra_long` channel. The gene/region aggregator split at
+  `<100 / <150 / <260 / <400` with no sixth channel. `mono_nucl` therefore meant
+  150–220 bp in `FSC.parquet` and 150–259 bp in `FSC.gene.parquet`; a column
+  labelled `di_nucl` held the genome table's `long` range; and gene `long` held
+  what the genome table called `ultra_long`. A consumer reading both tables into
+  one feature matrix was combining channels that do not describe the same thing.
+
+  The bands were never a deliberate gene-level choice. Three places already
+  documented the *correct* (genome) bands for these tables: the column table in
+  `docs/features/core/fsc.md`, the column table in
+  `docs/reference/output-files.md`, and a line in the latter describing
+  "146 genes × 6 channels" against an implementation that emitted five. Only the
+  code disagreed, so this is a correction, not a redefinition.
+
+  Both paths now call a single `SizeChannel::of`, and the bounds exist in
+  exactly one place. Duplicating them is what allowed the drift, so the fix is
+  the deduplication rather than a second edit to the same numbers. Gene and
+  region tables gain `ultra_long` and `ultra_long_ratio`.
+
+  A fragment that passes the length filter but matches no channel is now
+  counted and reported once at write time. It is *not* logged where it is
+  detected: that point is inside the rayon loop, and routing a per-fragment
+  warning through pyo3-log into Python deadlocks under the GIL — observed while
+  testing this change, where it hung the run outright rather than reporting
+  anything.
+
+  **Output-contract impact.** `FSC.gene.*` and `FSC.regions.*` change value for
+  every fragment in a moved band, and gain two columns. The six ratios sum to 1;
+  the five that existed before sum to `1 - ultra_long_ratio`, and the contract
+  gate now asserts both so a downstream renormalisation cannot quietly use the
+  wrong base. Values from before this fix are not comparable. `FSC.parquet` and
+  `FSC.ontarget.parquet` are unchanged — the genome path was always correct.
+
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was
   `Path(f"{sample}.FOO.tsv").exists()`, and that gate ran *before* `read_table()`
