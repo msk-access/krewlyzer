@@ -59,6 +59,24 @@ All notable changes to this project will be documented in this file.
   reads. A checker that throws is caught and logged: it must never lose a
   completed run.
 
+- **`WPS_background.nrl_at_band_limit`** — marks a right-censored NRL estimate,
+  where the spectral peak sat on the edge of the 140-250bp search band so
+  `nrl_bp` is that bound rather than a measurement.
+
+  On real plasma this is **21% of Alu groups for XS1 and 43% for XS2**, and
+  those groups are indistinguishable from interior ones by `periodicity_score`
+  or fragment support — so a consumer reading `nrl_bp = 250.0` had no way to
+  tell "the repeat length is 250bp" from "no nucleosomal peak was found". The
+  same *present, plausible, wrong* failure mode the NRL fix itself addressed,
+  one level down.
+
+  Not triggered by a long period: 400bp and 2000bp synthetic signals both
+  resolve to 225-235bp inside the band. Only the *absence* of periodicity pins
+  the edge, so the flag means "no peak found", not "period too long".
+
+  Additive and optional, so existing consumers are unaffected; the contract
+  gate accepts directories written before it existed.
+
 ### Fixed
 - **`--generate-json` silently dropped most features for compressed and Parquet
   runs.** Every probe in `FeatureSerializer.from_outputs()` was
