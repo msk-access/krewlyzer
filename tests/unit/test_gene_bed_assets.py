@@ -26,9 +26,19 @@ from typing import Dict, Iterator, List
 
 import pytest
 
-import krewlyzer
-
-_GENES = Path(krewlyzer.__file__).resolve().parent / "data" / "genes"
+#: Read from the checkout, not the installed package.
+#:
+#: ``pyproject.toml`` excludes ``data/`` from the wheel to stay under PyPI's
+#: 100 MB limit, so ``Path(krewlyzer.__file__).parent / "data"`` is present
+#: under an editable install and absent in CI. ``conftest.requires_data``
+#: exists for exactly that and skips such tests.
+#:
+#: These are deliberately *not* marked ``requires_data``. They validate the
+#: committed asset files themselves, not the runtime's ability to load them,
+#: and the CI checkout fetches LFS (``lfs: true``). Skipping here would mean
+#: assets regenerated from a new GENCODE release are never checked by CI --
+#: which is most of the value.
+_GENES = Path(__file__).resolve().parents[2] / "src" / "krewlyzer" / "data" / "genes"
 
 EXPECTED_COLUMNS = [
     "#chrom",
