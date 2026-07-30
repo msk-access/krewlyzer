@@ -1,0 +1,75 @@
+# krewlyzer secrets + PHI
+#
+# WHY THIS EXISTS
+#   krewlyzer is developed against MSK-ACCESS clinical output. Sample directories
+#   are named for the patient (see the P-0000000 placeholder below for the
+#   shape), so a pasted path, a debug print, a notebook cell or a commit message
+#   can publish an identifier without anyone deciding to. Once pushed it cannot
+#   be removed without rewriting history, so the check has to sit before the
+#   push, not after.
+#
+# HOW IT IS ENFORCED
+#   .githooks/pre-commit   staged diff, before it enters local history
+#   .githooks/pre-push     outgoing commits *and their messages*
+#   CI (phi-secret-scan)   the backstop for anyone who has not run
+#                          `git config core.hooksPath .githooks`
+#   scripts/check_phi_guard.sh verifies these rules still fire, in both
+#                          directions. A scanner that never fires is worse than
+#                          no scanner: it produces a false sense of safety.
+#
+# PLACEHOLDER POLICY
+#   Docs and tests need to show the *shape* of an identifier. `P-0000000` is the
+#   one permitted placeholder. Go's RE2 engine has no negative lookahead, so
+#   this is expressed as an allowlist rather than inside the pattern.
+#
+# DO NOT PUT REAL IDENTIFIERS IN THIS FILE
+#   gitleaks skips its own config, so anything pasted into a comment here is
+#   invisible to the scanner. Assertion 4 of check_phi_guard.sh is the only
+#   thing that catches it.
+
+title = "krewlyzer secrets + PHI"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "msk-dmp-patient-id"
+description = "MSK DMP/IMPACT patient or sample identifier (potential PHI)"
+# Deliberately matches the patient portion only, so it also covers full sample
+# ids: P-0000000-T01-XS1, P-0000000-T02-IM6.
+regex = '''P-[0-9]{7}'''
+tags = ["phi", "patient-id"]
+
+[[rules]]
+id = "cmo-sample-id"
+description = "CMO/IGO sample identifier (potential PHI)"
+# Shape seen throughout ACCESS output: six alphanumerics, then a library
+# suffix -- see the C-000000-L000 placeholder below. Anchored on the -L/-N/-T
+# suffix so ordinary hyphenated words and git hashes do not trip it.
+regex = '''\bC-[A-Z0-9]{6}-[LNT][0-9]{3}'''
+tags = ["phi", "sample-id"]
+
+[[rules]]
+id = "us-ssn"
+description = "US Social Security Number"
+regex = '''\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b'''
+tags = ["pii", "ssn"]
+
+[[rules]]
+id = "medical-record-number"
+description = "Medical record number"
+regex = '''(?i)\bMRN\b[ \t]*[:#=]?[ \t]*[0-9]{6,10}'''
+tags = ["phi", "mrn"]
+
+[[rules]]
+id = "date-of-birth"
+description = "Date of birth"
+regex = '''(?i)\b(?:dob|date[ _-]of[ _-]birth)\b[ \t]*[:=]?[ \t]*[0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}'''
+tags = ["phi", "dob"]
+
+[allowlist]
+description = "Documentation and test placeholders"
+regexes = [
+  '''P-0000000''',        # canonical all-zeros patient-id placeholder
+  '''C-000000-[LNT]000''', # canonical all-zeros CMO sample-id placeholder
+]

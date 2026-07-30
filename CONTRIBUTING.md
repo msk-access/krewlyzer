@@ -30,6 +30,34 @@ python -c "from krewlyzer import _core; print('Rust core:', _core.version())"
 
 ---
 
+## Before your first commit: enable the guards
+
+```bash
+git config core.hooksPath .githooks
+brew install gitleaks   # or see github.com/gitleaks/gitleaks
+```
+
+krewlyzer is developed against MSK-ACCESS clinical output, so a pasted path, a
+debug print or a commit message can publish a patient identifier without anyone
+deciding to. Once pushed it cannot be removed without rewriting history, which
+is why the check sits before the push.
+
+The hooks are tool-agnostic — they run whether a human, Claude, Cursor or Codex
+drives the commit. `pre-commit` scans the staged diff and refuses stray data
+artifacts; `pre-push` scans the outgoing commits **and their messages**, and
+blocks direct pushes to `main`. CI repeats all of it as a backstop for anyone
+who skipped the `git config` line above.
+
+Use the `P-0000000` and `C-000000-L000` placeholders in docs and tests. Never a
+real identifier, and never inside `.gitleaks.toml` itself — gitleaks skips its
+own config, so only `scripts/check_phi_guard.sh` would catch it.
+
+To check the guard is healthy:
+
+```bash
+bash scripts/check_phi_guard.sh
+```
+
 ## Code Style
 
 ### Python

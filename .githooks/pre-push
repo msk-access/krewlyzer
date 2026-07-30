@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Tool-agnostic push guard for krewlyzer. Enable once per clone:
+#   git config core.hooksPath .githooks
+#
+# Two things pre-commit cannot cover:
+#   * commit MESSAGES, which are published and cannot be edited after a push
+#     without rewriting history;
+#   * commits that arrived some other way -- a cherry-pick, a rebase, a merge,
+#     or a commit made before the hook was enabled.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+CONFIG="$REPO_ROOT/.gitleaks.toml"
+remote_name="${1:-origin}"
+
+# ---------------------------------------------------------------------------
+# 1) Never push straight to a protected branch. Git Flow goes through a PR.
+# ---------------------------------------------------------------------------
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+    [ -z "${remote_ref:-}" ] && continue
+    case "$remote_ref" in
+        refs/heads/main|refs/heads/master)
+            echo "pre-push BLOCKED: direct push to ${remote_ref#refs/heads/}." >&2
+            echo "Open a PR into develop instead (docs/development/release-guide.md)." >&2
+            exit 1
+            ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
+# 2) Work out what is actually being pushed.
+#
+# Deliberately NOT a full-history scan. This repository's history predates the
+# guard and contains identifiers that cannot be removed without a rewrite, so
+# scanning all of it would block every push forever and teach everyone to pass
+# --no-verify. Scope to what this push adds: against the upstream if the branch
+# has one, otherwise against the integration branch it will merge into.
+# ---------------------------------------------------------------------------
+if upstream="$(git rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)"; then
+    range="${upstream}..HEAD"
+else
+    base=""
+    for candidate in "${remote_name}/develop" "${remote_name}/main"; do
+        if git rev-parse --verify --quiet "$candidate" >/dev/null; then
+            base="$candidate"
+            break
+        fi
+    done
+    if [ -z "$base" ]; then
+        echo "pre-push: no upstream and no ${remote_name}/develop to compare against;" >&2
+        echo "skipping the scan. Push again once the remote is known." >&2
+        exit 0
+    fi
+    range="${base}..HEAD"
+fi
+
+if [ -z "$(git rev-list "$range" 2>/dev/null)" ]; then
+    exit 0  # nothing new to check
+fi
+
+# ---------------------------------------------------------------------------
+# 3) A missing or broken scanner is not a clean scan.
+#
+# py-gbcms's equivalent continues when gitleaks is absent. That turns the only
+# local defence into a no-op on exactly the machines that never installed it.
+# ---------------------------------------------------------------------------
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-push BLOCKED: gitleaks is not installed, so the outgoing commits" >&2
+    echo "cannot be checked for PHI. Install it (brew install gitleaks)." >&2
+    exit 1
+fi
+
+set +e
+gitleaks detect --source "$REPO_ROOT" --config "$CONFIG" \
+    --log-opts="$range" --no-banner --redact --exit-code 1 >/tmp/.krewlyzer-gitleaks.$$ 2>&1
+status=$?
+set -e
+
+if [ "$status" -eq 1 ]; then
+    echo "pre-push BLOCKED: possible PHI or secret in the outgoing commits ($range)." >&2
+    sed 's/^/  /' /tmp/.krewlyzer-gitleaks.$$ >&2
+    rm -f /tmp/.krewlyzer-gitleaks.$$
+    exit 1
+elif [ "$status" -ne 0 ]; then
+    # Distinguish "found something" from "could not look". Reporting a scanner
+    # crash as a finding sends people hunting for a secret that is not there.
+    echo "pre-push BLOCKED: gitleaks exited $status without completing." >&2
+    sed 's/^/  /' /tmp/.krewlyzer-gitleaks.$$ >&2
+    rm -f /tmp/.krewlyzer-gitleaks.$$
+    exit 1
+fi
+rm -f /tmp/.krewlyzer-gitleaks.$$
+
+# ---------------------------------------------------------------------------
+# 4) Commit messages. `gitleaks detect` scans diffs, never messages, so this is
+#    a separate pass -- and it is the one gap both sibling repos still have in
+#    CI. The temp file must not be named .gitleaks.toml: gitleaks skips its own
+#    config, so a message written there would be invisible.
+# ---------------------------------------------------------------------------
+msgfile="$(mktemp -t krewlyzer-commit-msgs)"
+trap 'rm -f "$msgfile"' EXIT
+git log "$range" --format='%B%n%an %ae' > "$msgfile"
+
+if [ -s "$msgfile" ]; then
+    if ! gitleaks stdin --config "$CONFIG" --no-banner --redact --exit-code 1 \
+            < "$msgfile" >/dev/null 2>&1; then
+        echo "pre-push BLOCKED: possible PHI or secret in a commit message." >&2
+        echo "Messages are published and cannot be edited after the push" >&2
+        echo "without rewriting history. Amend or rebase before pushing." >&2
+        exit 1
+    fi
+fi
+
+exit 0

@@ -110,6 +110,50 @@ jobs:
         run: |
           cargo test --manifest-path rust/Cargo.toml --lib
 
+  phi-secret-scan:
+    name: PHI / secret scan
+    # The git hooks only protect contributors who ran
+    # `git config core.hooksPath .githooks`. This job is the backstop.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need the merge base to scope the scan
+
+      - name: Install gitleaks (pinned)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # Verify the rules still fire before trusting a clean scan. A rule that
+      # silently stopped matching would otherwise look identical to success.
+      - name: Verify the PHI guard itself
+        run: bash scripts/check_phi_guard.sh
+
+      # Scoped to what this branch adds. A full-history scan would flag commits
+      # that predate the guard and cannot be changed without a rewrite, which
+      # would block every push and train everyone to bypass it.
+      - name: Scan the incoming commits
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          echo "scanning ${BASE}..HEAD"
+          gitleaks detect --source . --log-opts="${BASE}..HEAD" \
+            --no-banner --redact --exit-code 1
+
+      # gitleaks scans diffs, never commit messages -- and a message cannot be
+      # edited after a push without rewriting history.
+      - name: Scan the commit messages
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          git log "${BASE}..HEAD" --format='%B%n%an %ae' > /tmp/commit-messages.txt
+          gitleaks stdin --config .gitleaks.toml \
+            --no-banner --redact --exit-code 1 < /tmp/commit-messages.txt
+
   lint:
     name: Lint (ruff · black · mypy · clippy)
     runs-on: ubuntu-latest
