@@ -95,6 +95,17 @@ def region_entropy(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
+    ),
 ):
     """
     Calculate Region Entropy features (TFBS/ATAC size entropy) for a single sample.
@@ -249,7 +260,12 @@ def region_entropy(
 
                 # Process off-target output (primary)
                 process_region_entropy(
-                    out_raw, out_final, entropy_pon_parquet, "tfbs_baseline"
+                    out_raw,
+                    out_final,
+                    entropy_pon_parquet,
+                    "tfbs_baseline",
+                    output_format=output_format,
+                    compress=compress,
                 )
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ TFBS: {out_final} ({n_off} TFs)")
@@ -285,6 +301,8 @@ def region_entropy(
                         out_final_ont,
                         entropy_pon_parquet,
                         "tfbs_baseline_ontarget",
+                        output_format=output_format,
+                        compress=compress,
                     )
                     out_raw_ont.unlink(missing_ok=True)
                     logger.info(f"✅ TFBS on-target: {out_final_ont} ({n_ont} TFs)")
@@ -316,7 +334,12 @@ def region_entropy(
 
                 # Process off-target output (primary)
                 process_region_entropy(
-                    out_raw, out_final, entropy_pon_parquet, "atac_baseline"
+                    out_raw,
+                    out_final,
+                    entropy_pon_parquet,
+                    "atac_baseline",
+                    output_format=output_format,
+                    compress=compress,
                 )
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ ATAC: {out_final} ({n_off} cancer types)")
@@ -352,6 +375,8 @@ def region_entropy(
                         out_final_ont,
                         entropy_pon_parquet,
                         "atac_baseline_ontarget",
+                        output_format=output_format,
+                        compress=compress,
                     )
                     out_raw_ont.unlink(missing_ok=True)
                     logger.info(

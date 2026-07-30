@@ -86,6 +86,17 @@ def ocf(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
+    ),
     threads: int = typer.Option(
         0, "--threads", "-t", help="Number of threads (0=all cores)"
     ),
@@ -190,6 +201,8 @@ def ocf(
             gc_correct=gc_correct,
             threads=threads,
             verbose=verbose,
+            output_format=output_format,
+            compress=compress,
         )
 
         if outputs.ocf and outputs.ocf.exists():

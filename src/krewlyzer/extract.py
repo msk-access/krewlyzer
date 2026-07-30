@@ -110,6 +110,17 @@ def extract(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
+    ),
     threads: int = typer.Option(
         0, "--threads", "-t", help="Number of threads (0=all cores)"
     ),
@@ -300,6 +311,8 @@ def extract(
             genome=genome,
             assay=assay,
             compute_gc_factors=gc_correct and assets is not None,
+            output_format=output_format,
+            compress=compress,
         )
 
         # On-target GC correction (panel mode only) - additional to standard outputs

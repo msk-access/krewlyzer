@@ -28,6 +28,8 @@ process KREWLYZER_MOTIF {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
 
     """
     krewlyzer motif \\
@@ -36,6 +38,9 @@ process KREWLYZER_MOTIF {
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
+        $verbose_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml
