@@ -420,7 +420,39 @@ Per-exon/target output for fine-grained copy number analysis:
 
 **File**: `{sample}.FSC.regions.e1only.tsv`
 
-E1 (first exon) filtering extracts only the first exon per gene by genomic position. Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+
+!!! danger "This table does not currently contain what its name says"
+    Two separate problems, both measured against the `xs1`/`xs2` designs.
+
+    **1. It selects by genomic position, not transcription order.** The filter
+    sorts by `start` and takes the first row per gene. On a minus-strand gene
+    the first exon is at the *highest* coordinate, so this picks the wrong end.
+    [region-MDS](../regulatory/region-mds.md#e1-first-exon-significance) does
+    this correctly — the two features disagree with each other about what E1
+    means.
+
+    **2. Most panel genes have no E1 to select.** MSK-ACCESS tiles coding
+    hotspot exons; the canonical transcript's exon 1 is usually 5′UTR and
+    outside the capture design.
+
+    | assay | genes | with a tile overlapping canonical exon 1 |
+    |---|---:|---:|
+    | xs1 | 128 | **25** |
+    | xs2 | 146 | **33** |
+
+    AKT1's exon 1 sits 15 kb past the panel's most 5′ tile. For the 103 `xs1`
+    genes with no E1 tile, this table still emits a row — an arbitrary internal
+    exon labelled E1. Of the 25 that do have one, the current pick is right for
+    18 and wrong for 7.
+
+    **Do not treat `FSC.regions.e1only` as promoter-proximal for panel data
+    until this is resolved.** The bundled gene BEDs now carry a precomputed
+    `is_e1` column (see `scripts/build_gene_bed.py`) so the selection can be
+    made correctly; wiring this table to use it is outstanding.
+
+    WGS is unaffected by (2) — every exon of the canonical transcript is
+    present, so exon 1 always exists.
 
 **Usage**:
 ```bash
@@ -430,9 +462,6 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2
 # Disable E1-only generation
 krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2 --disable-e1-aggregation
 ```
-
-!!! tip
-    E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
 
 ### Normalized Depth (RPKM-like)
 

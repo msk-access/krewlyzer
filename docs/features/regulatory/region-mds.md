@@ -167,6 +167,21 @@ E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
 > half of a typical panel. If you have `MDS.gene.tsv` outputs from an earlier
 > version, minus-strand `mds_e1` / `mds_e1_z` values are not comparable.
 
+> [!WARNING]
+> **On a targeted panel, "first exon" usually means "first *captured* exon".**
+> MSK-ACCESS tiles coding hotspot exons, and the canonical transcript's exon 1
+> is generally 5′UTR and outside the capture design — only 25 of 128 `xs1`
+> genes (33 of 146 for `xs2`) have a tile overlapping it. AKT1's exon 1 sits
+> 15 kb past the panel's most 5′ tile.
+>
+> Strand-correct selection therefore returns the most 5′ *captured* region,
+> which for most genes is an internal exon rather than a promoter proxy. The
+> bundled gene BEDs now distinguish the two explicitly — `is_e1` for a genuine
+> exon 1 overlap, `is_first_captured` for the most 5′ tile — so a model can
+> weigh them separately instead of treating every `mds_e1` as promoter signal.
+>
+> WGS is unaffected: every exon of the canonical transcript is present.
+
 > [!NOTE]
 > `mds_e1 = 0.0` means E1 itself had no qualifying fragments. It no longer
 > silently falls through to the next exon with coverage.

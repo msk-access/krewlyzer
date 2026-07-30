@@ -105,6 +105,37 @@ chr17	7676707	7676863	TP53	exon2
 chr7	140719327	140724764	BRAF	exon15
 ```
 
+### Bundled assets carry four extra columns
+
+The gene BEDs shipped in `src/krewlyzer/data/genes/` are generated from a
+GENCODE GTF by `scripts/build_gene_bed.py` and extend the format:
+
+```
+chrom  start  end  gene  name  transcript_id  exon_number  strand  is_e1  is_first_captured
+```
+
+| Column | Description |
+|--------|-------------|
+| `transcript_id` | Canonical transcript: MANE Select → Ensembl canonical → longest CDS |
+| `exon_number` | **Transcription** order from the GTF, not coordinate order |
+| `strand` | `+` / `-`; absent from the panel assets before 0.9.0 |
+| `is_e1` | Row overlaps the canonical transcript's exon 1 |
+| `is_first_captured` | Most 5′ row for this gene, in transcription order |
+
+The first five columns are unchanged, so a custom 4- or 5-column file still
+works and readers indexing `gene`/`name` are unaffected.
+
+!!! note "`is_e1` and `is_first_captured` are not the same thing"
+    On a targeted panel they usually differ. Only 25 of 128 `xs1` genes have a
+    tile overlapping the canonical exon 1 — the panel tiles coding hotspots,
+    and exon 1 is generally 5′UTR and uncaptured. `is_first_captured` always
+    exists, but an internal exon is not a promoter proxy. Use `is_e1` when the
+    promoter-proximal interpretation matters.
+
+    `exon_number` deserves the same caution when reading *older* assets: the
+    pre-0.9.0 WGS BED numbered exons by coordinate, so its `exon_num 0` was the
+    last exon for every minus-strand gene.
+
 ### Used By
 
 - Custom gene files for panel FSC
