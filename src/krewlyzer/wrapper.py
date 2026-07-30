@@ -1005,7 +1005,10 @@ def run_all(
             from .core.feature_serializer import FeatureSerializer
 
             logger.info("Generating unified features JSON...")
-            serializer = FeatureSerializer.from_outputs(sample, output, version="0.8.3")
+            # Version deliberately not passed: the default is the package
+            # version. Restating it here is what let the stamp fall a release
+            # behind, since the release bump does not touch call sites.
+            serializer = FeatureSerializer.from_outputs(sample, output)
 
             # Add runtime metadata
             serializer.add_metadata("bam_path", str(bam_input))

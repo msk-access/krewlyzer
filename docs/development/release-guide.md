@@ -49,19 +49,26 @@ git branch --show-current
 
 ## Phase 2: Update Version Files
 
-### Version Locations (37 total)
+### Version Locations
 
-| Category | File | Line(s) |
-|----------|------|---------|
-| **Python** | `src/krewlyzer/__init__.py` | 3 |
-| **Python** | `pyproject.toml` | 3 |
-| **Python** | `src/krewlyzer/wrapper.py` | 674 |
-| **Python** | `src/krewlyzer/core/feature_serializer.py` | 54, 291 |
-| **Rust** | `rust/Cargo.toml` | 3 |
-| **Rust** | `rust/Cargo.lock` | Auto-updated |
-| **Nextflow** | `nextflow/nextflow.config` | 171 |
-| **Nextflow** | `nextflow/main.nf` | 36 |
-| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module |
+Line numbers are deliberately omitted: the previous table pointed at
+`wrapper.py:674` and `feature_serializer.py:54,291`, none of which held a
+version by the time anyone read it. A stale pointer in a release checklist is
+worse than no pointer, because it invites editing the wrong line.
+
+| Category | File | Notes |
+|----------|------|-------|
+| **Python** | `src/krewlyzer/__init__.py` | `__version__` — the single source of truth |
+| **Python** | `pyproject.toml` | packaging metadata |
+| **Rust** | `rust/Cargo.toml` | crate version |
+| **Rust** | `rust/Cargo.lock` | auto-updated by `cargo check` |
+| **Nextflow** | `nextflow/nextflow.config` | container tag |
+| **Nextflow** | `nextflow/main.nf` | container tag |
+| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module (container + `versions.yml`) |
+
+Everything on the Python side other than `__init__.py` imports `__version__`.
+`wrapper.py` and `core/feature_serializer.py` used to keep their own copies;
+`tests/unit/test_version_stamp.py` fails if one reappears.
 
 ### Quick Update Script
 
@@ -70,10 +77,12 @@ VERSION="X.Y.Z"
 OLD_VERSION="A.B.C"  # Current version before bump
 
 # Python
+# src/krewlyzer/__init__.py is the single source of truth for the Python side.
+# wrapper.py and core/feature_serializer.py used to carry their own copies and
+# needed their own sed lines; they now import __version__, so there is nothing
+# to substitute. tests/unit/test_version_stamp.py fails if a copy reappears.
 sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/g" src/krewlyzer/__init__.py
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" pyproject.toml
-sed -i '' "s/version=\"${OLD_VERSION}\"/version=\"${VERSION}\"/g" src/krewlyzer/wrapper.py
-sed -i '' "s/\"${OLD_VERSION}\"/\"${VERSION}\"/g" src/krewlyzer/core/feature_serializer.py
 
 # Rust
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" rust/Cargo.toml
@@ -84,6 +93,27 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/nextflow.config
 sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/main.nf
 find nextflow/modules -name "main.nf" -exec sed -i '' "s/${OLD_VERSION}/${VERSION}/g" {} \;
 ```
+
+!!! warning "Verify the bump landed"
+    Every command above depends on `OLD_VERSION` being exactly right, and
+    nothing in `sed` reports a pattern that matched nothing. Run this
+    afterwards — it fails if `__init__.py`, `pyproject.toml` and
+    `rust/Cargo.toml` disagree, or if any module has reintroduced a version
+    literal of its own:
+
+    ```bash
+    pytest tests/unit/test_version_stamp.py -q
+    ```
+
+    Then confirm nothing is left behind:
+
+    ```bash
+    git grep -n "${OLD_VERSION}" -- . ':!CHANGELOG.md' ':!docs'
+    ```
+
+    Remaining hits in `CHANGELOG.md` and `docs/` are expected: those are
+    historical references to how an older release behaved, and rewriting them
+    would falsify the record.
 
 ---
 

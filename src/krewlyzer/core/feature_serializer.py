@@ -20,6 +20,8 @@ import pandas as pd
 import numpy as np
 import logging
 
+from krewlyzer import __version__
+
 logger = logging.getLogger(__name__)
 
 # Current schema version
@@ -71,7 +73,7 @@ class FeatureSerializer:
     with complete data for ML pipelines.
     """
 
-    def __init__(self, sample_id: str, version: str = "0.8.3"):
+    def __init__(self, sample_id: str, version: str = __version__):
         self.sample_id = sample_id
         self.version = version
         self.metadata: Dict[str, Any] = {}
@@ -314,7 +316,7 @@ class FeatureSerializer:
 
     @classmethod
     def from_outputs(
-        cls, sample_id: str, output_dir: Path, version: str = "0.8.3"
+        cls, sample_id: str, output_dir: Path, version: str = __version__
     ) -> "FeatureSerializer":
         """
         Create FeatureSerializer by reading existing output files.
