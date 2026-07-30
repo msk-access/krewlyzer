@@ -718,6 +718,16 @@ def run_features(
                 )
                 if outputs.fsc_region_e1:
                     logger.info(f"✓ FSC E1-only: {outputs.fsc_region_e1.name}")
+                else:
+                    # E1 was absent from every 0.8.3 output directory and no log
+                    # said why. Silence here is what made that hard to notice.
+                    logger.warning(
+                        f"FSC E1-only not produced from "
+                        f"{outputs.fsc_region.name}; downstream E1 features "
+                        "will be missing"
+                    )
+            elif not disable_e1_aggregation:
+                logger.warning("FSC E1-only skipped: no FSC regions file to filter")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
 
