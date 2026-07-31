@@ -175,9 +175,18 @@ All notable changes to this project will be documented in this file.
   reader there swallows exceptions and yields an empty feature dict. The
   default is unchanged; the warning and the documentation are new.
 
+  Three parameters were also read by modules but **declared nowhere**:
+  `validate_min_samples`, `silent` and `assay`. Nextflow returns `null` for an
+  undeclared parameter rather than failing, so the `?: default` swallowed it —
+  the parameters were invisible to `--help` and the docs, and would become hard
+  errors the moment `nextflow.enable.strict` is enabled. All three are now
+  declared and documented, and a test cross-checks every `params.*` read in a
+  `.nf` file against the config.
+
   `docs/nextflow/outputs.md` gains the validation artifacts and a table of the
   six output families whose values change in 0.9.0; `parameters.md` gains
-  `--strict_validation`, `--gc_correct`, `--queue_size` and the Parquet caveat.
+  `--strict_validation`, `--validate_min_samples`, `--gc_correct`,
+  `--queue_size` and the Parquet caveat.
 
 - **`FSC.regions.e1only` selected by coordinate, and emitted a row for every
   gene whether or not it had one.** `filter_fsc_to_e1` sorted by `start` and

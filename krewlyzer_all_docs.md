@@ -7907,6 +7907,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--output_format` | `tsv` | Feature output format: `tsv`, `parquet`, or `both`. WPS outputs are always Parquet regardless of this setting. |
 | `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
 | `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
+| `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
 | `--gc_correct` | `true` | Apply GC bias correction during extraction. |
 | `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
 
