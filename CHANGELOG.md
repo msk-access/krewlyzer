@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`krewlyzer describe-output SAMPLE_DIR`** — says what a sample's output
+  files contain, which is the question people ask before "is it correct?".
+
+  Row and column counts, dtypes, value ranges, distinct counts and null counts
+  per column, plus total size and which tables are read downstream. Markdown by
+  default; `-o report.html` renders a self-contained page.
+
+  Everything is either measured from the file or read from `contract.py`.
+  Nothing about the biology is restated — that stays in
+  `docs/reference/output-files.md` and is linked — so a table that gains a
+  column or stops being consumed changes the report automatically and the two
+  cannot disagree.
+
+  **Identifier columns are redacted.** Sample directories here are named for
+  the patient and several tables carry the sample id as a *column value*, so
+  the first version of this report leaked a real identifier through `Sample`
+  and `sample_id` examples even though it was generated from deliberately
+  renamed files — the filenames were clean and the contents were not. Knowing a
+  column holds an identifier is the useful fact; which one is not, and this
+  report is meant to be hosted.
+
 - **`scripts/build_gene_bed.py`, and gene BED assets rebuilt from GENCODE.**
   The bundled gene BEDs could not answer "which exon is first". The panel
   assets (`xs1`/`xs2`) had five columns and **no strand at all**; the WGS asset
