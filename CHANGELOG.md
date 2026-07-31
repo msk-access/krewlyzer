@@ -152,6 +152,14 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **`MDS.gene` row order was non-deterministic.** The writer iterated a
+  `HashMap`, and Rust randomises hash iteration per process, so two runs on
+  identical input produced byte-different files. A comment above the loop
+  claimed "stable, reproducible output ordering" — it sorted regions *within* a
+  gene, not the genes themselves. `fsc.rs` already sorted its genes; this did
+  not. Verified on a real sample: identical SHA-256 across two runs after the
+  fix.
+
 - **`region-mds` E1 was never strand-aware on panel data, and the new assets
   would have silently disabled it for WGS too.** Two compounding problems.
 

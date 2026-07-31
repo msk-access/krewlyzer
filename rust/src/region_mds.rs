@@ -652,8 +652,19 @@ fn write_gene_output(
 
     writeln!(file, "gene\tn_exons\tn_fragments\tmds_mean\tmds_e1\tmds_std")?;
 
-    for (gene, regions_data) in &gene_data {
-        // Sort by genomic position for stable, reproducible output ordering.
+    // Gene order must be deterministic. `gene_data` is a HashMap and Rust
+    // randomises its iteration order per process, so without this two runs on
+    // identical input produce byte-different files -- which defeats any
+    // checksum-based reproducibility check and makes diffs between samples
+    // meaningless noise. `fsc.rs::write_gene_output` already sorts; this did
+    // not, and the comment below claimed a stability it only provided *within*
+    // a gene.
+    let mut gene_names: Vec<&String> = gene_data.keys().collect();
+    gene_names.sort();
+
+    for gene in gene_names {
+        let regions_data = &gene_data[gene];
+        // Sort by genomic position for stable ordering *within* the gene.
         // NOTE: E1 is NOT re-derived here -- it is read from the `is_e1` flag
         // set by identify_e1_regions(), which is strand-aware. Re-deriving it
         // by coordinate (the historical behaviour) both ignored strand and
