@@ -35,15 +35,36 @@ def _open_bed(path: Path) -> Generator[IO[str], None, None]:
         f.close()
 
 
+#: Column count of the annotated gene BED written by
+#: ``scripts/build_gene_bed.py``. The same number appears as
+#: ``ANNOTATED_COLUMNS`` in ``rust/src/region_mds.rs``; a test pins them
+#: together, because detection is by width and a silent mismatch sends the file
+#: down a legacy path that discards strand.
+ANNOTATED_COLUMNS = 11
+
+
 @dataclass
 class Region:
-    """A genomic region with gene annotation."""
+    """A genomic region with gene annotation.
+
+    The last three fields come from the annotated (11-column) gene BED built by
+    ``scripts/build_gene_bed.py`` and are ``None`` for the legacy formats and
+    for regions parsed on the fly from a target BED. ``None`` means *unknown*,
+    not *false*: a consumer must not read a missing flag as "this is not E1".
+    """
 
     chrom: str
     start: int
     end: int
     name: str
     gene: str
+    strand: Optional[str] = None
+    #: Overlaps the canonical transcript's exon 1.
+    is_e1: Optional[bool] = None
+    #: Overlaps another basic protein-coding transcript's exon 1 -- an
+    #: alternative promoter. Distinct from ``is_e1``; see
+    #: ``docs/reference/input-formats.md``.
+    is_alt_e1: Optional[bool] = None
 
 
 def detect_assay(target_bed: Path) -> Optional[str]:
@@ -306,7 +327,26 @@ def parse_gene_bed(bed_path: Path, version: str = "auto") -> Dict[str, List[Regi
                 logger.debug(f"Could not extract gene from: {name}")
                 continue
 
-            region = Region(chrom=chrom, start=start, end=end, name=name, gene=gene)
+            # Annotated (11-column) assets carry strand and the two E1 flags.
+            # Detection is by width, matching GeneBedFormat::Annotated in
+            # rust/src/region_mds.rs and HEADER in scripts/build_gene_bed.py --
+            # all three must agree on the count.
+            strand = is_e1 = is_alt_e1 = None
+            if len(fields) == ANNOTATED_COLUMNS:
+                strand = fields[7] if fields[7] in ("+", "-") else None
+                is_e1 = fields[8] == "1"
+                is_alt_e1 = fields[9] == "1"
+
+            region = Region(
+                chrom=chrom,
+                start=start,
+                end=end,
+                name=name,
+                gene=gene,
+                strand=strand,
+                is_e1=is_e1,
+                is_alt_e1=is_alt_e1,
+            )
 
             if gene not in genes:
                 genes[gene] = []

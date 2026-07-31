@@ -544,13 +544,37 @@ struct GeneRegion {
     end: u64,
     gene: String,
     name: String,
+    /// `+`, `-`, or `.` when the source carried no strand.
+    strand: String,
+    /// Overlaps the canonical transcript's exon 1. `None` means the source
+    /// could not say -- a legacy gene BED, or a target BED parsed on the fly.
+    /// Deliberately not conflated with `Some(false)`: absent is not "no".
+    is_e1: Option<bool>,
+    /// Overlaps another basic protein-coding transcript's exon 1.
+    is_alt_e1: Option<bool>,
 }
 
-/// Parse gene BED file: chrom, start, end, gene, [name]
+/// Parse the gene BED written by `fsc_processor.aggregate_by_gene`:
+/// chrom, start, end, gene, [name], [strand], [is_e1], [is_alt_e1].
+///
+/// Columns six to eight are what let E1 selection be strand-aware. A 5-column
+/// file still parses; its flags are `None`, and `filter_fsc_to_e1` falls back
+/// to the coordinate heuristic with a warning rather than silently claiming an
+/// E1 it cannot know.
 fn parse_gene_bed(path: &Path) -> Result<Vec<GeneRegion>> {
     let reader = crate::bed::get_reader(path)?;
     let mut regions = Vec::new();
-    
+
+    // `.` is unknown, `1`/`0` are known. Anything else is malformed and is
+    // treated as unknown rather than guessed at.
+    fn flag(field: Option<&&str>) -> Option<bool> {
+        match field {
+            Some(&"1") => Some(true),
+            Some(&"0") => Some(false),
+            _ => None,
+        }
+    }
+
     for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') || line.trim().is_empty() {
@@ -567,8 +591,18 @@ fn parse_gene_bed(path: &Path) -> Result<Vec<GeneRegion>> {
         let end: u64 = fields[2].parse().unwrap_or(0);
         let gene = fields[3].to_string();
         let name = if fields.len() > 4 { fields[4].to_string() } else { gene.clone() };
-        
-        regions.push(GeneRegion { chrom, start, end, gene, name });
+        let strand = fields.get(5).map(|s| s.to_string()).unwrap_or_else(|| ".".to_string());
+
+        regions.push(GeneRegion {
+            chrom,
+            start,
+            end,
+            gene,
+            name,
+            strand,
+            is_e1: flag(fields.get(6)),
+            is_alt_e1: flag(fields.get(7)),
+        });
     }
     
     log::info!("Parsed {} gene regions from {:?}", regions.len(), path);
@@ -719,7 +753,9 @@ impl GeneFscConsumer {
         let mut writer = BufWriter::new(file);
         
         // Header
-        writeln!(writer, "chrom\tstart\tend\tgene\tregion_name\tregion_bp\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\tultra_long\ttotal\tultra_short_ratio\tcore_short_ratio\tmono_nucl_ratio\tdi_nucl_ratio\tlong_ratio\tultra_long_ratio\tnormalized_depth")?;
+        // strand/is_e1/is_alt_e1 are carried through so E1 selection happens
+        // downstream on a fact rather than a coordinate guess.
+        writeln!(writer, "chrom\tstart\tend\tgene\tregion_name\tregion_bp\tstrand\tis_e1\tis_alt_e1\tultra_short\tcore_short\tmono_nucl\tdi_nucl\tlong\tultra_long\ttotal\tultra_short_ratio\tcore_short_ratio\tmono_nucl_ratio\tdi_nucl_ratio\tlong_ratio\tultra_long_ratio\tnormalized_depth")?;
         
         let total_frags = self.total_fragments.max(1) as f64;
         
@@ -743,8 +779,16 @@ impl GeneFscConsumer {
                 0.0
             };
             
-            writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
+            // "." for an unknown flag, never "0": a legacy gene BED cannot
+            // say whether a region is E1, and writing 0 would assert it is not.
+            let fmt_flag = |v: Option<bool>| match v {
+                Some(true) => "1",
+                Some(false) => "0",
+                None => ".",
+            };
+            writeln!(writer, "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.2}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}\t{:.4}",
                 region.chrom, region.start, region.end, region.gene, region.name, region_bp,
+                region.strand, fmt_flag(region.is_e1), fmt_flag(region.is_alt_e1),
                 rc.ultra_short, rc.core_short, rc.mono_nucl, rc.di_nucl, rc.long, rc.ultra_long, rc.total,
                 us_r, cs_r, mn_r, dn_r, lg_r, ul_r, norm_depth
             )?;
