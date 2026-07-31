@@ -42,7 +42,7 @@ Cancer cells leave molecular fingerprints in your blood. Krewlyzer finds them.
 | **Nucleosome positioning** | Epigenetic profiling |
 | **Mutation-specific sizes** | MRD monitoring |
 
-> **New to cfDNA?** Read [What is Cell-Free DNA?](https://msk-access.github.io/krewlyzer/introduction/) for background.
+> **New to cfDNA?** Read [Core Concepts](https://msk-access.github.io/krewlyzer/getting-started/concepts/) for background.
 
 ---
 
@@ -99,11 +99,41 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 | `wps` | Windowed protection score | `.WPS.parquet` |
 | `ocf` | Orientation-aware fragmentation | `.OCF.tsv` |
 | `region-entropy` | TFBS/ATAC size entropy | `.TFBS.tsv`, `.ATAC.tsv` |
+| `region-mds` | Gene- and exon-level MDS | `.MDS.gene.tsv`, `.MDS.exon.tsv` |
 | `uxm` | Fragment-level methylation | `.UXM.tsv` |
 | `mfsd` | Mutant vs wild-type sizes | `.mFSD.tsv` |
 | `build-pon` | Build Panel of Normals | `.pon.parquet` |
+| `build-gc-reference` | Build GC reference assets | `.gc_reference.tsv` |
 | `run-all` | All features in one pass | All outputs |
-| `--generate-json` | Unified JSON for ML | `.features.json` |
+
+Pass `--output-format parquet` to any of them, or `--generate-json` to `run-all`
+for a single `.features.json` for ML pipelines.
+
+### Inspecting and Validating
+
+These read inputs or a finished output directory rather than producing features.
+
+| Command | Description |
+|---------|-------------|
+| `validate` | Check input **assets** — BEDs, anchors, GC factors — before a run |
+| `describe-output` | What is in each output file: shape, columns, ranges |
+| `report` | Single-sample HTML report — verdict, charts, interpretation |
+| `validate-output` | Check results against the downstream output contract |
+| `validate-cohort` | Cross-sample degeneracy checks over fingerprints |
+
+```bash
+krewlyzer validate -G hg19                        # assets are intact
+krewlyzer validate-output results/                # results satisfy the contract
+krewlyzer describe-output results/{sample_id}/    # what is in each file
+pip install 'krewlyzer[report]'
+krewlyzer report results/{sample_id}/ -o report.html
+```
+
+> [!NOTE]
+> A `report` contains one sample's actual measurements — generate it on demand
+> for internal use, and use `describe-output` for anything structural that needs
+> to leave the machine. See the [CLI reference](https://msk-access.github.io/krewlyzer/cli/)
+> for exit codes and options.
 
 ### Panel Mode (`--target-regions`)
 
@@ -124,10 +154,10 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 ## Documentation
 
 - [Getting Started](https://msk-access.github.io/krewlyzer/getting-started/) - 5-minute quickstart
-- [Installation](https://msk-access.github.io/krewlyzer/installation/) - Docker, pip, development
-- [Usage Guide](https://msk-access.github.io/krewlyzer/usage/) - CLI reference
-- [Feature Details](https://msk-access.github.io/krewlyzer/features/extract/) - Per-feature documentation
-- [Nextflow Pipeline](https://msk-access.github.io/krewlyzer/pipeline/) - Batch processing
+- [Installation](https://msk-access.github.io/krewlyzer/getting-started/installation/) - Docker, pip, development
+- [CLI Reference](https://msk-access.github.io/krewlyzer/cli/) - Every command and option
+- [Feature Details](https://msk-access.github.io/krewlyzer/features/core/extract/) - Per-feature documentation
+- [Nextflow Pipeline](https://msk-access.github.io/krewlyzer/nextflow/) - Batch processing
 
 ---
 
@@ -140,7 +170,7 @@ If you use Krewlyzer, please cite:
 - **OCF:** Sun K, et al. Genome Res 2019
 - **UXM:** Loyfer N, et al. Nature 2022
 
-See [Citation & Scientific Background](https://msk-access.github.io/krewlyzer/citation/) for full references.
+See [Citation & Scientific Background](https://msk-access.github.io/krewlyzer/resources/citation/) for full references.
 
 ---
 

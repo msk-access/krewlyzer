@@ -4,7 +4,128 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **A whole-genome run lost an entire verdict axis.** A panel run splits OCF
+  into on- and off-target; a WGS run writes neither and emits a plain
+  `.OCF.parquet`. `verdict.py`, `plots.py` and the report's run-facts strip all
+  read only the panel pair, so every WGS sample reported OCF absent with the
+  file sitting in the directory. Losing an axis makes the verdict read
+  *stronger*, not weaker — it shrinks the denominator — which is the dangerous
+  direction. The preference order now lives once, in `contract.py`, and all
+  three read it.
+
+- **Six optional outputs rendered with no interpretation.** `mFSD`, `UXM`,
+  `OCF`, `FSC.regions.e1only`, `fsc_counts` and `correction_factors` got a
+  section with a measured shape and nothing else — no lede, no direction, no
+  why/how/what — because `test_meaning_registry.py` keyed on `CONTRACT` alone
+  and those six are `NOT_CONSUMED`. mFSD in particular had a chart with no
+  explanation beside it. The registry now covers everything either command can
+  render.
+
+- **Numeric identifier columns were not redacted.** `describe-output` prefers a
+  min…max range over the example value whenever one exists, so an integer
+  patient key or accession was printed in full by the branch meant to hide it —
+  a range over one distinct value *is* the value.
+
+- **`describe-output` and `report` disagreed about the same fact.** The report
+  says *gated* / *inventory*; `describe-output` still said *read downstream*,
+  a claim about another repository that nothing here keeps in sync. Aligned on
+  the report's wording, with the distinction spelled out in the output.
+
+- **README linked to six pages that do not exist.** `/introduction/`,
+  `/installation/`, `/usage/`, `/features/extract/`, `/pipeline/` and
+  `/citation/` all 404 — they point at a docs layout reorganised out of
+  existence. Absolute URLs, so neither mkdocs nor the internal link checker
+  ever resolved them.
+
+- **`tests/unit/test_cli_documented.py` checked 8 of 19 commands.** Its regex
+  matched only `app.command(name="x")` and silently skipped the eleven
+  registered as bare `app.command()(fn)`. It is now cross-checked against typer
+  itself, which immediately surfaced a fifth undocumented command, `validate`.
+
 ### Added
+- **`docs/cli/index.md` covers every command**, and two tests keep it that way:
+  one cross-checks the registered commands against the reference and the
+  README, the other resolves every README documentation link against the pages
+  mkdocs actually publishes.
+
+- **`krewlyzer report SAMPLE_DIR -o report.html`** — a single-sample report
+  with a cross-axis verdict, 16 charts and the tables behind them. Internal
+  use: it contains one patient's measurements, so it is generated on demand
+  rather than committed or published. `describe-output` remains the shareable,
+  structural view.
+
+  **Verdict.** Four independent axes — fragment size, nuclease cutting, tissue
+  shedding, chromatin accessibility — each showing its value, source column and
+  direction, summarised as *"N of M assessable axes agree"*. Never a composite
+  score: one would hide exactly the disagreement worth seeing. An axis with no
+  PON z-score is *not assessable*, never counted as disagreement, because that
+  would make a thinner run read as a healthier one.
+
+  **Organised by table, not by chart.** Each section carries one output's
+  chart, its **why / how / what**, and its columns together. A chart three
+  screens from its data is a chart nobody connects to the data.
+
+  **PON state is first-class.** Without one, every z-score and log-ratio is
+  absent — most of the interpretable surface — so the report leads with a
+  banner and marks each affected column.
+
+  Sixteen charts across the five-act structure from the output EDA notebooks,
+  including three taken from the existing notebook's specialised panels: the
+  per-region FSD heatmap, which shows whether the size shift is uniform across
+  chromosome arms or concentrated on a few — something the summed density curve
+  cannot; the WPS foreground profile around TSS and CTCF anchors; and the GC
+  correction curve, since everything GC-corrected downstream is multiplied by
+  it.
+
+  Plotly, self-contained (~5.6 MB, no network). The theme follows the docs site,
+  with an Auto/Light/Dark toggle that the figures respect. `plotly` is an
+  optional `[report]` extra; without it the command still runs and each chart
+  states that it is missing.
+
+  Three rules the charts hold to, each learned from a real defect here: a
+  constant column is reported as constant rather than drawn as a flat line; no
+  threshold is drawn as a cut-off, only labelled literature anchors; and a
+  value that means "nothing was observed" is never placed on the measurement
+  scale — an mFSD variant with no ALT fragment has `ALT_MeanSize = 0`, and
+  plotting `0 − REF` would put a fabricated point at the most tumour-like end
+  of the very axis being read. Those variants appear at the origin with their
+  own marker, because their absence is itself a finding.
+
+- **`krewlyzer describe-output SAMPLE_DIR`** — says what a sample's output
+  files contain, which is the question people ask before "is it correct?".
+
+  Row and column counts, dtypes, value ranges, distinct counts and null counts
+  per column, plus total size and which tables are read downstream. Markdown by
+  default; `-o report.html` renders a self-contained page.
+
+  Everything is either measured from the file or read from `contract.py`.
+  Nothing about the biology is restated — that stays in
+  `docs/reference/output-files.md` and is linked — so a table that gains a
+  column or stops being consumed changes the report automatically and the two
+  cannot disagree.
+
+  Each table carries a one-line **what it measures** and **which way cancer
+  moves it**, from a new `validate/meaning.py`. Direction is the point: it
+  differs per axis, and getting one backwards is the commonest misreading of
+  this output — `MDS` was documented the opposite of its own threshold table
+  for a year precisely because no test and no report ever stated one. A test
+  requires a direction for every table except `metadata`, which is provenance.
+
+  No thresholds are recorded. Every numeric band examined turned out to be a
+  display default or refuted outright: the documented ATAC/TFBS entropy range
+  flags a perfectly healthy N(167,30) distribution as abnormal. Directions are
+  robust, magnitudes are cohort-specific, and a number in the registry would
+  acquire an authority it has not earned — a test enforces their absence.
+
+  **Identifier columns are redacted.** Sample directories here are named for
+  the patient and several tables carry the sample id as a *column value*, so
+  the first version of this report leaked a real identifier through `Sample`
+  and `sample_id` examples even though it was generated from deliberately
+  renamed files — the filenames were clean and the contents were not. Knowing a
+  column holds an identifier is the useful fact; which one is not, and this
+  report is meant to be hosted.
+
 - **`scripts/build_gene_bed.py`, and gene BED assets rebuilt from GENCODE.**
   The bundled gene BEDs could not answer "which exon is first". The panel
   assets (`xs1`/`xs2`) had five columns and **no strand at all**; the WGS asset

@@ -22,7 +22,15 @@ docs = [
 ]
 test = [
     "pytest>=7.0.0",
-    "pytest-mock>=3.10.0"
+    "pytest-mock>=3.10.0",
+    # `krewlyzer report` is exercised end to end by tests/unit/test_report.py.
+    "plotly>=5.18.0"
+]
+# `krewlyzer report` only. Kept out of the core install because a pipeline that
+# never renders a report should not carry a plotting stack; without it the
+# command still runs and every chart states that it is missing.
+report = [
+    "plotly>=5.18.0"
 ]
 dev = [
     "pytest>=7.0.0",

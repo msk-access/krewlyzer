@@ -134,3 +134,113 @@ def validate_cohort(
         console.print(f"[dim]wrote {json_report}[/dim]")
 
     raise typer.Exit(result.exit_code)
+
+
+def describe_output(
+    sample_dir: Path = typer.Argument(
+        ...,
+        help="One sample directory, e.g. RESULTS/{sample_id}/",
+        exists=True,
+        file_okay=False,
+    ),
+    sample_id: Optional[str] = typer.Option(
+        None,
+        "--sample-id",
+        help="Override the sample id (defaults to the directory name)",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Write Markdown here instead of stdout. A .html suffix renders HTML.",
+    ),
+) -> None:
+    """Describe what a sample's output files contain.
+
+    `validate-output` answers "is this correct?"; this answers the question
+    people ask first -- "what are these files, and what is in them?". Shape,
+    dtypes, ranges and examples are measured from the sample; which tables are
+    gated comes from the output contract. Nothing about the biology is
+    restated, so this cannot drift from the reference documentation.
+    """
+    from .describe import describe_sample, render_html_page, render_markdown
+
+    report_obj = describe_sample(sample_dir, sample_id)
+    markdown = render_markdown(report_obj)
+
+    if output is None:
+        print(markdown)
+    elif output.suffix.lower() in (".html", ".htm"):
+        output.write_text(render_html_page(report_obj, markdown), encoding="utf-8")
+        console.print(f"[green]wrote[/green] {output}")
+    else:
+        output.write_text(markdown, encoding="utf-8")
+        console.print(f"[green]wrote[/green] {output}")
+
+    missing = [t for t in report_obj.missing if t.consumed]
+    if missing:
+        console.print(
+            f"[yellow]{len(missing)} gated table(s) absent[/yellow] "
+            "— run validate-output for the contract check"
+        )
+
+
+def report_sample(
+    sample_dir: Path = typer.Argument(
+        ...,
+        help="One sample directory, e.g. RESULTS/{sample_id}/",
+        exists=True,
+        file_okay=False,
+    ),
+    output: Path = typer.Option(
+        Path("report.html"),
+        "--output",
+        "-o",
+        help="Where to write the HTML report",
+    ),
+    sample_id: Optional[str] = typer.Option(
+        None,
+        "--sample-id",
+        help="Override the sample id (defaults to the directory name)",
+    ),
+    z_threshold: float = typer.Option(
+        2.0,
+        "--z-threshold",
+        help="|z| at which an axis is flagged. Conventional, not a clinical "
+        "cut-off — the report says so.",
+    ),
+) -> None:
+    """Build a single-sample report: verdict, charts, and the tables behind them.
+
+    For internal use. The output contains one sample's actual measurements, so
+    it is generated on demand rather than committed or published; use
+    `describe-output` for anything that leaves the machine.
+    """
+    from .describe import describe_sample
+    from .htmlreport import render_html
+    from .plots import build_charts
+    from .verdict import compute_verdict
+    from krewlyzer.core.output_utils import read_table
+
+    described = describe_sample(sample_dir, sample_id)
+    resolved_id = described.sample_id
+
+    tables = {
+        t.suffix: read_table(sample_dir / f"{resolved_id}{t.suffix}")
+        for t in described.tables
+    }
+    charts = build_charts(tables)
+    verdict = compute_verdict(sample_dir, resolved_id, z_threshold)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(render_html(described, verdict, charts, tables), encoding="utf-8")
+
+    drawn = sum(1 for c in charts if c.drawn)
+    console.print(
+        f"[green]wrote[/green] {output}  "
+        f"({len(described.present)} tables, {drawn}/{len(charts)} charts, "
+        f"{verdict.headline.lower()})"
+    )
+    undrawn = [c for c in charts if not c.drawn]
+    for c in undrawn:
+        console.print(f"  [dim]no {c.title.lower()}: {c.reason}[/dim]")
