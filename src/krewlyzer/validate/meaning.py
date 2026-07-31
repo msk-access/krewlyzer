@@ -34,12 +34,27 @@ here would give it an authority it has not earned.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
 class Meaning:
-    """One line of interpretation for an output table."""
+    """How to read one output table.
+
+    Four fields, because a reader opening an unfamiliar file needs four
+    different things and conflating them into one paragraph helps nobody:
+
+    ``measures``  the one-liner, for index and summary tables
+    ``why``       the biology — why this measurement exists at all
+    ``how``       how the number is arrived at
+    ``what``      what to actually look at, once you are staring at the numbers
+
+    ``what`` deliberately never contains a threshold. It can say *the right
+    tail matters more than the median*; it cannot say *above 1.3 is positive*.
+    Every numeric band in this project that was treated as a cut-off turned out
+    to be a display default or refuted outright, and a number printed beside a
+    column acquires an authority it has not earned.
+    """
 
     #: What the table quantifies, in a sentence a reader can act on.
     measures: str
@@ -48,6 +63,16 @@ class Meaning:
     cancer_direction: Optional[str] = None
     #: Anything that would cause a confident misreading. Kept short.
     caveat: Optional[str] = None
+    #: The biology. Why anyone measures this.
+    why: Optional[str] = None
+    #: How the number is computed.
+    how: Optional[str] = None
+    #: What to look at in the values. Never a threshold.
+    what: Optional[str] = None
+    #: Columns that exist, or mean anything, only when a PON was supplied.
+    #: Without one they are absent or uninterpretable, and the report says so
+    #: rather than letting a reader take a raw value for a normalised one.
+    pon_columns: Tuple[str, ...] = ()
 
 
 _SIZE_DIRECTION = "higher short-fragment fraction"
@@ -59,6 +84,15 @@ MEANINGS: Dict[str, Meaning] = {
         "Summed across arms this is the sample's genome-wide size density — the "
         "most direct picture of the whole thesis.",
         "mass shifts from the ~166 bp mononucleosomal mode toward ~145 bp",
+        why=(
+            "Nucleosomes protect ~147 bp of DNA from nuclease digestion, so plasma cfDNA arrives in a sharply peaked size distribution. Tumour cells package and shed DNA differently, and the whole field rests on that difference being measurable."
+        ),
+        how=(
+            "Every fragment is binned by length into 5 bp bins from 65 to 1000 bp, counted per chromosome arm."
+        ),
+        what=(
+            "Look at where the mode sits and how heavy the sub-150 bp shoulder is. Summing across arms gives the genome-wide density; comparing arms surfaces regional differences."
+        ),
     ),
     ".FSD.ontarget.parquet": Meaning(
         "As FSD, restricted to captured regions. Panel capture biases fragment "
@@ -70,6 +104,16 @@ MEANINGS: Dict[str, Meaning] = {
         "mean — so the ratio is healthy-relative and cancels batch effects. "
         "`short_long_log2` is the ML-ready signed form, ~0 in healthy plasma.",
         "higher `short_long_log2`",
+        why=(
+            "A ratio of short to long fragments is the most direct summary of the size shift, and dividing each side by a healthy baseline first cancels the batch and GC effects that otherwise dominate."
+        ),
+        how=(
+            "Per window: short and long counts are each divided by their PON mean, then the ratio is taken. `short_long_log2` is the signed log of that, ~0 in healthy plasma."
+        ),
+        what=(
+            "The median across windows is the genome-wide summary. The spread and the right tail matter more — focal high-burden regions live in that tail even when the median looks ordinary."
+        ),
+        pon_columns=("short_norm", "long_norm", "short_long_ratio", "short_long_log2"),
     ),
     ".FSR.ontarget.parquet": Meaning(
         "As FSR, over captured regions.", "higher `short_long_log2`"
@@ -81,18 +125,53 @@ MEANINGS: Dict[str, Meaning] = {
         _SIZE_DIRECTION + " in affected bins",
         "Not PON-normalised — the healthy expectation is not zero. Read the "
         "spread across bins, not the offset.",
+        why=(
+            "A genome average hides heterogeneity. Tying fragment size to location lets a focal signal survive that would otherwise be diluted across the genome."
+        ),
+        how=(
+            "Fragments are GC-corrected, then counted into six non-overlapping size channels per genomic bin. The channels partition the total, so the six ratios sum to 1."
+        ),
+        what=(
+            "Compare channel ratios between bins rather than reading any single bin. Unlike FSR these are raw counts, not PON-normalised, so the healthy expectation is not zero."
+        ),
+        pon_columns=(
+            "ultra_short_log2",
+            "core_short_log2",
+            "mono_nucl_log2",
+            "di_nucl_log2",
+            "long_log2",
+            "ultra_long_log2",
+        ),
     ),
     ".FSC.ontarget.parquet": Meaning("As FSC, over captured regions.", _SIZE_DIRECTION),
     ".FSC.gene.parquet": Meaning(
         "The six size channels aggregated per gene, plus an RPKM-like "
         "`normalized_depth` usable as a copy-number proxy.",
         _SIZE_DIRECTION + " at affected genes",
+        why=(
+            "On a targeted panel the gene is the natural unit: it is what the assay was designed around and what a clinician reasons about."
+        ),
+        how=(
+            "The six channels summed over every captured region belonging to a gene, plus `normalized_depth`, an RPKM-like value usable as a copy-number proxy."
+        ),
+        what=(
+            "`normalized_depth` compares coverage between genes in one sample. The channel ratios say whether a gene's fragments are unusually short."
+        ),
     ),
     ".FSC.regions.parquet": Meaning(
         "The same channels per exon or capture tile — the finest FSC resolution. "
         "Carries `strand`, `is_e1` and `is_alt_e1` so promoter-proximal regions "
         "can be selected without re-deriving them.",
         _SIZE_DIRECTION + " at affected regions",
+        why=(
+            "Exon-level resolution localises a signal to part of a gene — a hotspot exon can differ from the gene average."
+        ),
+        how=(
+            "The same six channels per exon or capture tile. Carries `strand`, `is_e1` and `is_alt_e1` from the gene BED so promoter-proximal regions can be selected without re-deriving them."
+        ),
+        what=(
+            "`is_e1` marks the canonical transcript's first exon; `is_alt_e1` marks another basic protein-coding transcript's first exon. Both are real transcription starts. A region with neither is an internal exon."
+        ),
     ),
     # -- motif --------------------------------------------------------------
     ".EndMotif.parquet": Meaning(
@@ -100,6 +179,15 @@ MEANINGS: Dict[str, Meaning] = {
         "cutting preference is sequence-specific, and tumour cfDNA is cut "
         "differently.",
         "a few motifs dominate — the distribution narrows",
+        why=(
+            "Nucleases cut with sequence preference, so the bases at fragment ends record which enzymes did the cutting. Tumour cfDNA carries a different signature."
+        ),
+        how=(
+            "The 4-mer at each fragment's 5′ end is counted across all 256 possibilities, then normalised to frequencies summing to 1."
+        ),
+        what=(
+            "Read the shape of the ranked distribution rather than any one motif. A broad, flat profile is healthy; mass concentrating on a few motifs is what MDS quantifies as lower diversity."
+        ),
     ),
     ".EndMotif.ontarget.parquet": Meaning(
         "As EndMotif, over captured regions.", "distribution narrows"
@@ -108,6 +196,13 @@ MEANINGS: Dict[str, Meaning] = {
         "4-mer frequencies at the breakpoint rather than the fragment end — the "
         "sequence context spanning the cut site.",
         "distribution narrows",
+        why=(
+            "The sequence spanning the cut site, rather than the fragment end, captures context the end motif alone misses."
+        ),
+        how=("As EndMotif, but the 4-mer straddles the breakpoint."),
+        what=(
+            "Compare its shape against EndMotif; a divergence between them points at the cutting chemistry rather than at fragment selection."
+        ),
     ),
     ".BreakPointMotif.ontarget.parquet": Meaning(
         "As BreakPointMotif, over captured regions.", "distribution narrows"
@@ -118,6 +213,13 @@ MEANINGS: Dict[str, Meaning] = {
         "complement to MDS — MDS measures diversity, this measures the chemistry "
         "of the cut end.",
         "higher C-end fraction",
+        why=(
+            "DNASE1L3 leaves single-stranded 5′ overhangs. Filling those in during library prep writes templated bases at the end, so the single-base composition records the chemistry of the cut — orthogonal to how diverse the 4-mers are."
+        ),
+        how=("The single 5′ base of each fragment, counted over A/C/G/T."),
+        what=(
+            "The C fraction is the quantity of interest. It is a cheap complement to MDS: MDS measures diversity, this measures the cut chemistry."
+        ),
     ),
     ".MDS.parquet": Meaning(
         "Motif Diversity Score: Shannon entropy of the 256 4-mer end motifs, "
@@ -125,6 +227,16 @@ MEANINGS: Dict[str, Meaning] = {
         "**lower** MDS — stereotyped cutting",
         "The direction is the opposite of intuition and was documented "
         "backwards for a year. Lower is the abnormal end.",
+        why=(
+            "If cutting becomes stereotyped, the *diversity* of end motifs falls even when no single motif stands out. Entropy captures that in one number."
+        ),
+        how=(
+            "Shannon entropy of the 256 4-mer frequencies, divided by log2(256) so the result lands in [0, 1]."
+        ),
+        what=(
+            "Lower is the abnormal direction. Compare against a PON via `mds_z` rather than reading the raw value, which varies with depth and library prep."
+        ),
+        pon_columns=("mds_z",),
     ),
     ".MDS.ontarget.parquet": Meaning("As MDS, over captured regions.", "**lower** MDS"),
     ".MDS.gene.parquet": Meaning(
@@ -134,10 +246,25 @@ MEANINGS: Dict[str, Meaning] = {
         "**lower** `mds_e1` at a driver locus",
         "`mds_e1` is NaN where the gene has no captured first exon, which on a "
         "targeted panel is most genes. NaN is not zero.",
+        why=(
+            "A global score says cutting is abnormal; per-gene says where. Promoter-proximal first exons sit in nucleosome-depleted regions, where accessibility differences between tumour and normal are largest (Helzer 2025)."
+        ),
+        how=(
+            "The same entropy computation over only the fragments overlapping each gene's regions, plus `mds_e1` for the first exon specifically."
+        ),
+        what=(
+            "`mds_e1` at a known driver is the targeted question. NaN means the gene has no captured first exon — on a hotspot panel that is most genes, and NaN is not zero."
+        ),
+        pon_columns=("mds_z", "mds_e1_z"),
     ),
     ".MDS.exon.parquet": Meaning(
         "MDS per exon or capture tile — localises aberrant cutting.",
         "**lower** MDS",
+        why=("The finest localisation available: which exon, not which gene."),
+        how=("Entropy over the fragments overlapping each exon or capture tile."),
+        what=(
+            "Sparse by nature — an exon with few fragments has an unstable entropy. Read `n_fragments` alongside `mds`."
+        ),
     ),
     # -- orientation and accessibility --------------------------------------
     ".OCF.ontarget.parquet": Meaning(
@@ -147,6 +274,16 @@ MEANINGS: Dict[str, Meaning] = {
         "the shedding tissue rises; a **fall** in T-cell OCF is equally "
         "informative, since it reflects dilution of normal haematopoietic "
         "background by tumour DNA",
+        why=(
+            "At a tissue-specific open chromatin region, DNA from that tissue fragments in a characteristic phased pattern. The orientation of fragment ends therefore identifies which tissue is shedding."
+        ),
+        how=(
+            "Fragments ending upstream and downstream of each region are counted separately and the asymmetry is normalised per tissue."
+        ),
+        what=(
+            "A rise means that tissue is shedding. A fall in T-cell is equally informative — it reflects dilution of the normal haematopoietic background by tumour DNA."
+        ),
+        pon_columns=("ocf_z",),
     ),
     ".OCF.offtarget.parquet": Meaning(
         "As OCF, outside captured regions — the unbiased view for panel data.",
@@ -160,6 +297,16 @@ MEANINGS: Dict[str, Meaning] = {
         "prefer z-scores",
         "Absolute entropy bands are refuted: a healthy-like N(167,30) sample "
         "already exceeds the documented 'normal' range. Use z-scores only.",
+        why=(
+            "Fragment-size diversity at a transcription factor's binding sites is a proxy for that factor's occupancy and the local accessibility. Cancer rewires TF programmes, and this reads that out without needing accessibility data for the sample."
+        ),
+        how=(
+            "Shannon entropy of the fragment-size distribution at the binding sites of each of 808 factors (GTRD)."
+        ),
+        what=(
+            "Interpretable per factor — lineage factors like HNF4A for hepatocyte or SPI1 for haematopoietic, E2F for proliferation. Use the z-scores; absolute entropy bands are refuted."
+        ),
+        pon_columns=("z_score",),
     ),
     ".TFBS.ontarget.parquet": Meaning(
         "As TFBS, over captured regions.", "per-factor; z-scores only"
@@ -170,6 +317,16 @@ MEANINGS: Dict[str, Meaning] = {
         "to OCF's orientation signal.",
         "shifts at the peaks of the matching cancer type; z-scores only",
         "Absolute entropy bands are refuted — see TFBS.",
+        why=(
+            "Each cancer type has a characteristic set of accessible enhancers. Aberrant nucleosome positioning at those loci changes local fragment-size diversity, giving a panel-compatible accessibility readout orthogonal to OCF's orientation signal."
+        ),
+        how=(
+            "The same entropy computation at each of 23 TCGA cancer types' ATAC-seq peak sets."
+        ),
+        what=(
+            "The relative ranking across types is the signal. Absolute entropy is not interpretable — a healthy N(167,30) distribution already exceeds the documented 'normal' band."
+        ),
+        pon_columns=("z_score",),
     ),
     ".ATAC.ontarget.parquet": Meaning(
         "As ATAC, over captured regions.", "z-scores only"
@@ -180,6 +337,15 @@ MEANINGS: Dict[str, Meaning] = {
         "each position is protected from cutting, which traces nucleosome "
         "placement. Per-position vectors, not scalars.",
         "protection at active promoters weakens as positioning is disrupted",
+        why=(
+            "A positioned nucleosome protects the DNA beneath it, so the density of fragment endpoints across a region traces where nucleosomes sit. At a TSS that positioning reflects whether the gene is active."
+        ),
+        how=(
+            "For each position, fragments fully spanning a window score positive and fragments ending inside it score negative, summed across TSS and CTCF anchors. Per-position vectors, not scalars."
+        ),
+        what=(
+            "Reduce the vectors with a mean or max before comparing; consumers use list_avg/list_max. The depth and phasing of the dip at the anchor are the features."
+        ),
     ),
     ".WPS.panel.parquet": Meaning("As WPS, over the panel's anchors.", "as WPS"),
     ".WPS_background.parquet": Meaning(
@@ -188,11 +354,27 @@ MEANINGS: Dict[str, Meaning] = {
         "NRL drifts from the ~190 bp healthy repeat length",
         "Check `nrl_at_band_limit`: where it is set, `nrl_bp` is the edge of the "
         "search band rather than a measurement — no peak was found.",
+        why=(
+            "Stacking WPS over the ~1 million Alu elements averages away locus-specific noise and leaves a genome-wide chromatin quality readout, including the nucleosome repeat length."
+        ),
+        how=(
+            "WPS profiles are stacked over Alu consensus positions, then the repeat length is read from the periodicity of the stacked wave by FFT."
+        ),
+        what=(
+            "Check `nrl_at_band_limit` first. Where it is set, `nrl_bp` is the edge of the search band rather than a measurement — no periodic peak was found, and the value is not a length."
+        ),
     ),
     # -- provenance ----------------------------------------------------------
     ".metadata.parquet": Meaning(
         "Run provenance and fragment totals. Also the **completion marker** — a "
         "sample without this file is dropped from the cohort silently.",
         None,
+        why=(
+            "Provenance: which inputs produced this directory, and how many fragments survived filtering. Also the completion marker the downstream consumer looks for."
+        ),
+        how=("Written at the end of a run, once every other output has been produced."),
+        what=(
+            "`total_fragments` bounds everything else — a table computed from few fragments is noisy regardless of what it says. Its absence means the sample is silently dropped downstream."
+        ),
     ),
 }

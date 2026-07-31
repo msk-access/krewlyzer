@@ -236,10 +236,16 @@ def describe_table(
 
 
 def describe_sample(directory: Path, sample_id: Optional[str] = None) -> SampleReport:
-    """Inspect every contracted output for one sample.
+    """Inspect every output krewlyzer can produce for one sample.
 
     ``sample_id`` defaults to the directory name, which is the layout the
     downstream consumer assumes: ``{results_dir}/{sample_id}/{sample_id}{suffix}``.
+
+    Covers ``CONTRACT`` *and* ``NOT_CONSUMED``. The latter is optional output —
+    mFSD needs a variant list, UXM a methylation-aware BAM — and gating on it
+    would be wrong, but a report that answers "what is in this folder" has to
+    describe a file that is sitting in the folder. Omitting them made the
+    report say mFSD was absent while the file was right there.
     """
     directory = Path(directory)
     sample_id = sample_id or directory.name
@@ -249,6 +255,20 @@ def describe_sample(directory: Path, sample_id: Optional[str] = None) -> SampleR
         describe_table(directory, sample_id, rule, rule.suffix not in not_consumed)
         for rule in CONTRACT
     ]
+
+    # Optional outputs have no TableRule -- nothing declares their columns,
+    # because nothing downstream requires them. An empty rule is honest here:
+    # every column is still measured, none is checked against a declaration.
+    described = {t.suffix for t in tables}
+    for suffix in NOT_CONSUMED:
+        if suffix in described:
+            continue
+        tables.append(
+            describe_table(
+                directory, sample_id, TableRule(suffix, columns=()), consumed=False
+            )
+        )
+
     return SampleReport(sample_id=sample_id, directory=directory, tables=tables)
 
 

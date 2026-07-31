@@ -221,3 +221,64 @@ def _render_html(report_obj, markdown: str) -> str:
 </style></head><body>
 {body}
 </body></html>"""
+
+
+def report_sample(
+    sample_dir: Path = typer.Argument(
+        ...,
+        help="One sample directory, e.g. RESULTS/{sample_id}/",
+        exists=True,
+        file_okay=False,
+    ),
+    output: Path = typer.Option(
+        Path("report.html"),
+        "--output",
+        "-o",
+        help="Where to write the HTML report",
+    ),
+    sample_id: Optional[str] = typer.Option(
+        None,
+        "--sample-id",
+        help="Override the sample id (defaults to the directory name)",
+    ),
+    z_threshold: float = typer.Option(
+        2.0,
+        "--z-threshold",
+        help="|z| at which an axis is flagged. Conventional, not a clinical "
+        "cut-off — the report says so.",
+    ),
+) -> None:
+    """Build a single-sample report: verdict, charts, and the tables behind them.
+
+    For internal use. The output contains one sample's actual measurements, so
+    it is generated on demand rather than committed or published; use
+    `describe-output` for anything that leaves the machine.
+    """
+    from .describe import describe_sample
+    from .htmlreport import render_html
+    from .plots import build_charts
+    from .verdict import compute_verdict
+    from krewlyzer.core.output_utils import read_table
+
+    described = describe_sample(sample_dir, sample_id)
+    resolved_id = described.sample_id
+
+    tables = {
+        t.suffix: read_table(sample_dir / f"{resolved_id}{t.suffix}")
+        for t in described.tables
+    }
+    charts = build_charts(tables)
+    verdict = compute_verdict(sample_dir, resolved_id, z_threshold)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(render_html(described, verdict, charts, tables), encoding="utf-8")
+
+    drawn = sum(1 for c in charts if c.drawn)
+    console.print(
+        f"[green]wrote[/green] {output}  "
+        f"({len(described.present)} tables, {drawn}/{len(charts)} charts, "
+        f"{verdict.headline.lower()})"
+    )
+    undrawn = [c for c in charts if not c.drawn]
+    for c in undrawn:
+        console.print(f"  [dim]no {c.title.lower()}: {c.reason}[/dim]")

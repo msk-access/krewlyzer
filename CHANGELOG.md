@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`krewlyzer report SAMPLE_DIR -o report.html`** — a single-sample report
+  with a cross-axis verdict, 13 charts and the tables behind them. Internal
+  use: it contains one patient's measurements, so it is generated on demand
+  rather than committed or published. `describe-output` remains the shareable,
+  structural view.
+
+  **Verdict.** Four independent axes — fragment size, nuclease cutting, tissue
+  shedding, chromatin accessibility — each showing its value, source column and
+  direction, summarised as *"N of M assessable axes agree"*. Never a composite
+  score: one would hide exactly the disagreement worth seeing. An axis with no
+  PON z-score is *not assessable*, never counted as disagreement, because that
+  would make a thinner run read as a healthier one.
+
+  **Organised by table, not by chart.** Each section carries one output's
+  chart, its **why / how / what**, and its columns together. A chart three
+  screens from its data is a chart nobody connects to the data.
+
+  **PON state is first-class.** Without one, every z-score and log-ratio is
+  absent — most of the interpretable surface — so the report leads with a
+  banner and marks each affected column.
+
+  Plotly, self-contained (~5 MB, no network). The theme follows the docs site,
+  with an Auto/Light/Dark toggle that the figures respect. `plotly` is an
+  optional `[report]` extra; without it the command still runs and each chart
+  states that it is missing.
+
+  Three rules the charts hold to, each learned from a real defect here: a
+  constant column is reported as constant rather than drawn as a flat line; no
+  threshold is drawn as a cut-off, only labelled literature anchors; and a
+  value that means "nothing was observed" is never placed on the measurement
+  scale — an mFSD variant with no ALT fragment has `ALT_MeanSize = 0`, and
+  plotting `0 − REF` would put a fabricated point at the most tumour-like end
+  of the very axis being read. Those variants appear at the origin with their
+  own marker, because their absence is itself a finding.
+
 - **`krewlyzer describe-output SAMPLE_DIR`** — says what a sample's output
   files contain, which is the question people ask before "is it correct?".
 
