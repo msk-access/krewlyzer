@@ -169,11 +169,16 @@ All notable changes to this project will be documented in this file.
   fingerprints, so the cohort step is skipped rather than run on a partial set,
   which would report degeneracy that is an artefact of the missing samples.
 
-  The pipeline also **warns at start** when `output_format` is tsv-only: kreview
-  reads Parquet only and a tsv-only run skips validation, so the default
-  produces a cohort that is invisible downstream — silently, because every
-  reader there swallows exceptions and yields an empty feature dict. The
-  default is unchanged; the warning and the documentation are new.
+  **`output_format` now defaults to `parquet` (was `tsv`).** kreview reads
+  Parquet only, and a tsv-only run additionally skips per-sample validation
+  because the contract describes the Parquet surface — so the old default
+  produced a cohort that was both invisible downstream and unchecked, silently,
+  since every reader there swallows exceptions and yields an empty feature
+  dict. The pipeline warns at start whenever the selection still excludes
+  Parquet.
+
+  **Breaking for anyone relying on the pipeline emitting TSV by default**; pass
+  `--output_format tsv` or `both` to restore it.
 
   Three parameters were also read by modules but **declared nowhere**:
   `validate_min_samples`, `silent` and `assay`. Nextflow returns `null` for an

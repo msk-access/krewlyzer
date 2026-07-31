@@ -24,15 +24,15 @@ workflow KREWLYZER {
     main:
     ch_versions = Channel.empty()
 
-    // kreview reads parquet only, and a tsv-only run also skips per-sample
-    // validation. Both failures are silent downstream -- every reader there
-    // swallows exceptions and yields an empty feature dict -- so say it here,
-    // once, at the point where it can still be changed.
+    // Parquet is the default as of 0.9.0, so this only fires when someone has
+    // deliberately excluded it. Both consequences are silent downstream --
+    // every reader there swallows exceptions and yields an empty feature dict
+    // -- so they are worth saying once, where they can still be changed.
     if (!params.output_format || params.output_format == 'tsv') {
         log.warn "output_format is '${params.output_format}': this cohort will " +
                  "contain no Parquet, which is the only format the downstream " +
-                 "consumer reads, and output validation will be skipped. Use " +
-                 "--output_format parquet (or both) for data destined for modelling."
+                 "consumer reads, and per-sample output validation will be " +
+                 "skipped. Use 'parquet' or 'both' for data destined for modelling."
     }
 
     // =====================================================
