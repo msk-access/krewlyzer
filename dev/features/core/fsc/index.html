@@ -2751,38 +2751,47 @@ the first exon is at the <em>highest</em> coordinate, so this picks the wrong en
 <a href="../../regulatory/region-mds/#e1-first-exon-significance">region-<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr></a> does
 this correctly — the two features disagree with each other about what E1
 means.</p>
-<p><strong>2. Most panel genes have no E1 to select.</strong> MSK-ACCESS tiles coding
-hotspot exons; the canonical transcript's exon 1 is usually 5′UTR and
-outside the capture design.</p>
+<p><strong>2. "First exon" is not one thing, and the panel often captures a
+different one.</strong> Genes carry a median of 13 distinct annotated first exons,
+because alternative promoters are the norm. Against the <code>xs1</code> design:</p>
 <table>
 <thead>
 <tr>
-<th>assay</th>
-<th style="text-align: right;">genes</th>
-<th style="text-align: right;">with a tile overlapping canonical exon 1</th>
+<th>tile overlaps…</th>
+<th style="text-align: right;">xs1 / 128</th>
+<th style="text-align: right;">xs2 / 146</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>xs1</td>
-<td style="text-align: right;">128</td>
-<td style="text-align: right;"><strong>25</strong></td>
+<td>the canonical (MANE) exon 1</td>
+<td style="text-align: right;">25</td>
+<td style="text-align: right;">33</td>
 </tr>
 <tr>
-<td>xs2</td>
-<td style="text-align: right;">146</td>
-<td style="text-align: right;"><strong>33</strong></td>
+<td><strong>plus</strong> another basic protein-coding transcript's exon 1</td>
+<td style="text-align: right;">40</td>
+<td style="text-align: right;">48</td>
+</tr>
+<tr>
+<td>any annotated transcript's exon 1, incl. minor isoforms</td>
+<td style="text-align: right;">79</td>
+<td style="text-align: right;">90</td>
 </tr>
 </tbody>
 </table>
-<p>AKT1's exon 1 sits 15 kb past the panel's most 5′ tile. For the 103 <code>xs1</code>
-genes with no E1 tile, this table still emits a row — an arbitrary internal
-exon labelled E1. Of the 25 that do have one, the current pick is right for
-18 and wrong for 7.</p>
+<p>MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits
+15 kb past the panel's most 5′ tile — but many genes are captured at an
+<em>alternative</em> promoter instead. The bundled gene BEDs now record the two
+cases separately as <code>is_e1</code> and <code>is_alt_e1</code>.</p>
+<p>Even on the widest defensible reading, 88 <code>xs1</code> genes have no tile on any
+basic protein-coding first exon, and this table still emits a row for each
+— an arbitrary internal exon labelled E1. Of the 25 with a canonical E1,
+the current pick is right for 18 and wrong for 7.</p>
 <p><strong>Do not treat <code>FSC.regions.e1only</code> as promoter-proximal for panel data
-until this is resolved.</strong> The bundled gene BEDs now carry a precomputed
-<code>is_e1</code> column (see <code>scripts/build_gene_bed.py</code>) so the selection can be
-made correctly; wiring this table to use it is outstanding.</p>
+until this is resolved.</strong> The assets carry <code>is_e1</code> / <code>is_alt_e1</code> (see
+<code>scripts/build_gene_bed.py</code>) so the selection can be made correctly; wiring
+this table to use them is outstanding.</p>
 <p>WGS is unaffected by (2) — every exon of the canonical transcript is
 present, so exon 1 always exists.</p>
 </div>
@@ -2869,7 +2878,7 @@ present, so exon 1 always exists.</p>
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 00:24:01 UTC"><span class="timeago" datetime="2026-07-31T00:24:01+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 00:24:01 UTC">2026-07-31</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 03:53:30 UTC"><span class="timeago" datetime="2026-07-31T03:53:30+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 03:53:30 UTC">2026-07-31</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
