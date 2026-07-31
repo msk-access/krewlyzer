@@ -439,43 +439,34 @@ The same 0.9.0 band correction applies here — see the warning above.
 
 Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
 
-!!! danger "This table does not currently contain what its name says"
-    Two separate problems, both measured against the `xs1`/`xs2` designs.
-
-    **1. It selects by genomic position, not transcription order.** The filter
-    sorts by `start` and takes the first row per gene. On a minus-strand gene
-    the first exon is at the *highest* coordinate, so this picks the wrong end.
-    [region-MDS](../regulatory/region-mds.md#e1-first-exon-significance) does
-    this correctly — the two features disagree with each other about what E1
-    means.
-
-    **2. "First exon" is not one thing, and the panel often captures a
-    different one.** Genes carry a median of 13 distinct annotated first exons,
-    because alternative promoters are the norm. Against the `xs1` design:
+!!! info "What this table contains, as of 0.9.0"
+    A region qualifies as E1 if it overlaps **either** the canonical
+    transcript's exon 1 (`is_e1`) **or** another basic protein-coding
+    transcript's first exon (`is_alt_e1`). Both are genuine transcription
+    starts, and restricting to the canonical one discards most of a panel:
 
     | tile overlaps… | xs1 / 128 | xs2 / 146 |
     |---|---:|---:|
-    | the canonical (MANE) exon 1 | 25 | 33 |
-    | **plus** another basic protein-coding transcript's exon 1 | 40 | 48 |
-    | any annotated transcript's exon 1, incl. minor isoforms | 79 | 90 |
+    | canonical (MANE) exon 1 only | 25 | 33 |
+    | **either flag — what this table uses** | **40** | **48** |
+    | any transcript's exon 1, incl. minor isoforms | 79 | 90 |
 
-    MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits
-    15 kb past the panel's most 5′ tile — but many genes are captured at an
-    *alternative* promoter instead. The bundled gene BEDs now record the two
-    cases separately as `is_e1` and `is_alt_e1`.
+    Alternative promoters are the norm — a gene carries a median of 13 distinct
+    annotated first exons. Minor and non-coding isoforms are excluded upstream
+    in `scripts/build_gene_bed.py`, because their annotated starts are not
+    evidence of a live promoter; that exclusion is the gap between 40 and 79.
 
-    Even on the widest defensible reading, 88 `xs1` genes have no tile on any
-    basic protein-coding first exon, and this table still emits a row for each
-    — an arbitrary internal exon labelled E1. Of the 25 with a canonical E1,
-    the current pick is right for 18 and wrong for 7.
+    **Genes with neither flag are omitted.** Before 0.9.0 this table emitted one
+    row per gene regardless, so a gene whose exon 1 the panel never captured got
+    an arbitrary internal exon labelled E1 — 98 of 146 rows on a real xs2
+    sample. Dropping them makes the table smaller and true.
 
-    **Do not treat `FSC.regions.e1only` as promoter-proximal for panel data
-    until this is resolved.** The assets carry `is_e1` / `is_alt_e1` (see
-    `scripts/build_gene_bed.py`) so the selection can be made correctly; wiring
-    this table to use them is outstanding.
+    Selection no longer depends on coordinate order, so it is correct on the
+    minus strand. `FSC.regions` now carries `strand`, `is_e1` and `is_alt_e1`
+    so a consumer can tell canonical from alternative.
 
-    WGS is unaffected by (2) — every exon of the canonical transcript is
-    present, so exon 1 always exists.
+    A gene BED without those columns still works and still produces a table,
+    but falls back to the lowest-start region per gene with a warning saying so.
 
 **Usage**:
 ```bash

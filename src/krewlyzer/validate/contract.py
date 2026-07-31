@@ -120,6 +120,10 @@ def label(name: str, reason: str) -> ColumnRule:
 
 _ID = "identifier column; its values are the join key, not a measurement"
 _TISSUE = "fixed tissue/label vocabulary from the bundled atlas"
+_ASSET_ANNOTATION = (
+    "copied from the gene BED asset rather than measured from the sample, "
+    "so it is identical across every sample by construction"
+)
 
 _ENTROPY_COLS = (
     label("label", _TISSUE),
@@ -198,7 +202,19 @@ CONTRACT: Tuple[TableRule, ...] = (
     ),
     TableRule(
         ".FSC.regions.parquet",
-        (label("gene", _ID), metric("total", Vary.BOTH), *_FSC_RATIOS),
+        (
+            label("gene", _ID),
+            # Copied from the gene BED asset, not measured from the sample, so
+            # they are identical across a cohort by construction. Declared
+            # NEVER rather than left undeclared: a reader needs to know these
+            # are annotations, and the degeneracy check would otherwise flag
+            # them every run.
+            label("strand", _ASSET_ANNOTATION),
+            label("is_e1", _ASSET_ANNOTATION),
+            label("is_alt_e1", _ASSET_ANNOTATION),
+            metric("total", Vary.BOTH),
+            *_FSC_RATIOS,
+        ),
         # Same six-channel partition as the gene rollup; the gene table is a
         # sum over these rows, so a partition break here propagates upward.
         checks=("fsc_gene_ratios_sum_to_one",),

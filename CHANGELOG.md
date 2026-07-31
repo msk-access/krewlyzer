@@ -152,6 +152,36 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **`FSC.regions.e1only` selected by coordinate, and emitted a row for every
+  gene whether or not it had one.** `filter_fsc_to_e1` sorted by `start` and
+  took the first row per gene. It had no strand to work with — the temp BED
+  handed to the Rust aggregator was five columns, so the asset's strand and E1
+  flags were discarded at that boundary regardless of what the asset contained.
+
+  On a real xs2 sample, **24 of 146 rows were the canonical exon 1**; the rest
+  were internal exons labelled E1.
+
+  `FSC.regions` now carries `strand`, `is_e1` and `is_alt_e1` end to end
+  (Python `Region` → 8-column temp BED → Rust `GeneRegion` → output), and
+  selection is on the flags: a region qualifies if it overlaps the canonical
+  transcript's exon 1 **or** another basic protein-coding transcript's first
+  exon. Both are real transcription starts, and requiring the canonical one
+  discards most of a panel — 25 of 128 xs1 genes against 40.
+
+  **Genes with neither flag are now omitted rather than back-filled.** The
+  table drops from 146 rows to 48 on that sample, and every remaining row is
+  on an annotated first exon.
+
+  A legacy or custom gene BED still works: the flags are absent, and selection
+  falls back to lowest-start with a warning that it is not strand-aware. `.`
+  rather than `0` marks an unknown flag, so "the source could not say" stays
+  distinguishable from "no".
+
+  **Output-contract impact.** `FSC.regions` gains three columns;
+  `FSC.regions.e1only` changes row count and membership. Neither is read by
+  kreview today (`e1only` is in `NOT_CONSUMED`), so nothing downstream breaks,
+  but any local analysis keyed on the old 146-row shape will.
+
 - **`MDS.gene` row order was non-deterministic.** The writer iterated a
   `HashMap`, and Rust randomises hash iteration per process, so two runs on
   identical input produced byte-different files. A comment above the loop
