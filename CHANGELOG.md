@@ -16,13 +16,14 @@ All notable changes to this project will be documented in this file.
   GENCODE's `exon_number` is transcription-ordered and `MANE_Select` names the
   agreed transcript, so the question is resolved once at build time and written
   into the asset as an explicit `is_e1` column. Canonical-transcript policy is
-  MANE Select → Ensembl canonical → longest CDS; the build **fails** if the GTF
-  carries no MANE tags at all, which is what silently happens with Ensembl's
-  frozen GRCh37 release 87.
+  `--transcript-overrides` → MANE Select → GENCODE basic protein-coding →
+  Ensembl canonical → longest CDS; the build **fails** if the GTF carries no
+  MANE tags at all, which is what silently happens with Ensembl's frozen
+  GRCh37 release 87.
 
   New columns are additive — the first five are unchanged and the existing
   parser produces identical genes and coordinates: `transcript_id`,
-  `exon_number`, `strand`, `is_e1`, `is_first_captured`.
+  `exon_number`, `strand`, `is_e1`, `is_alt_e1`, `is_first_captured`.
 
   Three panel symbols (`H3F3A`, `HIST1H3B`, `PAK7`) were renamed by HGNC and
   match nothing in a current GTF. They are carried by an explicit alias table
@@ -151,6 +152,32 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **`region-mds` E1 was never strand-aware on panel data, and the new assets
+  would have silently disabled it for WGS too.** Two compounding problems.
+
+  The strand fix in `identify_e1_regions()` reads `RegionInfo.strand`, but
+  `parse_gene_bed()` hard-coded `'+'` for the panel format — the 5-column panel
+  BEDs have no strand column to read. So `mds_e1` reported the **last** exon
+  for every minus-strand `xs1`/`xs2` gene, which the docs claimed was fixed.
+
+  Worse, format detection keys on **column count** (5 → panel, 8 → WGS,
+  anything else → warn and treat as panel). Regenerating the assets took them
+  to 11 columns, so the WGS BED would have fallen into the panel branch and
+  lost its strand as well — turning a panel-only defect into a universal one.
+  The existing E1 tests build `RegionInfo` by hand and never call
+  `parse_gene_bed`, so none of them would have failed.
+
+  `region-mds` now recognises the annotated format, reads strand from it, and
+  consumes the precomputed `is_e1` instead of re-deriving it — the build-time
+  flag comes from a GENCODE `exon_number` and is simply better than the
+  coordinate heuristic. Legacy formats still parse; the 5-column one now logs
+  a warning that E1 will not be strand-aware rather than quietly producing a
+  plausible number.
+
+  **Output-contract impact.** `MDS.gene.mds_e1` and `mds_e1_z` change for every
+  minus-strand gene on panel data, and for panel genes whose canonical exon 1
+  is not the most 5' captured region. Not comparable across the 0.9.0 boundary.
+
 - **`region-mds.md` documented the wrong MDS scale, and contradicted itself.**
   The Formulas section showed an unnormalised Shannon entropy and a "~6.0 to
   ~8.0" range — raw bits, which the tool has never emitted — while the clinical

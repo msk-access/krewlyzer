@@ -174,10 +174,20 @@ E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
 | `-`    | **highest** start coordinate |
 
 > [!IMPORTANT]
-> Prior to this fix, strand was ignored and the lowest coordinate always won,
-> so `mds_e1` reported the **last** exon for every minus-strand gene — roughly
-> half of a typical panel. If you have `MDS.gene.tsv` outputs from an earlier
-> version, minus-strand `mds_e1` / `mds_e1_z` values are not comparable.
+> Strand handling depends on which gene BED you feed it, and until 0.9.0 the
+> panel assets carried **no strand column at all** — the parser substituted
+> `+` for every region. So the strand-aware fix applied only to WGS; on
+> `xs1`/`xs2` the lowest coordinate still won, and `mds_e1` reported the
+> **last** exon for every minus-strand gene.
+>
+> The 0.9.0 assets carry strand *and* a precomputed `is_e1`, which
+> `region-mds` now reads directly instead of re-deriving. If you have
+> `MDS.gene.tsv` from an earlier version, minus-strand `mds_e1` / `mds_e1_z`
+> are not comparable — for panels that is **every** minus-strand gene.
+>
+> Feeding a legacy 5-column panel BED still works but now logs a warning
+> saying E1 will not be strand-aware, rather than silently producing a
+> plausible number.
 
 > [!WARNING]
 > **On a targeted panel, "first exon" is ambiguous — genes have several.**
