@@ -11,6 +11,8 @@ on:
       - 'docs/**'
       - 'krewlyzer_all_docs.md'
       - 'scripts/build_all_docs.py'
+      - 'scripts/build_example_report.py'
+      - 'src/krewlyzer/validate/**'
       - '.github/workflows/docs.yml'
   push:
     branches: [ main, develop ]
@@ -35,3 +37,25 @@ jobs:
       # seconds-long job rather than another full environment build.
       - name: Check krewlyzer_all_docs.md matches docs/
         run: python scripts/build_all_docs.py --check
+
+  example-report:
+    name: Example report is current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      # Needs the package: the example is rendered through the real
+      # describe-output code path, not a stored copy of its output.
+      - name: Install
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang libclang-dev
+          pip install uv && uv pip install --system .[test]
+
+      - name: Check docs/reference/example-output-report.md is current
+        run: python scripts/build_example_report.py --check
