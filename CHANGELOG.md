@@ -18,6 +18,19 @@ All notable changes to this project will be documented in this file.
   column or stops being consumed changes the report automatically and the two
   cannot disagree.
 
+  Each table carries a one-line **what it measures** and **which way cancer
+  moves it**, from a new `validate/meaning.py`. Direction is the point: it
+  differs per axis, and getting one backwards is the commonest misreading of
+  this output — `MDS` was documented the opposite of its own threshold table
+  for a year precisely because no test and no report ever stated one. A test
+  requires a direction for every table except `metadata`, which is provenance.
+
+  No thresholds are recorded. Every numeric band examined turned out to be a
+  display default or refuted outright: the documented ATAC/TFBS entropy range
+  flags a perfectly healthy N(167,30) distribution as abnormal. Directions are
+  robust, magnitudes are cohort-specific, and a number in the registry would
+  acquire an authority it has not earned — a test enforces their absence.
+
   **Identifier columns are redacted.** Sample directories here are named for
   the patient and several tables carry the sample id as a *column value*, so
   the first version of this report leaked a real identifier through `Sample`

@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 
 from krewlyzer.core.output_utils import read_table
+from krewlyzer.validate.meaning import MEANINGS, Meaning
 from krewlyzer.validate.contract import (
     COMPLETION_MARKER,
     CONTRACT,
@@ -98,6 +99,9 @@ class TableFacts:
     truncated: bool = False
     columns: List[ColumnFacts] = field(default_factory=list)
     error: Optional[str] = None
+    #: One-line interpretation from `meaning.py`. Absent only if a table were
+    #: added to the contract without one, which a test forbids.
+    meaning: Optional[Meaning] = None
 
     @property
     def family(self) -> str:
@@ -207,6 +211,7 @@ def describe_table(
         path=None,
         consumed=consumed,
         is_completion_marker=rule.suffix == COMPLETION_MARKER,
+        meaning=MEANINGS.get(rule.suffix),
     )
 
     df = read_table(base)
@@ -286,6 +291,28 @@ def render_markdown(report: SampleReport) -> str:
             "sample from the cohort silently — no warning, no error.\n"
         )
 
+    add("## Which way is the tumour signal?\n")
+    add(
+        "Direction differs per axis, and getting one backwards is the commonest "
+        "misreading of this output — `MDS` was documented the wrong way round "
+        "for a year. A single elevated metric is a hypothesis; several agreeing "
+        "across independent axes is evidence.\n"
+    )
+    add("| Table | Measures | Cancer direction |")
+    add("|---|---|---|")
+    for t in present:
+        m = t.meaning
+        if not m or not m.cancer_direction:
+            continue
+        add(f"| `{t.family}` | {m.measures.split('.')[0]}. | {m.cancer_direction} |")
+    add("")
+    add(
+        "*No thresholds are given. Every numeric band examined turned out to be "
+        "a display default or refuted outright — the documented ATAC/TFBS "
+        "entropy range flags a perfectly healthy distribution as abnormal. "
+        "Directions are robust; magnitudes are cohort-specific.*\n"
+    )
+
     add("## Contents\n")
     add("| Table | Rows | Cols | Size | Read downstream |")
     add("|---|---:|---:|---:|:---:|")
@@ -314,6 +341,12 @@ def render_markdown(report: SampleReport) -> str:
             "read downstream" if t.consumed else "not read downstream",
         ]
         add(" · ".join(meta) + "\n")
+        if t.meaning:
+            add(t.meaning.measures + "\n")
+            if t.meaning.cancer_direction:
+                add(f"**Cancer direction:** {t.meaning.cancer_direction}\n")
+            if t.meaning.caveat:
+                add(f"> ⚠️ {t.meaning.caveat}\n")
         if t.truncated:
             add(
                 f"> Column facts sampled from the first {_SCAN_ROWS:,} rows; "
@@ -336,8 +369,13 @@ def render_markdown(report: SampleReport) -> str:
 
     add("---\n")
     add(
-        f"Shape, ranges and examples are measured from this sample. What each "
-        f"column *means* is in the [output reference]({_DOCS}); this report "
-        "deliberately does not restate it, so the two cannot disagree.\n"
+        "Shape, ranges and examples are measured from this sample. The one-line "
+        "interpretation and direction for each table come from the output "
+        f"contract, so they cannot drift from it; the longer narrative — how to "
+        f"use each table, worked examples — is in the [output reference]({_DOCS}).\n"
+    )
+    add(
+        "Values in identifier columns are redacted. Everything else is this "
+        "sample's real data.\n"
     )
     return "\n".join(out)
