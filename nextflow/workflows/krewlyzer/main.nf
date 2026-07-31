@@ -14,6 +14,7 @@ include { INPUT_CHECK } from '../../subworkflows/local/input_check/main'
 include { TOOL_LEVEL } from '../../subworkflows/local/tool_level/main'
 include { KREWLYZER_RUNALL } from '../../modules/local/krewlyzer/runall/main'
 include { FILTER_MAF } from '../../modules/local/krewlyzer/filter_maf/main'
+include { KREWLYZER_VALIDATE_COHORT } from '../../modules/local/krewlyzer/validate_cohort/main'
 
 workflow KREWLYZER {
     take:
@@ -22,6 +23,17 @@ workflow KREWLYZER {
 
     main:
     ch_versions = Channel.empty()
+
+    // Parquet is the default as of 0.9.0, so this only fires when someone has
+    // deliberately excluded it. Both consequences are silent downstream --
+    // every reader there swallows exceptions and yields an empty feature dict
+    // -- so they are worth saying once, where they can still be changed.
+    if (!params.output_format || params.output_format == 'tsv') {
+        log.warn "output_format is '${params.output_format}': this cohort will " +
+                 "contain no Parquet, which is the only format the downstream " +
+                 "consumer reads, and per-sample output validation will be " +
+                 "skipped. Use 'parquet' or 'both' for data destined for modelling."
+    }
 
     // =====================================================
     // 1. PARSE AND VALIDATE SAMPLESHEET
@@ -66,6 +78,7 @@ workflow KREWLYZER {
         ch_ocf = KREWLYZER_RUNALL.out.ocf
         ch_mds = KREWLYZER_RUNALL.out.mds
         ch_features_json = KREWLYZER_RUNALL.out.features_json
+        ch_fingerprints  = KREWLYZER_RUNALL.out.fingerprint.map { _meta, fp -> fp }
         
     } else {
         // =====================================================
@@ -104,7 +117,21 @@ workflow KREWLYZER {
         ch_ocf = TOOL_LEVEL.out.ocf
         ch_mds = TOOL_LEVEL.out.mds
         ch_features_json = Channel.empty()
+        // Tool-level mode has no run-all step to emit fingerprints. Cohort
+        // validation is skipped rather than run on a partial set, which would
+        // report degeneracy findings that are artefacts of the missing samples.
+        ch_fingerprints = Channel.empty()
     }
+
+    // =====================================================
+    // COHORT VALIDATION (gather)
+    // =====================================================
+    // Degeneracy is inherently cross-sample: every sample can pass on its own
+    // while a metric is constant across all of them. This is the gather half
+    // of that check, and it was never wired up -- the module existed and
+    // nothing called it.
+    KREWLYZER_VALIDATE_COHORT(ch_fingerprints.collect(sort: true))
+    ch_versions = ch_versions.mix(KREWLYZER_VALIDATE_COHORT.out.versions)
 
     emit:
     fsc           = ch_fsc
@@ -114,5 +141,7 @@ workflow KREWLYZER {
     ocf           = ch_ocf
     mds           = ch_mds
     features_json = ch_features_json
+    fingerprints  = ch_fingerprints
+    cohort_report = KREWLYZER_VALIDATE_COHORT.out.report
     versions      = ch_versions
 }

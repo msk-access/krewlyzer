@@ -7925,6 +7925,48 @@ results/
 └── {sample}.UXM.tsv                        # Fragment-level methylation
 ```
 
+## Validation Artifacts (Parquet runs)
+
+Written per sample by `run-all`, and gathered once per cohort:
+
+| File | Scope | Contents |
+|------|-------|----------|
+| `{sample}.validation.json` | sample | Contract findings for that sample |
+| `{sample}.fingerprint.json` | sample | ~20 KB summary — a hash and two counts per column |
+| `cohort.validation.json` | cohort | Cross-sample degeneracy findings |
+
+The split exists because **degeneracy is inherently cross-sample**: every sample
+can pass on its own while a metric is constant across all of them. A sample
+directory is ~1.5 GB, so the gather step compares fingerprints rather than
+re-reading tables.
+
+Skipped entirely for tsv-only runs — see `--output_format` in
+[Parameters](parameters.md#output-parameters).
+
+!!! note "Tool-level mode"
+    `--use_runall false` produces no fingerprints, so cohort validation is
+    skipped rather than run on a partial set, which would report degeneracy
+    findings that are artefacts of the missing samples.
+
+---
+
+## Output Changes in 0.9.0
+
+Six output families changed value semantics. Values are **not comparable**
+across this boundary, and PON baselines built on uncollapsed input should be
+rebuilt.
+
+| Output | Change |
+|--------|--------|
+| Every positional family — `WPS`, `OCF`, TFBS/ATAC, `MDS.exon/gene`, `FSC.gene/regions` | Fragment coordinates corrected when R1 is the rightmost mate (~48% of reads on uncollapsed input) |
+| `FSC.gene.*`, `FSC.regions.*` | Size bands aligned to the genome-bin bands; new `ultra_long` and `ultra_long_ratio` |
+| `FSC.regions.*` | New `strand`, `is_e1`, `is_alt_e1` columns |
+| `FSC.regions.e1only.*` | Selects on the E1 flags; genes with no annotated first exon are omitted rather than represented by an internal exon |
+| `MDS.gene.mds_e1`, `mds_e1_z` | Strand-aware on panel data for the first time; `NaN` where the gene has no E1, instead of a fabricated `0.0` |
+| `WPS_background.*` | NRL family is data-dependent; new `nrl_at_band_limit` marks a right-censored estimate |
+
+---
+
 ## Available Modules
 
 | Module | Description |
@@ -8019,8 +8061,24 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--generate_json` | `true` | Generate unified `features.json` for ML pipelines |
-| `--output_format` | `tsv` | Feature output format: `tsv`, `parquet`, or `both`. WPS outputs are always Parquet regardless of this setting. |
+| `--output_format` | `parquet` | Feature output format: `tsv`, `parquet`, or `both`. **Default changed from `tsv` in 0.9.0.** WPS outputs are always Parquet regardless of this setting. |
 | `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
+| `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
+| `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
+| `--gc_correct` | `true` | Apply GC bias correction during extraction. |
+| `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
+
+!!! warning "Selecting `tsv` produces a cohort the downstream consumer cannot read"
+    kreview reads **Parquet only**. A tsv-only run additionally **skips output
+    validation**, because the contract describes the Parquet surface.
+
+    Both failures are silent: every reader downstream swallows exceptions and
+    yields an empty feature dict, so a cohort produced with the default simply
+    does not appear — no error, no warning, no missing-file complaint.
+
+    This is why the default changed to `parquet` in 0.9.0. Set `tsv` or
+    `both` only when you need the text tables; the pipeline logs a warning at
+    start whenever the selection excludes Parquet.
 
 ## See Also
 
