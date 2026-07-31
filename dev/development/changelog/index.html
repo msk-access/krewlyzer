@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -2955,6 +2955,40 @@
 <p>All notable changes to this project will be documented in this file.</p>
 <h2 id="unreleased">[Unreleased]</h2>
 <h3 id="added">Added</h3>
+<ul>
+<li><strong><code>scripts/build_gene_bed.py</code>, and gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> assets rebuilt from GENCODE.</strong>
+  The bundled gene BEDs could not answer "which exon is first". The panel
+  assets (<code>xs1</code>/<code>xs2</code>) had five columns and <strong>no strand at all</strong>; the WGS asset
+  numbered exons in <em>coordinate</em> order, so MTOR — minus strand — carried
+  <code>exon_num 0</code> at its lowest coordinate while its real exon 1 is at its
+  highest. Anything deriving E1 from those files got the wrong end of every
+  minus-strand gene.</li>
+</ul>
+<p>GENCODE's <code>exon_number</code> is transcription-ordered and <code>MANE_Select</code> names the
+  agreed transcript, so the question is resolved once at build time and written
+  into the asset as an explicit <code>is_e1</code> column. Canonical-transcript policy is
+  MANE Select → Ensembl canonical → longest CDS; the build <strong>fails</strong> if the GTF
+  carries no MANE tags at all, which is what silently happens with Ensembl's
+  frozen GRCh37 release 87.</p>
+<p>New columns are additive — the first five are unchanged and the existing
+  parser produces identical genes and coordinates: <code>transcript_id</code>,
+  <code>exon_number</code>, <code>strand</code>, <code>is_e1</code>, <code>is_first_captured</code>.</p>
+<p>Three panel symbols (<code>H3F3A</code>, <code>HIST1H3B</code>, <code>PAK7</code>) were renamed by HGNC and
+  match nothing in a current GTF. They are carried by an explicit alias table
+  and asserted, because the failure mode is a gene silently losing its
+  annotation rather than an error.</p>
+<p><strong>E1 is far sparser on a panel than it looks.</strong> Only <strong>25 of 128</strong> <code>xs1</code>
+  genes (33 of 146 for <code>xs2</code>) have a probe tile overlapping the canonical
+  transcript's exon 1. MSK-ACCESS tiles coding hotspot exons, and exon 1 is
+  usually 5′UTR and outside the capture design — AKT1's sits 15 kb past the
+  panel's most 5′ tile. <code>is_first_captured</code> marks the most 5′ <em>captured</em> tile
+  in transcription order, which exists for every gene, but an internal exon is
+  not a promoter proxy and must not be read as E1. Both are emitted so the
+  modelling step can weigh them separately.</p>
+<p>This also bounds the existing <code>filter_fsc_to_e1</code> defect: of the 25 <code>xs1</code>
+  genes that do have a real E1 tile, its lowest-start pick is correct for 18
+  and wrong for 7 (6 minus-strand). The larger issue is the other 103, for
+  which it emits a row labelled E1 that is an arbitrary internal exon.</p>
 <ul>
 <li><strong><code>krewlyzer validate-output</code></strong> — checks a finished output directory against
   the contract its consumers rely on. Three layers, in increasing order of what

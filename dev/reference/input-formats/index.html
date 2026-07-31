@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -2015,6 +2015,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#bundled-assets-carry-four-extra-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bundled assets carry four extra columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#used-by_2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2942,6 +2953,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#bundled-assets-carry-four-extra-columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bundled assets carry four extra columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#used-by_2" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3460,6 +3482,54 @@
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>chr17   7676707 7676863 TP53    exon2
 <a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>chr7    140719327   140724764   BRAF    exon15
 </code></pre></div>
+<h3 id="bundled-assets-carry-four-extra-columns">Bundled assets carry four extra columns</h3>
+<p>The gene BEDs shipped in <code>src/krewlyzer/data/genes/</code> are generated from a
+GENCODE GTF by <code>scripts/build_gene_bed.py</code> and extend the format:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>chrom  start  end  gene  name  transcript_id  exon_number  strand  is_e1  is_first_captured
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>transcript_id</code></td>
+<td>Canonical transcript: MANE Select → Ensembl canonical → longest CDS</td>
+</tr>
+<tr>
+<td><code>exon_number</code></td>
+<td><strong>Transcription</strong> order from the GTF, not coordinate order</td>
+</tr>
+<tr>
+<td><code>strand</code></td>
+<td><code>+</code> / <code>-</code>; absent from the panel assets before 0.9.0</td>
+</tr>
+<tr>
+<td><code>is_e1</code></td>
+<td>Row overlaps the canonical transcript's exon 1</td>
+</tr>
+<tr>
+<td><code>is_first_captured</code></td>
+<td>Most 5′ row for this gene, in transcription order</td>
+</tr>
+</tbody>
+</table>
+<p>The first five columns are unchanged, so a custom 4- or 5-column file still
+works and readers indexing <code>gene</code>/<code>name</code> are unaffected.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>is_e1</code> and <code>is_first_captured</code> are not the same thing</p>
+<p>On a targeted panel they usually differ. Only 25 of 128 <code>xs1</code> genes have a
+tile overlapping the canonical exon 1 — the panel tiles coding hotspots,
+and exon 1 is generally 5′UTR and uncaptured. <code>is_first_captured</code> always
+exists, but an internal exon is not a promoter proxy. Use <code>is_e1</code> when the
+promoter-proximal interpretation matters.</p>
+<p><code>exon_number</code> deserves the same caution when reading <em>older</em> assets: the
+pre-0.9.0 WGS <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> numbered exons by coordinate, so its <code>exon_num 0</code> was the
+last exon for every minus-strand gene.</p>
+</div>
 <h3 id="used-by_2">Used By</h3>
 <ul>
 <li>Custom gene files for panel <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr></li>
@@ -3468,7 +3538,7 @@
 <h2 id="arms-bed">Arms <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr></h2>
 <p>Chromosome arm annotations for <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> analysis.</p>
 <h3 id="format_3">Format</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>chrom    start    end    arm
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>chrom    start    end    arm
 </code></pre></div>
 <table>
 <thead>
@@ -3506,10 +3576,10 @@
 <p>Valid examples: <code>1p</code>, <code>1q</code>, <code>22p</code>, <code>22q</code><br>
 Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <h3 id="example_2">Example</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>chr1    0   125000000   1p
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>chr1    125000000   249250621   1q
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>chr2    0   93300000    2p
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>chr2    93300000    243199373   2q
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>chr1    0   125000000   1p
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>chr1    125000000   249250621   1q
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>chr2    0   93300000    2p
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>chr2    93300000    243199373   2q
 </code></pre></div>
 <h3 id="used-by_3">Used By</h3>
 <ul>
@@ -3519,7 +3589,7 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <h2 id="wps-anchors"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Anchors</h2>
 <p>BED6 format for <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchor regions (<abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>, <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites, etc.).</p>
 <h3 id="format_4">Format</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>chrom    start    end    name    score    strand
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>chrom    start    end    name    score    strand
 </code></pre></div>
 <table>
 <thead>
@@ -3563,9 +3633,9 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 </tbody>
 </table>
 <h3 id="example_3">Example</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>chr1    11873   14409   DDX11L1_TSS 0   +
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>chr1    29553   31109   MIR1302-2_TSS   0   +
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>chr17   7676594 7676707 TP53_TSS    0   -
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>chr1    11873   14409   DDX11L1_TSS 0   +
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>chr1    29553   31109   MIR1302-2_TSS   0   +
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>chr17   7676594 7676707 TP53_TSS    0   -
 </code></pre></div>
 <h3 id="used-by_4">Used By</h3>
 <ul>
@@ -3576,7 +3646,7 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <h2 id="region-bed">Region <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr></h2>
 <p>Labeled genomic regions for <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>, <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>, and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> analysis.</p>
 <h3 id="format_5">Format</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>chrom    start    end    label
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>chrom    start    end    label
 </code></pre></div>
 <table>
 <thead>
@@ -3610,9 +3680,9 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 </tbody>
 </table>
 <h3 id="example_4">Example</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>chr1    100 500 Liver
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>chr1    600 900 Lung
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>chr2    1000    1500    Blood
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>chr1    100 500 Liver
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>chr1    600 900 Lung
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>chr2    1000    1500    Blood
 </code></pre></div>
 <h3 id="used-by_5">Used By</h3>
 <ul>
@@ -3624,7 +3694,7 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <h2 id="gc-factors-tsv"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factors <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></h2>
 <p>Tab-separated correction factors for <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias normalization.</p>
 <h3 id="format_6">Format</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>length_bin    gc_pct    factor
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>length_bin    gc_pct    factor
 </code></pre></div>
 <table>
 <thead>
@@ -3653,11 +3723,11 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 </tbody>
 </table>
 <h3 id="example_5">Example</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>length_bin  gc_pct  factor
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>10  40  1.05
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>10  41  1.03
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>10  42  0.98
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>11  40  1.02
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>length_bin  gc_pct  factor
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>10  40  1.05
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>10  41  1.03
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>10  42  0.98
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>11  40  1.02
 </code></pre></div>
 <h3 id="notes_1">Notes</h3>
 <ul>
@@ -3672,19 +3742,19 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <hr>
 <h2 id="compression-support">Compression Support</h2>
 <p>All <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> files can be gzip-compressed (<code>.bed.gz</code>). Krewlyzer automatically detects and handles compression.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Both work</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Both work</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed.gz
 </code></pre></div>
 <hr>
 <h2 id="validation">Validation</h2>
 <p>Validate your files before analysis:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Validate specific files</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--gene-bed<span class="w"> </span>my_genes.bed
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed<span class="w"> </span>--wps-anchors<span class="w"> </span>my_anchors.bed
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="c1"># Validate bundled assets</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Validate specific files</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--gene-bed<span class="w"> </span>my_genes.bed
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed<span class="w"> </span>--wps-anchors<span class="w"> </span>my_anchors.bed
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="c1"># Validate bundled assets</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19
 </code></pre></div>
 <p>If validation fails, you'll see:
 - Expected format and columns
@@ -3715,7 +3785,7 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="January 27, 2026 18:22:53 UTC"><span class="timeago" datetime="2026-01-27T18:22:53+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="January 27, 2026 18:22:53 UTC">2026-01-27</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 00:24:01 UTC"><span class="timeago" datetime="2026-07-31T00:24:01+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 00:24:01 UTC">2026-07-31</span>
   </span>
 
     
