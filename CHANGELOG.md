@@ -135,6 +135,16 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **`region-mds.md` documented the wrong MDS scale, and contradicted itself.**
+  The Formulas section showed an unnormalised Shannon entropy and a "~6.0 to
+  ~8.0" range — raw bits, which the tool has never emitted — while the clinical
+  table further down the same page quoted ~0.95–1.0. `motif_utils.rs` divides by
+  `log2(256) = 8`, so MDS has always been in `[0, 1]`.
+
+  Anyone who built a threshold from the formula section is out by a factor of 8.
+  The divisor is now pinned in `validate/claims.py`, so the doc and the code
+  cannot drift apart again silently.
+
 - **Fragment coordinates were wrong whenever R1 was the rightmost mate.** The
   BED writer computed `pos() + |tlen|`, correct only when R1 is leftmost. For
   the other orientation the interval was shifted right by roughly

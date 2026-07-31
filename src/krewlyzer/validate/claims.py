@@ -193,6 +193,21 @@ CLAIMS: Tuple[Claim, ...] = (
         "mfsd.md claimed 5 in two places while the code used 2, so a worked "
         "example printed a KS_Valid the tool cannot produce",
     ),
+    # -- MDS ----------------------------------------------------------------
+    Claim(
+        "mds.entropy_normaliser",
+        "8.0",
+        RustPattern(
+            "motif_utils.rs",
+            r"entropy\s*/\s*([\d.]+)\s*\n\}",
+            "MDS entropy normaliser",
+        ),
+        "log2(256): divides raw 4-mer entropy so MDS lands in [0, 1]. "
+        "region-mds.md documented the raw 6.0-8.0 bit scale in its formula "
+        "section while its own clinical table quoted 0.95-1.0 -- the page "
+        "disagreed with itself, and a threshold built from the former is out "
+        "by a factor of 8",
+    ),
     # -- UXM ----------------------------------------------------------------
     # These were 0.5/0.5 at the call site for a year, which made the X class
     # unreachable because the backend tests >= methy first.
