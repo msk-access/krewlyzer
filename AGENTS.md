@@ -70,6 +70,10 @@ simply call the tools in turn. Full module map: `.agents/rules/architecture.md`.
 | Before blessing a cohort | `krewlyzer validate-output RESULTS_DIR` |
 | PHI rules touched | `bash scripts/check_phi_guard.sh` |
 
+Order matters: rebuild the extension before `pytest`, or you are testing the
+previous binary. What each gate is blind to, and why a passing test proves
+nothing until it has failed, is in `.agents/rules/validation-gates.md`.
+
 `cargo test` runs on macOS in CI: `krewlyzer_core` is a pyo3 `extension-module`
 cdylib and does not link libpython, so the test binary cannot resolve Python
 symbols at link time on Linux.
