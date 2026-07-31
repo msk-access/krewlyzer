@@ -10,7 +10,9 @@
 
 - **Rules** live in `.agents/rules/*.md` and are read on demand, not every turn.
   `architecture.md` has the Rust/Python boundary table; `development.md` has the
-  build and QC commands; `output-contract.md` has what downstream relies on.
+  build and QC commands; `output-contract.md` has what downstream relies on;
+  `validation-gates.md` has the order to run the gates in and what each one is
+  blind to.
 - **Hooks** are git-level and tool-agnostic, in `.githooks/`, so they apply
   whether a human, Claude, Cursor or Codex drives the commit. They are opt-in
   per clone — `git config core.hooksPath .githooks` — because git offers no way
