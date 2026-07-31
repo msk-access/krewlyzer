@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **FSD was never PON-normalised under `--output-format parquet`.** Under
+  `tsv` the bins came out as log2 ratios; under `parquet`, raw counts — same
+  column names, no warning either way. **0.9.0 makes parquet the Nextflow
+  default**, which would have turned this from affecting nobody into affecting
+  every pipeline run.
+
+  Two independent bugs, each sufficient on its own:
+
+  1. The caller guarded on `outputs.fsd.exists()`, where `outputs.fsd` names
+     the `.tsv`. The Rust writer honours `--output-format`, so under parquet no
+     `.tsv` was ever written and the whole post-processing block — PON
+     normalisation included — was skipped. Same class as `b77909e`, missed
+     site; now uses `resolve_table_path`.
+  2. `_write_fsd_output` read back through `read_table`, which is
+     **parquet-first**: given `x.FSD.tsv` it prefers `x.FSD.parquet` — the raw
+     table the single-pass writer emitted *before* normalisation. So the
+     log-ratios were computed, logged as `41 arms normalized`, and then
+     overwritten with the raw counts.
+
+  `FSD PON: no arms matched` is now a warning rather than a debug line: zero
+  arms means the output is raw counts wearing the same column names as
+  log-ratios, and nothing downstream can tell the difference.
+
 - **The WPS background PON baseline was never fitted.** `pon/build.py` looked
   for columns named `nrl`/`nucleosome_repeat_length` and
   `periodicity`/`period_score`; `WPS_background` writes `nrl_bp` and
