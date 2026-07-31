@@ -174,6 +174,18 @@ All notable changes to this project will be documented in this file.
   a warning that E1 will not be strand-aware rather than quietly producing a
   plausible number.
 
+  `mds_e1` now distinguishes three states instead of two: a value, `0.0` for
+  "E1 exists but had no fragments", and **`NaN` for "this gene has no E1 at
+  all"**. The last previously collapsed into `0.0` — the worst available
+  choice, since MDS lives in `[0, 1]` and lower means more abnormal, so a
+  fabricated `0.0` read as maximal tumour signal. It affects 88 of 128 `xs1`
+  genes, and every gene when a strandless legacy BED is supplied.
+
+  A legacy 5-column gene BED still parses and still produces per-exon MDS, but
+  `region-mds` now **refuses to derive E1 from it** — without strand the
+  heuristic returns the last exon for every minus-strand gene. `mds_e1` is
+  `NaN` for that input, with a warning naming the fix.
+
   **Output-contract impact.** `MDS.gene.mds_e1` and `mds_e1_z` change for every
   minus-strand gene on panel data, and for panel genes whose canonical exon 1
   is not the most 5' captured region. Not comparable across the 0.9.0 boundary.

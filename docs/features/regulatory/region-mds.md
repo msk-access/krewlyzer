@@ -214,8 +214,20 @@ E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
 > WGS is unaffected: every exon of the canonical transcript is present.
 
 > [!NOTE]
-> `mds_e1 = 0.0` means E1 itself had no qualifying fragments. It no longer
-> silently falls through to the next exon with coverage.
+> `mds_e1` has three distinguishable states:
+>
+> | value | meaning |
+> |---|---|
+> | a number | E1 exists and had fragments |
+> | `0.0` | E1 exists but had **no** fragments |
+> | `NaN` | this gene has **no E1 region at all** |
+>
+> The `NaN` case used to collapse into `0.0`, which is the worst available
+> choice — MDS lives in `[0, 1]` and *lower means more abnormal*, so a
+> fabricated `0.0` reads as maximal tumour signal. It is common rather than
+> rare: 88 of 128 `xs1` genes have no tile on any annotated first exon.
+>
+> It never falls through to the next exon with coverage.
 
 !!! tip
     Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
