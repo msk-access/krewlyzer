@@ -192,6 +192,24 @@ def test_every_act_of_the_report_structure_is_covered():
         assert expected in suffixes, f"no chart for {expected}"
 
 
+def test_a_drawn_chart_renders_its_title():
+    """Titles were only emitted on the not-drawn branch.
+
+    Every figure that worked arrived without a heading, leaving the reader to
+    infer from the caption what they were looking at.
+    """
+    from krewlyzer.validate.htmlreport import _figure_html
+
+    drawn = plots.fragment_size_density(
+        pd.DataFrame({"region": ["chr1"], "65-69": [10.0], "70-74": [20.0]})
+    )
+    assert drawn.drawn
+    assert "Fragment size distribution" in _figure_html(drawn, 0)
+
+    absent = plots.fragment_size_density(None)
+    assert "Fragment size distribution" in _figure_html(absent, 1)
+
+
 # ---------------------------------------------------------------------------
 # mFSD: the zero that is not a measurement
 # ---------------------------------------------------------------------------

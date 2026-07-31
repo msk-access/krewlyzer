@@ -26,7 +26,15 @@ All notable changes to this project will be documented in this file.
   absent — most of the interpretable surface — so the report leads with a
   banner and marks each affected column.
 
-  Plotly, self-contained (~5 MB, no network). The theme follows the docs site,
+  Sixteen charts across the five-act structure from the output EDA notebooks,
+  including three taken from the existing notebook's specialised panels: the
+  per-region FSD heatmap, which shows whether the size shift is uniform across
+  chromosome arms or concentrated on a few — something the summed density curve
+  cannot; the WPS foreground profile around TSS and CTCF anchors; and the GC
+  correction curve, since everything GC-corrected downstream is multiplied by
+  it.
+
+  Plotly, self-contained (~5.6 MB, no network). The theme follows the docs site,
   with an Auto/Light/Dark toggle that the figures respect. `plotly` is an
   optional `[report]` extra; without it the command still runs and each chart
   states that it is missing.

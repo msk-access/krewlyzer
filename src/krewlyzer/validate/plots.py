@@ -845,6 +845,225 @@ def methylation_composition(uxm: Optional[pd.DataFrame]) -> Chart:
     return Chart(suffix, title, caption, fig)
 
 
+def fsd_region_heatmap(fsd: Optional[pd.DataFrame]) -> Chart:
+    """Per-arm size distributions, which the summed density curve hides.
+
+    Taken from the existing output EDA notebook, whose per-region heatmap is
+    the one thing a genome-wide density trace cannot show: whether the size
+    shift is uniform or concentrated on particular arms.
+    """
+    suffix, title = ".FSD.parquet", "Fragment size by region"
+    caption = (
+        "Each row is a chromosome arm, each column a 5 bp size bin, normalised "
+        "within the row so arms of different depth are comparable. The summed "
+        "curve above answers *what* the size distribution is; this answers "
+        "whether it is the same everywhere."
+    )
+    go = _plotly()
+    if go is None:
+        return _no(suffix, title, caption, _NO_PLOTLY)
+    if fsd is None or fsd.empty or "region" not in fsd.columns:
+        return _no(suffix, title, caption, "FSD table absent or has no region column")
+
+    bins = sorted(
+        (int(m.group(1)), str(c))
+        for c in fsd.columns
+        if (m := re.fullmatch(r"(\d+)-(\d+)", str(c)))
+    )
+    if len(bins) < 2:
+        return _no(suffix, title, caption, "fewer than two size-bin columns")
+    if len(fsd) < 2:
+        return _no(suffix, title, caption, "only one region — nothing to compare")
+
+    labels = [b for _, b in bins]
+    matrix = fsd[labels].apply(pd.to_numeric, errors="coerce")
+    totals = matrix.sum(axis=1)
+    usable = totals > 0
+    if not usable.any():
+        return _no(suffix, title, caption, "every region is empty")
+    # Row-normalise: without it the heatmap shows sequencing depth per arm,
+    # not the size distribution, and the two look identical at a glance.
+    fractions = matrix[usable].div(totals[usable], axis=0)
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=fractions.values,
+            x=[b for b, _ in bins],
+            y=fsd.loc[usable, "region"].astype(str),
+            colorscale="Reds",
+            hovertemplate="%{y}<br>%{x} bp<br>%{z:.4f} of that region<extra></extra>",
+            colorbar=dict(title=dict(text="fraction", side="right"), thickness=10),
+        )
+    )
+    fig.update_layout(
+        **_layout(
+            go,
+            max(260, 13 * int(usable.sum()) + 90),
+            xaxis_title="fragment length (bp)",
+            showlegend=False,
+        )
+    )
+    fig.update_xaxes(range=[min(b for b, _ in bins), 600])
+    fig.update_yaxes(automargin=True, tickfont=dict(size=9))
+    dropped = int((~usable).sum())
+    if dropped:
+        caption += f" {dropped} region(s) with no fragments are omitted."
+    return Chart(suffix, title, caption, fig)
+
+
+def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
+    """Act 3.1 — the foreground WPS profile, averaged over anchors.
+
+    The audit withdrew every *derived* WPS metric because each was constant.
+    The stacking itself was always sound, and this is the panel that was
+    explicitly still worth plotting.
+    """
+    suffix, title = ".WPS.parquet", "Protection around TSS and CTCF"
+    caption = (
+        "Windowed protection score averaged across anchors, by anchor type. A "
+        "positioned nucleosome shields the DNA beneath it, so the dip at the "
+        "anchor traces the nucleosome-depleted region at an active promoter, "
+        "and the flanking ridges are the nucleosomes either side of it."
+    )
+    go = _plotly()
+    if go is None:
+        return _no(suffix, title, caption, _NO_PLOTLY)
+    if wps is None or "wps_nuc" not in getattr(wps, "columns", []):
+        return _no(suffix, title, caption, "WPS absent")
+
+    import numpy as np
+
+    groups = (
+        wps.groupby("region_type") if "region_type" in wps.columns else [("all", wps)]
+    )
+    fig = go.Figure()
+    drawn_any = False
+    for i, (name, frame) in enumerate(groups):
+        stacked = np.array(
+            [
+                np.asarray(v, dtype=float)
+                for v in frame["wps_nuc"]
+                if v is not None and len(v)
+            ]
+        )
+        if stacked.size == 0:
+            continue
+        mean = np.nanmean(stacked, axis=0)
+        if np.allclose(mean, mean[0]):
+            continue
+        centre = len(mean) // 2
+        fig.add_trace(
+            go.Scatter(
+                x=list(range(-centre, len(mean) - centre)),
+                y=mean,
+                mode="lines",
+                name=str(name),
+                line=dict(color=ACCENT if i == 0 else OPPOSE, width=1.8),
+                # str() first: the groupby key is Any, and interpolating
+                # bytes would render b'TSS' in the tooltip.
+                hovertemplate=(
+                    f"{str(name)}<br>%{{x}} bp<br>WPS %{{y:.2f}}<extra></extra>"
+                ),
+            )
+        )
+        drawn_any = True
+    if not drawn_any:
+        return _no(suffix, title, caption, "no anchor group has a varying profile")
+
+    fig.add_hline(y=0, line=dict(color=MUTED, width=1))
+    fig.add_vline(
+        x=0,
+        line=dict(color=MUTED, width=1, dash="dash"),
+        annotation_text="anchor",
+        annotation_position="top",
+        annotation_font_size=10,
+    )
+    fig.update_layout(
+        **_layout(
+            go,
+            300,
+            xaxis_title="position relative to anchor (bp)",
+            yaxis_title="mean WPS",
+            showlegend=True,
+            legend=dict(orientation="h", y=1.12, x=0),
+        ),
+    )
+    return Chart(suffix, title, caption, fig)
+
+
+def gc_correction_curve(factors: Optional[pd.DataFrame]) -> Chart:
+    """Is the GC model sane? Every corrected count depends on the answer."""
+    suffix, title = ".correction_factors.parquet", "GC correction factors"
+    caption = (
+        "The weight applied to each fragment before it is counted, by GC "
+        "content. Everything GC-corrected downstream — FSC, gene-level "
+        "coverage — is multiplied by this, so a wild curve propagates "
+        "everywhere. Values near 1 mean little bias to correct."
+    )
+    go = _plotly()
+    if go is None:
+        return _no(suffix, title, caption, _NO_PLOTLY)
+    if factors is None or "correction_factor" not in getattr(factors, "columns", []):
+        return _no(suffix, title, caption, "correction factors absent")
+    if "gc_percent" not in factors.columns:
+        return _no(suffix, title, caption, "no gc_percent column")
+
+    work = (
+        factors[["gc_percent", "correction_factor"]]
+        .apply(pd.to_numeric, errors="coerce")
+        .dropna()
+    )
+    if work.empty:
+        return _no(suffix, title, caption, "no finite correction factors")
+    if _is_constant(work["correction_factor"]):
+        value = work["correction_factor"].iloc[0]
+        return _no(
+            suffix,
+            title,
+            caption,
+            f"every factor is {value:.4g} — no GC correction was fitted",
+        )
+
+    summary = work.groupby("gc_percent")["correction_factor"].agg(
+        ["median", "min", "max"]
+    )
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=list(summary.index) + list(summary.index[::-1]),
+            y=list(summary["max"]) + list(summary["min"][::-1]),
+            fill="toself",
+            fillcolor="rgba(239,85,82,0.13)",
+            line=dict(width=0),
+            hoverinfo="skip",
+            showlegend=False,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=summary.index,
+            y=summary["median"],
+            mode="lines",
+            line=dict(color=ACCENT, width=2),
+            hovertemplate="GC %{x}%<br>median factor %{y:.3f}<extra></extra>",
+        )
+    )
+    fig.add_hline(
+        y=1.0,
+        line=dict(color=MUTED, width=1, dash="dash"),
+        annotation_text="no correction",
+        annotation_position="right",
+        annotation_font_size=10,
+    )
+    fig.update_layout(
+        **_layout(
+            go, 260, xaxis_title="GC content (%)", yaxis_title="correction factor"
+        )
+    )
+    caption += " The band spans the range across fragment-length bins."
+    return Chart(suffix, title, caption, fig)
+
+
 def _first_present(tables: Dict, *suffixes: str):
     """The first suffix that resolved to a frame, and which one it was.
 
@@ -870,6 +1089,7 @@ def build_charts(tables: Dict) -> List[Chart]:
     return [
         # Act 1 -- fragment size
         fragment_size_density(g(".FSD.parquet")),
+        fsd_region_heatmap(g(".FSD.parquet")),
         size_channel_composition(g(".FSC.parquet")),
         fsc_short_long_by_bin(g(".FSC.parquet")),
         short_long_spread(g(".FSR.parquet")),
@@ -880,12 +1100,15 @@ def build_charts(tables: Dict) -> List[Chart]:
         gene_level_mds(g(".MDS.gene.parquet")),
         # Act 3 -- nucleosome positioning. Withdrawn from earlier reporting
         # because every derived metric was constant; reinstated in 0.9.0.
+        wps_anchor_profile(g(".WPS.parquet")),
         nucleosome_profile(g(".WPS_background.parquet")),
         # Act 4 -- tissue and accessibility
         tissue_shedding(ocf_suffix, ocf),
         accessibility_by_cancer_type(g(".ATAC.parquet")),
         top_transcription_factors(g(".TFBS.parquet")),
         methylation_composition(g(".UXM.parquet")),
+        # Diagnostic: everything GC-corrected depends on this curve.
+        gc_correction_curve(g(".correction_factors.parquet")),
     ]
 
 

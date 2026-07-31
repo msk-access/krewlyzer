@@ -209,6 +209,9 @@ section > h2 code { font-size: 1.15rem; font-weight: 500; }
 
 /* ---------- figures ---------- */
 figure { margin: 1.25rem 0; }
+figure .figtitle {
+  font: 500 1rem/1.35 Roboto, sans-serif; margin: 0 0 .35rem; color: var(--fg);
+}
 figure .cap { color: var(--fg-soft); font-size: .89rem; margin: .5rem 0 0; max-width: 72ch; }
 .plot { border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
 .nodraw { border: 1px dashed var(--rule); border-radius: 6px; padding: .85rem 1rem; color: var(--fg-faint); font-size: .89rem; background: var(--bg-sunk); }
@@ -322,10 +325,15 @@ def _axes_html(verdict: Verdict) -> str:
 
 
 def _figure_html(chart: Chart, index: int, with_runtime: bool = False) -> str:
+    # A drawn chart needs its title too. An earlier version rendered the title
+    # only on the not-drawn branch, so every figure that worked arrived without
+    # a heading -- the caption alone left the reader to infer what they were
+    # looking at.
+    head = f'<h3 class="figtitle">{escape(chart.title)}</h3>'
     cap = f'<figcaption class="cap">{escape(chart.caption)}</figcaption>'
     if not chart.drawn:
         return (
-            f'<figure><div class="nodraw"><strong>{escape(chart.title)} — not drawn.</strong> '
+            f'<figure>{head}<div class="nodraw"><strong>Not drawn.</strong> '
             f"{escape(chart.reason or '')}</div>{cap}</figure>"
         )
     import plotly.io as pio
@@ -337,7 +345,7 @@ def _figure_html(chart: Chart, index: int, with_runtime: bool = False) -> str:
         div_id=f"plot-{index}",
         config={"displaylogo": False, "responsive": True, "scrollZoom": True},
     )
-    return f'<figure><div class="plot">{div}</div>{cap}</figure>'
+    return f'<figure>{head}<div class="plot">{div}</div>{cap}</figure>'
 
 
 def _whw(meaning) -> str:
