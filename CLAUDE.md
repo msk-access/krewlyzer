@@ -13,6 +13,10 @@
   build and QC commands; `output-contract.md` has what downstream relies on;
   `validation-gates.md` has the order to run the gates in and what each one is
   blind to.
+- **Shared memory** is in `.agents/memory/` — conventions, the modelling
+  philosophy, and dated decision records. It holds only what no rule, test or
+  doc already states; `.agents/memory/README.md` says what belongs there and
+  what belongs in your own per-user memory instead.
 - **Hooks** are git-level and tool-agnostic, in `.githooks/`, so they apply
   whether a human, Claude, Cursor or Codex drives the commit. They are opt-in
   per clone — `git config core.hooksPath .githooks` — because git offers no way
