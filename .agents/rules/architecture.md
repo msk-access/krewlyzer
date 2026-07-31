@@ -131,3 +131,33 @@ _core.configure_threads(num_threads)  # Sets Rayon thread pool size
 | `aggregate_by_gene()` | Counts fragments per gene/region with GC correction |
 | Output | `FSC.gene.tsv`, `FSC.regions.tsv` |
 | Uses | On-target GC factors for panel mode |
+
+---
+
+## Gene BED assets (`scripts/build_gene_bed.py`)
+
+Build-time, not runtime. The GTF is parsed once when the asset is regenerated;
+nothing in `src/` or `rust/` reads a GTF, and no GENCODE dependency exists at
+run time.
+
+**Canonical transcript policy**, decided here and nowhere else:
+
+1. MANE Select
+2. Ensembl canonical
+3. Longest CDS
+
+The build **fails** if the GTF carries no MANE tags. Ensembl's GRCh37 line is
+frozen at release 87 (2016) and predates MANE, so it would silently fall
+through to longest-CDS for every gene. GRCh37 assets must come from GENCODE's
+`lift37`.
+
+**Anything derived from strand or exon order belongs in the asset, not the
+runtime.** `is_e1` is precomputed for exactly this reason: deriving "first
+exon" from coordinates at run time gets every minus-strand gene wrong, and did
+— in two separate implementations that disagreed with each other. The runtime
+should read the column, not re-derive the answer.
+
+Panel gene symbols are matched through an explicit alias table
+(`LEGACY_GENE_ALIASES`); three MSK-ACCESS symbols were renamed by HGNC and
+match nothing in a current GTF. An unmatched gene is an error, not a warning,
+because the failure mode is silent loss of annotation.
