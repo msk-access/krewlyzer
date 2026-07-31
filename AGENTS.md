@@ -80,6 +80,11 @@ symbols at link time on Linux.
 
 ## Conventions
 
+- **Shared context** beyond these invariants lives in `.agents/rules/`
+  (normative, read on demand) and `.agents/memory/` (conventions, modelling
+  philosophy, and decision records). Anything machine- or operator-specific
+  belongs in your own memory directory, not the repo.
+
 - Git Flow (`docs/development/release-guide.md`): branch off `develop`, one
   `fix/*` or `feature/*` per concern, conventional commits, docs and CHANGELOG
   in the **same** commit as the change they describe.
