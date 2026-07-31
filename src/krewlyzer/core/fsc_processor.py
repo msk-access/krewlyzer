@@ -360,13 +360,27 @@ def aggregate_by_gene(
     if gene_bed_path and Path(gene_bed_path).exists():
         use_gene_bed = Path(gene_bed_path)
     else:
-        # Write genes dict to temp BED for Rust
+        # Write genes dict to temp BED for Rust.
+        #
+        # Eight columns, not five. The extra three carry strand and the two E1
+        # flags through to the Rust aggregator; a 5-column file dropped them
+        # here, which is why FSC could not do strand-aware E1 no matter what
+        # the asset contained. `.` marks unknown -- a legacy gene BED or a
+        # target BED parsed on the fly has no flags, and that must stay
+        # distinguishable from a genuine "false".
+        def _flag(value: Optional[bool]) -> str:
+            return "." if value is None else ("1" if value else "0")
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False) as f:
             for gene, regions in genes.items():
                 for region in regions:
                     name = getattr(region, "name", gene)
+                    strand = getattr(region, "strand", None) or "."
                     f.write(
-                        f"{region.chrom}\t{region.start}\t{region.end}\t{gene}\t{name}\n"
+                        f"{region.chrom}\t{region.start}\t{region.end}\t{gene}\t"
+                        f"{name}\t{strand}\t"
+                        f"{_flag(getattr(region, 'is_e1', None))}\t"
+                        f"{_flag(getattr(region, 'is_alt_e1', None))}\n"
                     )
             use_gene_bed = Path(f.name)
 
@@ -691,8 +705,63 @@ def filter_fsc_to_e1(
     n_input = len(df)
     n_genes = df["gene"].nunique()
 
-    # Sort by gene + genomic position, take first per gene (E1 = lowest start)
-    df_sorted = df.sort_values(["gene", "chrom", "start"])
+    # E1 selection: prefer the precomputed flags, fall back to coordinates.
+    #
+    # A region qualifies if it overlaps the canonical transcript's exon 1
+    # (`is_e1`) **or** another basic protein-coding transcript's first exon
+    # (`is_alt_e1`). Both are genuine transcription starts, and on a targeted
+    # panel restricting to the canonical one throws most of the signal away:
+    # for xs1, 25 of 128 genes have a canonical-E1 tile while 40 have a tile on
+    # some basic protein-coding first exon. Alternative promoters are the norm
+    # -- genes carry a median of 13 distinct annotated first exons.
+    #
+    # Minor and non-coding isoforms are deliberately excluded upstream, in
+    # `scripts/build_gene_bed.py`: their annotated starts are not evidence of a
+    # live promoter, and counting them would inflate the set to 79 of 128 with
+    # regions that are not promoter-proximal in any real sense.
+    #
+    # Genes with neither flag are **dropped**, not back-filled with their most
+    # 5' region. That region is usually an internal exon, and labelling it E1
+    # asserts promoter proximity that is not there -- the defect this replaces.
+    flag_cols = [c for c in ("is_e1", "is_alt_e1") if c in df.columns]
+    flagged = (
+        df[df[flag_cols].isin(["1", 1, True]).any(axis=1)]
+        if flag_cols
+        else df.iloc[0:0]
+    )
+
+    if not flagged.empty:
+        source = flagged
+        n_kept = flagged["gene"].nunique()
+        logger.info(
+            "E1 filter: %d of %d gene(s) have a region on an annotated first "
+            "exon; %d gene(s) have none and are omitted rather than back-filled "
+            "with an internal exon",
+            n_kept,
+            n_genes,
+            n_genes - n_kept,
+        )
+    else:
+        # Fallback: lowest start per gene. Retained so a legacy or custom gene
+        # BED still produces a table, but it is a positional guess, not an E1.
+        source = df
+        if flag_cols:
+            logger.warning(
+                "E1 filter: %s carries E1 flags but no region is marked. "
+                "Falling back to the lowest-start region per gene, which "
+                "ignores strand and is wrong for minus-strand genes.",
+                fsc_regions_path.name,
+            )
+        else:
+            logger.warning(
+                "E1 filter: no is_e1/is_alt_e1 columns in %s, so E1 is the "
+                "lowest-start region per gene. That ignores strand and picks "
+                "the LAST exon of every minus-strand gene. Regenerate the gene "
+                "BED with scripts/build_gene_bed.py to fix this.",
+                fsc_regions_path.name,
+            )
+
+    df_sorted = source.sort_values(["gene", "chrom", "start"])
     e1_df = df_sorted.groupby("gene", as_index=False).first()
 
     # Preserve original column order, write output
@@ -712,8 +781,16 @@ def filter_fsc_to_e1(
     )
     result_path = output_base.parent / (output_base.name + ext)
 
+    # `n_genes` is the count *before* filtering; reporting it beside the output
+    # row count reads as though every gene survived, which is now usually false.
     logger.info(
-        f"FSC E1-only filter: {n_input} regions → {len(e1_df)} E1 regions ({n_genes} genes) → {result_path.name}"
+        "FSC E1-only filter: %d regions across %d genes → %d E1 region(s) "
+        "across %d gene(s) → %s",
+        n_input,
+        n_genes,
+        len(e1_df),
+        e1_df["gene"].nunique(),
+        result_path.name,
     )
 
     return result_path

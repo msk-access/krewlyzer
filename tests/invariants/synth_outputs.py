@@ -93,6 +93,13 @@ def build_frame(rule: TableRule, sample_idx: int) -> pd.DataFrame:
             [_normalised(len(names), sample_idx * 7 + i) for i in range(n)]
         )
         frame = {"gene": [f"GENE{i}" for i in range(n)], "total": rng.random(n) * 500}
+        if suffix.startswith(".FSC.regions"):
+            # Annotations copied from the gene BED asset. Constant across
+            # samples by construction, which is why the contract declares them
+            # vary=NEVER; a region may carry both flags or neither.
+            frame["strand"] = ["+" if i % 2 == 0 else "-" for i in range(n)]
+            frame["is_e1"] = ["1" if i % 3 == 0 else "0" for i in range(n)]
+            frame["is_alt_e1"] = ["1" if i % 4 == 0 else "0" for i in range(n)]
         for i, name in enumerate(names):
             frame[f"{name}_ratio"] = ratios[:, i]
         frame["normalized_depth"] = rng.random(n) * 3
