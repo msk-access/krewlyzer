@@ -174,29 +174,60 @@ E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
 | `-`    | **highest** start coordinate |
 
 > [!IMPORTANT]
-> Prior to this fix, strand was ignored and the lowest coordinate always won,
-> so `mds_e1` reported the **last** exon for every minus-strand gene — roughly
-> half of a typical panel. If you have `MDS.gene.tsv` outputs from an earlier
-> version, minus-strand `mds_e1` / `mds_e1_z` values are not comparable.
+> Strand handling depends on which gene BED you feed it, and until 0.9.0 the
+> panel assets carried **no strand column at all** — the parser substituted
+> `+` for every region. So the strand-aware fix applied only to WGS; on
+> `xs1`/`xs2` the lowest coordinate still won, and `mds_e1` reported the
+> **last** exon for every minus-strand gene.
+>
+> The 0.9.0 assets carry strand *and* a precomputed `is_e1`, which
+> `region-mds` now reads directly instead of re-deriving. If you have
+> `MDS.gene.tsv` from an earlier version, minus-strand `mds_e1` / `mds_e1_z`
+> are not comparable — for panels that is **every** minus-strand gene.
+>
+> Feeding a legacy 5-column panel BED still works but now logs a warning
+> saying E1 will not be strand-aware, rather than silently producing a
+> plausible number.
 
 > [!WARNING]
-> **On a targeted panel, "first exon" usually means "first *captured* exon".**
-> MSK-ACCESS tiles coding hotspot exons, and the canonical transcript's exon 1
-> is generally 5′UTR and outside the capture design — only 25 of 128 `xs1`
-> genes (33 of 146 for `xs2`) have a tile overlapping it. AKT1's exon 1 sits
-> 15 kb past the panel's most 5′ tile.
+> **On a targeted panel, "first exon" is ambiguous — genes have several.**
+> Alternative promoters are the norm: a gene carries a median of 13 distinct
+> annotated first exons. The panel captures the *canonical* (MANE) exon 1 for
+> only 25 of 128 `xs1` genes, but another basic protein-coding transcript's
+> first exon for 15 more — so 40 have a genuine transcription start captured,
+> and 88 have none.
 >
-> Strand-correct selection therefore returns the most 5′ *captured* region,
-> which for most genes is an internal exon rather than a promoter proxy. The
-> bundled gene BEDs now distinguish the two explicitly — `is_e1` for a genuine
-> exon 1 overlap, `is_first_captured` for the most 5′ tile — so a model can
-> weigh them separately instead of treating every `mds_e1` as promoter signal.
+> The bundled gene BEDs record all three cases separately, so a model can weigh
+> them rather than treating every `mds_e1` as promoter signal:
+>
+> | column | meaning |
+> |---|---|
+> | `is_e1` | overlaps the canonical transcript's exon 1 |
+> | `is_alt_e1` | overlaps another basic protein-coding transcript's exon 1 |
+> | `is_first_captured` | most 5′ captured tile; always exists, often internal |
+>
+> Which transcript counts as canonical is configurable — see
+> `--transcript-overrides` in `scripts/build_gene_bed.py` — because a panel
+> designed around specific clinical transcripts should not have MANE imposed
+> on it.
 >
 > WGS is unaffected: every exon of the canonical transcript is present.
 
 > [!NOTE]
-> `mds_e1 = 0.0` means E1 itself had no qualifying fragments. It no longer
-> silently falls through to the next exon with coverage.
+> `mds_e1` has three distinguishable states:
+>
+> | value | meaning |
+> |---|---|
+> | a number | E1 exists and had fragments |
+> | `0.0` | E1 exists but had **no** fragments |
+> | `NaN` | this gene has **no E1 region at all** |
+>
+> The `NaN` case used to collapse into `0.0`, which is the worst available
+> choice — MDS lives in `[0, 1]` and *lower means more abnormal*, so a
+> fabricated `0.0` reads as maximal tumour signal. It is common rather than
+> rare: 88 of 128 `xs1` genes have no tile on any annotated first exon.
+>
+> It never falls through to the next exon with coverage.
 
 !!! tip
     Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.

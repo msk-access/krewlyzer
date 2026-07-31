@@ -16,32 +16,49 @@ All notable changes to this project will be documented in this file.
   GENCODE's `exon_number` is transcription-ordered and `MANE_Select` names the
   agreed transcript, so the question is resolved once at build time and written
   into the asset as an explicit `is_e1` column. Canonical-transcript policy is
-  MANE Select → Ensembl canonical → longest CDS; the build **fails** if the GTF
-  carries no MANE tags at all, which is what silently happens with Ensembl's
-  frozen GRCh37 release 87.
+  `--transcript-overrides` → MANE Select → GENCODE basic protein-coding →
+  Ensembl canonical → longest CDS; the build **fails** if the GTF carries no
+  MANE tags at all, which is what silently happens with Ensembl's frozen
+  GRCh37 release 87.
 
   New columns are additive — the first five are unchanged and the existing
   parser produces identical genes and coordinates: `transcript_id`,
-  `exon_number`, `strand`, `is_e1`, `is_first_captured`.
+  `exon_number`, `strand`, `is_e1`, `is_alt_e1`, `is_first_captured`.
 
   Three panel symbols (`H3F3A`, `HIST1H3B`, `PAK7`) were renamed by HGNC and
   match nothing in a current GTF. They are carried by an explicit alias table
   and asserted, because the failure mode is a gene silently losing its
   annotation rather than an error.
 
-  **E1 is far sparser on a panel than it looks.** Only **25 of 128** `xs1`
-  genes (33 of 146 for `xs2`) have a probe tile overlapping the canonical
-  transcript's exon 1. MSK-ACCESS tiles coding hotspot exons, and exon 1 is
-  usually 5′UTR and outside the capture design — AKT1's sits 15 kb past the
-  panel's most 5′ tile. `is_first_captured` marks the most 5′ *captured* tile
-  in transcription order, which exists for every gene, but an internal exon is
-  not a promoter proxy and must not be read as E1. Both are emitted so the
-  modelling step can weigh them separately.
+  **"First exon" is not one thing.** Genes carry a median of 13 distinct
+  annotated first exons, because alternative promoters are the norm, so a
+  single boolean cannot describe what a tile is. Three columns:
+
+  | tile overlaps… | column | xs1 / 128 | xs2 / 146 |
+  |---|---|---:|---:|
+  | canonical transcript's exon 1 | `is_e1` | 25 | 33 |
+  | another basic protein-coding transcript's exon 1 | `is_alt_e1` | +15 | +15 |
+  | most 5′ captured tile (always exists) | `is_first_captured` | 128 | 146 |
+
+  MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits 15 kb
+  past the panel's most 5′ tile — but many genes are captured at an
+  *alternative* promoter instead, which a MANE-only view misses entirely. 40
+  `xs1` genes have a tile on some basic protein-coding first exon; 88 have
+  none. `is_first_captured` exists for every gene but is frequently an internal
+  exon, which is not a promoter proxy and must not be read as E1.
+
+  Which transcript is canonical is configurable per gene via
+  `--transcript-overrides` (a `gene<TAB>transcript_id` TSV), because a panel
+  designed around specific clinical transcripts should not have MANE imposed on
+  it. A transcript that is absent from the GTF, or belongs to a different gene,
+  is a **hard error** — a silent fall back to MANE would produce an asset that
+  disagrees with the file the operator wrote.
 
   This also bounds the existing `filter_fsc_to_e1` defect: of the 25 `xs1`
-  genes that do have a real E1 tile, its lowest-start pick is correct for 18
-  and wrong for 7 (6 minus-strand). The larger issue is the other 103, for
-  which it emits a row labelled E1 that is an arbitrary internal exon.
+  genes with a canonical E1 tile, its lowest-start pick is correct for 18 and
+  wrong for 7 (6 minus-strand). The larger issue is the 88 with no captured
+  first exon at all, for which it emits a row labelled E1 that is an arbitrary
+  internal exon.
 
 - **`krewlyzer validate-output`** — checks a finished output directory against
   the contract its consumers rely on. Three layers, in increasing order of what
@@ -135,6 +152,52 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **`MDS.gene` row order was non-deterministic.** The writer iterated a
+  `HashMap`, and Rust randomises hash iteration per process, so two runs on
+  identical input produced byte-different files. A comment above the loop
+  claimed "stable, reproducible output ordering" — it sorted regions *within* a
+  gene, not the genes themselves. `fsc.rs` already sorted its genes; this did
+  not. Verified on a real sample: identical SHA-256 across two runs after the
+  fix.
+
+- **`region-mds` E1 was never strand-aware on panel data, and the new assets
+  would have silently disabled it for WGS too.** Two compounding problems.
+
+  The strand fix in `identify_e1_regions()` reads `RegionInfo.strand`, but
+  `parse_gene_bed()` hard-coded `'+'` for the panel format — the 5-column panel
+  BEDs have no strand column to read. So `mds_e1` reported the **last** exon
+  for every minus-strand `xs1`/`xs2` gene, which the docs claimed was fixed.
+
+  Worse, format detection keys on **column count** (5 → panel, 8 → WGS,
+  anything else → warn and treat as panel). Regenerating the assets took them
+  to 11 columns, so the WGS BED would have fallen into the panel branch and
+  lost its strand as well — turning a panel-only defect into a universal one.
+  The existing E1 tests build `RegionInfo` by hand and never call
+  `parse_gene_bed`, so none of them would have failed.
+
+  `region-mds` now recognises the annotated format, reads strand from it, and
+  consumes the precomputed `is_e1` instead of re-deriving it — the build-time
+  flag comes from a GENCODE `exon_number` and is simply better than the
+  coordinate heuristic. Legacy formats still parse; the 5-column one now logs
+  a warning that E1 will not be strand-aware rather than quietly producing a
+  plausible number.
+
+  `mds_e1` now distinguishes three states instead of two: a value, `0.0` for
+  "E1 exists but had no fragments", and **`NaN` for "this gene has no E1 at
+  all"**. The last previously collapsed into `0.0` — the worst available
+  choice, since MDS lives in `[0, 1]` and lower means more abnormal, so a
+  fabricated `0.0` read as maximal tumour signal. It affects 88 of 128 `xs1`
+  genes, and every gene when a strandless legacy BED is supplied.
+
+  A legacy 5-column gene BED still parses and still produces per-exon MDS, but
+  `region-mds` now **refuses to derive E1 from it** — without strand the
+  heuristic returns the last exon for every minus-strand gene. `mds_e1` is
+  `NaN` for that input, with a warning naming the fix.
+
+  **Output-contract impact.** `MDS.gene.mds_e1` and `mds_e1_z` change for every
+  minus-strand gene on panel data, and for panel genes whose canonical exon 1
+  is not the most 5' captured region. Not comparable across the 0.9.0 boundary.
+
 - **`region-mds.md` documented the wrong MDS scale, and contradicted itself.**
   The Formulas section showed an unnormalised Shannon entropy and a "~6.0 to
   ~8.0" range — raw bits, which the tool has never emitted — while the clinical

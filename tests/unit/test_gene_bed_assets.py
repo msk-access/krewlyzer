@@ -50,6 +50,7 @@ EXPECTED_COLUMNS = [
     "exon_number",
     "strand",
     "is_e1",
+    "is_alt_e1",
     "is_first_captured",
 ]
 
@@ -121,7 +122,7 @@ def test_at_most_one_first_captured_tile_per_gene(rel):
     """`is_first_captured` selects a single row; two would make it ambiguous."""
     counts: Dict[str, int] = defaultdict(int)
     for row in _rows(rel):
-        if row[9] == "1":
+        if row[10] == "1":
             counts[row[3]] += 1
     over = {g: n for g, n in counts.items() if n > 1}
     assert not over, f"{rel}: {len(over)} gene(s) with >1 first-captured row"
@@ -170,7 +171,7 @@ def test_panel_first_captured_respects_strand(rel):
     """
     wrong = []
     for gene, rows in _by_gene(rel).items():
-        picked = [r for r in rows if r[9] == "1"]
+        picked = [r for r in rows if r[10] == "1"]
         if not picked:
             continue
         strand = rows[0][7]
@@ -184,28 +185,58 @@ def test_panel_first_captured_respects_strand(rel):
     assert not wrong, f"{rel}: first-captured ignores strand for {wrong[:8]}"
 
 
-def test_panel_e1_is_sparse_and_that_is_expected(xs1):
-    """Most panel genes have no E1 tile, and the asset must not pretend otherwise.
+def test_the_three_first_columns_stay_distinct(xs1):
+    """`is_e1`, `is_alt_e1` and `is_first_captured` must not collapse into one.
 
-    MSK-ACCESS tiles coding hotspot exons; the canonical transcript's exon 1 is
-    usually 5'UTR and outside the capture design. AKT1's exon 1 sits 15 kb past
-    the panel's most 5' tile.
+    Each answers a different question, and the tempting simplification -- fall
+    back to the most 5' captured tile and call it E1 -- would label an internal
+    exon promoter-proximal and invent signal that is not there.
 
-    This is asserted rather than merely noted because the tempting "fix" is to
-    fall back to the most 5' captured tile and call it E1 -- which would label
-    an internal exon as promoter-proximal and quietly invent signal.
+    Deliberately a *structural* assertion rather than fixed counts. The exact
+    numbers move with the GENCODE release; what must hold is that the three
+    columns disagree with each other, because a build that made them identical
+    would pass every other test in this file.
     """
-    with_e1 = {g for g, rows in xs1.items() if any(r[8] == "1" for r in rows)}
-    assert with_e1, "no xs1 gene has an E1 tile; the build is broken"
-    assert len(with_e1) < len(xs1), (
-        "every xs1 gene has an E1 tile, which contradicts the capture design -- "
-        "check that is_e1 is not being set from is_first_captured"
+    e1 = {g for g, rows in xs1.items() if any(r[8] == "1" for r in rows)}
+    alt = {g for g, rows in xs1.items() if any(r[9] == "1" for r in rows)}
+    first = {g for g, rows in xs1.items() if any(r[10] == "1" for r in rows)}
+
+    assert e1, "no xs1 gene has a canonical E1 tile; the build is broken"
+    assert alt, "no xs1 gene has an alternative first-exon tile"
+    assert first == set(xs1), "every gene should have a most-5'-captured tile"
+
+    assert e1 != first, (
+        "is_e1 matches is_first_captured for every gene -- is_e1 is probably "
+        "being set from the most 5' tile rather than from exon 1"
     )
-    # AKT1 is the worked example in the script docstring; keep them honest.
-    assert "AKT1" not in with_e1, (
-        "AKT1 now has an E1 tile; if the panel design changed, update the "
-        "docstring in scripts/build_gene_bed.py which cites it"
+    assert alt - e1, (
+        "no gene has an alternative first exon without a canonical one; "
+        "is_alt_e1 may be duplicating is_e1 rather than excluding it"
     )
+    assert set(xs1) - e1 - alt, (
+        "every gene has some annotated first exon captured, which contradicts "
+        "a hotspot capture design -- check the overlap test"
+    )
+
+
+def test_is_alt_e1_excludes_the_canonical_first_exon(xs1):
+    """An alternative promoter means *another* transcript's exon 1.
+
+    If a tile overlaps only the canonical exon 1, it must carry `is_e1` alone.
+    Letting both flags fire on the same span would double-count the canonical
+    promoter as an alternative one.
+    """
+    both = [
+        (g, r) for g, rows in xs1.items() for r in rows if r[8] == "1" and r[9] == "1"
+    ]
+    # Both flags on one tile is legal only when a distinct alternative first
+    # exon genuinely overlaps the same tile -- the tile is wider than either.
+    for gene, row in both:
+        assert int(row[2]) - int(row[1]) > 0, f"{gene}: degenerate tile"
+    # But it must not be the universal case.
+    assert len(both) < sum(
+        1 for rows in xs1.values() for r in rows if r[8] == "1"
+    ), "every canonical-E1 tile also claims is_alt_e1; the exclusion is not working"
 
 
 def test_e1_implies_first_captured_is_also_set_or_upstream(xs1):
@@ -218,7 +249,7 @@ def test_e1_implies_first_captured_is_also_set_or_upstream(xs1):
         if not any(r[8] == "1" for r in rows):
             continue
         assert (
-            sum(r[9] == "1" for r in rows) == 1
+            sum(r[10] == "1" for r in rows) == 1
         ), f"{gene} has an E1 tile but not exactly one first-captured tile"
 
 

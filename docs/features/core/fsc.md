@@ -449,24 +449,30 @@ Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted
     this correctly — the two features disagree with each other about what E1
     means.
 
-    **2. Most panel genes have no E1 to select.** MSK-ACCESS tiles coding
-    hotspot exons; the canonical transcript's exon 1 is usually 5′UTR and
-    outside the capture design.
+    **2. "First exon" is not one thing, and the panel often captures a
+    different one.** Genes carry a median of 13 distinct annotated first exons,
+    because alternative promoters are the norm. Against the `xs1` design:
 
-    | assay | genes | with a tile overlapping canonical exon 1 |
+    | tile overlaps… | xs1 / 128 | xs2 / 146 |
     |---|---:|---:|
-    | xs1 | 128 | **25** |
-    | xs2 | 146 | **33** |
+    | the canonical (MANE) exon 1 | 25 | 33 |
+    | **plus** another basic protein-coding transcript's exon 1 | 40 | 48 |
+    | any annotated transcript's exon 1, incl. minor isoforms | 79 | 90 |
 
-    AKT1's exon 1 sits 15 kb past the panel's most 5′ tile. For the 103 `xs1`
-    genes with no E1 tile, this table still emits a row — an arbitrary internal
-    exon labelled E1. Of the 25 that do have one, the current pick is right for
-    18 and wrong for 7.
+    MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits
+    15 kb past the panel's most 5′ tile — but many genes are captured at an
+    *alternative* promoter instead. The bundled gene BEDs now record the two
+    cases separately as `is_e1` and `is_alt_e1`.
+
+    Even on the widest defensible reading, 88 `xs1` genes have no tile on any
+    basic protein-coding first exon, and this table still emits a row for each
+    — an arbitrary internal exon labelled E1. Of the 25 with a canonical E1,
+    the current pick is right for 18 and wrong for 7.
 
     **Do not treat `FSC.regions.e1only` as promoter-proximal for panel data
-    until this is resolved.** The bundled gene BEDs now carry a precomputed
-    `is_e1` column (see `scripts/build_gene_bed.py`) so the selection can be
-    made correctly; wiring this table to use it is outstanding.
+    until this is resolved.** The assets carry `is_e1` / `is_alt_e1` (see
+    `scripts/build_gene_bed.py`) so the selection can be made correctly; wiring
+    this table to use them is outstanding.
 
     WGS is unaffected by (2) — every exon of the canonical transcript is
     present, so exon 1 always exists.

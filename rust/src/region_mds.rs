@@ -90,13 +90,29 @@ impl RegionMdsStats {
 /// Detect gene BED format by column count
 #[derive(Debug, Clone, Copy)]
 pub enum GeneBedFormat {
-    /// Panel format: chrom, start, end, gene, name (5 columns)
+    /// Legacy panel format: chrom, start, end, gene, name (5 columns).
+    ///
+    /// Carries no strand, so E1 cannot be resolved correctly from it -- see
+    /// the note in `parse_gene_bed`.
     Panel,
-    /// WGS format: chrom, start, end, ens_id, refseq_id, gene, exon_num, strand (8 columns)
+    /// Legacy WGS format: chrom, start, end, ens_id, refseq_id, gene,
+    /// exon_num, strand (8 columns). `exon_num` here is *coordinate*-ordered
+    /// and must not be used to identify the first exon.
     Wgs,
+    /// Current format from `scripts/build_gene_bed.py` (11 columns):
+    /// chrom, start, end, gene, name, transcript_id, exon_number, strand,
+    /// is_e1, is_alt_e1, is_first_captured.
+    ///
+    /// `exon_number` is transcription-ordered and `is_e1` is precomputed, so
+    /// nothing here has to be re-derived at runtime.
+    Annotated,
     /// Unknown format
     Unknown,
 }
+
+/// Column count of [`GeneBedFormat::Annotated`], i.e. of `HEADER` in
+/// `scripts/build_gene_bed.py`. Detection is by width, so the two must agree.
+const ANNOTATED_COLUMNS: usize = 11;
 
 /// Parse gene BED file and return regions with format-aware key generation
 fn parse_gene_bed(
@@ -118,10 +134,19 @@ fn parse_gene_bed(
         // Detect format on first data line
         if matches!(detected_format, GeneBedFormat::Unknown) {
             detected_format = match cols.len() {
+                ANNOTATED_COLUMNS => GeneBedFormat::Annotated,
+                // No strand column exists in this format. identify_e1_regions()
+                // refuses to derive E1 from it and warns there; warning here too
+                // would report one condition twice.
                 5 => GeneBedFormat::Panel,
                 8 => GeneBedFormat::Wgs,
-                _ => {
-                    warn!("Gene BED has {} columns, treating as Panel format", cols.len());
+                n => {
+                    warn!(
+                        "Gene BED has {} columns, which matches no known format; \
+                         treating as legacy panel (gene=col4, name=col5, no \
+                         strand). E1 will not be strand-aware.",
+                        n
+                    );
                     GeneBedFormat::Panel
                 }
             };
@@ -132,22 +157,35 @@ fn parse_gene_bed(
         let start: u64 = cols[1].parse().unwrap_or(0);
         let end: u64 = cols[2].parse().unwrap_or(0);
 
-        let (gene, name, strand) = match detected_format {
+        // `prebuilt_e1` is Some only for the annotated format, where the flag
+        // was resolved at build time against a GENCODE transcript. For the two
+        // legacy formats it stays None and E1 is derived from coordinates.
+        let (gene, name, strand, prebuilt_e1) = match detected_format {
+            GeneBedFormat::Annotated => {
+                // gene=col3, name=col4, strand=col7, is_e1=col8
+                let gene = cols.get(3).unwrap_or(&"").to_string();
+                let name = cols.get(4).unwrap_or(&"").to_string();
+                let strand = cols.get(7).and_then(|s| s.chars().next()).unwrap_or('+');
+                (gene, name, strand, Some(cols.get(8) == Some(&"1")))
+            }
             GeneBedFormat::Panel => {
-                // Panel: gene=col3, name=col4
+                // Legacy panel: gene=col3, name=col4. No strand column exists,
+                // so '+' is a placeholder, not a claim -- warned about above.
                 (
                     cols.get(3).unwrap_or(&"").to_string(),
                     cols.get(4).unwrap_or(&"").to_string(),
                     '+',
+                    None,
                 )
             }
             GeneBedFormat::Wgs => {
-                // WGS: gene=col5, name=gene:exonN, strand=col7
+                // Legacy WGS: gene=col5, name=gene:exonN, strand=col7.
+                // col6 is coordinate-ordered and deliberately not used for E1.
                 let gene = cols.get(5).unwrap_or(&"").to_string();
                 let exon_num = cols.get(6).unwrap_or(&"0");
                 let strand = cols.get(7).and_then(|s| s.chars().next()).unwrap_or('+');
                 let name = format!("{}:exon{}", gene, exon_num);
-                (gene, name, strand)
+                (gene, name, strand, None)
             }
             GeneBedFormat::Unknown => {
                 continue;
@@ -169,7 +207,10 @@ fn parse_gene_bed(
             name,
             strand,
             chrom_id,
-            is_e1: false,  // Set later by identify_e1_regions()
+            // For the annotated format this is final; identify_e1_regions()
+            // leaves it alone. For the legacy formats it is a placeholder that
+            // identify_e1_regions() fills in from coordinates and strand.
+            is_e1: prebuilt_e1.unwrap_or(false),
         });
     }
 
@@ -184,7 +225,37 @@ fn parse_gene_bed(
 /// has stronger cancer signal than whole-gene averages.
 /// 
 /// Returns the count of E1 regions identified.
-fn identify_e1_regions(regions: &mut [RegionInfo]) -> usize {
+fn identify_e1_regions(regions: &mut [RegionInfo], format: GeneBedFormat) -> usize {
+    // If the asset already carries is_e1, trust it and derive nothing.
+    //
+    // The build-time flag comes from a GENCODE transcript's exon_number, which
+    // is the actual answer. The coordinate heuristic below is only a proxy: it
+    // returns the most 5' *captured* region, which on a targeted panel is
+    // usually an internal exon rather than the first one.
+    let prebuilt = regions.iter().filter(|r| r.is_e1).count();
+    if prebuilt > 0 {
+        debug!(
+            "Using {} precomputed E1 region(s) from the gene BED; not deriving \
+             from coordinates",
+            prebuilt
+        );
+        return prebuilt;
+    }
+
+    // The legacy 5-column panel format carries no strand, so every gene reads
+    // as plus-stranded and the coordinate heuristic returns the LAST exon for
+    // every minus-strand one -- about half a typical panel. Deriving anyway
+    // would emit a plausible, wrong mds_e1; leaving is_e1 unset makes it NaN,
+    // which is honest. Per-region MDS is unaffected and still written.
+    if matches!(format, GeneBedFormat::Panel) {
+        warn!(
+            "Gene BED has no strand column, so E1 cannot be determined: mds_e1 \
+             will be NaN for every gene. Per-exon MDS is unaffected. Regenerate \
+             the asset with scripts/build_gene_bed.py to get E1."
+        );
+        return 0;
+    }
+
     // Group by gene and find the TRANSCRIPTIONALLY first exon.
     //
     // E1 is defined by transcription order, not genomic coordinate order:
@@ -193,6 +264,8 @@ fn identify_e1_regions(regions: &mut [RegionInfo]) -> usize {
     //
     // Ignoring strand (the historical behaviour) silently reported the LAST
     // exon as E1 for every minus-strand gene, i.e. roughly half of any panel.
+    // Note this can only be as good as the strand it is given: the legacy
+    // 5-column panel format has none, so every gene there looks plus-stranded.
     let mut gene_first: HashMap<String, (usize, u64)> = HashMap::new();
 
     for (idx, region) in regions.iter().enumerate() {
@@ -329,7 +402,7 @@ pub fn run_region_mds(
 
     // Parse gene BED
     let mut chrom_map: HashMap<String, u32> = HashMap::new();
-    let (mut regions, _format) = parse_gene_bed(Path::new(&gene_bed_path), &mut chrom_map)
+    let (mut regions, gene_bed_format) = parse_gene_bed(Path::new(&gene_bed_path), &mut chrom_map)
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to parse gene BED: {}", e)))?;
 
     if regions.is_empty() {
@@ -337,7 +410,7 @@ pub fn run_region_mds(
     }
 
     // Identify E1 regions (mark is_e1 = true)
-    let n_e1 = identify_e1_regions(&mut regions);
+    let n_e1 = identify_e1_regions(&mut regions, gene_bed_format);
     info!("  E1 regions: {}", n_e1);
 
     // Apply E1 filtering if requested
@@ -579,8 +652,19 @@ fn write_gene_output(
 
     writeln!(file, "gene\tn_exons\tn_fragments\tmds_mean\tmds_e1\tmds_std")?;
 
-    for (gene, regions_data) in &gene_data {
-        // Sort by genomic position for stable, reproducible output ordering.
+    // Gene order must be deterministic. `gene_data` is a HashMap and Rust
+    // randomises its iteration order per process, so without this two runs on
+    // identical input produce byte-different files -- which defeats any
+    // checksum-based reproducibility check and makes diffs between samples
+    // meaningless noise. `fsc.rs::write_gene_output` already sorts; this did
+    // not, and the comment below claimed a stability it only provided *within*
+    // a gene.
+    let mut gene_names: Vec<&String> = gene_data.keys().collect();
+    gene_names.sort();
+
+    for gene in gene_names {
+        let regions_data = &gene_data[gene];
+        // Sort by genomic position for stable ordering *within* the gene.
         // NOTE: E1 is NOT re-derived here -- it is read from the `is_e1` flag
         // set by identify_e1_regions(), which is strand-aware. Re-deriving it
         // by coordinate (the historical behaviour) both ignored strand and
@@ -601,11 +685,21 @@ fn write_gene_output(
         let n_fragments: u64 = sorted_data.iter().map(|(_, _, _, c)| c).sum();
         let mds_mean = mds_values.iter().sum::<f64>() / mds_values.len() as f64;
         // Strict E1: the region flagged by identify_e1_regions() for this gene.
-        // 0.0 means "E1 had no fragments", NOT "the next exon's value".
+        //
+        // Three distinguishable states, deliberately:
+        //   value  -- E1 exists and had fragments
+        //   0.0    -- E1 exists and had no fragments
+        //   NaN    -- this gene has NO E1 region at all
+        //
+        // The last case used to collapse into 0.0, which is the worst possible
+        // choice: MDS lives in [0, 1] and *lower means more abnormal*, so a
+        // fabricated 0.0 reads as maximal tumour signal. It is common, not
+        // rare -- 88 of 128 xs1 genes have no tile on any annotated first exon,
+        // and a legacy 5-column BED cannot determine E1 for any gene.
         let mds_e1 = sorted_data.iter()
             .find(|(idx, _, _, _)| regions[*idx].is_e1)
             .map(|(_, _, mds, _)| *mds)
-            .unwrap_or(0.0);
+            .unwrap_or(f64::NAN);
 
         let mds_std = if mds_values.len() > 1 {
             let variance = mds_values.iter()
@@ -636,6 +730,124 @@ fn write_gene_output(
 mod tests {
     use super::*;
 
+    /// Write a gene BED to a temp file and parse it, so the format-detection
+    /// path is actually exercised.
+    ///
+    /// The existing E1 tests build `RegionInfo` by hand and never reach
+    /// `parse_gene_bed`. That gap let a real regression through: adding
+    /// columns to the bundled assets took them from 8 to 11 fields, which
+    /// matched no arm of the detector and silently fell back to the legacy
+    /// panel branch -- where strand is a hardcoded '+', so strand-aware E1
+    /// stopped working for WGS without a single test failing.
+    fn parse_str(body: &str) -> (Vec<RegionInfo>, GeneBedFormat) {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("krewlyzer_gene_bed_{}.bed", body.len()));
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(body.as_bytes()).unwrap();
+        drop(f);
+        let mut map = HashMap::new();
+        let out = parse_gene_bed(&path, &mut map).unwrap();
+        let _ = std::fs::remove_file(&path);
+        out
+    }
+
+    #[test]
+    fn the_annotated_format_is_detected_by_its_width() {
+        let body = "#chrom\tstart\tend\tgene\tname\ttranscript_id\texon_number\t\
+strand\tis_e1\tis_alt_e1\tis_first_captured\n\
+chr1\t100\t200\tTP53\ttile_a\tENST1\t1\t-\t1\t0\t1\n";
+        let (regions, fmt) = parse_str(body);
+        assert!(
+            matches!(fmt, GeneBedFormat::Annotated),
+            "11-column asset detected as {:?}, not Annotated -- it would fall \
+             back to the legacy panel branch and lose strand",
+            fmt
+        );
+        assert_eq!(regions[0].gene, "TP53");
+        assert_eq!(regions[0].strand, '-', "strand must come from column 8");
+        assert!(regions[0].is_e1, "is_e1 must be read from column 9");
+    }
+
+    #[test]
+    fn the_annotated_format_carries_strand_for_both_assay_families() {
+        // The regression in full: a minus-strand gene whose E1 is at its
+        // highest coordinate. Under the legacy panel branch every gene reads
+        // as '+' and the lowest coordinate wins.
+        let body = "chr1\t100\t200\tBRCA1\ta\tENST1\t3\t-\t0\t0\t0\n\
+chr1\t900\t1000\tBRCA1\tb\tENST1\t1\t-\t1\t0\t1\n";
+        let (mut regions, fmt) = parse_str(body);
+        assert!(matches!(fmt, GeneBedFormat::Annotated));
+        assert!(regions.iter().all(|r| r.strand == '-'));
+
+        let n = identify_e1_regions(&mut regions, GeneBedFormat::Wgs);
+        assert_eq!(n, 1);
+        let e1: Vec<_> = regions.iter().filter(|r| r.is_e1).collect();
+        assert_eq!(e1.len(), 1);
+        assert_eq!(
+            e1[0].start, 900,
+            "E1 should be the highest-coordinate region on a minus-strand gene"
+        );
+    }
+
+    #[test]
+    fn a_precomputed_e1_flag_is_not_overwritten() {
+        // The build-time flag comes from a GENCODE exon_number; the coordinate
+        // heuristic is only a proxy. Re-deriving would discard the better
+        // answer -- and on a panel would move E1 onto an internal exon.
+        let body = "chr1\t100\t200\tMYC\ta\tENST1\t5\t+\t0\t0\t1\n\
+chr1\t900\t1000\tMYC\tb\tENST1\t1\t+\t1\t0\t0\n";
+        let (mut regions, _) = parse_str(body);
+        identify_e1_regions(&mut regions, GeneBedFormat::Wgs);
+        let e1: Vec<_> = regions.iter().filter(|r| r.is_e1).collect();
+        assert_eq!(e1.len(), 1);
+        assert_eq!(
+            e1[0].start, 900,
+            "the precomputed flag was discarded and E1 re-derived from \
+             coordinates, which would pick the lowest start on a + strand"
+        );
+    }
+
+    #[test]
+    fn a_strandless_bed_refuses_to_guess_e1() {
+        // The 5-column panel format has no strand, so the coordinate heuristic
+        // would return the LAST exon for every minus-strand gene. Refusing
+        // leaves is_e1 unset, which surfaces downstream as NaN rather than a
+        // plausible wrong number -- and mds_e1 lives in [0, 1] where *lower is
+        // more abnormal*, so a fabricated value reads as tumour signal.
+        let mut regions = vec![
+            region("BRCA1", "exon_01", 1_000, '+'),
+            region("BRCA1", "exon_02", 2_000, '+'),
+        ];
+        let n = identify_e1_regions(&mut regions, GeneBedFormat::Panel);
+        assert_eq!(n, 0, "no E1 may be claimed without strand");
+        assert!(
+            regions.iter().all(|r| !r.is_e1),
+            "a strandless BED must not mark any region as E1"
+        );
+    }
+
+    #[test]
+    fn legacy_formats_still_parse() {
+        let (panel, fmt) = parse_str("chr1\t100\t200\tTP53\texon_01\n");
+        assert!(matches!(fmt, GeneBedFormat::Panel));
+        assert_eq!(panel[0].gene, "TP53");
+
+        let (wgs, fmt) =
+            parse_str("chr1\t100\t200\tENSG1\tNM_1\tTP53\t2\t-\n");
+        assert!(matches!(fmt, GeneBedFormat::Wgs));
+        assert_eq!(wgs[0].gene, "TP53");
+        assert_eq!(wgs[0].strand, '-');
+    }
+
+    #[test]
+    fn annotated_column_count_matches_the_builder() {
+        // Detection is by width, so this constant and the HEADER in
+        // scripts/build_gene_bed.py must stay in step.
+        let header = "chrom start end gene name transcript_id exon_number \
+strand is_e1 is_alt_e1 is_first_captured";
+        assert_eq!(header.split_whitespace().count(), ANNOTATED_COLUMNS);
+    }
+
     fn region(gene: &str, name: &str, start: u64, strand: char) -> RegionInfo {
         RegionInfo {
             chrom: "1".to_string(),
@@ -656,7 +868,7 @@ mod tests {
             region("TP53", "exon_02", 2_000, '+'),
             region("TP53", "exon_03", 3_000, '+'),
         ];
-        let n = identify_e1_regions(&mut regions);
+        let n = identify_e1_regions(&mut regions, GeneBedFormat::Wgs);
         assert_eq!(n, 1);
         assert!(regions[0].is_e1, "plus-strand E1 must be the lowest start");
         assert!(!regions[1].is_e1);
@@ -672,7 +884,7 @@ mod tests {
             region("BRCA1", "exon_02", 2_000, '-'),
             region("BRCA1", "exon_03", 3_000, '-'),
         ];
-        let n = identify_e1_regions(&mut regions);
+        let n = identify_e1_regions(&mut regions, GeneBedFormat::Wgs);
         assert_eq!(n, 1);
         assert!(
             regions[2].is_e1,
@@ -690,7 +902,7 @@ mod tests {
             region("MINUS", "e1", 200, '-'),
             region("MINUS", "e2", 800, '-'),
         ];
-        let n = identify_e1_regions(&mut regions);
+        let n = identify_e1_regions(&mut regions, GeneBedFormat::Wgs);
         assert_eq!(n, 2, "one E1 per gene");
         assert!(regions[0].is_e1, "PLUS E1 = lowest start");
         assert!(!regions[1].is_e1);
