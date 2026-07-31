@@ -5,6 +5,48 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **The WPS background PON baseline was never fitted.** `pon/build.py` looked
+  for columns named `nrl`/`nucleosome_repeat_length` and
+  `periodicity`/`period_score`; `WPS_background` writes `nrl_bp` and
+  `periodicity_score`. Neither ever matched, so the fallback fired on every
+  build and all four shipped PONs carry an identical hardcoded
+  `167.0 / 5.0 / 0.0 / 1.0` across all 28 groups — from cohorts of 21 and 47
+  samples, logging `28 groups` as though it had fitted them. Combined with the
+  0.8.x `nrl_bp ≡ 150.0` degeneracy, **every sample ever produced scored
+  `nrl_z = -3.4`**: a constant, moderately extreme z presented as a
+  measurement. A missing source column is now fatal.
+
+- **Six σ floors replaced with NaN.** `max(std, 0.001)`, `max(nrl_std, 0.1)`,
+  `.max(0.01)` and three siblings do not make a z-score conservative — they
+  make it arbitrarily large, because the divisor is a number nothing measured.
+  That is `nrl_at_band_limit` one level down: a boundary value reported as a
+  result. NaN propagates to an absent z, which is what "we could not measure
+  this" should look like. A single-sample WPS anchor previously got σ = 0.1 at
+  every position.
+
+- **The WPS baseline had no minimum-sample requirement.** FSC gene and FSC
+  region have required ≥3 since they were written; WPS — 141k anchors, the
+  largest block by 100× — required nothing, so an anchor seen in one sample
+  still produced a baseline. Measured on the shipped models that was 1.6% of
+  anchors for all_unique/xs1 and 28.8% for duplex/xs1. Now ≥3, and the count
+  skipped is logged.
+
+- **`np.std` → `ddof=1` in the PON baselines.** These are a sample of healthy
+  donors, not the population. The population form understates the spread and
+  inflates every z built from it — by 2.5% at n=21.
+
+### Added
+- **`build-pon --keep-sample-outputs DIR`.** Per-sample feature outputs were
+  extracted to a temp directory and deleted on completion, so every rebuild
+  re-ran extraction over every BAM from scratch (~4 h for 47 samples) and
+  leave-one-out calibration would have cost *n* of those. Kept outputs also
+  survive a failed build, so the rerun can skip what finished.
+
+- **`_log_baseline_quality`** reports how many entries in a block carry a
+  measured spread, warns on those that do not, and warns when every entry
+  shares one σ — the signature of a fabricated baseline.
+
+### Fixed
 - **A whole-genome run lost an entire verdict axis.** A panel run splits OCF
   into on- and off-target; a WGS run writes neither and emits a plain
   `.OCF.parquet`. `verdict.py`, `plots.py` and the report's run-facts strip all
