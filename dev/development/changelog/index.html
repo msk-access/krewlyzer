@@ -3114,6 +3114,32 @@
   <code>params.compress_tsv</code> through as well; previously only <code>runall</code> did.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li><strong><code>FSC.regions.e1only</code> selected by coordinate, and emitted a row for every
+  gene whether or not it had one.</strong> <code>filter_fsc_to_e1</code> sorted by <code>start</code> and
+  took the first row per gene. It had no strand to work with — the temp <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>
+  handed to the Rust aggregator was five columns, so the asset's strand and E1
+  flags were discarded at that boundary regardless of what the asset contained.</li>
+</ul>
+<p>On a real xs2 sample, <strong>24 of 146 rows were the canonical exon 1</strong>; the rest
+  were internal exons labelled E1.</p>
+<p><code>FSC.regions</code> now carries <code>strand</code>, <code>is_e1</code> and <code>is_alt_e1</code> end to end
+  (Python <code>Region</code> → 8-column temp <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> → Rust <code>GeneRegion</code> → output), and
+  selection is on the flags: a region qualifies if it overlaps the canonical
+  transcript's exon 1 <strong>or</strong> another basic protein-coding transcript's first
+  exon. Both are real transcription starts, and requiring the canonical one
+  discards most of a panel — 25 of 128 xs1 genes against 40.</p>
+<p><strong>Genes with neither flag are now omitted rather than back-filled.</strong> The
+  table drops from 146 rows to 48 on that sample, and every remaining row is
+  on an annotated first exon.</p>
+<p>A legacy or custom gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> still works: the flags are absent, and selection
+  falls back to lowest-start with a warning that it is not strand-aware. <code>.</code>
+  rather than <code>0</code> marks an unknown flag, so "the source could not say" stays
+  distinguishable from "no".</p>
+<p><strong>Output-contract impact.</strong> <code>FSC.regions</code> gains three columns;
+  <code>FSC.regions.e1only</code> changes row count and membership. Neither is read by
+  kreview today (<code>e1only</code> is in <code>NOT_CONSUMED</code>), so nothing downstream breaks,
+  but any local analysis keyed on the old 146-row shape will.</p>
+<ul>
 <li>
 <p><strong><code>MDS.gene</code> row order was non-deterministic.</strong> The writer iterated a
   <code>HashMap</code>, and Rust randomises hash iteration per process, so two runs on

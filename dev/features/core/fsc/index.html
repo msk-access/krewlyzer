@@ -2742,18 +2742,12 @@ emitted as a sixth channel rather than being folded into <code>long</code>.</p>
 <h3 id="e1-only-fsc-output">E1-Only <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> Output</h3>
 <p><strong>File</strong>: <code>{sample}.FSC.regions.e1only.tsv</code></p>
 <p>Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.</p>
-<div class="admonition danger">
-<p class="admonition-title">This table does not currently contain what its name says</p>
-<p>Two separate problems, both measured against the <code>xs1</code>/<code>xs2</code> designs.</p>
-<p><strong>1. It selects by genomic position, not transcription order.</strong> The filter
-sorts by <code>start</code> and takes the first row per gene. On a minus-strand gene
-the first exon is at the <em>highest</em> coordinate, so this picks the wrong end.
-<a href="../../regulatory/region-mds/#e1-first-exon-significance">region-<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr></a> does
-this correctly — the two features disagree with each other about what E1
-means.</p>
-<p><strong>2. "First exon" is not one thing, and the panel often captures a
-different one.</strong> Genes carry a median of 13 distinct annotated first exons,
-because alternative promoters are the norm. Against the <code>xs1</code> design:</p>
+<div class="admonition info">
+<p class="admonition-title">What this table contains, as of 0.9.0</p>
+<p>A region qualifies as E1 if it overlaps <strong>either</strong> the canonical
+transcript's exon 1 (<code>is_e1</code>) <strong>or</strong> another basic protein-coding
+transcript's first exon (<code>is_alt_e1</code>). Both are genuine transcription
+starts, and restricting to the canonical one discards most of a panel:</p>
 <table>
 <thead>
 <tr>
@@ -2764,36 +2758,35 @@ because alternative promoters are the norm. Against the <code>xs1</code> design:
 </thead>
 <tbody>
 <tr>
-<td>the canonical (MANE) exon 1</td>
+<td>canonical (MANE) exon 1 only</td>
 <td style="text-align: right;">25</td>
 <td style="text-align: right;">33</td>
 </tr>
 <tr>
-<td><strong>plus</strong> another basic protein-coding transcript's exon 1</td>
-<td style="text-align: right;">40</td>
-<td style="text-align: right;">48</td>
+<td><strong>either flag — what this table uses</strong></td>
+<td style="text-align: right;"><strong>40</strong></td>
+<td style="text-align: right;"><strong>48</strong></td>
 </tr>
 <tr>
-<td>any annotated transcript's exon 1, incl. minor isoforms</td>
+<td>any transcript's exon 1, incl. minor isoforms</td>
 <td style="text-align: right;">79</td>
 <td style="text-align: right;">90</td>
 </tr>
 </tbody>
 </table>
-<p>MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits
-15 kb past the panel's most 5′ tile — but many genes are captured at an
-<em>alternative</em> promoter instead. The bundled gene BEDs now record the two
-cases separately as <code>is_e1</code> and <code>is_alt_e1</code>.</p>
-<p>Even on the widest defensible reading, 88 <code>xs1</code> genes have no tile on any
-basic protein-coding first exon, and this table still emits a row for each
-— an arbitrary internal exon labelled E1. Of the 25 with a canonical E1,
-the current pick is right for 18 and wrong for 7.</p>
-<p><strong>Do not treat <code>FSC.regions.e1only</code> as promoter-proximal for panel data
-until this is resolved.</strong> The assets carry <code>is_e1</code> / <code>is_alt_e1</code> (see
-<code>scripts/build_gene_bed.py</code>) so the selection can be made correctly; wiring
-this table to use them is outstanding.</p>
-<p>WGS is unaffected by (2) — every exon of the canonical transcript is
-present, so exon 1 always exists.</p>
+<p>Alternative promoters are the norm — a gene carries a median of 13 distinct
+annotated first exons. Minor and non-coding isoforms are excluded upstream
+in <code>scripts/build_gene_bed.py</code>, because their annotated starts are not
+evidence of a live promoter; that exclusion is the gap between 40 and 79.</p>
+<p><strong>Genes with neither flag are omitted.</strong> Before 0.9.0 this table emitted one
+row per gene regardless, so a gene whose exon 1 the panel never captured got
+an arbitrary internal exon labelled E1 — 98 of 146 rows on a real xs2
+sample. Dropping them makes the table smaller and true.</p>
+<p>Selection no longer depends on coordinate order, so it is correct on the
+minus strand. <code>FSC.regions</code> now carries <code>strand</code>, <code>is_e1</code> and <code>is_alt_e1</code>
+so a consumer can tell canonical from alternative.</p>
+<p>A gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> without those columns still works and still produces a table,
+but falls back to the lowest-start region per gene with a warning saying so.</p>
 </div>
 <p><strong>Usage</strong>:
 </p><div class="highlight"><pre><span></span><code><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a><span class="c1"># Default: E1-only file generated automatically with --assay</span>
@@ -2878,7 +2871,7 @@ present, so exon 1 always exists.</p>
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 03:53:30 UTC"><span class="timeago" datetime="2026-07-31T03:53:30+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 03:53:30 UTC">2026-07-31</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 14:01:14 UTC"><span class="timeago" datetime="2026-07-31T14:01:14+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 14:01:14 UTC">2026-07-31</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
