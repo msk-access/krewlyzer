@@ -180,17 +180,26 @@ E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
 > version, minus-strand `mds_e1` / `mds_e1_z` values are not comparable.
 
 > [!WARNING]
-> **On a targeted panel, "first exon" usually means "first *captured* exon".**
-> MSK-ACCESS tiles coding hotspot exons, and the canonical transcript's exon 1
-> is generally 5′UTR and outside the capture design — only 25 of 128 `xs1`
-> genes (33 of 146 for `xs2`) have a tile overlapping it. AKT1's exon 1 sits
-> 15 kb past the panel's most 5′ tile.
+> **On a targeted panel, "first exon" is ambiguous — genes have several.**
+> Alternative promoters are the norm: a gene carries a median of 13 distinct
+> annotated first exons. The panel captures the *canonical* (MANE) exon 1 for
+> only 25 of 128 `xs1` genes, but another basic protein-coding transcript's
+> first exon for 15 more — so 40 have a genuine transcription start captured,
+> and 88 have none.
 >
-> Strand-correct selection therefore returns the most 5′ *captured* region,
-> which for most genes is an internal exon rather than a promoter proxy. The
-> bundled gene BEDs now distinguish the two explicitly — `is_e1` for a genuine
-> exon 1 overlap, `is_first_captured` for the most 5′ tile — so a model can
-> weigh them separately instead of treating every `mds_e1` as promoter signal.
+> The bundled gene BEDs record all three cases separately, so a model can weigh
+> them rather than treating every `mds_e1` as promoter signal:
+>
+> | column | meaning |
+> |---|---|
+> | `is_e1` | overlaps the canonical transcript's exon 1 |
+> | `is_alt_e1` | overlaps another basic protein-coding transcript's exon 1 |
+> | `is_first_captured` | most 5′ captured tile; always exists, often internal |
+>
+> Which transcript counts as canonical is configurable — see
+> `--transcript-overrides` in `scripts/build_gene_bed.py` — because a panel
+> designed around specific clinical transcripts should not have MANE imposed
+> on it.
 >
 > WGS is unaffected: every exon of the canonical transcript is present.
 

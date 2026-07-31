@@ -29,19 +29,35 @@ All notable changes to this project will be documented in this file.
   and asserted, because the failure mode is a gene silently losing its
   annotation rather than an error.
 
-  **E1 is far sparser on a panel than it looks.** Only **25 of 128** `xs1`
-  genes (33 of 146 for `xs2`) have a probe tile overlapping the canonical
-  transcript's exon 1. MSK-ACCESS tiles coding hotspot exons, and exon 1 is
-  usually 5′UTR and outside the capture design — AKT1's sits 15 kb past the
-  panel's most 5′ tile. `is_first_captured` marks the most 5′ *captured* tile
-  in transcription order, which exists for every gene, but an internal exon is
-  not a promoter proxy and must not be read as E1. Both are emitted so the
-  modelling step can weigh them separately.
+  **"First exon" is not one thing.** Genes carry a median of 13 distinct
+  annotated first exons, because alternative promoters are the norm, so a
+  single boolean cannot describe what a tile is. Three columns:
+
+  | tile overlaps… | column | xs1 / 128 | xs2 / 146 |
+  |---|---|---:|---:|
+  | canonical transcript's exon 1 | `is_e1` | 25 | 33 |
+  | another basic protein-coding transcript's exon 1 | `is_alt_e1` | +15 | +15 |
+  | most 5′ captured tile (always exists) | `is_first_captured` | 128 | 146 |
+
+  MSK-ACCESS tiles coding hotspot exons, so AKT1's canonical exon 1 sits 15 kb
+  past the panel's most 5′ tile — but many genes are captured at an
+  *alternative* promoter instead, which a MANE-only view misses entirely. 40
+  `xs1` genes have a tile on some basic protein-coding first exon; 88 have
+  none. `is_first_captured` exists for every gene but is frequently an internal
+  exon, which is not a promoter proxy and must not be read as E1.
+
+  Which transcript is canonical is configurable per gene via
+  `--transcript-overrides` (a `gene<TAB>transcript_id` TSV), because a panel
+  designed around specific clinical transcripts should not have MANE imposed on
+  it. A transcript that is absent from the GTF, or belongs to a different gene,
+  is a **hard error** — a silent fall back to MANE would produce an asset that
+  disagrees with the file the operator wrote.
 
   This also bounds the existing `filter_fsc_to_e1` defect: of the 25 `xs1`
-  genes that do have a real E1 tile, its lowest-start pick is correct for 18
-  and wrong for 7 (6 minus-strand). The larger issue is the other 103, for
-  which it emits a row labelled E1 that is an arbitrary internal exon.
+  genes with a canonical E1 tile, its lowest-start pick is correct for 18 and
+  wrong for 7 (6 minus-strand). The larger issue is the 88 with no captured
+  first exon at all, for which it emits a row labelled E1 that is an arbitrary
+  internal exon.
 
 - **`krewlyzer validate-output`** — checks a finished output directory against
   the contract its consumers rely on. Three layers, in increasing order of what

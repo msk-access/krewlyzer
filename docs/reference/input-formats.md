@@ -120,17 +120,26 @@ chrom  start  end  gene  name  transcript_id  exon_number  strand  is_e1  is_fir
 | `exon_number` | **Transcription** order from the GTF, not coordinate order |
 | `strand` | `+` / `-`; absent from the panel assets before 0.9.0 |
 | `is_e1` | Row overlaps the canonical transcript's exon 1 |
+| `is_alt_e1` | Row overlaps *another* basic protein-coding transcript's exon 1 |
 | `is_first_captured` | Most 5′ row for this gene, in transcription order |
 
 The first five columns are unchanged, so a custom 4- or 5-column file still
 works and readers indexing `gene`/`name` are unaffected.
 
-!!! note "`is_e1` and `is_first_captured` are not the same thing"
-    On a targeted panel they usually differ. Only 25 of 128 `xs1` genes have a
-    tile overlapping the canonical exon 1 — the panel tiles coding hotspots,
-    and exon 1 is generally 5′UTR and uncaptured. `is_first_captured` always
-    exists, but an internal exon is not a promoter proxy. Use `is_e1` when the
-    promoter-proximal interpretation matters.
+!!! note "The three `first` columns are not interchangeable"
+    Genes have several annotated first exons — a median of 13 — because
+    alternative promoters are common. On `xs1`, 25 of 128 genes have a tile on
+    the canonical exon 1, 15 more on another basic protein-coding transcript's
+    first exon, and 88 on neither. `is_first_captured` always exists but is
+    frequently an internal exon, which is not a promoter proxy.
+
+    Use `is_e1` when the promoter-proximal interpretation matters, `is_alt_e1`
+    to include alternative promoters, and `is_first_captured` only as a
+    positional anchor.
+
+    The canonical transcript is configurable per gene via
+    `--transcript-overrides`, so a panel built around specific clinical
+    transcripts can say so rather than inherit MANE.
 
     `exon_number` deserves the same caution when reading *older* assets: the
     pre-0.9.0 WGS BED numbered exons by coordinate, so its `exon_num 0` was the
