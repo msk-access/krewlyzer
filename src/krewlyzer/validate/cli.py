@@ -160,10 +160,10 @@ def describe_output(
     `validate-output` answers "is this correct?"; this answers the question
     people ask first -- "what are these files, and what is in them?". Shape,
     dtypes, ranges and examples are measured from the sample; which tables are
-    read downstream comes from the output contract. Nothing about the biology
-    is restated, so this cannot drift from the reference documentation.
+    gated comes from the output contract. Nothing about the biology is
+    restated, so this cannot drift from the reference documentation.
     """
-    from .describe import describe_sample, render_markdown
+    from .describe import describe_sample, render_html_page, render_markdown
 
     report_obj = describe_sample(sample_dir, sample_id)
     markdown = render_markdown(report_obj)
@@ -171,7 +171,7 @@ def describe_output(
     if output is None:
         print(markdown)
     elif output.suffix.lower() in (".html", ".htm"):
-        output.write_text(_render_html(report_obj, markdown), encoding="utf-8")
+        output.write_text(render_html_page(report_obj, markdown), encoding="utf-8")
         console.print(f"[green]wrote[/green] {output}")
     else:
         output.write_text(markdown, encoding="utf-8")
@@ -180,47 +180,9 @@ def describe_output(
     missing = [t for t in report_obj.missing if t.consumed]
     if missing:
         console.print(
-            f"[yellow]{len(missing)} table(s) read downstream are absent[/yellow]"
+            f"[yellow]{len(missing)} gated table(s) absent[/yellow] "
+            "— run validate-output for the contract check"
         )
-
-
-def _render_html(report_obj, markdown: str) -> str:
-    """Self-contained HTML, so the report can be attached or hosted as-is.
-
-    Markdown is embedded and rendered client-side only if `markdown` is
-    installed; otherwise it is shown in a <pre>, which stays readable. A hard
-    dependency on a renderer would make the whole command unavailable in a
-    minimal install for the sake of formatting.
-    """
-    try:
-        import markdown as _md  # type: ignore[import-untyped]
-
-        body = _md.markdown(markdown, extensions=["tables", "toc"])
-    except ImportError:
-        from html import escape
-
-        body = f"<pre>{escape(markdown)}</pre>"
-
-    return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>krewlyzer output — {report_obj.sample_id}</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  body {{ font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }}
-  table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; display: block;
-          overflow-x: auto; }}
-  th, td {{ border: 1px solid #8884; padding: .35rem .6rem; text-align: left;
-           white-space: nowrap; }}
-  th {{ background: #8881; }}
-  code {{ font-size: .9em; }}
-  blockquote {{ border-left: 3px solid #e5a; margin: 1rem 0; padding: .1rem 1rem;
-               background: #e5a1; }}
-  h3 {{ margin-top: 2rem; border-top: 1px solid #8883; padding-top: 1rem; }}
-</style></head><body>
-{body}
-</body></html>"""
 
 
 def report_sample(

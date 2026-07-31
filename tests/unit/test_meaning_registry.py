@@ -10,18 +10,26 @@ from __future__ import annotations
 
 import pytest
 
-from krewlyzer.validate.contract import CONTRACT
+from krewlyzer.validate.contract import CONTRACT, NOT_CONSUMED
 from krewlyzer.validate.meaning import MEANINGS
 
-_SUFFIXES = {rule.suffix for rule in CONTRACT}
+#: Every table `describe-output` and `report` can render a section for.
+#:
+#: Deliberately wider than `CONTRACT`. The optional outputs are ungated --
+#: mFSD needs a variant list, UXM a methylation-aware BAM -- but they still
+#: get a section, and a section with a measured shape and no interpretation
+#: is the thing this registry exists to prevent. Keying the test on CONTRACT
+#: alone let all six ship that way.
+_SUFFIXES = {rule.suffix for rule in CONTRACT} | set(NOT_CONSUMED)
 
 
-def test_every_contracted_table_has_a_meaning():
+def test_every_renderable_table_has_a_meaning():
     """A new output must not ship without a reader being told what it is."""
     missing = sorted(_SUFFIXES - set(MEANINGS))
     assert not missing, (
-        f"contracted tables with no entry in meaning.py: {missing}. "
-        "A table nobody can interpret is one nobody will use correctly."
+        f"tables with no entry in meaning.py: {missing}. A table nobody "
+        "can interpret is one nobody will use correctly -- and an ungated "
+        "table still gets a section in the report."
     )
 
 
@@ -30,7 +38,7 @@ def test_no_meaning_describes_a_table_that_does_not_exist():
     orphans = sorted(set(MEANINGS) - _SUFFIXES)
     assert (
         not orphans
-    ), f"meaning.py describes tables absent from the contract: {orphans}"
+    ), f"meaning.py describes tables krewlyzer does not produce: {orphans}"
 
 
 @pytest.mark.parametrize("suffix", sorted(MEANINGS))
@@ -52,17 +60,26 @@ def test_each_meaning_is_substantive(suffix):
         )
 
 
-def test_directions_are_stated_wherever_they_apply():
-    """The notebook's central point: a wrong direction is the commonest misread.
+#: Tables that legitimately have no cancer direction, and why.
+#:
+#: An allowlist rather than a loosened assertion: each entry is a table that is
+#: not a measurement of the sample's biology, so a direction would be an
+#: invention. Anything else lacking one is an omission.
+_DIRECTIONLESS = {
+    ".metadata.parquet": "provenance, not a measurement",
+    ".fsc_counts.parquet": "the input to FSC, not a result — a raw count has no direction",
+    ".correction_factors.parquet": "a property of the library preparation, not of the tumour",
+}
 
-    Only `metadata` is legitimately directionless — it is provenance, not a
-    measurement. Anything else lacking a direction is an omission.
-    """
+
+def test_directions_are_stated_wherever_they_apply():
+    """The notebook's central point: a wrong direction is the commonest misread."""
     silent = {s for s, m in MEANINGS.items() if not m.cancer_direction}
-    assert silent == {".metadata.parquet"}, (
-        f"tables with no stated cancer direction: {sorted(silent)}. "
-        "Every measurement has one, and leaving it unsaid is how MDS came to be "
-        "documented backwards."
+    assert silent == set(_DIRECTIONLESS), (
+        f"tables with no stated cancer direction: {sorted(silent)}, expected "
+        f"{sorted(_DIRECTIONLESS)}. Every measurement has one, and leaving it "
+        "unsaid is how MDS came to be documented backwards. To add a table "
+        "here, write down why it is not a measurement."
     )
 
 

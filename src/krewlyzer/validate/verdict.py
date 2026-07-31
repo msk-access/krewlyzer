@@ -38,6 +38,7 @@ from typing import List, Optional
 import pandas as pd
 
 from krewlyzer.core.output_utils import read_table
+from krewlyzer.validate.contract import OCF_PREFERENCE
 
 #: Conventional |z| flag. An argument everywhere it is used, never a constant
 #: baked into a comparison -- see the module docstring.
@@ -221,9 +222,9 @@ def compute_verdict(
     )
 
     # -- 3. tissue of origin ------------------------------------------------
-    ocf = table(".OCF.offtarget.parquet")
-    if ocf is None:
-        ocf = table(".OCF.ontarget.parquet")
+    ocf = next(
+        (df for df in (table(sfx) for sfx in OCF_PREFERENCE) if df is not None), None
+    )
     ocf_z, tissue = _extreme(ocf, "ocf_z", "tissue", largest=True)
     axes.append(
         Axis(
@@ -233,7 +234,11 @@ def compute_verdict(
             support=_classify(ocf_z, z_threshold, higher_is_tumour=True),
             value=ocf_z,
             detail=f"strongest tissue: {tissue}" if tissue else None,
-            reason=None if ocf_z is not None else "OCF absent (hg19 only) or no PON",
+            reason=(
+                None
+                if ocf_z is not None
+                else "OCF absent (hg19 assets only) or carries no PON z-score"
+            ),
         )
     )
 

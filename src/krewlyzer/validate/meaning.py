@@ -377,4 +377,86 @@ MEANINGS: Dict[str, Meaning] = {
             "`total_fragments` bounds everything else — a table computed from few fragments is noisy regardless of what it says. Its absence means the sample is silently dropped downstream."
         ),
     ),
+    # -- optional outputs -----------------------------------------------------
+    #
+    # Not in ``CONTRACT``: each needs an input the pipeline cannot assume, so
+    # gating on them would fail every run that legitimately lacks one. They are
+    # still described, because a file sitting in the directory needs an entry
+    # here whether or not anything downstream reads it -- a section with a shape
+    # and no interpretation was the exact complaint that put `describe-output`
+    # on `NOT_CONSUMED` in the first place.
+    ".mFSD.parquet": Meaning(
+        "Fragment sizes carrying the mutant allele versus the reference allele, "
+        "per variant. The only output that separates tumour from background "
+        "within a single sample rather than against a cohort.",
+        "**shorter** ALT than REF fragments",
+        "`ALT_Count` can be zero for a variant that was called but is not "
+        "observed here. Nothing derived from it — sizes, LLR, KS — is a "
+        "measurement in that case, and `ALT_MeanSize` reads 0, not the "
+        "~166 bp a plausible-looking value would suggest.",
+        why=(
+            "Tumour-derived fragments are shorter than the healthy background. Splitting by allele makes that comparison internal: the reference fragments at the same locus are the control, so no panel of normals is needed."
+        ),
+        how=(
+            "Fragments overlapping each variant position are assigned to REF or ALT by the base they carry, and the two size distributions are compared by mean, by log-likelihood ratio against a size model, and by a KS test."
+        ),
+        what=(
+            "Read `ALT_Count` before anything else — a handful of fragments cannot support a distribution comparison, and the KS statistic is computed from as few as two. Then the sign of `ALT_MeanSize - REF_MeanSize`, which is the whole measurement."
+        ),
+    ),
+    ".UXM.parquet": Meaning(
+        "Fragment-level methylation: each read classified unmethylated, mixed "
+        "or methylated, then summarised per marker region.",
+        "the **U** fraction rises at markers for the tissue of origin",
+        "Needs a methylation-aware BAM (`--bisulfite-bam`). Absent from an "
+        "ordinary run, which is not a failure.",
+        why=(
+            "Methylation is the sharpest tissue-of-origin signal in cfDNA, and calling it per fragment rather than per CpG keeps the read as the unit of evidence -- a fragment is either from that tissue or it is not."
+        ),
+        how=(
+            "Each read's CpGs are read from its bisulfite tag and the read is classified U, X or M by the fraction methylated; the three counts are then summed per marker region."
+        ),
+        what=(
+            "`U + X + M` sums to 1 by construction, so only two of the three are independent. Compare the U fraction at markers for a candidate tissue against the same markers in a normal."
+        ),
+    ),
+    ".OCF.parquet": Meaning(
+        "As OCF, for a whole-genome run -- no capture, so no on/off-target " "split.",
+        "as OCF",
+        pon_columns=("ocf_z",),
+    ),
+    ".FSC.regions.e1only.parquet": Meaning(
+        "As FSC by region, restricted to first exons.",
+        "as FSC",
+    ),
+    ".fsc_counts.parquet": Meaning(
+        "The raw per-bin fragment counts behind FSC, before GC correction and "
+        "before conversion to ratios.",
+        None,
+        why=(
+            "FSC ships ratios, which are scale-free and therefore hide how much evidence is behind them. This is the count each ratio was computed from."
+        ),
+        how=(
+            "The same single pass that produces FSC, written out before normalisation."
+        ),
+        what=(
+            "`total` per bin. A ratio from a bin with a handful of fragments is noise with a plausible-looking value, and the ratio alone cannot tell you which bins those are."
+        ),
+    ),
+    ".correction_factors.parquet": Meaning(
+        "The GC bias model this run applied: the correction factor fitted for "
+        "each fragment-length and GC-content bin.",
+        None,
+        "Diagnostic output. Factors far from 1 mean the correction is doing a "
+        "lot of work, which is a fact about the library, not about the tumour.",
+        why=(
+            "GC content biases coverage during library preparation and sequencing, and short fragments are affected differently from long ones. Every FSC and FSR ratio is corrected using this model, so the model is part of the result."
+        ),
+        how=(
+            "Observed and expected fragment counts are tabulated per length/GC bin and the correction factor is their ratio; in panel mode the model is fitted on off-target fragments, which are unbiased by capture."
+        ),
+        what=(
+            "How far the factors sit from 1, and whether any bin is fitted from few fragments -- `observed` says. A large correction derived from a thin bin is the case to distrust."
+        ),
+    ),
 }

@@ -333,6 +333,21 @@ CONTRACT: Tuple[TableRule, ...] = (
 
 COMPLETION_MARKER = ".metadata.parquet"
 
+#: Which OCF table to read, best first.
+#:
+#: A panel run splits OCF into on- and off-target; a whole-genome run writes
+#: neither and emits a plain ``.OCF.parquet``. Reading only the panel pair made
+#: every WGS sample report OCF as absent -- with the plain file sitting in the
+#: directory -- which quietly dropped a verdict axis and moved the denominator
+#: from four to three. Off-target first because it is the unbiased view where
+#: capture applies.
+OCF_PREFERENCE = (
+    ".OCF.offtarget.parquet",
+    ".OCF.ontarget.parquet",
+    ".OCF.parquet",
+)
+
+
 # Produced by krewlyzer but not read by kreview. Inventoried so that a missing
 # one is visible, never gated.
 NOT_CONSUMED: Tuple[str, ...] = (

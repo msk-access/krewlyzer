@@ -347,3 +347,89 @@ def test_a_pon_run_is_detected_from_its_output(sample_dir):
     from krewlyzer.validate.htmlreport import detect_pon
 
     assert detect_pon(describe_sample(sample_dir)) is True
+
+
+# ---------------------------------------------------------------------------
+# Whole-genome runs
+# ---------------------------------------------------------------------------
+#
+# A panel run splits OCF into on- and off-target; a whole-genome run writes
+# neither and emits a plain `.OCF.parquet`. Every reader here originally looked
+# only for the panel pair, so a WGS sample reported OCF absent with the file
+# sitting in the directory -- and losing an axis makes the verdict *look*
+# stronger, because the denominator shrinks with it.
+
+
+def _wgs_ocf(tmp_path: Path) -> Path:
+    d = tmp_path / SAMPLE
+    _write(
+        d,
+        ".OCF.parquet",
+        pd.DataFrame(
+            {
+                "tissue": ["Liver", "Tcell", "Lung"],
+                "OCF": [12.0, 4.0, 6.0],
+                "ocf_z": [3.4, -0.2, 0.8],
+            }
+        ),
+    )
+    return d
+
+
+def test_a_whole_genome_ocf_table_is_read(tmp_path):
+    directory = _wgs_ocf(tmp_path)
+    axis = next(
+        a for a in compute_verdict(directory).axes if a.name == "Tissue shedding"
+    )
+    assert axis.support is Support.AGREES, axis.reason
+    assert axis.value == pytest.approx(3.4)
+    assert "Liver" in (axis.detail or "")
+
+
+def test_a_whole_genome_run_keeps_the_tissue_axis_in_the_denominator(tmp_path):
+    """The failure mode is silent: fewer axes, so a higher fraction agreeing."""
+    verdict = compute_verdict(_wgs_ocf(tmp_path))
+    assert "Tissue shedding" in {a.name for a in verdict.assessable}
+
+
+def test_the_panel_split_still_wins_when_both_exist(tmp_path):
+    """Off-target is the unbiased view where capture applies, so it ranks first."""
+    directory = _wgs_ocf(tmp_path)
+    _write(
+        directory,
+        ".OCF.offtarget.parquet",
+        pd.DataFrame({"tissue": ["Colon"], "OCF": [9.0], "ocf_z": [5.5]}),
+    )
+    axis = next(
+        a for a in compute_verdict(directory).axes if a.name == "Tissue shedding"
+    )
+    assert axis.value == pytest.approx(5.5)
+    assert "Colon" in (axis.detail or "")
+
+
+def test_the_ocf_chart_reads_the_whole_genome_table(tmp_path):
+    """verdict and plots must not disagree about which file exists."""
+    directory = _wgs_ocf(tmp_path)
+    described = describe_sample(directory)
+    from krewlyzer.core.output_utils import read_table
+
+    tables = {
+        t.suffix: read_table(directory / f"{described.sample_id}{t.suffix}")
+        for t in described.tables
+    }
+    ocf_charts = [c for c in plots.build_charts(tables) if "OCF" in c.suffix]
+    assert ocf_charts, "no chart is tagged with an OCF table"
+    assert all(c.drawn for c in ocf_charts), [c.reason for c in ocf_charts]
+
+
+def test_every_optional_output_can_be_interpreted():
+    """An ungated table still gets a section, so it still needs a meaning.
+
+    All six shipped without one: `report` drew the mFSD chart and put no
+    explanation beside it, because the registry test keyed on CONTRACT alone.
+    """
+    from krewlyzer.validate.contract import NOT_CONSUMED
+    from krewlyzer.validate.meaning import MEANINGS
+
+    missing = sorted(s for s in NOT_CONSUMED if s not in MEANINGS)
+    assert not missing, f"optional outputs with no interpretation: {missing}"

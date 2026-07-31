@@ -37,6 +37,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import pandas as pd
 
+from krewlyzer.validate.contract import OCF_PREFERENCE
+
 #: The accent, matching the docs site. "Krew" is blood in Polish.
 ACCENT = "#ef5552"
 ACCENT_DARK = "#ff7875"
@@ -1081,9 +1083,7 @@ def _first_present(tables: Dict, *suffixes: str):
 def build_charts(tables: Dict) -> List[Chart]:
     """Every chart, each tagged with the table it belongs beside."""
     g = tables.get
-    ocf_suffix, ocf = _first_present(
-        tables, ".OCF.offtarget.parquet", ".OCF.ontarget.parquet"
-    )
+    ocf_suffix, ocf = _first_present(tables, *OCF_PREFERENCE)
     # Ordered as the five acts of the audit notebook's report structure:
     # size, cutting, nucleosome positioning, tissue and accessibility.
     return [

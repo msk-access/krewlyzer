@@ -4,9 +4,53 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **A whole-genome run lost an entire verdict axis.** A panel run splits OCF
+  into on- and off-target; a WGS run writes neither and emits a plain
+  `.OCF.parquet`. `verdict.py`, `plots.py` and the report's run-facts strip all
+  read only the panel pair, so every WGS sample reported OCF absent with the
+  file sitting in the directory. Losing an axis makes the verdict read
+  *stronger*, not weaker — it shrinks the denominator — which is the dangerous
+  direction. The preference order now lives once, in `contract.py`, and all
+  three read it.
+
+- **Six optional outputs rendered with no interpretation.** `mFSD`, `UXM`,
+  `OCF`, `FSC.regions.e1only`, `fsc_counts` and `correction_factors` got a
+  section with a measured shape and nothing else — no lede, no direction, no
+  why/how/what — because `test_meaning_registry.py` keyed on `CONTRACT` alone
+  and those six are `NOT_CONSUMED`. mFSD in particular had a chart with no
+  explanation beside it. The registry now covers everything either command can
+  render.
+
+- **Numeric identifier columns were not redacted.** `describe-output` prefers a
+  min…max range over the example value whenever one exists, so an integer
+  patient key or accession was printed in full by the branch meant to hide it —
+  a range over one distinct value *is* the value.
+
+- **`describe-output` and `report` disagreed about the same fact.** The report
+  says *gated* / *inventory*; `describe-output` still said *read downstream*,
+  a claim about another repository that nothing here keeps in sync. Aligned on
+  the report's wording, with the distinction spelled out in the output.
+
+- **README linked to six pages that do not exist.** `/introduction/`,
+  `/installation/`, `/usage/`, `/features/extract/`, `/pipeline/` and
+  `/citation/` all 404 — they point at a docs layout reorganised out of
+  existence. Absolute URLs, so neither mkdocs nor the internal link checker
+  ever resolved them.
+
+- **`tests/unit/test_cli_documented.py` checked 8 of 19 commands.** Its regex
+  matched only `app.command(name="x")` and silently skipped the eleven
+  registered as bare `app.command()(fn)`. It is now cross-checked against typer
+  itself, which immediately surfaced a fifth undocumented command, `validate`.
+
 ### Added
+- **`docs/cli/index.md` covers every command**, and two tests keep it that way:
+  one cross-checks the registered commands against the reference and the
+  README, the other resolves every README documentation link against the pages
+  mkdocs actually publishes.
+
 - **`krewlyzer report SAMPLE_DIR -o report.html`** — a single-sample report
-  with a cross-axis verdict, 13 charts and the tables behind them. Internal
+  with a cross-axis verdict, 16 charts and the tables behind them. Internal
   use: it contains one patient's measurements, so it is generated on demand
   rather than committed or published. `describe-output` remains the shareable,
   structural view.

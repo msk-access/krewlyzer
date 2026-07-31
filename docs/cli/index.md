@@ -30,14 +30,51 @@ See [run-all](run-all.md) for the unified command that runs all features.
 
 ## Inspection and Validation
 
-These read a finished output directory rather than producing features.
+These inspect inputs or a finished output directory rather than producing
+features.
+
+!!! warning "`validate` and `validate-output` are different commands"
+    `validate` checks the **assets going in** — is this BED well-formed, does
+    it have the columns the Rust core expects. `validate-output` checks the
+    **results coming out** against the downstream contract. One hyphen apart
+    and neither substitutes for the other.
 
 | Command | Purpose |
 |---------|---------|
+| [`validate`](#validate) | Check input **assets** before a run — BEDs, anchors, GC factors |
 | [`describe-output`](#describe-output) | What is in each output file — shape, columns, ranges |
 | [`report`](#report) | Single-sample HTML report: verdict, charts, interpretation |
 | [`validate-output`](#validate-output) | Check one sample against the output contract |
 | [`validate-cohort`](#validate-cohort) | Cross-sample degeneracy checks over fingerprints |
+
+---
+
+### `validate` {#validate}
+
+Checks the reference assets a run depends on, before the run rather than after
+it. A malformed BED does not usually crash — it produces a table with fewer
+rows than it should, which looks exactly like a quiet sample.
+
+```bash
+krewlyzer validate --genome hg19                    # every bundled asset
+krewlyzer validate --genome hg19 --assay xs2        # ...plus assay-specific
+krewlyzer validate --gene-bed my_genes.bed          # one custom file
+```
+
+| Option | Checks |
+|--------|--------|
+| `--genome` / `-G` | All bundled assets for `hg19` or `hg38` |
+| `--assay` / `-A` | Assay-specific assets too (requires `--genome`) |
+| `--gene-bed` | Gene BED: chrom, start, end, gene, \[name\] |
+| `--targets-bed` | Panel target regions |
+| `--arms-bed` | Chromosome arms: chrom, start, end, arm |
+| `--wps-anchors` | WPS anchors, BED6 |
+| `--ocr-file` | OCF open-chromatin regions |
+| `--gc-factors` | GC correction factors TSV |
+| `--bin-file` | Genomic bins, BED3 |
+
+Use `-G` before reporting a bundled-asset problem: a partial `git lfs pull`
+leaves pointer files in place of the real assets, and this is what says so.
 
 ---
 
@@ -101,7 +138,9 @@ disagreement.
     Every z-score and PON log-ratio is absent, which is most of the
     interpretable surface — three of the four verdict axes cannot be assessed.
     The report leads with a banner saying so and marks each affected column.
-    Re-run with `--pon-model` for anything comparative.
+    Re-run the *feature extraction* with `run-all --pon-model ...` and
+    report the new output; `report` has no PON option of its own, because
+    it reads what is already on disk and never recomputes a feature.
 
 `--z-threshold` is a **convention, not a clinical cut-off**, and the report
 says so. No chart draws a threshold as a cut-off; reference lines appear only

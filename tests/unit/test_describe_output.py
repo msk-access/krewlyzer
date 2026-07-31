@@ -21,6 +21,7 @@ import pytest
 
 from krewlyzer.validate.describe import (
     REDACTED,
+    _column_facts,
     describe_sample,
     human_bytes,
     is_identifier_column,
@@ -192,3 +193,31 @@ def test_an_empty_directory_produces_a_report_rather_than_an_error(tmp_path):
 )
 def test_human_bytes(n, expected):
     assert human_bytes(n) == expected
+
+
+def test_a_numeric_identifier_column_is_redacted_too():
+    """Redacting `example` alone was not enough.
+
+    The renderer prefers a min…max range over the example whenever one exists,
+    so a numeric identifier — an accession, an integer patient key — was printed
+    in full by the very branch meant to hide it. A range over one distinct value
+    *is* the value.
+    """
+    facts = _column_facts(pd.Series([88123456, 88123456]), "patient_id", {})
+    assert facts.example == REDACTED
+    assert facts.minimum is None and facts.maximum is None
+
+
+def test_redaction_does_not_cost_the_column_its_shape():
+    """Knowing a column holds an identifier is the useful fact; which one is not."""
+    facts = _column_facts(pd.Series([1, 2, 3]), "sample_id", {})
+    assert facts.dtype.startswith("int")
+    assert facts.n_distinct == 3
+    assert facts.n_null == 0
+
+
+def test_a_numeric_measurement_still_reports_its_range():
+    """The guard is on the name, not on being numeric — ranges are the point."""
+    facts = _column_facts(pd.Series([0.1, 0.9]), "short_long_log2", {})
+    assert facts.minimum == pytest.approx(0.1)
+    assert facts.maximum == pytest.approx(0.9)

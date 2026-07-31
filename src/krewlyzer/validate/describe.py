@@ -1,7 +1,7 @@
 """Describe what a finished sample directory actually contains.
 
 `validate-output` answers *"is this correct?"*. This answers the question people
-ask first: *"what are these 26 files, and what is in them?"*
+ask first: *"what are all these files, and what is in them?"*
 
 Everything reported here is either **measured from the file** — row and column
 counts, dtypes, a value sample, how much is null — or **read from
@@ -143,7 +143,7 @@ def human_bytes(n: Optional[int]) -> str:
         if size < 1024 or unit == "GB":
             return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
         size /= 1024.0
-    return f"{size:.1f} GB"
+    raise AssertionError("unreachable: the GB arm above always returns")
 
 
 def _example(series: pd.Series) -> str:
@@ -192,9 +192,12 @@ def _column_facts(
         declared_vary=declared.vary.value if declared else None,
         constant_reason=declared.constant_reason if declared else None,
     )
-    # A numeric range cannot encode an identifier, so it is left alone; only
-    # the example value is withheld.
-    if pd.api.types.is_numeric_dtype(series):
+    # Ranges are withheld for identifier columns too. The rendering below
+    # prefers min/max over `example`, so redacting only the example left a
+    # numeric identifier -- an accession, an integer patient key -- printed in
+    # full by the very branch that was supposed to hide it. A range over one
+    # distinct value *is* the value.
+    if pd.api.types.is_numeric_dtype(series) and not is_identifier_column(name):
         finite = pd.to_numeric(series, errors="coerce").dropna()
         if not finite.empty:
             facts.minimum = float(finite.min())
@@ -300,9 +303,10 @@ def render_markdown(report: SampleReport) -> str:
     add(f"`{report.directory}`\n")
 
     present, missing = report.present, report.missing
+    gated = sum(1 for t in present if t.consumed)
     add(
-        f"**{len(present)} of {len(report.tables)} contracted tables present**, "
-        f"{human_bytes(report.total_bytes)} total.\n"
+        f"**{len(present)} of {len(report.tables)} possible outputs present** "
+        f"({gated} gated), {human_bytes(report.total_bytes)} total.\n"
     )
     if not report.has_completion_marker:
         add(
@@ -334,21 +338,29 @@ def render_markdown(report: SampleReport) -> str:
     )
 
     add("## Contents\n")
-    add("| Table | Rows | Cols | Size | Read downstream |")
+    add(
+        "*Gated* tables are checked by `krewlyzer validate-output`; a failure "
+        "there fails the run. *Inventory* tables are described and never gate — "
+        "they need an input the pipeline cannot assume, so an absent one is not "
+        "a fault. Neither says whether a downstream tool reads the table: that "
+        "is a fact about another repository, and a label nothing keeps in sync "
+        "is worse than no label.\n"
+    )
+    add("| Table | Rows | Cols | Size | Contract |")
     add("|---|---:|---:|---:|:---:|")
     for t in present:
         rows = f"{t.n_rows:,}" if t.n_rows is not None else "—"
         add(
             f"| [`{t.family}`](#{t.family.lower().replace('.', '')}) | {rows} | "
             f"{t.n_cols} | {human_bytes(t.size_bytes)} | "
-            f"{'yes' if t.consumed else 'no'} |"
+            f"{'gated' if t.consumed else 'inventory'} |"
         )
     add("")
 
     if missing:
         add("### Absent\n")
         for t in missing:
-            why = "" if t.consumed else " *(not read downstream)*"
+            why = "" if t.consumed else " *(inventory — never gates a run)*"
             add(f"- `{t.family}`{why}")
         add("")
 
@@ -358,7 +370,7 @@ def render_markdown(report: SampleReport) -> str:
         meta = [
             f"{t.n_rows:,} rows × {t.n_cols} columns",
             human_bytes(t.size_bytes),
-            "read downstream" if t.consumed else "not read downstream",
+            "gated" if t.consumed else "inventory",
         ]
         add(" · ".join(meta) + "\n")
         if t.meaning:
@@ -399,3 +411,45 @@ def render_markdown(report: SampleReport) -> str:
         "sample's real data.\n"
     )
     return "\n".join(out)
+
+
+def render_html_page(report: SampleReport, markdown: str) -> str:
+    """Wrap the Markdown in a self-contained page, attachable or hostable as-is.
+
+    Named apart from ``htmlreport.render_html`` on purpose: that one builds
+    the full charted report, this one only wraps ``render_markdown`` output.
+
+    Markdown is embedded and rendered client-side only if `markdown` is
+    installed; otherwise it is shown in a <pre>, which stays readable. A hard
+    dependency on a renderer would make the whole command unavailable in a
+    minimal install for the sake of formatting.
+    """
+    try:
+        import markdown as _md  # type: ignore[import-untyped]
+
+        body = _md.markdown(markdown, extensions=["tables", "toc"])
+    except ImportError:
+        from html import escape
+
+        body = f"<pre>{escape(markdown)}</pre>"
+
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>krewlyzer output — {report.sample_id}</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  body {{ font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         max-width: 60rem; margin: 2rem auto; padding: 0 1rem; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; display: block;
+          overflow-x: auto; }}
+  th, td {{ border: 1px solid #8884; padding: .35rem .6rem; text-align: left;
+           white-space: nowrap; }}
+  th {{ background: #8881; }}
+  code {{ font-size: .9em; }}
+  blockquote {{ border-left: 3px solid #e5a; margin: 1rem 0; padding: .1rem 1rem;
+               background: #e5a1; }}
+  h3 {{ margin-top: 2rem; border-top: 1px solid #8883; padding-top: 1rem; }}
+</style></head><body>
+{body}
+</body></html>"""
