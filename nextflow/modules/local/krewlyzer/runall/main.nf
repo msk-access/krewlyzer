@@ -31,6 +31,14 @@ process KREWLYZER_RUNALL {
     tuple val(meta), path("*.metadata.tsv.gz"),       emit: metadata_gz, optional: true
     tuple val(meta), path("*.metadata.parquet"),      emit: metadata_parquet, optional: true
     tuple val(meta), path("*.features.json"),        emit: features_json, optional: true
+
+    // Written by run-all on Parquet runs. `optional` because a tsv-only run
+    // skips validation entirely -- the contract describes the Parquet surface.
+    // These were produced and then discarded: the module did not emit them, so
+    // the fingerprint that makes cohort validation affordable never left the
+    // work directory and KREWLYZER_VALIDATE_COHORT had nothing to gather.
+    tuple val(meta), path("*.validation.json"),      emit: validation, optional: true
+    tuple val(meta), path("*.fingerprint.json"),     emit: fingerprint, optional: true
     
     // FSC outputs — TSV/TSV.gz/Parquet (controlled by --output-format and --compress)
     tuple val(meta), path("*.FSC.tsv"),              emit: fsc, optional: true
@@ -198,6 +206,7 @@ process KREWLYZER_RUNALL {
     def assay_arg = meta.assay && meta.assay != 'UNKNOWN' && meta.assay != 'WGS' ? "--assay ${meta.assay.toLowerCase()}" : ""
     
     // Params-based arguments
+    def strict_validation_arg = params.strict_validation ? "--strict-validation" : ""
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def mapq_arg = params.mapq != 20 ? "--mapq ${params.mapq}" : ""
     def minlen_arg = params.minlen != 65 ? "--minlen ${params.minlen}" : ""
@@ -257,6 +266,7 @@ process KREWLYZER_RUNALL {
         $json_arg \\
         $output_format_arg \\
         $compress_arg \\
+        $strict_validation_arg \\
         $debug_arg \\
         $args
 

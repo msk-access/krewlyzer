@@ -152,6 +152,33 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+- **The Nextflow pipeline discarded its own validation artifacts, and never ran
+  the cohort check.** Three compounding gaps, so the scatter/gather validation
+  added earlier was inert end to end:
+
+  1. `run-all` writes `{sample}.validation.json` and `{sample}.fingerprint.json`
+     on Parquet runs, but the `runall` module declared neither as an output —
+     both were produced and left to die in the work directory.
+  2. `KREWLYZER_VALIDATE_COHORT` existed as a module and was **included by
+     nothing and called by nothing**. The gather half of the check had no
+     inputs and never ran.
+  3. `--strict-validation` was not exposed as a pipeline parameter at all.
+
+  The workflow now collects the fingerprints and runs the cohort step, and
+  emits `cohort_report`. Tool-level mode (`--use_runall false`) produces no
+  fingerprints, so the cohort step is skipped rather than run on a partial set,
+  which would report degeneracy that is an artefact of the missing samples.
+
+  The pipeline also **warns at start** when `output_format` is tsv-only: kreview
+  reads Parquet only and a tsv-only run skips validation, so the default
+  produces a cohort that is invisible downstream — silently, because every
+  reader there swallows exceptions and yields an empty feature dict. The
+  default is unchanged; the warning and the documentation are new.
+
+  `docs/nextflow/outputs.md` gains the validation artifacts and a table of the
+  six output families whose values change in 0.9.0; `parameters.md` gains
+  `--strict_validation`, `--gc_correct`, `--queue_size` and the Parquet caveat.
+
 - **`FSC.regions.e1only` selected by coordinate, and emitted a row for every
   gene whether or not it had one.** `filter_fsc_to_e1` sorted by `start` and
   took the first row per gene. It had no strand to work with — the temp BED
