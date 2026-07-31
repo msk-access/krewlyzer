@@ -150,6 +150,21 @@ grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
 
 ---
 
+## Phase 2.6: Regenerate the aggregated documentation
+
+`krewlyzer_all_docs.md` is a single-file concatenation of `docs/`, generated
+rather than hand-maintained. Any doc edit in the release — including the
+version bumps in Phase 2.5 — leaves it stale.
+
+```bash
+python scripts/build_all_docs.py
+```
+
+CI runs `--check` and fails if it is out of date, so this cannot be skipped
+silently.
+
+---
+
 ## Phase 3: Update CHANGELOG
 
 Add new entry at the top of `CHANGELOG.md`:
