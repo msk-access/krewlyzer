@@ -38,6 +38,21 @@ Ensembl's own GRCh37 line is frozen at release 87 (2016) and predates MANE
 entirely; GENCODE's lift37 is a modern release mapped back, and does carry MANE
 tags. Verified before use rather than assumed -- see ``_require_mane``.
 
+Which GENCODE file
+------------------
+Use the **comprehensive** annotation (``gencode.vNN[lift37].annotation.gtf.gz``),
+not ``.basic.``.
+
+For the panel assays it makes no difference -- building ``xs1`` from both gives
+the same 128 MANE transcripts, the same 25 genes with a true E1, and the same
+1,725 rows, because MANE Select transcripts are in both files. It matters for
+WGS: ``basic`` is a curated subset, and the ~5% of genes with no MANE tag fall
+through to the Ensembl-canonical and longest-CDS branches, which need the full
+transcript set to choose from sensibly.
+
+The assets in this repo were built from ``gencode.v47lift37`` (GRCh37) and
+``gencode.v50`` (GRCh38), comprehensive in both cases.
+
 Usage
 -----
     python scripts/build_gene_bed.py \\
