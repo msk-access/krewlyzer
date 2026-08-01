@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **An unmeasurable spread produced `z = 0.0`, in twelve places.** Ten baseline
+  classes in `pon/model.py` independently ended with
+  `if std > 0: return (x - mean) / std` followed by `return 0.0` — nine copies
+  of the same three lines, and the same defect nine times. Zero is not a
+  cautious answer: it is the most confident claim the column can make ("sits
+  exactly at the healthy baseline"), asserted precisely when the baseline
+  measured no spread, and indistinguishable from a genuine zero.
+
+  Replaced by one `zscore_or_nan` helper, so it can only be wrong once. Also:
+  `FsdBaseline.get_expected`/`get_std` returned `0.0` for an unknown arm (a
+  caller dividing by that gets infinity, not an absence), and
+  `compute_shape_score` returned `0.0` for an undefined correlation, which is
+  a real claim about shape agreement.
+
+- **`WpsBaseline.compute_z_vector` substituted `1.0` for an unusable σ.** Since
+  `4cd634b` the builder writes NaN where it could not measure spread;
+  `np.where(std > 0, std, 1.0)` is False for NaN, so every one of those became
+  a *finite* z — undoing the builder's honesty at the read side, which is the
+  harder place to notice. This is the function WPS z-scoring will use.
+
+### Changed
+- **OCF PON logging distinguishes "absent from the baseline" from "matched but
+  unscoreable".** Both correctly write NaN, but collapsing them reported
+  `0/1 regions matched` for a region that matched perfectly well and simply has
+  no variance in the cohort. That is the difference between "rebuild the PON"
+  and "expected", and only the log can say which.
+
+### Fixed
 - **Reading back a file just written could return an older run's data.**
   `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is
   right when asking "what was produced for this output" and wrong immediately

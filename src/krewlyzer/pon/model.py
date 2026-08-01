@@ -21,6 +21,30 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pon")
 
 
+#: What a z-score is when there is nothing to divide by.
+#:
+#: Every baseline class below independently ended `if std > 0: ... return 0.0`,
+#: nine times over. Zero is not a cautious answer there -- it is the single
+#: most confident statement the column can make ("this sample sits exactly at
+#: the healthy baseline"), asserted precisely when the baseline measured no
+#: spread at all, and indistinguishable from a genuine zero.
+#:
+#: The same reasoning that took the sigma floors out of the builder (4cd634b)
+#: and `z_score = 0.0` out of region entropy: a value a reader cannot tell
+#: apart from a measurement must be a measurement, or absent.
+def zscore_or_nan(observed: float, mean: float, std: float) -> float:
+    """``(observed - mean) / std``, or NaN when ``std`` is not usable.
+
+    NaN propagates to an absent column value rather than a fabricated zero,
+    and — unlike zero — cannot be mistaken for a reading.
+    """
+    if std is None or not np.isfinite(std) or std <= 0:
+        return float("nan")
+    if mean is None or not np.isfinite(mean) or not np.isfinite(observed):
+        return float("nan")
+    return (observed - mean) / std
+
+
 @dataclass
 class GcBiasModel:
     """
@@ -81,16 +105,24 @@ class FsdBaseline:
     arms: Dict[str, Dict[str, List[float]]]  # arm -> {"expected": [...], "std": [...]}
 
     def get_expected(self, arm: str, size: int) -> float:
-        """Get expected proportion for a size bin in a given arm."""
+        """Expected proportion for a size bin, NaN when the arm is unknown.
+
+        Not 0.0: an arm absent from the baseline has no expectation, and zero
+        is a specific -- and specifically wrong -- one.
+        """
         if arm not in self.arms:
-            return 0.0
+            return float("nan")
         arm_data = self.arms[arm]
         return float(np.interp(size, self.size_bins, arm_data["expected"]))
 
     def get_std(self, arm: str, size: int) -> float:
-        """Get standard deviation for a size bin in a given arm."""
+        """Spread for a size bin, NaN when the arm is unknown.
+
+        Zero would be worse than useless here -- a caller dividing by it gets
+        infinity rather than an absent value.
+        """
         if arm not in self.arms:
-            return 0.0
+            return float("nan")
         arm_data = self.arms[arm]
         return float(np.interp(size, self.size_bins, arm_data["std"]))
 
@@ -221,9 +253,18 @@ class WpsBaseline:
         if mean is None or std is None:
             return None
 
-        # Avoid division by zero
-        std_safe = np.where(std > 0, std, 1.0)
-        return (sample_vector - mean) / std_safe
+        # NaN where sigma is not usable, never a substituted 1.0.
+        #
+        # Since 4cd634b the builder writes NaN for positions whose spread it
+        # could not measure. `np.where(std > 0, ...)` is False for NaN, so a
+        # 1.0 default would turn every one of those into a finite z -- undoing
+        # the builder's honesty at the read side, which is the harder place to
+        # notice it.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            usable = np.isfinite(std) & (std > 0)
+            return np.where(
+                usable, (sample_vector - mean) / np.where(usable, std, 1.0), np.nan
+            )
 
     def compute_shape_score(
         self, region_id: str, sample_vector: np.ndarray, column: str = "wps_nuc"
@@ -260,8 +301,9 @@ class WpsBaseline:
         mean_std = np.std(mean)
 
         if sample_std < 1e-6 or mean_std < 1e-6:
-            # If either is constant, correlation is undefined
-            return 0.0
+            # Undefined, not uncorrelated. Zero is a real claim about shape
+            # agreement and would be indistinguishable from having measured it.
+            return float("nan")
 
         correlation = np.corrcoef(sample_vector, mean)[0, 1]
         return float(correlation) if not np.isnan(correlation) else 0.0
@@ -319,9 +361,7 @@ class OcfBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_ocf - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_ocf, mean, std)
 
 
 @dataclass
@@ -381,9 +421,7 @@ class WpsBackgroundBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_nrl - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_nrl, mean, std)
 
 
 @dataclass
@@ -413,15 +451,11 @@ class MdsBaseline:
             return None
         expected = self.kmer_expected[kmer]
         std = self.kmer_std.get(kmer, 0.001)
-        if std > 0:
-            return (observed_freq - expected) / std
-        return 0.0
+        return zscore_or_nan(observed_freq, expected, std)
 
     def get_mds_zscore(self, observed_mds: float) -> float:
         """Compute z-score for MDS value."""
-        if self.mds_std > 0:
-            return (observed_mds - self.mds_mean) / self.mds_std
-        return 0.0
+        return zscore_or_nan(observed_mds, self.mds_mean, self.mds_std)
 
     def get_aberrant_kmers(
         self, observed_freqs: Dict[str, float], threshold: float = 2.0
@@ -504,9 +538,7 @@ class RegionMdsBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_mds - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_mds, mean, std)
 
     def compute_e1_zscore(self, gene: str, observed_mds_e1: float) -> Optional[float]:
         """
@@ -516,9 +548,7 @@ class RegionMdsBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_mds_e1 - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_mds_e1, mean, std)
 
 
 @dataclass
@@ -576,9 +606,7 @@ class FscGeneBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_depth - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_depth, mean, std)
 
     def __len__(self) -> int:
         """Return number of genes in baseline."""
@@ -641,9 +669,7 @@ class FscRegionBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_depth - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_depth, mean, std)
 
     def __len__(self) -> int:
         """Return number of regions in baseline."""
@@ -671,9 +697,9 @@ class TfbsBaseline:
         return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
-        """Compute z-score for observed entropy value."""
+        """Compute z-score for observed entropy value, NaN without a baseline."""
         if self.baseline is None:
-            return 0.0
+            return float("nan")
         return self.baseline.get_zscore(label, observed_entropy)
 
     def get_stats(self, label: str) -> Optional[tuple]:
@@ -704,9 +730,9 @@ class AtacBaseline:
         return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
-        """Compute z-score for observed entropy value."""
+        """Compute z-score for observed entropy value, NaN without a baseline."""
         if self.baseline is None:
-            return 0.0
+            return float("nan")
         return self.baseline.get_zscore(label, observed_entropy)
 
     def get_stats(self, label: str) -> Optional[tuple]:
