@@ -552,6 +552,46 @@ class RegionMdsBaseline:
 
 
 @dataclass
+class RegionMdsExonBaseline:
+    """Per-exon MDS baseline — the finest localisation krewlyzer produces.
+
+    Keyed on ``(gene, name)``. ``name`` alone is not unique across genes, and
+    coordinates would break whenever the panel BED is regenerated.
+
+    Measured on the 0.8.3 corpus before this was built: every exon appears in
+    every sample of its assay (7/7 for xs1, 19/19 for xs2) with a measurable
+    spread, and under 0.25% carry fewer than 10 fragments. Exons are far
+    better supported here than "per-exon" suggests, so this needs no special
+    sparsity handling — only the same NaN-not-floor rule as everywhere else.
+    """
+
+    #: (gene, name) -> {mds_mean, mds_std, n_samples}
+    exon_baseline: Dict[tuple, Dict[str, float]] = field(default_factory=dict)
+
+    def get_stats(self, gene: str, name: str) -> Optional[tuple]:
+        """``(mean, std)`` for one exon, or None when it is not in the baseline."""
+        entry = self.exon_baseline.get((gene, name))
+        if entry is None:
+            return None
+        return (entry.get("mds_mean"), entry.get("mds_std"))
+
+    def compute_zscore(
+        self, gene: str, name: str, observed_mds: float
+    ) -> Optional[float]:
+        """Z-score for one exon.
+
+        ``None`` when the exon is absent from the baseline; NaN when it is
+        present but the baseline measured no usable spread. Both write NaN to
+        the output, but only the caller's log can tell them apart.
+        """
+        stats = self.get_stats(gene, name)
+        if stats is None:
+            return None
+        mean, std = stats
+        return zscore_or_nan(observed_mds, mean, std)
+
+
+@dataclass
 class FscGeneBaseline:
     """
     Per-Gene Fragment Size Coverage (FSC) depth baseline.
@@ -781,7 +821,8 @@ class PonModel:
     mds_baseline: Optional[MdsBaseline] = None
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
     atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
-    region_mds: Optional[RegionMdsBaseline] = None  # Per-gene MDS baseline
+    region_mds: Optional[RegionMdsBaseline] = None
+    region_mds_exon: Optional[RegionMdsExonBaseline] = None  # Per-exon MDS baseline
     fsc_gene_baseline: Optional[FscGeneBaseline] = (
         None  # Per-gene normalized depth (panel mode)
     )
@@ -1174,6 +1215,22 @@ class PonModel:
             fsc_region_baseline = FscRegionBaseline(data=fsc_region_data)
             logger.debug(f"Loaded FSC region baseline: {len(fsc_region_data)} regions")
 
+        # Parse Region MDS exon baseline
+        region_mds_exon_df = df_all[df_all["table"] == "region_mds_exon"]
+        region_mds_exon = None
+        if not region_mds_exon_df.empty:
+            exon_baseline = {}
+            for _, row in region_mds_exon_df.iterrows():
+                # No `or 0.0` defaults: a NaN sigma here means the builder
+                # could not measure a spread, and zscore_or_nan must see it.
+                exon_baseline[(str(row["gene"]), str(row["name"]))] = {
+                    "mds_mean": float(row["mds_mean"]),
+                    "mds_std": float(row["mds_std"]),
+                    "n_samples": int(row.get("n_samples", 0) or 0),
+                }
+            region_mds_exon = RegionMdsExonBaseline(exon_baseline=exon_baseline)
+            logger.debug(f"Loaded Region MDS exon baseline: {len(exon_baseline)} exons")
+
         # Parse Region MDS baseline
         region_mds_df = df_all[df_all["table"] == "region_mds"]
         region_mds = None
@@ -1235,6 +1292,7 @@ class PonModel:
             fsc_gene_baseline=fsc_gene_baseline,
             fsc_region_baseline=fsc_region_baseline,
             region_mds=region_mds,
+            region_mds_exon=region_mds_exon,
             wps_background_baseline=wps_background_baseline,
         )
 
@@ -1279,35 +1337,14 @@ class PonModel:
         # Placeholder for legacy support
         return cls()
 
-    def save(self, path: Path) -> None:
-        """
-        Save PON model to Parquet file.
-
-        Args:
-            path: Output path (should end with .pon.parquet)
-        """
-        path = Path(path)
-
-        # Build metadata table
-        metadata = pd.DataFrame(
-            [
-                {
-                    "table": "metadata",
-                    "schema_version": self.schema_version,
-                    "assay": self.assay,
-                    "build_date": self.build_date,
-                    "n_samples": self.n_samples,
-                    "reference": self.reference,
-                }
-            ]
-        )
-
-        # Note: This is a simplified save method. build.py uses _save_pon_model()
-        # for complete serialization including all baselines.
-
-        # For now, just save metadata
-        metadata.to_parquet(path, index=False)
-        logger.info(f"Saved PON model: {path}")
+    # NOTE: there is deliberately no `save()` here.
+    #
+    # One existed and wrote only the metadata block -- a PON with no baselines
+    # at all -- while `build-pon` used `_save_pon_model` in `build.py`. Two
+    # writers for one format, one of them silently producing an empty model,
+    # and nothing in production called it. Removed rather than completed:
+    # a second serializer is a second thing to keep in step with every new
+    # block, and the first one already has to be.
 
     def validate(self) -> List[str]:
         """

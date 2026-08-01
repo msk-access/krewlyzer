@@ -4,6 +4,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **Per-exon MDS baseline (`region_mds_exon`) and `MDS.exon.mds_z`.**
+  `MDS.exon` is the finest localisation krewlyzer produces — 1,006 rows on
+  xs2, 1,725 on xs1 — and was the only feature table with no baseline at all,
+  so it shipped a raw score with nothing to compare it against.
+
+  Keyed on `(gene, name)`: `name` alone is not unique across genes, and
+  coordinates would break whenever the panel BED is regenerated. Aggregated in
+  Python like the FSC gene and region baselines rather than adding a second
+  Rust entry point for a groupby over ~1.7k rows.
+
+  Measured before building it, which refuted the expected shape: exon data is
+  **not** sparse. Every exon appears in every sample of its assay (7/7 xs1,
+  19/19 xs2) with a measurable spread, and under 0.25% carry fewer than 10
+  fragments. So no sparsity handling was needed — only the same NaN-not-floor
+  rule as everywhere else. Verified on the real cohort: 1,006/1,006 xs2 exons
+  fitted, median σ 0.0079, none unmeasurable.
+
+  A PON built before 0.9.0 has no such block; `mds_z` is then `NaN` and a line
+  says so.
+
+### Removed
+- **`PonModel.save`** — a second serializer that wrote only the metadata block,
+  producing a PON with no baselines at all, while `build-pon` used
+  `_save_pon_model`. Nothing in production called it. Removed rather than
+  completed: a second writer is a second thing to keep in step with every new
+  block.
+
+### Changed
+- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
+  and FSC region have required it since they were written and WPS acquired it
+  in `4cd634b`; the four now agree by construction rather than by three
+  separate literals happening to match.
+
 ### Fixed
 - **An unmeasurable spread produced `z = 0.0`, in twelve places.** Ten baseline
   classes in `pon/model.py` independently ended with

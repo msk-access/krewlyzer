@@ -5251,6 +5251,19 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `strand` | Strand (+/-) |
 | `n_fragments` | Fragment count |
 | `mds` | Motif Diversity Score |
+| `mds_z` | Z-score against the PON's per-exon baseline (with `--pon-model`) |
+
+!!! note "`mds_z` needs a PON built by 0.9.0 or later"
+    The per-exon baseline (`region_mds_exon`) is new in 0.9.0. Against an
+    older PON the column is `NaN` and a line is logged saying so — the exon
+    score itself is unaffected.
+
+    `NaN` also appears where the exon is absent from the baseline, which
+    usually means the PON was built for a different panel. Measured on a real
+    cohort, exon coverage is much better than "per-exon" suggests: every exon
+    appears in every sample of its assay, and under 0.25% carry fewer than 10
+    fragments. So a `NaN` here is worth investigating rather than assuming
+    thin coverage.
 
 ### MDS.gene.tsv Columns
 

@@ -263,8 +263,9 @@ MEANINGS: Dict[str, Meaning] = {
         why=("The finest localisation available: which exon, not which gene."),
         how=("Entropy over the fragments overlapping each exon or capture tile."),
         what=(
-            "Sparse by nature — an exon with few fragments has an unstable entropy. Read `n_fragments` alongside `mds`."
+            '`mds_z` against the PON\'s per-exon baseline, then `n_fragments`. Measured on a real cohort, exon coverage is far better than "per-exon" suggests -- every exon appears in every sample of its assay and under 0.25% carry fewer than 10 fragments -- so a NaN `mds_z` usually means the PON was built for a different panel, not that the exon is thin.'
         ),
+        pon_columns=("mds_z",),
     ),
     # -- orientation and accessibility --------------------------------------
     ".OCF.ontarget.parquet": Meaning(

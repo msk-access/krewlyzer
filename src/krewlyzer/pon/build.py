@@ -23,6 +23,7 @@ from .model import (
     OcfBaseline,
     MdsBaseline,
     RegionMdsBaseline,
+    RegionMdsExonBaseline,
     WpsBackgroundBaseline,
     FscGeneBaseline,
     FscRegionBaseline,
@@ -38,10 +39,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("build-pon")
 
+#: Minimum samples behind a per-key baseline entry.
+#:
+#: FSC gene and FSC region have required this since they were written; WPS
+#: acquired it in 4cd634b. Named here so the four agree by construction
+#: rather than by three separate literals happening to match.
+MIN_SAMPLES_PER_KEY = 3
+
 # Import core tools for processing samples
 from krewlyzer import _core
 
 # Import unified sample processor
+from krewlyzer.core.output_utils import read_table
 from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
 
 # Import asset resolution functions
@@ -721,6 +730,7 @@ def build_pon(
         wps_background_paths = []  # WPS Alu background for NRL baseline
         wps_panel_paths = []  # Panel-specific WPS parquets (panel mode only)
         mds_gene_paths = []  # Region MDS per-gene files
+        mds_exon_paths = []  # Region MDS per-exon files (written alongside)
 
         # FSC gene/region data collectors (panel mode only)
         # Collect normalized_depth from FSC.gene.tsv and FSC.regions.tsv
@@ -891,6 +901,15 @@ def build_pon(
             )
             if sample_mds_gene.exists():
                 mds_gene_paths.append(str(sample_mds_gene))
+
+            # The exon table is written by the same run_region_mds call, so it
+            # costs nothing extra to baseline -- and it is the finest
+            # localisation krewlyzer produces, which had no baseline at all.
+            sample_mds_exon = (
+                Path(temp_output_dir) / sample_name / f"{sample_name}.MDS.exon.tsv"
+            )
+            if sample_mds_exon.exists():
+                mds_exon_paths.append(str(sample_mds_exon))
 
             # Collect MDS data (from extraction)
             if outputs.mds_counts:
@@ -1148,6 +1167,15 @@ def build_pon(
         except Exception as e:
             logger.warning(f"  Region MDS baseline failed: {e}")
 
+    # Build Region MDS exon baseline (per-exon / per-capture-tile)
+    region_mds_exon_baseline = None
+    if mds_exon_paths:
+        logger.info("  Computing Region MDS exon baseline...")
+        try:
+            region_mds_exon_baseline = _compute_region_mds_exon_baseline(mds_exon_paths)
+        except Exception as e:
+            logger.warning(f"  Region MDS exon baseline failed: {e}")
+
     # Compute FSC gene/region baselines (panel mode only)
     fsc_gene_baseline = None
     fsc_region_baseline = None
@@ -1189,6 +1217,7 @@ def build_pon(
         mds_baseline=mds_baseline,
         mds_baseline_ontarget=mds_baseline_ontarget,
         region_mds=region_mds_baseline,
+        region_mds_exon=region_mds_exon_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
         # On-target baselines (panel mode - uses panel-specific regions)
@@ -1282,6 +1311,15 @@ def build_pon(
             region_mds_baseline,
             lambda b: (
                 f"{len(b.gene_baseline)} genes" if hasattr(b, "gene_baseline") else "OK"
+            ),
+        )
+    )
+    logger.info(
+        _baseline_status(
+            "region_mds_exon",
+            region_mds_exon_baseline,
+            lambda b: (
+                f"{len(b.exon_baseline)} exons" if hasattr(b, "exon_baseline") else "OK"
             ),
         )
     )
@@ -1591,6 +1629,100 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
         mds_mean=mds_mean,
         mds_std=mds_std,
     )
+
+
+def _compute_region_mds_exon_baseline(
+    mds_exon_paths: List[str],
+) -> "Optional[RegionMdsExonBaseline]":
+    """Per-exon MDS baseline from sample ``MDS.exon`` tables.
+
+    The finest localisation krewlyzer produces -- which exon, not which gene --
+    and until now the only feature output with no baseline at all, so
+    ``MDS.exon`` shipped a raw score no reader could put in context.
+
+    Aggregated in Python rather than Rust like its per-gene sibling: 1,006
+    (xs2) to 1,725 (xs1) rows per sample is a trivial groupby, and the FSC
+    gene and region baselines already aggregate this way in this module.
+    Adding a Rust entry point would be a second way to do the same thing.
+
+    Keyed on ``(gene, name)``. ``name`` alone is not unique across genes, and
+    coordinates would break whenever the panel BED is regenerated.
+    """
+    from .model import RegionMdsExonBaseline
+
+    if not mds_exon_paths:
+        return None
+
+    valid_paths = [p for p in mds_exon_paths if Path(p).exists()]
+    if not valid_paths:
+        logger.warning("No valid MDS.exon files found for region-MDS exon baseline")
+        return None
+
+    logger.info(
+        f"Computing region-MDS exon baseline from {len(valid_paths)} samples..."
+    )
+
+    frames = []
+    for path in valid_paths:
+        try:
+            frame = read_table(Path(path))
+        except Exception as exc:
+            logger.warning(f"Could not read {Path(path).name}: {exc}")
+            continue
+        if frame is None:
+            continue
+        missing = [c for c in ("gene", "name", "mds") if c not in frame.columns]
+        if missing:
+            # Loud, not silent: a renamed column here would otherwise produce
+            # an empty baseline that looks exactly like "no exon data".
+            raise ValueError(
+                f"{Path(path).name} is missing {missing}; found "
+                f"{sorted(frame.columns)}. Refusing to build a partial baseline."
+            )
+        frames.append(frame[["gene", "name", "mds"]])
+
+    if not frames:
+        logger.warning("No readable MDS.exon data for the exon baseline")
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined["mds"] = pd.to_numeric(combined["mds"], errors="coerce")
+
+    grouped = combined.groupby(["gene", "name"], sort=True)["mds"]
+    stats = grouped.agg(["mean", "std", "count"])  # std is ddof=1 in pandas
+
+    kept = stats[stats["count"] >= MIN_SAMPLES_PER_KEY]
+    skipped = len(stats) - len(kept)
+
+    exon_stats: Dict[tuple, Dict[str, float]] = {}
+    for key, row in kept.iterrows():
+        # A two-level MultiIndex from the (gene, name) groupby. Indexed rather
+        # than unpacked: iterrows' key is untyped, and unpacking it leaves
+        # mypy unable to infer either half.
+        exon_key = (str(key[0]), str(key[1]))  # type: ignore[index]
+        exon_stats[exon_key] = {
+            "mds_mean": float(row["mean"]),
+            # NaN where pandas could not measure a spread. No floor: see
+            # zscore_or_nan in model.py.
+            "mds_std": float(row["std"]),
+            "n_samples": int(row["count"]),
+        }
+
+    baseline = RegionMdsExonBaseline(exon_baseline=exon_stats)
+    frame = pd.DataFrame(
+        [
+            {"key": f"{g}|{n}", "mds_std": v["mds_std"]}
+            for (g, n), v in exon_stats.items()
+        ]
+    )
+    _log_baseline_quality("Region MDS exon", frame, "mds_std", "exon")
+    if skipped:
+        logger.warning(
+            f"Region MDS exon baseline: skipped {skipped} of {len(stats)} exons "
+            f"seen in fewer than {MIN_SAMPLES_PER_KEY} samples -- those exons "
+            "get no z-score rather than one from an unmeasurable spread."
+        )
+    return baseline
 
 
 def _compute_region_mds_baseline(
@@ -2247,6 +2379,28 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             )
     region_mds_df = pd.DataFrame(region_mds_rows) if region_mds_rows else pd.DataFrame()
 
+    # Build Region MDS exon baseline DataFrame.
+    #
+    # `gene` and `name` are stored as separate columns rather than a joined
+    # key: the reader needs both anyway, and a delimiter would be one more
+    # thing that can collide with an exon name.
+    region_mds_exon_rows: List[Dict] = []
+    if model.region_mds_exon and model.region_mds_exon.exon_baseline:
+        for (gene, exon_name), entry in model.region_mds_exon.exon_baseline.items():
+            region_mds_exon_rows.append(
+                {
+                    "table": "region_mds_exon",
+                    "gene": gene,
+                    "name": exon_name,
+                    "mds_mean": entry.get("mds_mean"),
+                    "mds_std": entry.get("mds_std"),
+                    "n_samples": entry.get("n_samples", 0),
+                }
+            )
+    region_mds_exon_df = (
+        pd.DataFrame(region_mds_exon_rows) if region_mds_exon_rows else pd.DataFrame()
+    )
+
     # Build WPS Background baseline DataFrame
     wps_background_df = pd.DataFrame()
     if (
@@ -2295,6 +2449,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(fsc_region_df)
     if not region_mds_df.empty:
         all_dfs.append(region_mds_df)
+    if not region_mds_exon_df.empty:
+        all_dfs.append(region_mds_exon_df)
     if not wps_background_df.empty:
         all_dfs.append(wps_background_df)
 
