@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
+  and variant as arguments. The old script was hardcoded to xs2 and carried a
+  header claiming "47 samples" inherited from the xs1 copy it was made from —
+  while the xs2 model it produced records 21. Four models built from four
+  edited copies of one script is how that happens.
+
+  It also passes `--keep-sample-outputs` and `--cohort-label`, and **ends by
+  running `validate-pon` on what it built**. A build that produces a model the
+  gate rejects has not succeeded, whatever `build-pon`'s exit code said.
+
+  `docs/guides/building-pon.md` gains the rebuild runbook: what to watch in the
+  log, why the sample outputs are kept, and the LFS ordering that has to be
+  right.
+
 ### Added
 - **`krewlyzer validate-pon`** — gates the reference, not the results.
   `validate-output` checks what a run produced; nothing checked the model

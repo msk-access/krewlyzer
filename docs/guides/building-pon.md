@@ -326,3 +326,56 @@ mkdir -p ./pon_temp && srun \
 
 !!! warning
     If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
+
+---
+
+## Rebuilding the bundled PONs
+
+`scripts/build_pon.sh` takes the two things that differ between the four
+models as arguments:
+
+```bash
+sbatch scripts/build_pon.sh xs1 all_unique
+sbatch scripts/build_pon.sh xs2 all_unique
+sbatch scripts/build_pon.sh xs1 duplex
+sbatch scripts/build_pon.sh xs2 duplex
+```
+
+Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
+`KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.
+
+Each run ends by calling `krewlyzer validate-pon` on what it produced. **A
+build that produces a model the gate rejects has not succeeded**, whatever
+`build-pon`'s exit code said — that check is why four models carrying a
+fabricated baseline shipped for months.
+
+### What to watch in the log
+
+| Line | What it means if it looks wrong |
+|------|--------------------------------|
+| `WPS background baseline: N/28 group_ids with a measured spread` | Anything below 28/28 on a real cohort means the source columns are not what the builder expects |
+| `WPS baseline skipped N of M anchors` | Expected to be large for **duplex** (~36–38%), small for all_unique (~4.5%). Large for all_unique is worth stopping for |
+| `Region MDS exon baseline: N/M exons` | Should be all of them; exon coverage is dense, not sparse |
+| `... every {key} has the identical std` | The fabricated-baseline signature. Stop |
+
+### Why `--keep-sample-outputs`
+
+Per-sample features used to be extracted to a temp directory and deleted on
+success, so every rebuild re-ran extraction over every BAM — hours — and
+leave-one-out calibration would have cost *n* of those. The script keeps them,
+and they survive a failed build so a rerun skips what finished.
+
+### After the build
+
+1. `krewlyzer validate-pon` on all four (the script does one; check the set).
+2. Diff each new model against the one it replaces, per block, and keep it as
+   the acceptance record.
+3. `git lfs push --all` **before** pushing the branch, or the pointers land
+   without the objects.
+
+!!! warning "Expect the numbers to move"
+    0.9.0 changes what several features mean — reverse-strand fragment
+    placement moves ~half of all fragments, FSC bands were realigned, E1 comes
+    from GENCODE flags, and NRL is data-dependent for the first time. Do not
+    compare a 0.9.0 PON against an older one value-by-value; the old values
+    were measuring something else.
