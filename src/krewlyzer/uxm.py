@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .core.output_utils import (
-    read_table,
+    read_exact_table,
     write_table,
 )  # Unified I/O for Parquet support
 
@@ -186,7 +186,10 @@ def uxm(
             logger.debug(
                 f"UXM: converting {output_file.name} → format={output_format!r}"
             )
-            df = read_table(output_file)
+            # read_exact_table: Rust wrote this exact TSV. read_table is
+            # parquet-first and would prefer a stale `.parquet` sibling from an
+            # earlier run into the same directory (c92ed86).
+            df = read_exact_table(output_file)
             if df is not None:
                 write_table(
                     df,
@@ -201,7 +204,10 @@ def uxm(
         elif compress:
             # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
             logger.debug(f"UXM: compressing {output_file.name} → .tsv.gz")
-            df = read_table(output_file)
+            # read_exact_table: Rust wrote this exact TSV. read_table is
+            # parquet-first and would prefer a stale `.parquet` sibling from an
+            # earlier run into the same directory (c92ed86).
+            df = read_exact_table(output_file)
             if df is not None:
                 write_table(
                     df, output_file.with_suffix(""), output_format="tsv", compress=True

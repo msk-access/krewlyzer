@@ -27,6 +27,7 @@ from datetime import datetime
 import pandas as pd
 
 from .output_utils import (
+    read_exact_table,
     read_table,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
@@ -597,7 +598,9 @@ def write_motif_outputs(
                 # Append z-score to on-target MDS file
                 mds_on_output = mds_on_base.parent / (mds_on_base.name + ext)
                 try:
-                    mds_on_df = read_table(mds_on_output)
+                    # Exact: `ext` is the extension this run actually wrote, so
+                    # resolving could pick a sibling from an earlier run.
+                    mds_on_df = read_exact_table(mds_on_output)
                     if mds_on_df is not None and "mds_z" not in mds_on_df.columns:
                         mds_on_df["mds_z"] = mds_z_on
                         write_table(

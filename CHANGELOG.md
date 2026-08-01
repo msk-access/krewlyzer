@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Reading back a file just written could return an older run's data.**
+  `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is
+  right when asking "what was produced for this output" and wrong immediately
+  after writing a specific file. The Rust backends write plain TSV and Python
+  reads it back to honour `--output-format`, so a `.parquet` sibling left by an
+  earlier run into the same directory won — which is what a Nextflow retry or
+  `-resume` produces.
+
+  Reproduced end to end for region entropy: with a stale parquet present, the
+  output carried the **previous run's** `z_score` and `entropy` rather than
+  this run's. Fixed at every read-after-write site — region entropy, mFSD, UXM,
+  region-MDS gene and exon, on-target MDS — via a new
+  `read_exact_table` helper.
+
+  Also reverts an over-correction from earlier in this branch: the post-Rust
+  existence check in `process_region_entropy` must be exact, not resolving, or
+  a stale sibling satisfies it and the degradation branch never fires.
+
+### Added
+- **`read_exact_table`** in `core/output_utils.py` — reads the given path with
+  no sibling resolution, the counterpart to the deliberately parquet-first
+  `read_table`.
+- **`tests/invariants/test_read_after_write.py`** — pins both readers'
+  behaviour and an AST check that no function reads with the resolving reader
+  after writing, with a reviewed allowlist that must state why each entry is
+  safe. Also fails on a stale allowlist entry, so it cannot rot.
+
+### Changed
+- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
+  existed** — `version` / `genome` / `sample_count` where real PONs write
+  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
+  `meta.get(key, default)`, it loaded as a completely empty model and the tests
+  asserted only `is not None`. `test_pon_model_loading` had been marked
+  `skip("PON parquet schema requires production format")` — true of the
+  fixture, not the loader. Fixture corrected against the bundled PON, test
+  unskipped, and both now assert real field values.
+
 - **PON scoring was skipped under `--output-format parquet` in three more
   places.** Same shape as the FSD defect below: callers name a hardcoded
   `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
