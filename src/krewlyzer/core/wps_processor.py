@@ -53,27 +53,12 @@ def post_process_wps(
         "periodicity_z": None,
     }
 
-    # Apply Rust PON z-score to foreground WPS
-    if pon is not None and wps_parquet.exists():
-        try:
-            from krewlyzer import _core
-
-            # Get PON path from model if available
-            pon_path = getattr(pon, "_source_path", None)
-            if pon_path:
-                regions_processed = _core.wps.apply_pon_zscore(
-                    str(wps_parquet),
-                    str(pon_path),
-                    None,  # Overwrite in place
-                )
-                if regions_processed > 0:
-                    result["pon_subtracted"] = True
-                    logger.info(
-                        f"WPS PON z-score: {regions_processed} regions normalized"
-                    )
-        except Exception as e:
-            logger.error(f"WPS PON z-score failed: {e}")
-            raise RuntimeError(f"WPS PON z-score computation failed: {e}")
+    # WPS foreground z-scoring lives in `core/wps_pon.py` and is applied by
+    # the caller, not here. What stood in this place called
+    # `_core.wps.apply_pon_zscore` behind `getattr(pon, "_source_path", None)`
+    # -- an attribute nothing ever set -- so it never ran, and the Rust
+    # function it guarded computed a scalar z from v1.0 baseline fields that
+    # no shipped PON has carried since the vector format landed.
 
     # Process background WPS - periodicity/NRL computed in Rust
     if wps_background_parquet and wps_background_parquet.exists():

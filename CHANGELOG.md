@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **WPS z-scoring — the largest PON baseline, previously read by nothing.**
+  `wps_baseline` is ~128k anchors of 200-element mean and σ vectors, roughly
+  90% of every PON file, and its only consumer was a log line appending
+  `"WPS"` to a list of available components.
+
+  `WPS.parquet` now carries `wps_nuc_z` / `wps_tf_z` (per-position z vectors)
+  plus three derived shape quantities with their own z-scores, from a new
+  `wps_shape_baseline` block.
+
+  **Measurement drove every choice here, and ruled out the obvious ones:**
+
+  | rejected | why, measured |
+  |---|---|
+  | mean of z over positions | lag-1 autocorrelation **0.986** — a fragment spans ~167 bp and touches many positions, so such a mean has nothing like σ/√200 precision |
+  | max of \|z\| over positions | expected max under pure noise is **2.97**, so \|z\|>2 would flag nearly every anchor |
+  | centre-minus-flank amplitude | TSS dips at the centre (−6.8 vs −3.4 flanks), CTCF does the reverse — any fixed window is backwards for one |
+  | raw peak-to-trough range | correlates **+0.512** with `local_depth`; `log1p` drops it to −0.036 |
+  | raw shape correlation | bounded at 1.0; mean 0.844 σ 0.099 means **302/400 anchors cannot reach +2** — Fisher `arctanh` removes the ceiling |
+
+  `wps_phase_at_search_limit` marks anchors where the ±30 search ended on its
+  own edge (1.8% measured) — `nrl_at_band_limit` one level down, and those are
+  excluded from the z rather than scored as "displaced by exactly 30 bp".
+
+### Removed
+- **`_core.wps.apply_pon_zscore`** (173 lines of Rust). It emitted one scalar z
+  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
+  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
+  not positive. It was also unreachable: the call was gated on
+  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
+  schema-obsolete, fabricating, and implementing the statistic measurement
+  refuted.
+
+### Added
 - **Per-exon MDS baseline (`region_mds_exon`) and `MDS.exon.mds_z`.**
   `MDS.exon` is the finest localisation krewlyzer produces — 1,006 rows on
   xs2, 1,725 on xs1 — and was the only feature table with no baseline at all,

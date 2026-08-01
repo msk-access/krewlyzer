@@ -20,6 +20,8 @@ from .model import (
     GcBiasModel,
     FsdBaseline,
     WpsBaseline,
+    WpsShapeBaseline,
+    WPS_SHAPE_STATS,
     OcfBaseline,
     MdsBaseline,
     RegionMdsBaseline,
@@ -1050,7 +1052,7 @@ def build_pon(
 
     # Build WPS baseline
     logger.info("  Computing WPS baseline...")
-    wps_baseline = _compute_wps_baseline(wps_paths)
+    wps_baseline, wps_shape_baseline = _compute_wps_baseline(wps_paths)
 
     # Build OCF baseline
     ocf_baseline = None
@@ -1156,7 +1158,10 @@ def build_pon(
         logger.info(
             f"  Computing WPS panel baseline ({len(wps_panel_paths)} samples)..."
         )
-        wps_baseline_panel = _compute_wps_baseline(wps_panel_paths)
+        # The panel anchors get their own vector baseline; their shape
+        # statistics are not separately modelled -- 285-326 anchors is too
+        # few to be worth a second block, and they overlap the genome-wide set.
+        wps_baseline_panel, _ = _compute_wps_baseline(wps_panel_paths)
 
     # Build Region MDS baseline (per-gene MDS statistics)
     region_mds_baseline = None
@@ -1209,6 +1214,7 @@ def build_pon(
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
+        wps_shape_baseline=wps_shape_baseline,
         wps_background_baseline=wps_background_baseline,
         wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
@@ -1502,7 +1508,9 @@ def _compute_fsd_baseline(
     return FsdBaseline(size_bins=size_bins, arms=arms)
 
 
-def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
+def _compute_wps_baseline(
+    wps_paths: List[str],
+) -> tuple[Optional[WpsBaseline], Optional[WpsShapeBaseline]]:
     """
     Compute WPS baseline from Parquet vector format (v2.0).
 
@@ -1513,14 +1521,16 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
         wps_paths: List of paths to WPS Parquet files
 
     Returns:
-        WpsBaseline with 200-element vectors or None if no data
+        ``(vector baseline, shape baseline)``. Both come from the same Rust
+        pass -- it already holds every sample's vectors for a region, and the
+        Python side would have to re-read ~44 MB per sample to see them again.
 
     Raises:
         RuntimeError: If computation fails
     """
     if not wps_paths:
         logger.warning("No WPS paths provided for baseline computation")
-        return None
+        return None, None
 
     from krewlyzer import _core
 
@@ -1548,7 +1558,34 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
             }
         )
 
-    return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0")
+    # The derived shape quantities, keyed the same way. Kept in their own
+    # baseline rather than as more columns on the vector one: these are scalars
+    # per anchor and the vector table is already ~100M floats.
+    shape_regions = {
+        region_id: {
+            **{
+                f"{stat}_{moment}": float(data.get(f"{stat}_{moment}", float("nan")))
+                for stat in WPS_SHAPE_STATS
+                for moment in ("mean", "std")
+            },
+            "n_samples": int(data.get("n_samples", 0)),
+        }
+        for region_id, data in result.items()
+    }
+    shape = WpsShapeBaseline(regions=shape_regions)
+    _log_baseline_quality(
+        "WPS shape",
+        pd.DataFrame(
+            [
+                {"region_id": r, "std": v["shape_corr_fisher_std"]}
+                for r, v in shape_regions.items()
+            ]
+        ),
+        "std",
+        "anchor",
+    )
+
+    return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0"), shape
 
 
 def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "Optional[OcfBaseline]":
@@ -2401,6 +2438,16 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         pd.DataFrame(region_mds_exon_rows) if region_mds_exon_rows else pd.DataFrame()
     )
 
+    # Build WPS shape baseline DataFrame -- scalars per anchor, kept apart
+    # from the 200-element vector table.
+    wps_shape_rows: List[Dict] = []
+    if model.wps_shape_baseline and model.wps_shape_baseline.regions:
+        for region_id, entry in model.wps_shape_baseline.regions.items():
+            wps_shape_rows.append(
+                {"table": "wps_shape_baseline", "region_id": region_id, **entry}
+            )
+    wps_shape_df = pd.DataFrame(wps_shape_rows) if wps_shape_rows else pd.DataFrame()
+
     # Build WPS Background baseline DataFrame
     wps_background_df = pd.DataFrame()
     if (
@@ -2451,6 +2498,8 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(region_mds_df)
     if not region_mds_exon_df.empty:
         all_dfs.append(region_mds_exon_df)
+    if not wps_shape_df.empty:
+        all_dfs.append(wps_shape_df)
     if not wps_background_df.empty:
         all_dfs.append(wps_background_df)
 

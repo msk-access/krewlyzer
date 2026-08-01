@@ -802,6 +802,17 @@ def run_features(
         if skip_pon_zscore and pon:
             logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(outputs.wps, outputs.wps_background, pon=pon_for_zscore)
+        if pon_for_zscore is not None:
+            # The largest baseline in the PON, and until 0.9.0 read by nothing.
+            from .wps_pon import apply_wps_pon
+
+            apply_wps_pon(
+                outputs.wps,
+                pon_for_zscore,
+                output_base=outputs.wps.with_suffix(""),
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
         logger.info(f"✓ WPS: {outputs.wps.name}")
 
     # Panel WPS (assay-specific)

@@ -298,6 +298,117 @@ fn extract_wps_vector(col: &dyn arrow::array::Array, row: usize) -> Option<Vec<f
     None
 }
 
+/// How far the phase-shift search looks, in positions.
+///
+/// Measured on the real cohort: at +/-20 the search terminates on its own edge
+/// for 3.3% of anchors, at +/-30 for 1.8%. Wider costs linearly and the
+/// remaining edge cases are reported rather than hidden.
+const PHASE_MAX_LAG: usize = 30;
+
+/// Mean and sample standard deviation over the finite values, NaN when the
+/// spread cannot be measured. Never a floor -- see `element_wise_std`.
+fn mean_and_sd(values: &[f32]) -> (f32, f32) {
+    let finite: Vec<f32> = values.iter().copied().filter(|x| x.is_finite()).collect();
+    if finite.is_empty() {
+        return (f32::NAN, f32::NAN);
+    }
+    let n = finite.len() as f32;
+    let mean = finite.iter().sum::<f32>() / n;
+    if finite.len() < 2 {
+        return (mean, f32::NAN);
+    }
+    let var = finite.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / (n - 1.0);
+    let sd = var.sqrt();
+    (mean, if sd > 0.0 { sd } else { f32::NAN })
+}
+
+/// Peak-to-trough range of a profile, on a log scale.
+///
+/// Raw amplitude is a coverage measurement, not a chromatin one: measured on
+/// the real cohort it correlates +0.512 with `local_depth` and is skewed 11.6.
+/// `ln(1 + range)` drops the depth correlation to -0.036 and the skew to 1.6,
+/// which is the same multiplicative structure FSD and FSC depth show.
+fn log_amplitude(v: &[f32]) -> f32 {
+    let finite: Vec<f32> = v.iter().copied().filter(|x| x.is_finite()).collect();
+    if finite.len() < 2 {
+        return f32::NAN;
+    }
+    let hi = finite.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let lo = finite.iter().cloned().fold(f32::INFINITY, f32::min);
+    (1.0 + (hi - lo)).ln()
+}
+
+/// Pearson correlation, or NaN when either side has no variance.
+fn correlation(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len().min(b.len());
+    if n < 3 {
+        return f32::NAN;
+    }
+    let (mut sa, mut sb) = (0.0f64, 0.0f64);
+    for i in 0..n {
+        sa += a[i] as f64;
+        sb += b[i] as f64;
+    }
+    let (ma, mb) = (sa / n as f64, sb / n as f64);
+    let (mut num, mut da, mut db) = (0.0f64, 0.0f64, 0.0f64);
+    for i in 0..n {
+        let (x, y) = (a[i] as f64 - ma, b[i] as f64 - mb);
+        num += x * y;
+        da += x * x;
+        db += y * y;
+    }
+    if da < 1e-12 || db < 1e-12 {
+        return f32::NAN;
+    }
+    (num / (da.sqrt() * db.sqrt())) as f32
+}
+
+/// Fisher z of a correlation: `arctanh(r)`.
+///
+/// Required, not cosmetic. A correlation is bounded at 1.0, and measured on
+/// the real cohort the shape correlation sits at mean 0.844 with sigma 0.099 --
+/// so the largest attainable positive z is about 1.5, and **302 of 400 anchors
+/// could not reach +2 however tumour-like the sample**. On the Fisher scale
+/// the same data has mean 1.371 and no ceiling.
+fn fisher_z(r: f32) -> f32 {
+    if !r.is_finite() {
+        return f32::NAN;
+    }
+    r.clamp(-0.999_999, 0.999_999).atanh()
+}
+
+/// How far the sample profile is displaced against the baseline, in bp.
+///
+/// A positional shift is invisible to any per-position summary: the same
+/// nucleosome, one turn along, differs at every position while the profile is
+/// unchanged in shape.
+///
+/// Returns `(lag, hit_limit)`. `hit_limit` is the `nrl_at_band_limit` lesson
+/// applied here -- when the best correlation sits at the edge of the search
+/// window the true shift may be larger, so the value is a boundary and not a
+/// measurement. Measured incidence at +/-30: 1.8% of anchors.
+fn phase_shift(sample: &[f32], baseline: &[f32], max_lag: usize) -> (f32, bool) {
+    let n = sample.len().min(baseline.len());
+    if n < 4 * max_lag {
+        return (f32::NAN, false);
+    }
+    let core = &baseline[max_lag..n - max_lag];
+    let (mut best_r, mut best_lag) = (f32::NEG_INFINITY, 0i64);
+    for k in -(max_lag as i64)..=(max_lag as i64) {
+        let start = (max_lag as i64 + k) as usize;
+        let window = &sample[start..start + core.len()];
+        let r = correlation(window, core);
+        if r.is_finite() && r > best_r {
+            best_r = r;
+            best_lag = k;
+        }
+    }
+    if !best_r.is_finite() {
+        return (f32::NAN, false);
+    }
+    (best_lag as f32, best_lag.unsigned_abs() as usize == max_lag)
+}
+
 /// Compute element-wise mean of multiple vectors.
 /// All vectors must have the same length.
 fn element_wise_mean(vectors: &[Vec<f32>]) -> Vec<f32> {
@@ -497,6 +608,39 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
         
         // Add sample count for diagnostics
         region_dict.set_item("n_samples", nuc_vectors.len())?;
+
+        // -- shape baseline -------------------------------------------------
+        //
+        // Derived quantities, each z-scored later against its own mean/sigma
+        // rather than being a reduction of the per-position z vector. That
+        // distinction is the point: adjacent WPS positions have lag-1
+        // autocorrelation 0.986 (a fragment spans ~167bp and touches many
+        // positions at once), so averaging z across positions produces a
+        // number with none of a z-score's properties. Derive the biological
+        // quantity first, then z-score that.
+        //
+        // Computed here rather than in Python because this loop already holds
+        // every sample's vectors for the region; the Python side would have to
+        // re-read ~44 MB per sample to see them again.
+        let amps: Vec<f32> = nuc_vectors.iter().map(|v| log_amplitude(v)).collect();
+        let corrs: Vec<f32> = nuc_vectors
+            .iter()
+            .map(|v| fisher_z(correlation(v, &nuc_mean)))
+            .collect();
+        let shifts: Vec<f32> = nuc_vectors
+            .iter()
+            .map(|v| phase_shift(v, &nuc_mean, PHASE_MAX_LAG).0)
+            .collect();
+
+        for (name, values) in [
+            ("log_amplitude", &amps),
+            ("shape_corr_fisher", &corrs),
+            ("phase_shift_bp", &shifts),
+        ] {
+            let (m, sd) = mean_and_sd(values);
+            region_dict.set_item(format!("{name}_mean"), m as f64)?;
+            region_dict.set_item(format!("{name}_std"), sd as f64)?;
+        }
         
         result.set_item(region_id, region_dict)?;
     }
@@ -694,5 +838,116 @@ mod tests {
         let std = element_wise_std(&vectors, &means);
         assert!(std[0] < 0.01, "a real sub-floor spread was floored: {}", std[0]);
         assert!(std[0] > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    /// Raw amplitude is a coverage measurement, not a chromatin one.
+    ///
+    /// Measured on the real cohort: raw amplitude correlates +0.512 with
+    /// `local_depth` and is skewed 11.6; `ln(1 + range)` drops that to -0.036
+    /// and 1.6. A z-score on the raw scale would rank samples by how deeply
+    /// they were sequenced.
+    #[test]
+    fn log_amplitude_compresses_a_depth_driven_range() {
+        let shallow: Vec<f32> = (0..200).map(|i| (i as f32 / 20.0).sin()).collect();
+        let deep: Vec<f32> = shallow.iter().map(|x| x * 100.0).collect();
+        let (a, b) = (log_amplitude(&shallow), log_amplitude(&deep));
+        assert!(b > a, "a deeper profile must still register as larger");
+        assert!(
+            b / a < 10.0,
+            "100x the depth must not be 100x the statistic, got {}x",
+            b / a
+        );
+    }
+
+    #[test]
+    fn log_amplitude_is_nan_for_a_profile_with_nothing_in_it() {
+        assert!(log_amplitude(&[]).is_nan());
+        assert!(log_amplitude(&[1.0]).is_nan());
+    }
+
+    /// The ceiling this transform exists for.
+    ///
+    /// A correlation is bounded at 1.0. On the real cohort the shape
+    /// correlation sits at mean 0.844 with sigma 0.099, so the largest
+    /// attainable positive z is ~1.5 and 302 of 400 anchors could not reach
+    /// +2 however tumour-like the sample. Fisher's transform removes the
+    /// bound.
+    #[test]
+    fn fisher_z_removes_the_correlation_ceiling() {
+        let near_ceiling = [0.90_f32, 0.95, 0.99];
+        let transformed: Vec<f32> = near_ceiling.iter().map(|&r| fisher_z(r)).collect();
+        // Raw: the gaps shrink toward the bound. Fisher: they widen.
+        let raw_gap = near_ceiling[2] - near_ceiling[1];
+        let fisher_gap = transformed[2] - transformed[1];
+        assert!(
+            fisher_gap > raw_gap * 3.0,
+            "fisher must expand the region near 1.0, gaps {raw_gap} vs {fisher_gap}"
+        );
+        assert!(transformed.iter().all(|z| z.is_finite()));
+    }
+
+    #[test]
+    fn fisher_z_survives_a_perfect_correlation() {
+        // arctanh(1.0) is infinite; the clamp keeps it a number.
+        assert!(fisher_z(1.0).is_finite());
+        assert!(fisher_z(-1.0).is_finite());
+        assert!(fisher_z(f32::NAN).is_nan());
+    }
+
+    #[test]
+    fn correlation_is_nan_without_variance() {
+        let flat = [3.0_f32; 50];
+        let ramp: Vec<f32> = (0..50).map(|i| i as f32).collect();
+        assert!(correlation(&flat, &ramp).is_nan());
+        assert!((correlation(&ramp, &ramp) - 1.0).abs() < 1e-5);
+    }
+
+    /// A shift is invisible to any per-position summary: the same profile one
+    /// turn along differs everywhere and is unchanged in shape.
+    #[test]
+    fn phase_shift_recovers_a_known_displacement() {
+        let baseline: Vec<f32> = (0..200).map(|i| ((i as f32) / 12.0).sin()).collect();
+        for offset in [-7_i64, 0, 5] {
+            let shifted: Vec<f32> = (0..200)
+                .map(|i| (((i as i64 - offset) as f32) / 12.0).sin())
+                .collect();
+            let (lag, hit) = phase_shift(&shifted, &baseline, PHASE_MAX_LAG);
+            assert!(!hit, "offset {offset} should not reach the search edge");
+            assert!(
+                (lag - offset as f32).abs() <= 1.0,
+                "offset {offset} recovered as {lag}"
+            );
+        }
+    }
+
+    /// `nrl_at_band_limit`, one level down: a search that stops on its own
+    /// window edge has not measured anything.
+    #[test]
+    fn phase_shift_reports_when_it_hits_its_own_window() {
+        // A ramp correlates better and better the further it slides, so the
+        // best lag is always the largest one on offer.
+        let baseline: Vec<f32> = (0..200).map(|i| i as f32).collect();
+        let shifted: Vec<f32> = (0..200).map(|i| (i as f32) * -1.0).collect();
+        let (_, hit) = phase_shift(&shifted, &baseline, PHASE_MAX_LAG);
+        assert!(hit, "a search ending on the edge must say so");
+    }
+
+    #[test]
+    fn mean_and_sd_reports_an_unmeasurable_spread_as_nan() {
+        assert!(mean_and_sd(&[]).0.is_nan());
+        let (m, sd) = mean_and_sd(&[5.0]);
+        assert_eq!(m, 5.0);
+        assert!(sd.is_nan(), "one value has no spread");
+        let (m, sd) = mean_and_sd(&[3.0, 3.0, 3.0]);
+        assert_eq!(m, 3.0);
+        assert!(sd.is_nan(), "zero spread is still no information about spread");
+        let (m, sd) = mean_and_sd(&[2.0, 4.0, 6.0]);
+        assert!((m - 4.0).abs() < 1e-6);
+        assert!((sd - 2.0).abs() < 1e-5, "ddof=1 sample sd, got {sd}");
     }
 }

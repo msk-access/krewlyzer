@@ -32,7 +32,9 @@ logger = logging.getLogger("pon")
 #: The same reasoning that took the sigma floors out of the builder (4cd634b)
 #: and `z_score = 0.0` out of region entropy: a value a reader cannot tell
 #: apart from a measurement must be a measurement, or absent.
-def zscore_or_nan(observed: float, mean: float, std: float) -> float:
+def zscore_or_nan(
+    observed: Optional[float], mean: Optional[float], std: Optional[float]
+) -> float:
     """``(observed - mean) / std``, or NaN when ``std`` is not usable.
 
     NaN propagates to an absent column value rather than a fabricated zero,
@@ -40,7 +42,9 @@ def zscore_or_nan(observed: float, mean: float, std: float) -> float:
     """
     if std is None or not np.isfinite(std) or std <= 0:
         return float("nan")
-    if mean is None or not np.isfinite(mean) or not np.isfinite(observed):
+    if mean is None or observed is None:
+        return float("nan")
+    if not np.isfinite(mean) or not np.isfinite(observed):
         return float("nan")
     return (observed - mean) / std
 
@@ -307,6 +311,52 @@ class WpsBaseline:
 
         correlation = np.corrcoef(sample_vector, mean)[0, 1]
         return float(correlation) if not np.isnan(correlation) else 0.0
+
+
+#: The derived WPS shape quantities, and what each answers.
+#:
+#: Each is z-scored against its own mean/sigma, never derived from the
+#: per-position z vector. Adjacent WPS positions have lag-1 autocorrelation
+#: 0.986 -- a fragment spans ~167 bp and touches many positions at once -- so
+#: an average of z across positions has none of a z-score's properties.
+WPS_SHAPE_STATS = ("log_amplitude", "shape_corr_fisher", "phase_shift_bp")
+
+
+@dataclass
+class WpsShapeBaseline:
+    """Per-anchor baselines for the three derived WPS shape quantities.
+
+    Separate from :class:`WpsBaseline`, which holds the 200-element mean and
+    sigma *profiles*. These are scalars per anchor, and they answer questions a
+    per-position comparison cannot:
+
+    ``log_amplitude``       is there nucleosome structure here at all
+    ``shape_corr_fisher``   is it the *right* structure
+    ``phase_shift_bp``      is it in the right place
+
+    All three are window-free by design. Measured on the real cohort, TSS
+    anchors dip at the centre (-6.8 against -3.4 in the flanks) while CTCF
+    anchors do the opposite, so any fixed centre-versus-flank definition is
+    backwards for one of the two.
+    """
+
+    #: region_id -> {f"{stat}_mean": float, f"{stat}_std": float, "n_samples": int}
+    regions: Dict[str, Dict[str, float]] = field(default_factory=dict)
+
+    def compute_zscore(
+        self, region_id: str, stat: str, observed: float
+    ) -> Optional[float]:
+        """Z for one derived quantity at one anchor.
+
+        ``None`` when the anchor is absent from the baseline; NaN when it is
+        present but the baseline measured no usable spread.
+        """
+        entry = self.regions.get(region_id)
+        if entry is None:
+            return None
+        return zscore_or_nan(
+            observed, entry.get(f"{stat}_mean"), entry.get(f"{stat}_std")
+        )
 
 
 @dataclass
@@ -812,6 +862,7 @@ class PonModel:
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
     wps_background_baseline: Optional[WpsBackgroundBaseline] = None  # Alu periodicity
+    wps_shape_baseline: Optional[WpsShapeBaseline] = None
     wps_baseline_panel: Optional[WpsBaseline] = (
         None  # Panel-specific WPS (panel mode only)
     )
@@ -1215,6 +1266,25 @@ class PonModel:
             fsc_region_baseline = FscRegionBaseline(data=fsc_region_data)
             logger.debug(f"Loaded FSC region baseline: {len(fsc_region_data)} regions")
 
+        # Parse WPS shape baseline
+        wps_shape_df = df_all[df_all["table"] == "wps_shape_baseline"]
+        wps_shape_baseline = None
+        if not wps_shape_df.empty:
+            wanted = [
+                f"{stat}_{moment}"
+                for stat in WPS_SHAPE_STATS
+                for moment in ("mean", "std")
+            ]
+            shape_regions = {}
+            for _, row in wps_shape_df.iterrows():
+                # No defaults: a NaN sigma means the builder could not measure
+                # a spread, and zscore_or_nan must see it as NaN.
+                shape_regions[str(row["region_id"])] = {
+                    key: float(row[key]) for key in wanted if key in row
+                }
+            wps_shape_baseline = WpsShapeBaseline(regions=shape_regions)
+            logger.debug(f"Loaded WPS shape baseline: {len(shape_regions)} anchors")
+
         # Parse Region MDS exon baseline
         region_mds_exon_df = df_all[df_all["table"] == "region_mds_exon"]
         region_mds_exon = None
@@ -1276,6 +1346,7 @@ class PonModel:
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
+            wps_shape_baseline=wps_shape_baseline,
             wps_baseline_panel=wps_baseline_panel,
             ocf_baseline=ocf_baseline,
             ocf_baseline_ontarget=ocf_baseline_ontarget,
