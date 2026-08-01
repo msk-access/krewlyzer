@@ -24,12 +24,26 @@ All notable changes to this project will be documented in this file.
   | raw peak-to-trough range | correlates **+0.512** with `local_depth`; `log1p` drops it to −0.036 |
   | raw shape correlation | bounded at 1.0; mean 0.844 σ 0.099 means **302/400 anchors cannot reach +2** — Fisher `arctanh` removes the ceiling |
 
+  **Displacement is measured but deliberately not z-scored.**
+  `wps_phase_shift_bp` ships because it is cheap and genuinely non-redundant
+  (corr −0.24 and −0.28 with the two scored statistics), but it gets no
+  baseline: per-sample mean lag varies by **0.26 bp** against a within-sample
+  spread of **8.43**, so there is no whole-sample phasing signal, and per
+  anchor the intraclass correlation is **0.479** — about half of any lag is
+  noise, optimistically, since that estimate used a baseline containing the
+  samples being scored. It is also integer-valued, so on a small cohort its σ
+  bottoms out at `std([0,0,0,0,0,1]) = 0.408` and a 1 bp shift scores z = 2.4.
+
   `wps_phase_at_search_limit` marks anchors where the ±30 search ended on its
-  own edge (1.8% measured) — `nrl_at_band_limit` one level down, and those are
-  excluded from the z rather than scored as "displaced by exactly 30 bp".
+  own edge (1.8% measured) — `nrl_at_band_limit` one level down.
 
 ### Removed
-- **`_core.wps.apply_pon_zscore`** (173 lines of Rust). It emitted one scalar z
+- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
+  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
+  parquet imports that existed only to serve them. The crate now builds with
+  zero warnings.
+
+  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
   per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
   while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
   not positive. It was also unreachable: the call was gated on

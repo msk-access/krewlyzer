@@ -24,6 +24,16 @@ many consecutive positions. So:
 
 Both were the obvious first design and both are wrong. Derive the biological
 quantity first, then z-score that.
+
+**Displacement is measured but not z-scored.** ``wps_phase_shift_bp`` is
+emitted because it is cheap and genuinely non-redundant (correlation -0.24 and
+-0.28 with the two scored statistics), but it gets no baseline: measured on a
+real cohort, per-sample mean lag varies by 0.26 bp against a within-sample
+spread of 8.43, so there is no whole-sample phasing signal, and per anchor the
+intraclass correlation is 0.479 -- about half of any lag is noise, optimistically,
+since that estimate used a baseline containing the samples being scored. A
+z-score of an integer-valued statistic that is half noise is a plausible number
+and nothing more.
 """
 
 from __future__ import annotations
@@ -40,11 +50,11 @@ from .output_utils import read_exact_table, write_table
 
 logger = logging.getLogger("core.wps_pon")
 
-#: Must match ``PHASE_MAX_LAG`` in ``rust/src/pon_builder.rs``.
+#: How far the phase search looks, in positions.
 #:
-#: Asserted rather than assumed: the baseline's phase-shift mean and sigma were
-#: computed with the builder's window, so scoring against them with a different
-#: one compares two different statistics.
+#: Python-only: the builder no longer computes a phase baseline, so there is no
+#: Rust twin this has to agree with. Measured on the real cohort, the search
+#: terminates on its own edge for 3.3% of anchors at +/-20 and 1.8% at +/-30.
 PHASE_MAX_LAG = 30
 
 
@@ -123,7 +133,7 @@ def apply_wps_pon(
     ``{column}_z``                 200-element z vector against the profile
     ``wps_log_amplitude``          + ``_z``
     ``wps_shape_corr``             + ``_z`` (z computed on the Fisher scale)
-    ``wps_phase_shift_bp``         + ``_z``
+    ``wps_phase_shift_bp``         raw displacement, deliberately not z-scored
     ``wps_phase_at_search_limit``  the boundary flag
 
     The raw derived values are emitted beside their z-scores deliberately: a z
@@ -158,7 +168,6 @@ def apply_wps_pon(
     at_limit: list[bool] = []
     z_amp: list[float] = []
     z_corr: list[float] = []
-    z_shift: list[float] = []
     n_absent = 0
     n_scored = 0
     n_at_limit = 0
@@ -178,7 +187,6 @@ def apply_wps_pon(
             at_limit.append(False)
             z_amp.append(float("nan"))
             z_corr.append(float("nan"))
-            z_shift.append(float("nan"))
             continue
 
         mean = np.asarray(mean, dtype=float)
@@ -196,14 +204,11 @@ def apply_wps_pon(
         if shape_baseline is None:
             z_amp.append(float("nan"))
             z_corr.append(float("nan"))
-            z_shift.append(float("nan"))
             continue
         observed = {
             "log_amplitude": amplitude,
             # z on the Fisher scale, reported next to the readable correlation
             "shape_corr_fisher": fisher_z(r),
-            # NaN rather than a lag that only says where the search stopped
-            "phase_shift_bp": float("nan") if hit else lag,
         }
         scores = {
             stat: shape_baseline.compute_zscore(str(region_id), stat, observed[stat])
@@ -211,7 +216,6 @@ def apply_wps_pon(
         }
         z_amp.append(_nan_if_none(scores["log_amplitude"]))
         z_corr.append(_nan_if_none(scores["shape_corr_fisher"]))
-        z_shift.append(_nan_if_none(scores["phase_shift_bp"]))
 
     frame[f"{column}_z"] = z_vectors
     frame["wps_log_amplitude"] = amps
@@ -219,7 +223,6 @@ def apply_wps_pon(
     frame["wps_shape_corr"] = corrs
     frame["wps_shape_corr_z"] = z_corr
     frame["wps_phase_shift_bp"] = shifts
-    frame["wps_phase_shift_z"] = z_shift
     frame["wps_phase_at_search_limit"] = at_limit
 
     write_table(

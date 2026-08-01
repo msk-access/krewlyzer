@@ -1828,19 +1828,8 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
     }
 }
 
-// =============================================================================
-// PON Z-Score Normalization for WPS Parquet Files
-// =============================================================================
-
-use std::path::PathBuf;
-use arrow::record_batch::RecordBatch;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
-use parquet::arrow::ArrowWriter;
-use arrow::array::{Float64Array, StringArray, ArrayRef, Array};
-use arrow::datatypes::{Schema, Field, DataType};
-use std::sync::Arc as StdArc;
-
-// NOTE: `apply_pon_zscore` was removed here.
+// NOTE: `apply_pon_zscore` was removed here, along with the parquet
+// read/write imports that existed only to serve it.
 //
 // It emitted a single scalar z per anchor from `wps_long_std`/`wps_short_std`
 // -- the v1.0 scalar baseline field names, while every shipped PON is v2.0
@@ -1853,65 +1842,6 @@ use std::sync::Arc as StdArc;
 // shape quantities -- because measurement showed a scalar reduction of the
 // profile is the wrong statistic: adjacent positions have lag-1
 // autocorrelation 0.986.
-
-/// Load WpsBaseline from PON parquet.
-fn load_wps_baseline_from_parquet(path: &std::path::Path) -> anyhow::Result<crate::pon_model::WpsBaseline> {
-    use parquet::file::reader::{FileReader, SerializedFileReader};
-    use parquet::record::RowAccessor;
-    use std::fs::File;
-    
-    let file = File::open(path)?;
-    let reader = SerializedFileReader::new(file)?;
-    
-    let mut regions: std::collections::HashMap<String, crate::pon_model::WpsRegionBaseline> = std::collections::HashMap::new();
-    
-    for row_result in reader.get_row_iter(None)? {
-        let row = row_result?;
-        
-        // Check table column
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != "wps_baseline" {
-                continue;
-            }
-        } else {
-            continue;
-        }
-        
-        // Parse region_id and baseline values
-        let region_id = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "region_id").unwrap_or(0)
-        ).map_or("".to_string(), |v| v.to_string());
-        
-        let wps_long_mean = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "wps_long_mean").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let wps_long_std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "wps_long_std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
-        let wps_short_mean = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "wps_short_mean").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let wps_short_std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "wps_short_std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
-        regions.insert(region_id, crate::pon_model::WpsRegionBaseline {
-            wps_long_mean,
-            wps_long_std,
-            wps_short_mean,
-            wps_short_std,
-        });
-    }
-    
-    info!("Loaded WPS baseline: {} regions", regions.len());
-    
-    Ok(crate::pon_model::WpsBaseline { regions })
-}
 
 // =============================================================================
 // TESTS

@@ -319,7 +319,7 @@ class WpsBaseline:
 #: per-position z vector. Adjacent WPS positions have lag-1 autocorrelation
 #: 0.986 -- a fragment spans ~167 bp and touches many positions at once -- so
 #: an average of z across positions has none of a z-score's properties.
-WPS_SHAPE_STATS = ("log_amplitude", "shape_corr_fisher", "phase_shift_bp")
+WPS_SHAPE_STATS = ("log_amplitude", "shape_corr_fisher")
 
 
 @dataclass
@@ -332,7 +332,11 @@ class WpsShapeBaseline:
 
     ``log_amplitude``       is there nucleosome structure here at all
     ``shape_corr_fisher``   is it the *right* structure
-    ``phase_shift_bp``      is it in the right place
+
+    Positional displacement is measured too, but deliberately not baselined --
+    see ``core/wps_pon.py``. It showed no per-sample signal and an intraclass
+    correlation of 0.479 per anchor, so a z-score of it would be a plausible
+    number with nothing behind it.
 
     All three are window-free by design. Measured on the real cohort, TSS
     anchors dip at the centre (-6.8 against -3.4 in the flanks) while CTCF

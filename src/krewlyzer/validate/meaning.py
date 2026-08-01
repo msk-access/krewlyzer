@@ -345,14 +345,13 @@ MEANINGS: Dict[str, Meaning] = {
             "For each position, fragments fully spanning a window score positive and fragments ending inside it score negative, summed across TSS and CTCF anchors. Per-position vectors, not scalars."
         ),
         what=(
-            "`wps_shape_corr_z` (is it the right shape), `wps_phase_shift_bp` (is it in the right place, and check `wps_phase_at_search_limit`), `wps_log_amplitude_z` (is there structure at all). `wps_nuc_z` holds the full per-position comparison. Do **not** average `wps_nuc_z` across positions: adjacent positions have lag-1 autocorrelation 0.986, so a mean of z there is not a z."
+            "`wps_shape_corr_z` (is it the right shape) and `wps_log_amplitude_z` (is there structure at all). `wps_phase_shift_bp` reports displacement but is deliberately not z-scored -- measured on a real cohort it shows no per-sample signal and is about half noise per anchor -- so read it directly, and check `wps_phase_at_search_limit` before believing a large value. `wps_nuc_z` holds the full per-position comparison. Do **not** average `wps_nuc_z` across positions: adjacent positions have lag-1 autocorrelation 0.986, so a mean of z there is not a z."
         ),
         pon_columns=(
             "wps_nuc_z",
             "wps_tf_z",
             "wps_log_amplitude_z",
             "wps_shape_corr_z",
-            "wps_phase_shift_z",
         ),
     ),
     ".WPS.panel.parquet": Meaning("As WPS, over the panel's anchors.", "as WPS"),

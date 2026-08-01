@@ -220,11 +220,39 @@ def test_every_promised_column_is_emitted():
         "wps_shape_corr",
         "wps_shape_corr_z",
         "wps_phase_shift_bp",
-        "wps_phase_shift_z",
         "wps_phase_at_search_limit",
     ):
         assert column in out.columns, f"{column} was not emitted"
     assert len(np.asarray(out["wps_nuc_z"].iloc[0])) == 200
+    assert "wps_phase_shift_z" not in out.columns, (
+        "displacement is measured but deliberately not z-scored -- see "
+        "test_displacement_is_measured_but_not_scored"
+    )
+
+
+def test_displacement_is_measured_but_not_scored():
+    """The raw lag is useful; a z-score of it would not be.
+
+    Measured on a real cohort: per-sample mean lag varies by 0.26 bp against a
+    within-sample spread of 8.43, so there is no whole-sample phasing signal;
+    and per anchor the intraclass correlation is 0.479, meaning about half of
+    any lag is noise. That estimate is optimistic -- the baseline used
+    contained the samples being scored.
+
+    It is also integer-valued, so on a small cohort its sigma bottoms out at
+    std([0,0,0,0,0,1]) = 0.408 and a 1 bp shift scores z = 2.4.
+
+    So the column ships and the baseline does not. The measurement is cheap
+    and genuinely non-redundant (corr -0.24 and -0.28 with the two scored
+    statistics); adding the baseline back is small if the n=21/47 rebuild
+    shows reproducible per-anchor shifts.
+    """
+    from krewlyzer.pon.model import WPS_SHAPE_STATS
+
+    assert (
+        "phase_shift_bp" not in WPS_SHAPE_STATS
+    ), "the shape baseline must not carry a phase-shift entry"
+    assert set(WPS_SHAPE_STATS) == {"log_amplitude", "shape_corr_fisher"}
 
 
 def test_a_pon_without_a_shape_block_still_writes_the_z_vectors():

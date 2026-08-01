@@ -298,13 +298,6 @@ fn extract_wps_vector(col: &dyn arrow::array::Array, row: usize) -> Option<Vec<f
     None
 }
 
-/// How far the phase-shift search looks, in positions.
-///
-/// Measured on the real cohort: at +/-20 the search terminates on its own edge
-/// for 3.3% of anchors, at +/-30 for 1.8%. Wider costs linearly and the
-/// remaining edge cases are reported rather than hidden.
-const PHASE_MAX_LAG: usize = 30;
-
 /// Mean and sample standard deviation over the finite values, NaN when the
 /// spread cannot be measured. Never a floor -- see `element_wise_std`.
 fn mean_and_sd(values: &[f32]) -> (f32, f32) {
@@ -375,38 +368,6 @@ fn fisher_z(r: f32) -> f32 {
         return f32::NAN;
     }
     r.clamp(-0.999_999, 0.999_999).atanh()
-}
-
-/// How far the sample profile is displaced against the baseline, in bp.
-///
-/// A positional shift is invisible to any per-position summary: the same
-/// nucleosome, one turn along, differs at every position while the profile is
-/// unchanged in shape.
-///
-/// Returns `(lag, hit_limit)`. `hit_limit` is the `nrl_at_band_limit` lesson
-/// applied here -- when the best correlation sits at the edge of the search
-/// window the true shift may be larger, so the value is a boundary and not a
-/// measurement. Measured incidence at +/-30: 1.8% of anchors.
-fn phase_shift(sample: &[f32], baseline: &[f32], max_lag: usize) -> (f32, bool) {
-    let n = sample.len().min(baseline.len());
-    if n < 4 * max_lag {
-        return (f32::NAN, false);
-    }
-    let core = &baseline[max_lag..n - max_lag];
-    let (mut best_r, mut best_lag) = (f32::NEG_INFINITY, 0i64);
-    for k in -(max_lag as i64)..=(max_lag as i64) {
-        let start = (max_lag as i64 + k) as usize;
-        let window = &sample[start..start + core.len()];
-        let r = correlation(window, core);
-        if r.is_finite() && r > best_r {
-            best_r = r;
-            best_lag = k;
-        }
-    }
-    if !best_r.is_finite() {
-        return (f32::NAN, false);
-    }
-    (best_lag as f32, best_lag.unsigned_abs() as usize == max_lag)
 }
 
 /// Compute element-wise mean of multiple vectors.
@@ -627,15 +588,21 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
             .iter()
             .map(|v| fisher_z(correlation(v, &nuc_mean)))
             .collect();
-        let shifts: Vec<f32> = nuc_vectors
-            .iter()
-            .map(|v| phase_shift(v, &nuc_mean, PHASE_MAX_LAG).0)
-            .collect();
-
+        // No phase-shift baseline. Measured on the real cohort: per-sample
+        // mean lag varies by 0.26 bp against a within-sample spread of 8.43,
+        // so there is no whole-sample phasing signal; and per anchor the
+        // intraclass correlation is 0.479, meaning about half of a lag is
+        // noise -- optimistically, since that baseline included the samples
+        // being scored. Z-scoring an integer-valued statistic that is half
+        // noise produces a plausible number and nothing else.
+        //
+        // The raw lag is still emitted per sample by `core/wps_pon.py`: it is
+        // cheap, genuinely non-redundant (corr -0.24 and -0.28 with the two
+        // below), and may resolve at n=21/47. Adding the baseline back is a
+        // small change if the rebuild shows reproducible shifts.
         for (name, values) in [
             ("log_amplitude", &amps),
             ("shape_corr_fisher", &corrs),
-            ("phase_shift_bp", &shifts),
         ] {
             let (m, sd) = mean_and_sd(values);
             region_dict.set_item(format!("{name}_mean"), m as f64)?;
@@ -905,36 +872,6 @@ mod shape_tests {
         let ramp: Vec<f32> = (0..50).map(|i| i as f32).collect();
         assert!(correlation(&flat, &ramp).is_nan());
         assert!((correlation(&ramp, &ramp) - 1.0).abs() < 1e-5);
-    }
-
-    /// A shift is invisible to any per-position summary: the same profile one
-    /// turn along differs everywhere and is unchanged in shape.
-    #[test]
-    fn phase_shift_recovers_a_known_displacement() {
-        let baseline: Vec<f32> = (0..200).map(|i| ((i as f32) / 12.0).sin()).collect();
-        for offset in [-7_i64, 0, 5] {
-            let shifted: Vec<f32> = (0..200)
-                .map(|i| (((i as i64 - offset) as f32) / 12.0).sin())
-                .collect();
-            let (lag, hit) = phase_shift(&shifted, &baseline, PHASE_MAX_LAG);
-            assert!(!hit, "offset {offset} should not reach the search edge");
-            assert!(
-                (lag - offset as f32).abs() <= 1.0,
-                "offset {offset} recovered as {lag}"
-            );
-        }
-    }
-
-    /// `nrl_at_band_limit`, one level down: a search that stops on its own
-    /// window edge has not measured anything.
-    #[test]
-    fn phase_shift_reports_when_it_hits_its_own_window() {
-        // A ramp correlates better and better the further it slides, so the
-        // best lag is always the largest one on offer.
-        let baseline: Vec<f32> = (0..200).map(|i| i as f32).collect();
-        let shifted: Vec<f32> = (0..200).map(|i| (i as f32) * -1.0).collect();
-        let (_, hit) = phase_shift(&shifted, &baseline, PHASE_MAX_LAG);
-        assert!(hit, "a search ending on the edge must say so");
     }
 
     #[test]
