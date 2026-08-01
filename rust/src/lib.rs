@@ -107,7 +107,6 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // WPS submodule
     let wps_mod = PyModule::new(m.py(), "wps")?;
     wps_mod.add_function(wrap_pyfunction!(wps::calculate_wps, &wps_mod)?)?;
-    wps_mod.add_function(wrap_pyfunction!(wps::apply_pon_zscore, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 
     // OCF submodule

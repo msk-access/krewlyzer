@@ -21,6 +21,34 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pon")
 
 
+#: What a z-score is when there is nothing to divide by.
+#:
+#: Every baseline class below independently ended `if std > 0: ... return 0.0`,
+#: nine times over. Zero is not a cautious answer there -- it is the single
+#: most confident statement the column can make ("this sample sits exactly at
+#: the healthy baseline"), asserted precisely when the baseline measured no
+#: spread at all, and indistinguishable from a genuine zero.
+#:
+#: The same reasoning that took the sigma floors out of the builder (4cd634b)
+#: and `z_score = 0.0` out of region entropy: a value a reader cannot tell
+#: apart from a measurement must be a measurement, or absent.
+def zscore_or_nan(
+    observed: Optional[float], mean: Optional[float], std: Optional[float]
+) -> float:
+    """``(observed - mean) / std``, or NaN when ``std`` is not usable.
+
+    NaN propagates to an absent column value rather than a fabricated zero,
+    and — unlike zero — cannot be mistaken for a reading.
+    """
+    if std is None or not np.isfinite(std) or std <= 0:
+        return float("nan")
+    if mean is None or observed is None:
+        return float("nan")
+    if not np.isfinite(mean) or not np.isfinite(observed):
+        return float("nan")
+    return (observed - mean) / std
+
+
 @dataclass
 class GcBiasModel:
     """
@@ -81,16 +109,24 @@ class FsdBaseline:
     arms: Dict[str, Dict[str, List[float]]]  # arm -> {"expected": [...], "std": [...]}
 
     def get_expected(self, arm: str, size: int) -> float:
-        """Get expected proportion for a size bin in a given arm."""
+        """Expected proportion for a size bin, NaN when the arm is unknown.
+
+        Not 0.0: an arm absent from the baseline has no expectation, and zero
+        is a specific -- and specifically wrong -- one.
+        """
         if arm not in self.arms:
-            return 0.0
+            return float("nan")
         arm_data = self.arms[arm]
         return float(np.interp(size, self.size_bins, arm_data["expected"]))
 
     def get_std(self, arm: str, size: int) -> float:
-        """Get standard deviation for a size bin in a given arm."""
+        """Spread for a size bin, NaN when the arm is unknown.
+
+        Zero would be worse than useless here -- a caller dividing by it gets
+        infinity rather than an absent value.
+        """
         if arm not in self.arms:
-            return 0.0
+            return float("nan")
         arm_data = self.arms[arm]
         return float(np.interp(size, self.size_bins, arm_data["std"]))
 
@@ -221,9 +257,18 @@ class WpsBaseline:
         if mean is None or std is None:
             return None
 
-        # Avoid division by zero
-        std_safe = np.where(std > 0, std, 1.0)
-        return (sample_vector - mean) / std_safe
+        # NaN where sigma is not usable, never a substituted 1.0.
+        #
+        # Since 4cd634b the builder writes NaN for positions whose spread it
+        # could not measure. `np.where(std > 0, ...)` is False for NaN, so a
+        # 1.0 default would turn every one of those into a finite z -- undoing
+        # the builder's honesty at the read side, which is the harder place to
+        # notice it.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            usable = np.isfinite(std) & (std > 0)
+            return np.where(
+                usable, (sample_vector - mean) / np.where(usable, std, 1.0), np.nan
+            )
 
     def compute_shape_score(
         self, region_id: str, sample_vector: np.ndarray, column: str = "wps_nuc"
@@ -260,11 +305,62 @@ class WpsBaseline:
         mean_std = np.std(mean)
 
         if sample_std < 1e-6 or mean_std < 1e-6:
-            # If either is constant, correlation is undefined
-            return 0.0
+            # Undefined, not uncorrelated. Zero is a real claim about shape
+            # agreement and would be indistinguishable from having measured it.
+            return float("nan")
 
         correlation = np.corrcoef(sample_vector, mean)[0, 1]
         return float(correlation) if not np.isnan(correlation) else 0.0
+
+
+#: The derived WPS shape quantities, and what each answers.
+#:
+#: Each is z-scored against its own mean/sigma, never derived from the
+#: per-position z vector. Adjacent WPS positions have lag-1 autocorrelation
+#: 0.986 -- a fragment spans ~167 bp and touches many positions at once -- so
+#: an average of z across positions has none of a z-score's properties.
+WPS_SHAPE_STATS = ("log_amplitude", "shape_corr_fisher")
+
+
+@dataclass
+class WpsShapeBaseline:
+    """Per-anchor baselines for the three derived WPS shape quantities.
+
+    Separate from :class:`WpsBaseline`, which holds the 200-element mean and
+    sigma *profiles*. These are scalars per anchor, and they answer questions a
+    per-position comparison cannot:
+
+    ``log_amplitude``       is there nucleosome structure here at all
+    ``shape_corr_fisher``   is it the *right* structure
+
+    Positional displacement is measured too, but deliberately not baselined --
+    see ``core/wps_pon.py``. It showed no per-sample signal and an intraclass
+    correlation of 0.479 per anchor, so a z-score of it would be a plausible
+    number with nothing behind it.
+
+    All three are window-free by design. Measured on the real cohort, TSS
+    anchors dip at the centre (-6.8 against -3.4 in the flanks) while CTCF
+    anchors do the opposite, so any fixed centre-versus-flank definition is
+    backwards for one of the two.
+    """
+
+    #: region_id -> {f"{stat}_mean": float, f"{stat}_std": float, "n_samples": int}
+    regions: Dict[str, Dict[str, float]] = field(default_factory=dict)
+
+    def compute_zscore(
+        self, region_id: str, stat: str, observed: float
+    ) -> Optional[float]:
+        """Z for one derived quantity at one anchor.
+
+        ``None`` when the anchor is absent from the baseline; NaN when it is
+        present but the baseline measured no usable spread.
+        """
+        entry = self.regions.get(region_id)
+        if entry is None:
+            return None
+        return zscore_or_nan(
+            observed, entry.get(f"{stat}_mean"), entry.get(f"{stat}_std")
+        )
 
 
 @dataclass
@@ -319,9 +415,17 @@ class OcfBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_ocf - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_ocf, mean, std)
+
+
+#: The group id the whole-sample NRL and periodicity are keyed on.
+#:
+#: The default here used to be the string ``"all"``, which no PON has ever
+#: contained -- the groups are ``Global_All``, ``Chr1_All`` ... ``Family_AluY``.
+#: Every lookup therefore missed, ``compute_nrl_zscore`` returned None, and
+#: ``nrl_z``/``periodicity_z`` never reached a single output file. Silent,
+#: because a None was indistinguishable from "this PON has no baseline".
+GENOME_WIDE_GROUP = "Global_All"
 
 
 @dataclass
@@ -341,28 +445,36 @@ class WpsBackgroundBaseline:
     # DataFrame: group_id, nrl_mean, nrl_std, periodicity_mean, periodicity_std
     groups: pd.DataFrame
 
-    def get_nrl_stats(self, group_id: str = "all") -> Optional[tuple]:
+    def get_nrl_stats(self, group_id: str = GENOME_WIDE_GROUP) -> Optional[tuple]:
         """
         Get (mean, std) for nucleosome repeat length.
 
         Args:
-            group_id: Group identifier (default: "all" for genome-wide)
+            group_id: Group identifier (default: the genome-wide group)
 
         Returns:
             Tuple (nrl_mean, nrl_std) or None if not found
         """
         match = self.groups[self.groups["group_id"] == group_id]
         if match.empty:
+            # Loud: a group id that matches nothing is a naming mistake, not a
+            # PON without a baseline, and the two used to look identical.
+            logger.warning(
+                f"WPS background baseline has no group {group_id!r}; "
+                f"available: {sorted(self.groups['group_id'].unique())[:5]}..."
+            )
             return None
         row = match.iloc[0]
         return (row["nrl_mean"], row["nrl_std"])
 
-    def get_periodicity_stats(self, group_id: str = "all") -> Optional[tuple]:
+    def get_periodicity_stats(
+        self, group_id: str = GENOME_WIDE_GROUP
+    ) -> Optional[tuple]:
         """
         Get (mean, std) for periodicity score.
 
         Args:
-            group_id: Group identifier (default: "all" for genome-wide)
+            group_id: Group identifier (default: the genome-wide group)
 
         Returns:
             Tuple (periodicity_mean, periodicity_std) or None if not found
@@ -374,16 +486,14 @@ class WpsBackgroundBaseline:
         return (row.get("periodicity_mean", 0), row.get("periodicity_std", 1))
 
     def compute_nrl_zscore(
-        self, observed_nrl: float, group_id: str = "all"
+        self, observed_nrl: float, group_id: str = GENOME_WIDE_GROUP
     ) -> Optional[float]:
         """Compute z-score for observed NRL value."""
         stats = self.get_nrl_stats(group_id)
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_nrl - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_nrl, mean, std)
 
 
 @dataclass
@@ -413,15 +523,11 @@ class MdsBaseline:
             return None
         expected = self.kmer_expected[kmer]
         std = self.kmer_std.get(kmer, 0.001)
-        if std > 0:
-            return (observed_freq - expected) / std
-        return 0.0
+        return zscore_or_nan(observed_freq, expected, std)
 
     def get_mds_zscore(self, observed_mds: float) -> float:
         """Compute z-score for MDS value."""
-        if self.mds_std > 0:
-            return (observed_mds - self.mds_mean) / self.mds_std
-        return 0.0
+        return zscore_or_nan(observed_mds, self.mds_mean, self.mds_std)
 
     def get_aberrant_kmers(
         self, observed_freqs: Dict[str, float], threshold: float = 2.0
@@ -504,9 +610,7 @@ class RegionMdsBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_mds - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_mds, mean, std)
 
     def compute_e1_zscore(self, gene: str, observed_mds_e1: float) -> Optional[float]:
         """
@@ -516,9 +620,47 @@ class RegionMdsBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_mds_e1 - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_mds_e1, mean, std)
+
+
+@dataclass
+class RegionMdsExonBaseline:
+    """Per-exon MDS baseline — the finest localisation krewlyzer produces.
+
+    Keyed on ``(gene, name)``. ``name`` alone is not unique across genes, and
+    coordinates would break whenever the panel BED is regenerated.
+
+    Measured on the 0.8.3 corpus before this was built: every exon appears in
+    every sample of its assay (7/7 for xs1, 19/19 for xs2) with a measurable
+    spread, and under 0.25% carry fewer than 10 fragments. Exons are far
+    better supported here than "per-exon" suggests, so this needs no special
+    sparsity handling — only the same NaN-not-floor rule as everywhere else.
+    """
+
+    #: (gene, name) -> {mds_mean, mds_std, n_samples}
+    exon_baseline: Dict[tuple, Dict[str, float]] = field(default_factory=dict)
+
+    def get_stats(self, gene: str, name: str) -> Optional[tuple]:
+        """``(mean, std)`` for one exon, or None when it is not in the baseline."""
+        entry = self.exon_baseline.get((gene, name))
+        if entry is None:
+            return None
+        return (entry.get("mds_mean"), entry.get("mds_std"))
+
+    def compute_zscore(
+        self, gene: str, name: str, observed_mds: float
+    ) -> Optional[float]:
+        """Z-score for one exon.
+
+        ``None`` when the exon is absent from the baseline; NaN when it is
+        present but the baseline measured no usable spread. Both write NaN to
+        the output, but only the caller's log can tell them apart.
+        """
+        stats = self.get_stats(gene, name)
+        if stats is None:
+            return None
+        mean, std = stats
+        return zscore_or_nan(observed_mds, mean, std)
 
 
 @dataclass
@@ -576,9 +718,7 @@ class FscGeneBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_depth - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_depth, mean, std)
 
     def __len__(self) -> int:
         """Return number of genes in baseline."""
@@ -641,9 +781,7 @@ class FscRegionBaseline:
         if stats is None:
             return None
         mean, std = stats
-        if std > 0:
-            return (observed_depth - mean) / std
-        return 0.0
+        return zscore_or_nan(observed_depth, mean, std)
 
     def __len__(self) -> int:
         """Return number of regions in baseline."""
@@ -671,9 +809,9 @@ class TfbsBaseline:
         return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
-        """Compute z-score for observed entropy value."""
+        """Compute z-score for observed entropy value, NaN without a baseline."""
         if self.baseline is None:
-            return 0.0
+            return float("nan")
         return self.baseline.get_zscore(label, observed_entropy)
 
     def get_stats(self, label: str) -> Optional[tuple]:
@@ -704,9 +842,9 @@ class AtacBaseline:
         return list(self.baseline.data.keys())
 
     def get_zscore(self, label: str, observed_entropy: float) -> float:
-        """Compute z-score for observed entropy value."""
+        """Compute z-score for observed entropy value, NaN without a baseline."""
         if self.baseline is None:
-            return 0.0
+            return float("nan")
         return self.baseline.get_zscore(label, observed_entropy)
 
     def get_stats(self, label: str) -> Optional[tuple]:
@@ -741,11 +879,24 @@ class PonModel:
     panel_mode: bool = False  # True if built with --target-regions
     target_regions_file: str = ""  # Original target regions BED file name
 
+    # Provenance. See pon/provenance.py for why the cohort is a salted digest
+    # rather than a list: a PON ships in this repo, in the Docker image and on
+    # PyPI, so it is the last place patient identifiers may appear.
+    #
+    # `krewlyzer_version` is the load-bearing one. 0.9.0 changes what every
+    # feature *means*, so a PON built earlier is not merely old -- it measures
+    # something else. Empty for anything built before this release, which is
+    # exactly the signal the version guard refuses on.
+    krewlyzer_version: str = ""
+    cohort_digest: str = ""
+    cohort_label: str = ""
+
     # Off-target baselines (primary - always present)
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
     wps_baseline: Optional[WpsBaseline] = None
     wps_background_baseline: Optional[WpsBackgroundBaseline] = None  # Alu periodicity
+    wps_shape_baseline: Optional[WpsShapeBaseline] = None
     wps_baseline_panel: Optional[WpsBaseline] = (
         None  # Panel-specific WPS (panel mode only)
     )
@@ -755,7 +906,8 @@ class PonModel:
     mds_baseline: Optional[MdsBaseline] = None
     tfbs_baseline: Optional[TfbsBaseline] = None  # TFBS size entropy
     atac_baseline: Optional[AtacBaseline] = None  # ATAC size entropy
-    region_mds: Optional[RegionMdsBaseline] = None  # Per-gene MDS baseline
+    region_mds: Optional[RegionMdsBaseline] = None
+    region_mds_exon: Optional[RegionMdsExonBaseline] = None  # Per-exon MDS baseline
     fsc_gene_baseline: Optional[FscGeneBaseline] = (
         None  # Per-gene normalized depth (panel mode)
     )
@@ -1148,6 +1300,41 @@ class PonModel:
             fsc_region_baseline = FscRegionBaseline(data=fsc_region_data)
             logger.debug(f"Loaded FSC region baseline: {len(fsc_region_data)} regions")
 
+        # Parse WPS shape baseline
+        wps_shape_df = df_all[df_all["table"] == "wps_shape_baseline"]
+        wps_shape_baseline = None
+        if not wps_shape_df.empty:
+            wanted = [
+                f"{stat}_{moment}"
+                for stat in WPS_SHAPE_STATS
+                for moment in ("mean", "std")
+            ]
+            shape_regions = {}
+            for _, row in wps_shape_df.iterrows():
+                # No defaults: a NaN sigma means the builder could not measure
+                # a spread, and zscore_or_nan must see it as NaN.
+                shape_regions[str(row["region_id"])] = {
+                    key: float(row[key]) for key in wanted if key in row
+                }
+            wps_shape_baseline = WpsShapeBaseline(regions=shape_regions)
+            logger.debug(f"Loaded WPS shape baseline: {len(shape_regions)} anchors")
+
+        # Parse Region MDS exon baseline
+        region_mds_exon_df = df_all[df_all["table"] == "region_mds_exon"]
+        region_mds_exon = None
+        if not region_mds_exon_df.empty:
+            exon_baseline = {}
+            for _, row in region_mds_exon_df.iterrows():
+                # No `or 0.0` defaults: a NaN sigma here means the builder
+                # could not measure a spread, and zscore_or_nan must see it.
+                exon_baseline[(str(row["gene"]), str(row["name"]))] = {
+                    "mds_mean": float(row["mds_mean"]),
+                    "mds_std": float(row["mds_std"]),
+                    "n_samples": int(row.get("n_samples", 0) or 0),
+                }
+            region_mds_exon = RegionMdsExonBaseline(exon_baseline=exon_baseline)
+            logger.debug(f"Loaded Region MDS exon baseline: {len(exon_baseline)} exons")
+
         # Parse Region MDS baseline
         region_mds_df = df_all[df_all["table"] == "region_mds"]
         region_mds = None
@@ -1190,9 +1377,13 @@ class PonModel:
             reference=str(meta.get("reference", "")),
             panel_mode=bool(meta.get("panel_mode", False)),
             target_regions_file=str(meta.get("target_regions_file", "")),
+            krewlyzer_version=str(meta.get("krewlyzer_version", "")),
+            cohort_digest=str(meta.get("cohort_digest", "")),
+            cohort_label=str(meta.get("cohort_label", "")),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
+            wps_shape_baseline=wps_shape_baseline,
             wps_baseline_panel=wps_baseline_panel,
             ocf_baseline=ocf_baseline,
             ocf_baseline_ontarget=ocf_baseline_ontarget,
@@ -1209,6 +1400,7 @@ class PonModel:
             fsc_gene_baseline=fsc_gene_baseline,
             fsc_region_baseline=fsc_region_baseline,
             region_mds=region_mds,
+            region_mds_exon=region_mds_exon,
             wps_background_baseline=wps_background_baseline,
         )
 
@@ -1253,35 +1445,14 @@ class PonModel:
         # Placeholder for legacy support
         return cls()
 
-    def save(self, path: Path) -> None:
-        """
-        Save PON model to Parquet file.
-
-        Args:
-            path: Output path (should end with .pon.parquet)
-        """
-        path = Path(path)
-
-        # Build metadata table
-        metadata = pd.DataFrame(
-            [
-                {
-                    "table": "metadata",
-                    "schema_version": self.schema_version,
-                    "assay": self.assay,
-                    "build_date": self.build_date,
-                    "n_samples": self.n_samples,
-                    "reference": self.reference,
-                }
-            ]
-        )
-
-        # Note: This is a simplified save method. build.py uses _save_pon_model()
-        # for complete serialization including all baselines.
-
-        # For now, just save metadata
-        metadata.to_parquet(path, index=False)
-        logger.info(f"Saved PON model: {path}")
+    # NOTE: there is deliberately no `save()` here.
+    #
+    # One existed and wrote only the metadata block -- a PON with no baselines
+    # at all -- while `build-pon` used `_save_pon_model` in `build.py`. Two
+    # writers for one format, one of them silently producing an empty model,
+    # and nothing in production called it. Removed rather than completed:
+    # a second serializer is a second thing to keep in step with every new
+    # block, and the first one already has to be.
 
     def validate(self) -> List[str]:
         """

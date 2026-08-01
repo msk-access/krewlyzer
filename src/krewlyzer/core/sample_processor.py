@@ -29,6 +29,7 @@ import pandas as pd
 from .output_utils import (
     read_exact_table,
     read_table,
+    strip_table_extension,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
 
@@ -633,6 +634,28 @@ def write_motif_outputs(
     )
     outputs["edm_1mer"] = edm_1mer_base.parent / (edm_1mer_base.name + ext)
     logger.debug(f"  C-end fraction: {c_end_metrics['c_fraction']:.4f}")
+
+    # Per-motif z-scores against the PON's k-mer baseline.
+    #
+    # 625 k-mer means and sigmas were built into every PON and read by nothing;
+    # EndMotif shipped Motif and Frequency alone, so a shift in one motif was
+    # invisible unless it moved the whole-sample MDS enough to notice. Applied
+    # here so `run-all` and the standalone `motif` command behave the same
+    # (invariant #6).
+    if pon is not None:
+        from .motif_pon import apply_motif_pon
+
+        for key in ("edm", "bpm", "edm_ontarget", "bpm_ontarget"):
+            path = outputs.get(key)
+            if path is None:
+                continue
+            apply_motif_pon(
+                path,
+                pon,
+                output_base=Path(strip_table_extension(str(path))),
+                output_format=output_format,
+                compress=compress,
+            )
 
     logger.info(f"  Wrote {len(outputs)} motif files")
     return outputs

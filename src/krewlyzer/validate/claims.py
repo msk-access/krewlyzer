@@ -243,6 +243,24 @@ CLAIMS: Tuple[Claim, ...] = (
         ),
         "the six documented FSC channels, shared by genome bins and genes",
     ),
+    # -- PON --------------------------------------------------------------
+    # `docs/cli/index.md` quotes this in the validate-pon table, and the
+    # builder and the gate enforce it in different files -- so the three can
+    # drift unless something ties them together.
+    Claim(
+        "pon.min_samples_per_key",
+        "3",
+        PyConst("krewlyzer.pon.build", "MIN_SAMPLES_PER_KEY"),
+        "an entry backed by fewer samples is an anecdote, and its sigma is "
+        "the difference between two numbers",
+    ),
+    Claim(
+        "pon.gate.min_samples",
+        "3",
+        PyConst("krewlyzer.validate.pon_gate", "MIN_SAMPLES"),
+        "the gate must enforce the same floor the builder applies, or one of "
+        "them is decoration",
+    ),
 )
 
 

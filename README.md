@@ -120,9 +120,11 @@ These read inputs or a finished output directory rather than producing features.
 | `report` | Single-sample HTML report — verdict, charts, interpretation |
 | `validate-output` | Check results against the downstream output contract |
 | `validate-cohort` | Cross-sample degeneracy checks over fingerprints |
+| `validate-pon` | Check a PON **before** anything is scored against it |
 
 ```bash
 krewlyzer validate -G hg19                        # assets are intact
+krewlyzer validate-pon model.pon.parquet          # the reference is sound
 krewlyzer validate-output results/                # results satisfy the contract
 krewlyzer describe-output results/{sample_id}/    # what is in each file
 pip install 'krewlyzer[report]'

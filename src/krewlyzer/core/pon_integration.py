@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Optional
 import logging
 
+from krewlyzer.pon.model import GENOME_WIDE_GROUP
+
 logger = logging.getLogger("core.pon_integration")
 
 
@@ -42,7 +44,7 @@ def load_pon_model(pon_path: Path):
 
 
 def compute_nrl_zscore(
-    observed_nrl: float, pon, group_id: str = "all"
+    observed_nrl: float, pon, group_id: str = GENOME_WIDE_GROUP
 ) -> Optional[float]:
     """
     Compute NRL (Nucleosome Repeat Length) z-score.
@@ -56,7 +58,7 @@ def compute_nrl_zscore(
     Args:
         observed_nrl: NRL in bp from FFT analysis (nrl_bp column)
         pon: Loaded PonModel with wps_background_baseline
-        group_id: Group identifier (default: "all" for global)
+        group_id: Group identifier (default: the genome-wide group)
 
     Returns:
         Z-score or None if not computable
@@ -68,7 +70,7 @@ def compute_nrl_zscore(
 
 
 def compute_periodicity_zscore(
-    observed_periodicity: float, pon, group_id: str = "all"
+    observed_periodicity: float, pon, group_id: str = GENOME_WIDE_GROUP
 ) -> Optional[float]:
     """
     Compute periodicity z-score.
@@ -79,7 +81,7 @@ def compute_periodicity_zscore(
     Args:
         observed_periodicity: Periodicity score from FFT
         pon: Loaded PonModel with wps_background_baseline
-        group_id: Group identifier (default: "all" for global)
+        group_id: Group identifier (default: the genome-wide group)
 
     Returns:
         Z-score or None if not computable

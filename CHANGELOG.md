@@ -4,6 +4,188 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`krewlyzer validate-pon`** — gates the reference, not the results.
+  `validate-output` checks what a run produced; nothing checked the model
+  those results are measured against. Every PON defect fixed in this release
+  sat in four shipped files, visible in the file and invisible to every check.
+
+  The load-bearing assertion is the same invariant the output gate enforces one
+  level up: **a baseline that cannot vary with its cohort was not fitted to
+  one.** A single check that σ differs between groups would have caught the
+  fabricated `wps_background` in March.
+
+  Also checks: σ positive and finite, `krewlyzer_version` and `cohort_digest`
+  recorded, and every entry backed by ≥ 3 samples. Exit codes match
+  `validate-output` — `0` satisfied, `1` violation, `2` structural.
+
+  **All four currently-shipped PONs fail it**, which is the acceptance
+  criterion: a gate that passes the models we know are wrong is not a gate. A
+  test asserts that failure, and flipping it is the record that the rebuild
+  worked.
+
+  Wired into the Nextflow pipeline as `KREWLYZER_VALIDATE_PON`, running once
+  per run rather than once per sample. Wired at the same time it was added —
+  an unwired module is the defect #34 fixed, and it reads as coverage while
+  providing none.
+
+- **PON provenance: `krewlyzer_version`, `cohort_digest`, `cohort_label`.**
+  The four models in this repository record `n_samples` and nothing else, so
+  none can be reproduced, audited, or compared against a rebuild — and the
+  build script that produced them has a stale comment claiming 47 where the
+  metadata says 21, so even the integer is uncorroborated.
+
+  The cohort is a **salted, non-reversible digest** of the sample IDs, stable
+  across paths and ordering. Two builds from the same cohort match; the digest
+  reveals nothing about who is in it. A PON ships in this repository, in the
+  Docker image and on PyPI, so it is the last place an identifier may appear
+  (invariant #4). `--cohort-label` adds a free-text name for humans.
+
+  Writing is inert: `PonModel.load` reads through `meta.get(key, default)`, so
+  unknown keys are ignored and existing models still load unchanged.
+
+### Added
+- **Per-motif z-scores (`EndMotif.frequency_z`, `BreakPointMotif.frequency_z`).**
+  `mds_baseline` carries 625 k-mer means and σ — every 4-mer over ACGTN — and
+  nothing read them; the tables shipped `Motif, Frequency` alone, so a shift in
+  one motif was invisible unless it moved the whole-sample MDS enough to notice.
+
+  The join is on the motif string, never position: 625 baseline keys against
+  256 ACGT motifs in the output. And the sample is put on the baseline's scale
+  first — sample frequencies sum to 1.0 across the 256, the baseline's
+  expectations for those same 256 sum to **0.972**, with the missing 2.79% in
+  the N-containing k-mers the output never reports. Comparing them directly
+  biased every z upward: measured on a real sample, median **+0.37** naive
+  against **−0.21** corrected.
+
+### Fixed
+- **`nrl_z` and `periodicity_z` never reached a single output file** — and the
+  machinery was fully plumbed. `compute_nrl_zscore` defaulted to
+  `group_id="all"`, and no PON has ever held a group by that name: they are
+  `Global_All`, `Chr1_All` … `Family_AluY`. Every lookup missed, the function
+  returned `None`, and `None` was indistinguishable from "this PON has no
+  baseline". The default is now a named `GENOME_WIDE_GROUP` constant, defined
+  once, and a group that matches nothing logs what it did find.
+
+  Two defects had to stack for the column to be absent: the fabricated
+  `wps_background` baseline (`4cd634b`) *and* this. With the old PON the value
+  is `−3.4` for every sample, which is what the fabricated `167.0 / 5.0` gives
+  for an `nrl_bp` pinned at 150.
+
+- **27 of 28 NRL baselines were built and never used.** Only `Global_All` was
+  scored, though the output carries an `nrl_bp` per chromosome and per Alu
+  family and the baseline has one for each. All 28 groups are now scored;
+  per-chromosome NRL drift is the reason those baselines exist.
+
+### Added
+- **WPS z-scoring — the largest PON baseline, previously read by nothing.**
+  `wps_baseline` is ~128k anchors of 200-element mean and σ vectors, roughly
+  90% of every PON file, and its only consumer was a log line appending
+  `"WPS"` to a list of available components.
+
+  `WPS.parquet` now carries `wps_nuc_z` / `wps_tf_z` (per-position z vectors)
+  plus three derived shape quantities with their own z-scores, from a new
+  `wps_shape_baseline` block.
+
+  **Measurement drove every choice here, and ruled out the obvious ones:**
+
+  | rejected | why, measured |
+  |---|---|
+  | mean of z over positions | lag-1 autocorrelation **0.986** — a fragment spans ~167 bp and touches many positions, so such a mean has nothing like σ/√200 precision |
+  | max of \|z\| over positions | expected max under pure noise is **2.97**, so \|z\|>2 would flag nearly every anchor |
+  | centre-minus-flank amplitude | TSS dips at the centre (−6.8 vs −3.4 flanks), CTCF does the reverse — any fixed window is backwards for one |
+  | raw peak-to-trough range | correlates **+0.512** with `local_depth`; `log1p` drops it to −0.036 |
+  | raw shape correlation | bounded at 1.0; mean 0.844 σ 0.099 means **302/400 anchors cannot reach +2** — Fisher `arctanh` removes the ceiling |
+
+  **Displacement is measured but deliberately not z-scored.**
+  `wps_phase_shift_bp` ships because it is cheap and genuinely non-redundant
+  (corr −0.24 and −0.28 with the two scored statistics), but it gets no
+  baseline: per-sample mean lag varies by **0.26 bp** against a within-sample
+  spread of **8.43**, so there is no whole-sample phasing signal, and per
+  anchor the intraclass correlation is **0.479** — about half of any lag is
+  noise, optimistically, since that estimate used a baseline containing the
+  samples being scored. It is also integer-valued, so on a small cohort its σ
+  bottoms out at `std([0,0,0,0,0,1]) = 0.408` and a 1 bp shift scores z = 2.4.
+
+  `wps_phase_at_search_limit` marks anchors where the ±30 search ended on its
+  own edge (1.8% measured) — `nrl_at_band_limit` one level down.
+
+### Removed
+- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
+  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
+  parquet imports that existed only to serve them. The crate now builds with
+  zero warnings.
+
+  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
+  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
+  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
+  not positive. It was also unreachable: the call was gated on
+  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
+  schema-obsolete, fabricating, and implementing the statistic measurement
+  refuted.
+
+### Added
+- **Per-exon MDS baseline (`region_mds_exon`) and `MDS.exon.mds_z`.**
+  `MDS.exon` is the finest localisation krewlyzer produces — 1,006 rows on
+  xs2, 1,725 on xs1 — and was the only feature table with no baseline at all,
+  so it shipped a raw score with nothing to compare it against.
+
+  Keyed on `(gene, name)`: `name` alone is not unique across genes, and
+  coordinates would break whenever the panel BED is regenerated. Aggregated in
+  Python like the FSC gene and region baselines rather than adding a second
+  Rust entry point for a groupby over ~1.7k rows.
+
+  Measured before building it, which refuted the expected shape: exon data is
+  **not** sparse. Every exon appears in every sample of its assay (7/7 xs1,
+  19/19 xs2) with a measurable spread, and under 0.25% carry fewer than 10
+  fragments. So no sparsity handling was needed — only the same NaN-not-floor
+  rule as everywhere else. Verified on the real cohort: 1,006/1,006 xs2 exons
+  fitted, median σ 0.0079, none unmeasurable.
+
+  A PON built before 0.9.0 has no such block; `mds_z` is then `NaN` and a line
+  says so.
+
+### Removed
+- **`PonModel.save`** — a second serializer that wrote only the metadata block,
+  producing a PON with no baselines at all, while `build-pon` used
+  `_save_pon_model`. Nothing in production called it. Removed rather than
+  completed: a second writer is a second thing to keep in step with every new
+  block.
+
+### Changed
+- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
+  and FSC region have required it since they were written and WPS acquired it
+  in `4cd634b`; the four now agree by construction rather than by three
+  separate literals happening to match.
+
+### Fixed
+- **An unmeasurable spread produced `z = 0.0`, in twelve places.** Ten baseline
+  classes in `pon/model.py` independently ended with
+  `if std > 0: return (x - mean) / std` followed by `return 0.0` — nine copies
+  of the same three lines, and the same defect nine times. Zero is not a
+  cautious answer: it is the most confident claim the column can make ("sits
+  exactly at the healthy baseline"), asserted precisely when the baseline
+  measured no spread, and indistinguishable from a genuine zero.
+
+  Replaced by one `zscore_or_nan` helper, so it can only be wrong once. Also:
+  `FsdBaseline.get_expected`/`get_std` returned `0.0` for an unknown arm (a
+  caller dividing by that gets infinity, not an absence), and
+  `compute_shape_score` returned `0.0` for an undefined correlation, which is
+  a real claim about shape agreement.
+
+- **`WpsBaseline.compute_z_vector` substituted `1.0` for an unusable σ.** Since
+  `4cd634b` the builder writes NaN where it could not measure spread;
+  `np.where(std > 0, std, 1.0)` is False for NaN, so every one of those became
+  a *finite* z — undoing the builder's honesty at the read side, which is the
+  harder place to notice. This is the function WPS z-scoring will use.
+
+### Changed
+- **OCF PON logging distinguishes "absent from the baseline" from "matched but
+  unscoreable".** Both correctly write NaN, but collapsing them reported
+  `0/1 regions matched` for a region that matched perfectly well and simply has
+  no variance in the cohort. That is the difference between "rebuild the PON"
+  and "expected", and only the log can say which.
+
 ### Fixed
 - **Reading back a file just written could return an older run's data.**
   `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is

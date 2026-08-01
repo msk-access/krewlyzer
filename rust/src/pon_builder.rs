@@ -298,6 +298,78 @@ fn extract_wps_vector(col: &dyn arrow::array::Array, row: usize) -> Option<Vec<f
     None
 }
 
+/// Mean and sample standard deviation over the finite values, NaN when the
+/// spread cannot be measured. Never a floor -- see `element_wise_std`.
+fn mean_and_sd(values: &[f32]) -> (f32, f32) {
+    let finite: Vec<f32> = values.iter().copied().filter(|x| x.is_finite()).collect();
+    if finite.is_empty() {
+        return (f32::NAN, f32::NAN);
+    }
+    let n = finite.len() as f32;
+    let mean = finite.iter().sum::<f32>() / n;
+    if finite.len() < 2 {
+        return (mean, f32::NAN);
+    }
+    let var = finite.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / (n - 1.0);
+    let sd = var.sqrt();
+    (mean, if sd > 0.0 { sd } else { f32::NAN })
+}
+
+/// Peak-to-trough range of a profile, on a log scale.
+///
+/// Raw amplitude is a coverage measurement, not a chromatin one: measured on
+/// the real cohort it correlates +0.512 with `local_depth` and is skewed 11.6.
+/// `ln(1 + range)` drops the depth correlation to -0.036 and the skew to 1.6,
+/// which is the same multiplicative structure FSD and FSC depth show.
+fn log_amplitude(v: &[f32]) -> f32 {
+    let finite: Vec<f32> = v.iter().copied().filter(|x| x.is_finite()).collect();
+    if finite.len() < 2 {
+        return f32::NAN;
+    }
+    let hi = finite.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+    let lo = finite.iter().cloned().fold(f32::INFINITY, f32::min);
+    (1.0 + (hi - lo)).ln()
+}
+
+/// Pearson correlation, or NaN when either side has no variance.
+fn correlation(a: &[f32], b: &[f32]) -> f32 {
+    let n = a.len().min(b.len());
+    if n < 3 {
+        return f32::NAN;
+    }
+    let (mut sa, mut sb) = (0.0f64, 0.0f64);
+    for i in 0..n {
+        sa += a[i] as f64;
+        sb += b[i] as f64;
+    }
+    let (ma, mb) = (sa / n as f64, sb / n as f64);
+    let (mut num, mut da, mut db) = (0.0f64, 0.0f64, 0.0f64);
+    for i in 0..n {
+        let (x, y) = (a[i] as f64 - ma, b[i] as f64 - mb);
+        num += x * y;
+        da += x * x;
+        db += y * y;
+    }
+    if da < 1e-12 || db < 1e-12 {
+        return f32::NAN;
+    }
+    (num / (da.sqrt() * db.sqrt())) as f32
+}
+
+/// Fisher z of a correlation: `arctanh(r)`.
+///
+/// Required, not cosmetic. A correlation is bounded at 1.0, and measured on
+/// the real cohort the shape correlation sits at mean 0.844 with sigma 0.099 --
+/// so the largest attainable positive z is about 1.5, and **302 of 400 anchors
+/// could not reach +2 however tumour-like the sample**. On the Fisher scale
+/// the same data has mean 1.371 and no ceiling.
+fn fisher_z(r: f32) -> f32 {
+    if !r.is_finite() {
+        return f32::NAN;
+    }
+    r.clamp(-0.999_999, 0.999_999).atanh()
+}
+
 /// Compute element-wise mean of multiple vectors.
 /// All vectors must have the same length.
 fn element_wise_mean(vectors: &[Vec<f32>]) -> Vec<f32> {
@@ -497,6 +569,45 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
         
         // Add sample count for diagnostics
         region_dict.set_item("n_samples", nuc_vectors.len())?;
+
+        // -- shape baseline -------------------------------------------------
+        //
+        // Derived quantities, each z-scored later against its own mean/sigma
+        // rather than being a reduction of the per-position z vector. That
+        // distinction is the point: adjacent WPS positions have lag-1
+        // autocorrelation 0.986 (a fragment spans ~167bp and touches many
+        // positions at once), so averaging z across positions produces a
+        // number with none of a z-score's properties. Derive the biological
+        // quantity first, then z-score that.
+        //
+        // Computed here rather than in Python because this loop already holds
+        // every sample's vectors for the region; the Python side would have to
+        // re-read ~44 MB per sample to see them again.
+        let amps: Vec<f32> = nuc_vectors.iter().map(|v| log_amplitude(v)).collect();
+        let corrs: Vec<f32> = nuc_vectors
+            .iter()
+            .map(|v| fisher_z(correlation(v, &nuc_mean)))
+            .collect();
+        // No phase-shift baseline. Measured on the real cohort: per-sample
+        // mean lag varies by 0.26 bp against a within-sample spread of 8.43,
+        // so there is no whole-sample phasing signal; and per anchor the
+        // intraclass correlation is 0.479, meaning about half of a lag is
+        // noise -- optimistically, since that baseline included the samples
+        // being scored. Z-scoring an integer-valued statistic that is half
+        // noise produces a plausible number and nothing else.
+        //
+        // The raw lag is still emitted per sample by `core/wps_pon.py`: it is
+        // cheap, genuinely non-redundant (corr -0.24 and -0.28 with the two
+        // below), and may resolve at n=21/47. Adding the baseline back is a
+        // small change if the rebuild shows reproducible shifts.
+        for (name, values) in [
+            ("log_amplitude", &amps),
+            ("shape_corr_fisher", &corrs),
+        ] {
+            let (m, sd) = mean_and_sd(values);
+            region_dict.set_item(format!("{name}_mean"), m as f64)?;
+            region_dict.set_item(format!("{name}_std"), sd as f64)?;
+        }
         
         result.set_item(region_id, region_dict)?;
     }
@@ -694,5 +805,86 @@ mod tests {
         let std = element_wise_std(&vectors, &means);
         assert!(std[0] < 0.01, "a real sub-floor spread was floored: {}", std[0]);
         assert!(std[0] > 0.0);
+    }
+}
+
+#[cfg(test)]
+mod shape_tests {
+    use super::*;
+
+    /// Raw amplitude is a coverage measurement, not a chromatin one.
+    ///
+    /// Measured on the real cohort: raw amplitude correlates +0.512 with
+    /// `local_depth` and is skewed 11.6; `ln(1 + range)` drops that to -0.036
+    /// and 1.6. A z-score on the raw scale would rank samples by how deeply
+    /// they were sequenced.
+    #[test]
+    fn log_amplitude_compresses_a_depth_driven_range() {
+        let shallow: Vec<f32> = (0..200).map(|i| (i as f32 / 20.0).sin()).collect();
+        let deep: Vec<f32> = shallow.iter().map(|x| x * 100.0).collect();
+        let (a, b) = (log_amplitude(&shallow), log_amplitude(&deep));
+        assert!(b > a, "a deeper profile must still register as larger");
+        assert!(
+            b / a < 10.0,
+            "100x the depth must not be 100x the statistic, got {}x",
+            b / a
+        );
+    }
+
+    #[test]
+    fn log_amplitude_is_nan_for_a_profile_with_nothing_in_it() {
+        assert!(log_amplitude(&[]).is_nan());
+        assert!(log_amplitude(&[1.0]).is_nan());
+    }
+
+    /// The ceiling this transform exists for.
+    ///
+    /// A correlation is bounded at 1.0. On the real cohort the shape
+    /// correlation sits at mean 0.844 with sigma 0.099, so the largest
+    /// attainable positive z is ~1.5 and 302 of 400 anchors could not reach
+    /// +2 however tumour-like the sample. Fisher's transform removes the
+    /// bound.
+    #[test]
+    fn fisher_z_removes_the_correlation_ceiling() {
+        let near_ceiling = [0.90_f32, 0.95, 0.99];
+        let transformed: Vec<f32> = near_ceiling.iter().map(|&r| fisher_z(r)).collect();
+        // Raw: the gaps shrink toward the bound. Fisher: they widen.
+        let raw_gap = near_ceiling[2] - near_ceiling[1];
+        let fisher_gap = transformed[2] - transformed[1];
+        assert!(
+            fisher_gap > raw_gap * 3.0,
+            "fisher must expand the region near 1.0, gaps {raw_gap} vs {fisher_gap}"
+        );
+        assert!(transformed.iter().all(|z| z.is_finite()));
+    }
+
+    #[test]
+    fn fisher_z_survives_a_perfect_correlation() {
+        // arctanh(1.0) is infinite; the clamp keeps it a number.
+        assert!(fisher_z(1.0).is_finite());
+        assert!(fisher_z(-1.0).is_finite());
+        assert!(fisher_z(f32::NAN).is_nan());
+    }
+
+    #[test]
+    fn correlation_is_nan_without_variance() {
+        let flat = [3.0_f32; 50];
+        let ramp: Vec<f32> = (0..50).map(|i| i as f32).collect();
+        assert!(correlation(&flat, &ramp).is_nan());
+        assert!((correlation(&ramp, &ramp) - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn mean_and_sd_reports_an_unmeasurable_spread_as_nan() {
+        assert!(mean_and_sd(&[]).0.is_nan());
+        let (m, sd) = mean_and_sd(&[5.0]);
+        assert_eq!(m, 5.0);
+        assert!(sd.is_nan(), "one value has no spread");
+        let (m, sd) = mean_and_sd(&[3.0, 3.0, 3.0]);
+        assert_eq!(m, 3.0);
+        assert!(sd.is_nan(), "zero spread is still no information about spread");
+        let (m, sd) = mean_and_sd(&[2.0, 4.0, 6.0]);
+        assert!((m - 4.0).abs() < 1e-6);
+        assert!((sd - 2.0).abs() < 1e-5, "ddof=1 sample sd, got {sd}");
     }
 }

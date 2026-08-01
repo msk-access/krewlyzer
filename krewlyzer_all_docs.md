@@ -61,6 +61,7 @@ features.
 | [`report`](#report) | Single-sample HTML report: verdict, charts, interpretation |
 | [`validate-output`](#validate-output) | Check one sample against the output contract |
 | [`validate-cohort`](#validate-cohort) | Cross-sample degeneracy checks over fingerprints |
+| [`validate-pon`](#validate-pon) | Check a PON **before** anything is scored against it |
 
 ---
 
@@ -204,6 +205,42 @@ than terabytes. Below `--min-samples` the check reports SKIP, never PASS.
 
 - [Nextflow Pipeline](../nextflow/index.md) - Batch processing
 - [Features](../features/index.md) - Feature documentation
+
+---
+
+### `validate-pon` {#validate-pon}
+
+`validate-output` gates the results of a run. This gates the **reference those
+results are measured against**.
+
+```bash
+krewlyzer validate-pon model.pon.parquet
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --json-report pon.json
+```
+
+Same exit codes as `validate-output`: `0` satisfied, `1` violation, `2`
+structural.
+
+| Check | Why |
+|---|---|
+| **σ is not one value repeated** | A baseline that cannot vary with its cohort was not fitted to one |
+| σ is positive and finite | A z divided by zero is infinite, not conservative |
+| `krewlyzer_version` recorded | 0.9.0 changes what every feature *means* |
+| `cohort_digest` recorded | Otherwise the model cannot be reproduced or compared |
+| entries backed by ≥ 3 samples | Below that a baseline entry is an anecdote |
+
+!!! warning "Every PON shipped before 0.9.0 fails this"
+    They carry a `wps_background` block hardcoded to `167.0 / 5.0 / 0.0 / 1.0`
+    — identical across all 28 groups and all four models, from cohorts of 21
+    and 47 samples — and no provenance at all. That is not a false positive;
+    it is the reason the command exists. Rebuild with `build-pon`.
+
+**Provenance contains no identifiers.** The cohort is recorded as a salted,
+non-reversible digest of the sample IDs, plus an optional free-text
+`--cohort-label`. Two builds from the same cohort produce the same digest; the
+digest reveals nothing about who is in it. A PON ships in this repository, in
+the Docker image and on PyPI, so it is the last place a patient identifier may
+appear.
 
 ---
 
@@ -5251,6 +5288,19 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `strand` | Strand (+/-) |
 | `n_fragments` | Fragment count |
 | `mds` | Motif Diversity Score |
+| `mds_z` | Z-score against the PON's per-exon baseline (with `--pon-model`) |
+
+!!! note "`mds_z` needs a PON built by 0.9.0 or later"
+    The per-exon baseline (`region_mds_exon`) is new in 0.9.0. Against an
+    older PON the column is `NaN` and a line is logged saying so — the exon
+    score itself is unaffected.
+
+    `NaN` also appears where the exon is absent from the baseline, which
+    usually means the PON was built for a different panel. Measured on a real
+    cohort, exon coverage is much better than "per-exon" suggests: every exon
+    appears in every sample of its assay, and under 0.25% carry fewer than 10
+    fragments. So a `NaN` here is worth investigating rather than assuming
+    thin coverage.
 
 ### MDS.gene.tsv Columns
 

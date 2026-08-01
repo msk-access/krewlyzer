@@ -186,8 +186,9 @@ MEANINGS: Dict[str, Meaning] = {
             "The 4-mer at each fragment's 5′ end is counted across all 256 possibilities, then normalised to frequencies summing to 1."
         ),
         what=(
-            "Read the shape of the ranked distribution rather than any one motif. A broad, flat profile is healthy; mass concentrating on a few motifs is what MDS quantifies as lower diversity."
+            "`frequency_z` per motif against the PON, then the shape of the ranked distribution. A broad, flat profile is healthy; mass concentrating on a few motifs is what MDS quantifies as lower diversity."
         ),
+        pon_columns=("frequency_z",),
     ),
     ".EndMotif.ontarget.parquet": Meaning(
         "As EndMotif, over captured regions.", "distribution narrows"
@@ -203,6 +204,7 @@ MEANINGS: Dict[str, Meaning] = {
         what=(
             "Compare its shape against EndMotif; a divergence between them points at the cutting chemistry rather than at fragment selection."
         ),
+        pon_columns=("frequency_z",),
     ),
     ".BreakPointMotif.ontarget.parquet": Meaning(
         "As BreakPointMotif, over captured regions.", "distribution narrows"
@@ -263,8 +265,9 @@ MEANINGS: Dict[str, Meaning] = {
         why=("The finest localisation available: which exon, not which gene."),
         how=("Entropy over the fragments overlapping each exon or capture tile."),
         what=(
-            "Sparse by nature — an exon with few fragments has an unstable entropy. Read `n_fragments` alongside `mds`."
+            '`mds_z` against the PON\'s per-exon baseline, then `n_fragments`. Measured on a real cohort, exon coverage is far better than "per-exon" suggests -- every exon appears in every sample of its assay and under 0.25% carry fewer than 10 fragments -- so a NaN `mds_z` usually means the PON was built for a different panel, not that the exon is thin.'
         ),
+        pon_columns=("mds_z",),
     ),
     # -- orientation and accessibility --------------------------------------
     ".OCF.ontarget.parquet": Meaning(
@@ -344,7 +347,13 @@ MEANINGS: Dict[str, Meaning] = {
             "For each position, fragments fully spanning a window score positive and fragments ending inside it score negative, summed across TSS and CTCF anchors. Per-position vectors, not scalars."
         ),
         what=(
-            "Reduce the vectors with a mean or max before comparing; consumers use list_avg/list_max. The depth and phasing of the dip at the anchor are the features."
+            "`wps_shape_corr_z` (is it the right shape) and `wps_log_amplitude_z` (is there structure at all). `wps_phase_shift_bp` reports displacement but is deliberately not z-scored -- measured on a real cohort it shows no per-sample signal and is about half noise per anchor -- so read it directly, and check `wps_phase_at_search_limit` before believing a large value. `wps_nuc_z` holds the full per-position comparison. Do **not** average `wps_nuc_z` across positions: adjacent positions have lag-1 autocorrelation 0.986, so a mean of z there is not a z."
+        ),
+        pon_columns=(
+            "wps_nuc_z",
+            "wps_tf_z",
+            "wps_log_amplitude_z",
+            "wps_shape_corr_z",
         ),
     ),
     ".WPS.panel.parquet": Meaning("As WPS, over the panel's anchors.", "as WPS"),
@@ -363,6 +372,7 @@ MEANINGS: Dict[str, Meaning] = {
         what=(
             "Check `nrl_at_band_limit` first. Where it is set, `nrl_bp` is the edge of the search band rather than a measurement — no periodic peak was found, and the value is not a length."
         ),
+        pon_columns=("nrl_z", "periodicity_z"),
     ),
     # -- provenance ----------------------------------------------------------
     ".metadata.parquet": Meaning(
