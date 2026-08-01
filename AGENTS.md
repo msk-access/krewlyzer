@@ -68,6 +68,7 @@ simply call the tools in turn. Full module map: `.agents/rules/architecture.md`.
 | Output-writing change | `python scripts/check_output_format.py` |
 | Docs or constants | `pytest tests/unit/test_claims_registry.py` |
 | Before blessing a cohort | `krewlyzer validate-output RESULTS_DIR` |
+| Before blessing a cohort or a release | `KREWLYZER_TEST_CORPUS=<dir> pytest tests/real_data` (local only) |
 | PHI rules touched | `bash scripts/check_phi_guard.sh` |
 
 Order matters: rebuild the extension before `pytest`, or you are testing the

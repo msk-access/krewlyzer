@@ -91,3 +91,33 @@ retry on 2 and escalate on 1.
 **Do not add a column to an exception list to make the gate green.** Declaring a
 column legitimately constant requires a written `constant_reason`, and that cost
 is the point.
+
+## The local cohort gate
+
+```bash
+KREWLYZER_TEST_CORPUS=/path/to/scored/cohort python -m pytest tests/real_data -q
+```
+
+**Local only.** Unset the variable and it skips, so `pytest tests/` stays green
+and CI never sees it. No cohort data is committed, and nothing here may put a
+patient identifier in a test name, a parameter id, an assertion message or a
+written artifact — sample directories are named for the patient (invariant #4).
+`sample_label()` gives a non-reversible handle when output needs one.
+
+**What it catches that nothing else does.** Every defect the PON audit found
+needed a cohort to see:
+
+| defect | what a single fixture showed |
+|---|---|
+| `wps_background` fabricated | nothing — one sample cannot reveal a constant |
+| FSD unnormalised under parquet | nothing — the fixture PON matches no arm |
+| single-sample WPS anchors | nothing — needs per-anchor `n` across samples |
+| `wps_baseline` consumed by nothing | nothing — the code reads fine |
+
+The unit suite proves a scorer *can* run; only a cohort proves it *did*, and
+only a cohort can tell a varying metric from a constant one.
+
+**Blind spot.** The corpus is tumour samples, not the healthy cohort the PON
+was fitted on, so a shifted z-score mean is expected biology. The calibration
+checks here are deliberately loose — they reject a scale error (a floored
+sigma, a mismatched baseline), not a shifted one.

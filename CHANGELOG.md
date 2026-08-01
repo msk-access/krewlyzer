@@ -24,6 +24,22 @@ All notable changes to this project will be documented in this file.
   a stale sibling satisfies it and the degradation branch never fires.
 
 ### Added
+- **`tests/real_data/` — a local cohort gate.** Point
+  `KREWLYZER_TEST_CORPUS` at a scored cohort and it runs; leave it unset and it
+  skips, so `pytest tests/` stays green and CI never sees it. No cohort data is
+  committed, and no patient identifier may appear in a test name, parameter id,
+  assertion message or artifact — `sample_label()` gives a non-reversible
+  handle where output needs one.
+
+  It exists because every defect the PON audit found needed a cohort to see: a
+  single fixture cannot reveal a constant, cannot match a real PON arm, and
+  cannot show per-anchor sample support. The unit suite proves a scorer *can*
+  run; only a cohort proves it *did*.
+
+  The four PON blocks that are built and consumed by nothing are marked
+  `xfail(strict=True)`, so Phase B wiring them turns the test red and forces
+  the marker off.
+
 - **`read_exact_table`** in `core/output_utils.py` — reads the given path with
   no sibling resolution, the counterpart to the deliberately parquet-first
   `read_table`.
