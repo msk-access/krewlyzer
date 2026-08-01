@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **Per-motif z-scores (`EndMotif.frequency_z`, `BreakPointMotif.frequency_z`).**
+  `mds_baseline` carries 625 k-mer means and σ — every 4-mer over ACGTN — and
+  nothing read them; the tables shipped `Motif, Frequency` alone, so a shift in
+  one motif was invisible unless it moved the whole-sample MDS enough to notice.
+
+  The join is on the motif string, never position: 625 baseline keys against
+  256 ACGT motifs in the output. And the sample is put on the baseline's scale
+  first — sample frequencies sum to 1.0 across the 256, the baseline's
+  expectations for those same 256 sum to **0.972**, with the missing 2.79% in
+  the N-containing k-mers the output never reports. Comparing them directly
+  biased every z upward: measured on a real sample, median **+0.37** naive
+  against **−0.21** corrected.
+
+### Fixed
+- **`nrl_z` and `periodicity_z` never reached a single output file** — and the
+  machinery was fully plumbed. `compute_nrl_zscore` defaulted to
+  `group_id="all"`, and no PON has ever held a group by that name: they are
+  `Global_All`, `Chr1_All` … `Family_AluY`. Every lookup missed, the function
+  returned `None`, and `None` was indistinguishable from "this PON has no
+  baseline". The default is now a named `GENOME_WIDE_GROUP` constant, defined
+  once, and a group that matches nothing logs what it did find.
+
+  Two defects had to stack for the column to be absent: the fabricated
+  `wps_background` baseline (`4cd634b`) *and* this. With the old PON the value
+  is `−3.4` for every sample, which is what the fabricated `167.0 / 5.0` gives
+  for an `nrl_bp` pinned at 150.
+
+- **27 of 28 NRL baselines were built and never used.** Only `Global_All` was
+  scored, though the output carries an `nrl_bp` per chromosome and per Alu
+  family and the baseline has one for each. All 28 groups are now scored;
+  per-chromosome NRL drift is the reason those baselines exist.
+
+### Added
 - **WPS z-scoring — the largest PON baseline, previously read by nothing.**
   `wps_baseline` is ~128k anchors of 200-element mean and σ vectors, roughly
   90% of every PON file, and its only consumer was a log line appending

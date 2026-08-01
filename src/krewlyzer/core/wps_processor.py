@@ -14,6 +14,8 @@ import pandas as pd
 import numpy as np
 import logging
 
+from krewlyzer.pon.model import GENOME_WIDE_GROUP, zscore_or_nan
+
 logger = logging.getLogger("core.wps_processor")
 
 
@@ -82,34 +84,50 @@ def post_process_wps(
                     if "nrl_bp" in df.columns:
                         result["nrl_bp"] = float(df["nrl_bp"].iloc[0])
 
-            # Compute NRL and periodicity z-scores if PON available
-            if pon is not None and result["nrl_bp"] is not None:
-                from .pon_integration import (
-                    compute_nrl_zscore,
-                    compute_periodicity_zscore,
-                )
+            # Score every group, not just the genome-wide one.
+            #
+            # The baseline holds 28 groups -- Global_All, one per chromosome,
+            # and one per Alu family -- and the output has an nrl_bp for each.
+            # Only Global_All was ever scored, so 27 of 28 baselines were built
+            # and never used. Per-chromosome NRL drift is the point of having
+            # them.
+            if pon is not None and getattr(pon, "wps_background_baseline", None):
+                baseline = pon.wps_background_baseline
+                for column, stats in (
+                    ("nrl_bp", baseline.get_nrl_stats),
+                    ("periodicity_score", baseline.get_periodicity_stats),
+                ):
+                    if column not in df.columns:
+                        continue
+                    target = "nrl_z" if column == "nrl_bp" else "periodicity_z"
+                    scores, absent = [], 0
+                    for group_id, observed in zip(df["group_id"], df[column]):
+                        pair = stats(str(group_id))
+                        if pair is None:
+                            absent += 1
+                            scores.append(np.nan)
+                            continue
+                        scores.append(zscore_or_nan(float(observed), pair[0], pair[1]))
+                    df[target] = scores
+                    scored = int(np.isfinite(np.asarray(scores, dtype=float)).sum())
+                    logger.info(f"{target}: {scored}/{len(df)} groups scored")
+                    if absent:
+                        logger.warning(
+                            f"{target}: {absent}/{len(df)} groups are absent from "
+                            "the PON's wps_background baseline. Rebuild the PON "
+                            "if these groups should be there."
+                        )
 
-                nrl_z = compute_nrl_zscore(float(result["nrl_bp"]), pon)  # type: ignore[arg-type]
-                if nrl_z is not None:
-                    result["nrl_z"] = nrl_z
-                    if "nrl_z" not in df.columns:
-                        df["nrl_z"] = np.nan
-                    if global_mask.any():
-                        df.loc[global_mask, "nrl_z"] = nrl_z
-                    logger.info(f"NRL z-score: {nrl_z:.2f}")
-
-                if result["periodicity_score"] is not None:
-                    period_z = compute_periodicity_zscore(  # type: ignore[arg-type]
-                        float(result["periodicity_score"]),  # type: ignore[arg-type]
-                        pon,
-                    )
-                    if period_z is not None:
-                        result["periodicity_z"] = period_z
-                        if "periodicity_z" not in df.columns:
-                            df["periodicity_z"] = np.nan
-                        if global_mask.any():
-                            df.loc[global_mask, "periodicity_z"] = period_z
-                        logger.info(f"Periodicity z-score: {period_z:.2f}")
+                # Summary values for the caller, from the genome-wide group.
+                summary = df[df["group_id"] == GENOME_WIDE_GROUP]
+                if not summary.empty:
+                    for key, column in (
+                        ("nrl_z", "nrl_z"),
+                        ("periodicity_z", "periodicity_z"),
+                    ):
+                        if column in summary.columns:
+                            value = summary[column].iloc[0]
+                            result[key] = None if pd.isna(value) else float(value)
 
             df.to_parquet(wps_background_parquet, index=False)
             logger.info(f"Processed background WPS: {wps_background_parquet}")

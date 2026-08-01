@@ -186,8 +186,9 @@ MEANINGS: Dict[str, Meaning] = {
             "The 4-mer at each fragment's 5′ end is counted across all 256 possibilities, then normalised to frequencies summing to 1."
         ),
         what=(
-            "Read the shape of the ranked distribution rather than any one motif. A broad, flat profile is healthy; mass concentrating on a few motifs is what MDS quantifies as lower diversity."
+            "`frequency_z` per motif against the PON, then the shape of the ranked distribution. A broad, flat profile is healthy; mass concentrating on a few motifs is what MDS quantifies as lower diversity."
         ),
+        pon_columns=("frequency_z",),
     ),
     ".EndMotif.ontarget.parquet": Meaning(
         "As EndMotif, over captured regions.", "distribution narrows"
@@ -203,6 +204,7 @@ MEANINGS: Dict[str, Meaning] = {
         what=(
             "Compare its shape against EndMotif; a divergence between them points at the cutting chemistry rather than at fragment selection."
         ),
+        pon_columns=("frequency_z",),
     ),
     ".BreakPointMotif.ontarget.parquet": Meaning(
         "As BreakPointMotif, over captured regions.", "distribution narrows"
@@ -370,6 +372,7 @@ MEANINGS: Dict[str, Meaning] = {
         what=(
             "Check `nrl_at_band_limit` first. Where it is set, `nrl_bp` is the edge of the search band rather than a measurement — no periodic peak was found, and the value is not a length."
         ),
+        pon_columns=("nrl_z", "periodicity_z"),
     ),
     # -- provenance ----------------------------------------------------------
     ".metadata.parquet": Meaning(

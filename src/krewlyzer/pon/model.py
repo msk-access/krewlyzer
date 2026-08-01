@@ -418,6 +418,16 @@ class OcfBaseline:
         return zscore_or_nan(observed_ocf, mean, std)
 
 
+#: The group id the whole-sample NRL and periodicity are keyed on.
+#:
+#: The default here used to be the string ``"all"``, which no PON has ever
+#: contained -- the groups are ``Global_All``, ``Chr1_All`` ... ``Family_AluY``.
+#: Every lookup therefore missed, ``compute_nrl_zscore`` returned None, and
+#: ``nrl_z``/``periodicity_z`` never reached a single output file. Silent,
+#: because a None was indistinguishable from "this PON has no baseline".
+GENOME_WIDE_GROUP = "Global_All"
+
+
 @dataclass
 class WpsBackgroundBaseline:
     """
@@ -435,28 +445,36 @@ class WpsBackgroundBaseline:
     # DataFrame: group_id, nrl_mean, nrl_std, periodicity_mean, periodicity_std
     groups: pd.DataFrame
 
-    def get_nrl_stats(self, group_id: str = "all") -> Optional[tuple]:
+    def get_nrl_stats(self, group_id: str = GENOME_WIDE_GROUP) -> Optional[tuple]:
         """
         Get (mean, std) for nucleosome repeat length.
 
         Args:
-            group_id: Group identifier (default: "all" for genome-wide)
+            group_id: Group identifier (default: the genome-wide group)
 
         Returns:
             Tuple (nrl_mean, nrl_std) or None if not found
         """
         match = self.groups[self.groups["group_id"] == group_id]
         if match.empty:
+            # Loud: a group id that matches nothing is a naming mistake, not a
+            # PON without a baseline, and the two used to look identical.
+            logger.warning(
+                f"WPS background baseline has no group {group_id!r}; "
+                f"available: {sorted(self.groups['group_id'].unique())[:5]}..."
+            )
             return None
         row = match.iloc[0]
         return (row["nrl_mean"], row["nrl_std"])
 
-    def get_periodicity_stats(self, group_id: str = "all") -> Optional[tuple]:
+    def get_periodicity_stats(
+        self, group_id: str = GENOME_WIDE_GROUP
+    ) -> Optional[tuple]:
         """
         Get (mean, std) for periodicity score.
 
         Args:
-            group_id: Group identifier (default: "all" for genome-wide)
+            group_id: Group identifier (default: the genome-wide group)
 
         Returns:
             Tuple (periodicity_mean, periodicity_std) or None if not found
@@ -468,7 +486,7 @@ class WpsBackgroundBaseline:
         return (row.get("periodicity_mean", 0), row.get("periodicity_std", 1))
 
     def compute_nrl_zscore(
-        self, observed_nrl: float, group_id: str = "all"
+        self, observed_nrl: float, group_id: str = GENOME_WIDE_GROUP
     ) -> Optional[float]:
         """Compute z-score for observed NRL value."""
         stats = self.get_nrl_stats(group_id)
