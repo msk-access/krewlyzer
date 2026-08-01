@@ -213,6 +213,14 @@ def build_pon(
     temp_dir: Optional[Path] = typer.Option(
         None, "--temp-dir", help="Directory for temporary files (default: system temp)"
     ),
+    keep_sample_outputs: Optional[Path] = typer.Option(
+        None,
+        "--keep-sample-outputs",
+        help="Write each sample's feature outputs here and keep them. Without "
+        "this they are extracted to a temp directory and deleted, so every "
+        "rebuild re-runs extraction over every BAM from scratch -- hours -- "
+        "and leave-one-out calibration is not affordable at all.",
+    ),
     threads: int = typer.Option(
         4, "--threads", "-p", help="Total threads (divided among parallel samples)"
     ),
@@ -497,10 +505,17 @@ def build_pon(
         wps_background=wps_bg_file,  # Bundled Alu regions for NRL baseline
     )
 
-    # Use temp directory for sample processing outputs
-    temp_base = str(temp_dir) if temp_dir else None
-    temp_output_dir = tempfile.mkdtemp(prefix="pon_build_", dir=temp_base)
-    logger.info(f"Temporary output directory: {temp_output_dir}")
+    # Where each sample's features land. Kept when asked for: extraction is
+    # the expensive half of a build, and discarding it means a rebuild costs a
+    # full pass over every BAM and leave-one-out costs n of them.
+    if keep_sample_outputs is not None:
+        keep_sample_outputs.mkdir(parents=True, exist_ok=True)
+        temp_output_dir = str(keep_sample_outputs)
+        logger.info(f"Sample outputs (kept): {temp_output_dir}")
+    else:
+        temp_base = str(temp_dir) if temp_dir else None
+        temp_output_dir = tempfile.mkdtemp(prefix="pon_build_", dir=temp_base)
+        logger.info(f"Temporary output directory: {temp_output_dir}")
 
     # Process samples
     all_outputs: List[SampleOutputs] = []
@@ -986,8 +1001,12 @@ def build_pon(
             logger.info(f"  FSC region samples: {len(all_fsc_region_data)}")
 
     except Exception:
-        # On error, cleanup temp directory before re-raising
-        if temp_output_dir and Path(temp_output_dir).exists():
+        # On error, cleanup before re-raising -- but never when the caller
+        # asked to keep the outputs. A failed build is exactly when the
+        # completed samples are worth having: the rerun skips them.
+        if keep_sample_outputs is not None:
+            logger.info(f"Build failed; per-sample outputs kept in {temp_output_dir}")
+        elif temp_output_dir and Path(temp_output_dir).exists():
             shutil.rmtree(temp_output_dir)
             logger.debug(f"Cleaned up temp directory after error: {temp_output_dir}")
         raise
@@ -1361,8 +1380,13 @@ def build_pon(
     logger.info("=" * 60)
     logger.info(f"✅ PON model built successfully: {output}")
 
-    # Cleanup temp directory after successful completion
-    if temp_output_dir and Path(temp_output_dir).exists():
+    # Cleanup, unless the caller asked to keep the sample outputs.
+    if keep_sample_outputs is not None:
+        logger.info(
+            f"Kept per-sample outputs in {temp_output_dir} -- reuse them for a "
+            "rebuild or for leave-one-out calibration instead of re-extracting."
+        )
+    elif temp_output_dir and Path(temp_output_dir).exists():
         shutil.rmtree(temp_output_dir)
         logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
 
@@ -1544,12 +1568,18 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
 
         if values:
             kmer_expected[kmer] = np.mean(values)
-            kmer_std[kmer] = np.std(values) if len(values) > 1 else 0.001
+            # NaN, not 0.001: one observation has no spread, and a z
+            # divided by 0.001 is a fabrication with three decimal places.
+            kmer_std[kmer] = (
+                float(np.std(values, ddof=1)) if len(values) > 1 else float("nan")
+            )
 
     # Compute MDS mean/std
     mds_values = [s["mds"] for s in all_mds_data if s.get("mds") is not None]
-    mds_mean = np.mean(mds_values) if mds_values else 0.0
-    mds_std = np.std(mds_values) if len(mds_values) > 1 else 1.0
+    # mean 0.0 / std 1.0 would make `z` equal the raw MDS value -- about 0.95,
+    # a perfectly ordinary-looking z-score for a baseline that was never fitted.
+    mds_mean = float(np.mean(mds_values)) if mds_values else float("nan")
+    mds_std = float(np.std(mds_values, ddof=1)) if len(mds_values) > 1 else float("nan")
 
     logger.info(
         f"MDS baseline: {len(kmer_expected)} k-mers, {len(all_mds_data)} samples"
@@ -1622,6 +1652,40 @@ def _compute_region_mds_baseline(
         raise RuntimeError(f"Region-MDS baseline computation failed: {e}")
 
 
+def _log_baseline_quality(
+    label: str, frame: "pd.DataFrame", std_col: str, key_col: str
+) -> None:
+    """Say out loud how much of a baseline is actually usable.
+
+    A PON block reports its row count and nothing else, so a block that is
+    entirely placeholder looks identical to one fitted from 47 samples. Every
+    defect found in these models has been of that shape. This prints the one
+    number that distinguishes them: how many entries carry a spread that was
+    measured rather than assumed.
+    """
+    total = len(frame)
+    if total == 0:
+        logger.warning(f"{label} baseline: EMPTY -- no entries were fitted")
+        return
+    std = pd.to_numeric(frame[std_col], errors="coerce")
+    unusable = int((~np.isfinite(std)).sum())
+    usable = total - unusable
+    logger.info(f"{label} baseline: {usable}/{total} {key_col}s with a measured spread")
+    if unusable:
+        logger.warning(
+            f"{label} baseline: {unusable}/{total} {key_col}s have no measurable "
+            f"spread and will yield no z-score. This is reported rather than "
+            f"floored -- a z divided by a placeholder is not a measurement."
+        )
+    finite = std[np.isfinite(std)]
+    if len(finite) > 1 and finite.nunique() == 1:
+        logger.warning(
+            f"{label} baseline: every {key_col} has the identical std "
+            f"{finite.iloc[0]!r}. A baseline that cannot vary with the data is "
+            f"the signature of a fabricated one -- check the source columns."
+        )
+
+
 def _compute_wps_background_baseline(
     wps_background_paths: List[str],
 ) -> "Optional[WpsBackgroundBaseline]":
@@ -1669,50 +1733,59 @@ def _compute_wps_background_baseline(
         # Concatenate all samples
         combined = pd.concat(all_groups, ignore_index=True)
 
+        # The columns this block is built from, as WPS_background actually
+        # writes them. They were previously guessed as `nrl`/`period_score`;
+        # neither has ever existed, so the `else` arm fired on every build and
+        # every shipped PON carried a hardcoded 167.0/5.0/0.0/1.0 -- identical
+        # across all four models and all 28 groups, from cohorts of 21 and 47.
+        # Combined with the 0.8.x nrl_bp degeneracy that made nrl_z exactly
+        # -3.4 for every sample ever produced.
+        #
+        # Named once, and their absence is fatal. A baseline that silently
+        # substitutes a literal is worse than a missing one: it is present,
+        # plausible, and passes every schema check.
+        nrl_col, periodicity_col = "nrl_bp", "periodicity_score"
+        missing = [c for c in (nrl_col, periodicity_col) if c not in combined.columns]
+        if missing:
+            raise ValueError(
+                f"WPS_background is missing {missing}; found "
+                f"{sorted(combined.columns)}. Refusing to substitute a default "
+                "-- a fabricated baseline cannot be told apart from a measured "
+                "one once it is written."
+            )
+
         # Aggregate by group_id
         group_stats = []
         for group_id in combined["group_id"].unique():
             group_data = combined[combined["group_id"] == group_id]
 
-            nrl_col = (
-                "nrl" if "nrl" in group_data.columns else "nucleosome_repeat_length"
-            )
-            periodicity_col = (
-                "periodicity" if "periodicity" in group_data.columns else "period_score"
-            )
-
-            nrl_mean = (
-                group_data[nrl_col].mean() if nrl_col in group_data.columns else 167.0
-            )
-            nrl_std = (
-                group_data[nrl_col].std() if nrl_col in group_data.columns else 5.0
-            )
-            period_mean = (
-                group_data[periodicity_col].mean()
-                if periodicity_col in group_data.columns
-                else 0.0
-            )
-            period_std = (
-                group_data[periodicity_col].std()
-                if periodicity_col in group_data.columns
-                else 1.0
-            )
-
             group_stats.append(
                 {
                     "group_id": group_id,
-                    "nrl_mean": nrl_mean,
-                    "nrl_std": max(nrl_std, 0.1),  # Avoid zero std
-                    "periodicity_mean": period_mean,
-                    "periodicity_std": max(period_std, 0.01),
+                    "n_samples": int(group_data[nrl_col].notna().sum()),
+                    "nrl_mean": group_data[nrl_col].mean(),
+                    # No floor. An unmeasurable spread yields NaN, which
+                    # propagates to an absent z rather than an enormous one --
+                    # dividing by a placeholder turns "no information" into
+                    # "infinite precision". Same reasoning as
+                    # `nrl_at_band_limit`: a boundary value is not a
+                    # measurement.
+                    "nrl_std": group_data[nrl_col].std(),
+                    "periodicity_mean": group_data[periodicity_col].mean(),
+                    "periodicity_std": group_data[periodicity_col].std(),
                 }
             )
 
         groups_df = pd.DataFrame(group_stats)
-        logger.info(f"WPS background baseline: {len(groups_df)} groups")
+        _log_baseline_quality("WPS background", groups_df, "nrl_std", "group_id")
 
         return WpsBackgroundBaseline(groups=groups_df)
 
+    except ValueError:
+        # A refusal above is a build-stopping condition, not a read error --
+        # returning None here would drop the block and let the build report
+        # success, which is the failure mode this refusal exists to prevent.
+        raise
     except Exception as e:
         logger.error(f"WPS background baseline computation failed: {e}")
         return None
@@ -1760,10 +1833,13 @@ def _compute_fsc_gene_baseline(
     for gene, values in gene_values.items():
         if len(values) >= MIN_SAMPLES:
             mean_depth = float(np.mean(values))
-            std_depth = float(np.std(values))
-            # Ensure minimum std to avoid division by zero
-            std_depth = max(std_depth, 0.001)
-            data[gene] = (mean_depth, std_depth, len(values))
+            # ddof=1: these are a sample of healthy donors, not the population.
+            # np.std defaults to ddof=0 and understates the spread, which
+            # inflates every z built from it -- by 2.5% at n=21.
+            std_depth = float(np.std(values, ddof=1))
+            # No floor: an unmeasurable spread yields NaN, so the z is absent
+            # rather than enormous. See _log_baseline_quality.
+            data[gene] = (mean_depth, std_depth or float("nan"), len(values))
         else:
             skipped += 1
 
@@ -1821,9 +1897,12 @@ def _compute_fsc_region_baseline(
     for region_id, values in region_values.items():
         if len(values) >= MIN_SAMPLES:
             mean_depth = float(np.mean(values))
-            std_depth = float(np.std(values))
-            # Ensure minimum std to avoid division by zero
-            std_depth = max(std_depth, 0.001)
+            # ddof=1: these are a sample of healthy donors, not the population.
+            # np.std defaults to ddof=0 and understates the spread, which
+            # inflates every z built from it -- by 2.5% at n=21.
+            std_depth = float(np.std(values, ddof=1))
+            # No floor: an unmeasurable spread yields NaN, so the z is absent
+            # rather than enormous. See _log_baseline_quality.
             data[region_id] = (mean_depth, std_depth, len(values))
         else:
             skipped += 1

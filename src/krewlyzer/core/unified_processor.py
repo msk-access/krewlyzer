@@ -49,7 +49,12 @@ from .utils import resolve_int as _resolve_int
 from .utils import resolve_path as _resolve_path
 from .utils import resolve_bool as _resolve_bool
 from .utils import resolve_str as _resolve_str
-from .output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .output_utils import (
+    read_table,
+    resolve_table_path,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 
 logger = logging.getLogger("krewlyzer.core.unified_processor")
 
@@ -735,7 +740,11 @@ def run_features(
     # Use pon_parquet only when skip_pon_zscore is False, consistent with
     # how FSC/FSR/WPS/OCF/TFBS/ATAC all respect the --skip-pon flag.
     fsd_pon_path = pon_parquet if (pon_parquet and not skip_pon_zscore) else None
-    if enable_fsd and outputs.fsd and outputs.fsd.exists():
+    # resolve_table_path, not .exists(): `outputs.fsd` names the .tsv, but
+    # the Rust writer honours --output-format and may have written only
+    # .parquet or .tsv.gz. The bare exists() check silently skipped FSD
+    # post-processing -- PON normalisation included -- under parquet.
+    if enable_fsd and outputs.fsd and resolve_table_path(outputs.fsd) is not None:
         if skip_pon_zscore and pon:
             logger.info(
                 "  FSD: --skip-pon active, outputting raw values (no log-ratios)"

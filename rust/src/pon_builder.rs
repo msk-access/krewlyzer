@@ -12,7 +12,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
-use log::info;
+use log::{info, warn};
 
 /// GC bins for bias model: [0.25, 0.27, ..., 0.73]
 const GC_BIN_START: f64 = 0.25;
@@ -316,9 +316,18 @@ fn element_wise_mean(vectors: &[Vec<f32>]) -> Vec<f32> {
 }
 
 /// Compute element-wise standard deviation of multiple vectors.
+///
+/// Returns NaN where the spread cannot be measured, rather than a floor. A
+/// floored sigma does not make the z-score conservative -- it makes it
+/// arbitrarily large, because the division is by a number nothing measured.
+/// One sample previously yielded 0.1 at every position and a single anchor
+/// could then produce an enormous z that read as strong signal.
+///
+/// NaN propagates through `(x - mean) / std` to an absent z, which is what
+/// "we could not measure this" should look like downstream.
 fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
     if vectors.len() < 2 || means.is_empty() {
-        return means.iter().map(|_| 0.1_f32).collect();
+        return means.iter().map(|_| f32::NAN).collect();
     }
     let n = vectors.len() as f32;
     
@@ -330,7 +339,10 @@ fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
                     (val - mean).powi(2)
                 })
                 .sum::<f32>() / (n - 1.0);
-            variance.sqrt().max(0.01) // Minimum std to avoid divide by zero
+            let sd = variance.sqrt();
+            // Zero spread across >=2 samples is still no information about
+            // spread, so it is reported as such rather than floored.
+            if sd > 0.0 { sd } else { f32::NAN }
         })
         .collect()
 }
@@ -450,7 +462,19 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
     // Compute element-wise mean and std per region
     let result = PyDict::new(py);
     
+    // FSC gene and FSC region have required >=3 samples since they were
+    // written; WPS -- 141k anchors, the largest block by 100x -- required
+    // nothing, so an anchor seen in one sample still produced a baseline.
+    // Measured on the shipped models, that was 1.6% of anchors for
+    // all_unique/xs1 and 28.8% for duplex/xs1.
+    const MIN_SAMPLES: usize = 3;
+    let mut skipped = 0usize;
+
     for (region_id, nuc_vectors) in &region_nuc_vectors {
+        if nuc_vectors.len() < MIN_SAMPLES {
+            skipped += 1;
+            continue;
+        }
         let region_dict = PyDict::new(py);
         
         // Compute WPS-Nuc mean/std vectors
@@ -477,7 +501,18 @@ pub fn compute_wps_baseline(py: Python<'_>, wps_paths: Vec<String>) -> PyResult<
         result.set_item(region_id, region_dict)?;
     }
     
-    info!("PON Builder: WPS vector baseline computed: {} regions", region_nuc_vectors.len());
+    if skipped > 0 {
+        warn!(
+            "PON Builder: WPS baseline skipped {} of {} anchors backed by fewer \
+             than {} samples; those anchors get no z-score rather than one \
+             divided by a placeholder",
+            skipped, region_nuc_vectors.len(), MIN_SAMPLES
+        );
+    }
+    info!(
+        "PON Builder: WPS vector baseline computed: {} of {} anchors",
+        region_nuc_vectors.len() - skipped, region_nuc_vectors.len()
+    );
     
     Ok(result.into())
 }
@@ -601,4 +636,63 @@ pub fn compute_region_mds_baseline(py: Python<'_>, mds_paths: Vec<String>) -> Py
     info!("PON Builder: Region MDS baseline computed: {} genes", gene_mds.len());
     
     Ok(result.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A floored sigma is not conservative -- it is a fabrication.
+    ///
+    /// The shipped models returned 0.1 at every position for a single-sample
+    /// anchor and floored everything else at 0.01, so `z = (x - mean) / 0.01`
+    /// produced enormous values from a baseline that measured nothing. NaN is
+    /// the honest answer, and it propagates to an absent z.
+    #[test]
+    fn a_single_sample_yields_no_spread_rather_than_a_floor() {
+        let vectors = vec![vec![5.0_f32, 7.0, 9.0]];
+        let means = element_wise_mean(&vectors);
+        let std = element_wise_std(&vectors, &means);
+        assert_eq!(means, vec![5.0, 7.0, 9.0], "the mean is still measurable");
+        assert!(
+            std.iter().all(|v| v.is_nan()),
+            "one sample must give NaN, got {std:?}"
+        );
+    }
+
+    #[test]
+    fn identical_samples_yield_no_spread_rather_than_zero() {
+        let vectors = vec![vec![3.0_f32; 4], vec![3.0; 4], vec![3.0; 4]];
+        let means = element_wise_mean(&vectors);
+        let std = element_wise_std(&vectors, &means);
+        assert!(
+            std.iter().all(|v| v.is_nan()),
+            "zero spread is still no information about spread, got {std:?}"
+        );
+    }
+
+    #[test]
+    fn a_real_spread_is_measured_with_the_sample_correction() {
+        // values 2, 4, 6 -> mean 4, sample sd (ddof=1) = 2.0, not 1.633.
+        // The population form understates the spread and inflates every z.
+        let vectors = vec![vec![2.0_f32], vec![4.0], vec![6.0]];
+        let means = element_wise_mean(&vectors);
+        let std = element_wise_std(&vectors, &means);
+        assert!((means[0] - 4.0).abs() < 1e-6);
+        assert!(
+            (std[0] - 2.0).abs() < 1e-5,
+            "expected the ddof=1 sample sd of 2.0, got {}",
+            std[0]
+        );
+    }
+
+    #[test]
+    fn a_measured_spread_is_never_replaced_by_a_floor() {
+        // Genuinely tiny but real: 0.001 must survive, not be raised to 0.01.
+        let vectors = vec![vec![1.0_f32], vec![1.001], vec![0.999]];
+        let means = element_wise_mean(&vectors);
+        let std = element_wise_std(&vectors, &means);
+        assert!(std[0] < 0.01, "a real sub-floor spread was floored: {}", std[0]);
+        assert!(std[0] > 0.0);
+    }
 }
