@@ -15,6 +15,7 @@ import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
+from .provenance import build_provenance
 from .model import (
     PonModel,
     GcBiasModel,
@@ -52,6 +53,7 @@ MIN_SAMPLES_PER_KEY = 3
 from krewlyzer import _core
 
 # Import unified sample processor
+from krewlyzer import __version__
 from krewlyzer.core.output_utils import read_table
 from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
 
@@ -60,7 +62,6 @@ from krewlyzer.core.asset_resolution import resolve_target_regions
 
 # Import startup banner logging
 from krewlyzer.core.logging import log_startup_banner, ResolvedAsset
-from krewlyzer import __version__
 
 
 def _process_sample_subprocess(
@@ -220,6 +221,13 @@ def build_pon(
         "--target-regions",
         "-T",
         help="BED file with target regions (panel mode - builds dual on/off-target baselines)",
+    ),
+    cohort_label: str = typer.Option(
+        "",
+        "--cohort-label",
+        help="A name for this cohort, recorded in the PON. Free text, for "
+        "humans -- the machine-readable half is a salted digest of the sample "
+        "IDs, written automatically. No identifier is stored either way.",
     ),
     temp_dir: Optional[Path] = typer.Option(
         None, "--temp-dir", help="Directory for temporary files (default: system temp)"
@@ -1211,6 +1219,10 @@ def build_pon(
             if is_panel_mode
             else ""
         ),
+        # Provenance, from the sample list actually read at the top of this
+        # function. The four models already in the repo record only n_samples,
+        # so none of them can be reproduced or checked against a rebuild.
+        **build_provenance(samples, __version__, cohort_label),
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
@@ -2159,6 +2171,12 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
                 "reference": model.reference,
                 "panel_mode": model.panel_mode,
                 "target_regions_file": model.target_regions_file,
+                # Provenance. Inert for older readers -- PonModel.load goes
+                # through meta.get(key, default), so unknown keys are ignored
+                # and the four models already in the repo still load.
+                "krewlyzer_version": model.krewlyzer_version,
+                "cohort_digest": model.cohort_digest,
+                "cohort_label": model.cohort_label,
             }
         ]
     )

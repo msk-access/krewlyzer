@@ -879,6 +879,18 @@ class PonModel:
     panel_mode: bool = False  # True if built with --target-regions
     target_regions_file: str = ""  # Original target regions BED file name
 
+    # Provenance. See pon/provenance.py for why the cohort is a salted digest
+    # rather than a list: a PON ships in this repo, in the Docker image and on
+    # PyPI, so it is the last place patient identifiers may appear.
+    #
+    # `krewlyzer_version` is the load-bearing one. 0.9.0 changes what every
+    # feature *means*, so a PON built earlier is not merely old -- it measures
+    # something else. Empty for anything built before this release, which is
+    # exactly the signal the version guard refuses on.
+    krewlyzer_version: str = ""
+    cohort_digest: str = ""
+    cohort_label: str = ""
+
     # Off-target baselines (primary - always present)
     gc_bias: Optional[GcBiasModel] = None
     fsd_baseline: Optional[FsdBaseline] = None
@@ -1365,6 +1377,9 @@ class PonModel:
             reference=str(meta.get("reference", "")),
             panel_mode=bool(meta.get("panel_mode", False)),
             target_regions_file=str(meta.get("target_regions_file", "")),
+            krewlyzer_version=str(meta.get("krewlyzer_version", "")),
+            cohort_digest=str(meta.get("cohort_digest", "")),
+            cohort_label=str(meta.get("cohort_label", "")),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,

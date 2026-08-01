@@ -26,7 +26,29 @@ def _sorted(findings: List[Finding]) -> List[Finding]:
     return sorted(findings, key=lambda f: (_ORDER[f.severity], f.table or "", f.id))
 
 
-def render(result: Result, console: Console) -> None:
+#: Shown when a run has degeneracy errors, unless the caller supplies its own.
+#:
+#: The two gates have different remedies -- an output column can be declared
+#: `vary=NEVER` with a written reason, a PON block cannot -- and offering the
+#: wrong one is worse than offering none.
+DEFAULT_DEGENERACY_NOTE = (
+    "a constant column passes every schema check and still reaches a model "
+    "fit. Fix the metric, or declare it vary=NEVER with a written reason -- "
+    "do not silence the check."
+)
+
+PON_DEGENERACY_NOTE = (
+    "a baseline that cannot vary with its cohort was not fitted to one. There "
+    "is no way to declare this expected -- rebuild the PON with build-pon, and "
+    "check the builder is reading the columns it thinks it is."
+)
+
+
+def render(
+    result: Result,
+    console: Console,
+    degeneracy_note: str = DEFAULT_DEGENERACY_NOTE,
+) -> None:
     counts = result.counts()
     console.print(
         f"\n[bold]{len(result.samples)} sample(s)[/bold] · "
@@ -62,11 +84,7 @@ def render(result: Result, console: Console) -> None:
         if f.category is Category.DEGENERACY and f.severity is Severity.ERROR
     ]
     if degenerate:
-        console.print(
-            "\n[bold]Note:[/bold] a constant column passes every schema check "
-            "and still reaches a model fit. Fix the metric, or declare it "
-            "vary=NEVER with a written reason -- do not silence the check."
-        )
+        console.print(f"\n[bold]Note:[/bold] {degeneracy_note}")
 
 
 def to_json(result: Result, path: Path, version: str) -> None:

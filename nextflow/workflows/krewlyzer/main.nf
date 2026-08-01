@@ -14,6 +14,7 @@ include { INPUT_CHECK } from '../../subworkflows/local/input_check/main'
 include { TOOL_LEVEL } from '../../subworkflows/local/tool_level/main'
 include { KREWLYZER_RUNALL } from '../../modules/local/krewlyzer/runall/main'
 include { FILTER_MAF } from '../../modules/local/krewlyzer/filter_maf/main'
+include { KREWLYZER_VALIDATE_PON    } from '../../modules/local/krewlyzer/validate_pon/main'
 include { KREWLYZER_VALIDATE_COHORT } from '../../modules/local/krewlyzer/validate_cohort/main'
 
 workflow KREWLYZER {
@@ -124,6 +125,23 @@ workflow KREWLYZER {
     }
 
     // =====================================================
+    // PON VALIDATION
+    // =====================================================
+    // Check the reference before anything is measured against it. Runs once
+    // per pipeline rather than once per sample -- the PON is the same file for
+    // all of them.
+    //
+    // Wired here rather than added as a module and left to be called later:
+    // an unwired module is exactly the defect #34 fixed, and it looks like
+    // coverage while providing none.
+    ch_pon_report = Channel.empty()
+    if (params.pon_model) {
+        KREWLYZER_VALIDATE_PON(Channel.fromPath(params.pon_model, checkIfExists: true))
+        ch_versions   = ch_versions.mix(KREWLYZER_VALIDATE_PON.out.versions)
+        ch_pon_report = KREWLYZER_VALIDATE_PON.out.report
+    }
+
+    // =====================================================
     // COHORT VALIDATION (gather)
     // =====================================================
     // Degeneracy is inherently cross-sample: every sample can pass on its own
@@ -143,5 +161,6 @@ workflow KREWLYZER {
     features_json = ch_features_json
     fingerprints  = ch_fingerprints
     cohort_report = KREWLYZER_VALIDATE_COHORT.out.report
+    pon_report    = ch_pon_report
     versions      = ch_versions
 }

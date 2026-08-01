@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`krewlyzer validate-pon`** — gates the reference, not the results.
+  `validate-output` checks what a run produced; nothing checked the model
+  those results are measured against. Every PON defect fixed in this release
+  sat in four shipped files, visible in the file and invisible to every check.
+
+  The load-bearing assertion is the same invariant the output gate enforces one
+  level up: **a baseline that cannot vary with its cohort was not fitted to
+  one.** A single check that σ differs between groups would have caught the
+  fabricated `wps_background` in March.
+
+  Also checks: σ positive and finite, `krewlyzer_version` and `cohort_digest`
+  recorded, and every entry backed by ≥ 3 samples. Exit codes match
+  `validate-output` — `0` satisfied, `1` violation, `2` structural.
+
+  **All four currently-shipped PONs fail it**, which is the acceptance
+  criterion: a gate that passes the models we know are wrong is not a gate. A
+  test asserts that failure, and flipping it is the record that the rebuild
+  worked.
+
+  Wired into the Nextflow pipeline as `KREWLYZER_VALIDATE_PON`, running once
+  per run rather than once per sample. Wired at the same time it was added —
+  an unwired module is the defect #34 fixed, and it reads as coverage while
+  providing none.
+
+- **PON provenance: `krewlyzer_version`, `cohort_digest`, `cohort_label`.**
+  The four models in this repository record `n_samples` and nothing else, so
+  none can be reproduced, audited, or compared against a rebuild — and the
+  build script that produced them has a stale comment claiming 47 where the
+  metadata says 21, so even the integer is uncorroborated.
+
+  The cohort is a **salted, non-reversible digest** of the sample IDs, stable
+  across paths and ordering. Two builds from the same cohort match; the digest
+  reveals nothing about who is in it. A PON ships in this repository, in the
+  Docker image and on PyPI, so it is the last place an identifier may appear
+  (invariant #4). `--cohort-label` adds a free-text name for humans.
+
+  Writing is inert: `PonModel.load` reads through `meta.get(key, default)`, so
+  unknown keys are ignored and existing models still load unchanged.
+
+### Added
 - **Per-motif z-scores (`EndMotif.frequency_z`, `BreakPointMotif.frequency_z`).**
   `mds_baseline` carries 625 k-mer means and σ — every 4-mer over ACGTN — and
   nothing read them; the tables shipped `Motif, Frequency` alone, so a shift in

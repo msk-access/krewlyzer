@@ -52,6 +52,7 @@ from krewlyzer.validate.cli import (
     describe_output,
     report_sample,
     validate_cohort,
+    validate_pon,
     validate_output,
 )
 from krewlyzer import __version__
@@ -173,6 +174,7 @@ app.command(name="build-gc-reference")(build_gc_reference)
 app.command()(validate)
 app.command(name="validate-output")(validate_output)
 app.command(name="validate-cohort")(validate_cohort)
+app.command(name="validate-pon")(validate_pon)
 app.command(name="describe-output")(describe_output)
 app.command(name="report")(report_sample)
 

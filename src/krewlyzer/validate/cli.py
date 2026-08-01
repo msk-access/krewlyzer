@@ -136,6 +136,50 @@ def validate_cohort(
     raise typer.Exit(result.exit_code)
 
 
+def validate_pon(
+    pon_model: List[Path] = typer.Argument(
+        ...,
+        exists=True,
+        help="PON parquet file(s) to check.",
+    ),
+    json_report: Optional[Path] = typer.Option(
+        None, "--json-report", help="Write findings as JSON."
+    ),
+) -> None:
+    """Check a built PON before anything is scored against it.
+
+    `validate-output` gates the results of a run. Nothing gated the reference
+    a run measures itself against -- and every PON defect this release fixes
+    was sitting in four shipped files, visible in the file and invisible to
+    every check.
+
+    The load-bearing assertion is the same invariant as the output gate, one
+    level up: a baseline that cannot vary with its cohort was not fitted to
+    one. `wps_background` shipped a hardcoded 167.0/5.0 identical across all
+    28 groups and all four models; a single check that sigma differs between
+    groups would have caught it.
+
+    Exit codes: 0 satisfied, 1 violation, 2 structural -- as validate-output,
+    so a workflow can retry on 2 and escalate on 1.
+    """
+    from krewlyzer import __version__
+
+    from .pon_gate import check_pon, describe, exit_code
+
+    result = Result()
+    for path in pon_model:
+        provenance = describe(path)
+        console.print(f"[bold]{path.name}[/bold]  {provenance or '(no metadata)'}")
+        result.findings.extend(check_pon(path))
+
+    report.render(result, console, degeneracy_note=report.PON_DEGENERACY_NOTE)
+    if json_report is not None:
+        report.to_json(result, json_report, __version__)
+        console.print(f"[dim]wrote {json_report}[/dim]")
+
+    raise typer.Exit(exit_code(result.findings))
+
+
 def describe_output(
     sample_dir: Path = typer.Argument(
         ...,
