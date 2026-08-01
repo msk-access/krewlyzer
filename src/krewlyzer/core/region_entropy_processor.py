@@ -13,7 +13,13 @@ from pathlib import Path
 from typing import Optional, Dict, Tuple
 import logging
 
-from .output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .output_utils import (
+    read_exact_table,
+    read_table,
+    resolve_table_path,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 
 logger = logging.getLogger("krewlyzer.core.region_entropy_processor")
 
@@ -130,14 +136,18 @@ def process_region_entropy(
     """
     from krewlyzer import _core
 
-    if not raw_path.exists():
-        logger.warning(f"Entropy file not found: {raw_path}")
+    # The caller names the `.tsv`; the writer honours --output-format and may
+    # have produced only `.parquet`. A bare `.exists()` skipped the whole step.
+    if resolve_table_path(raw_path) is None:
+        logger.warning(f"Entropy file not found: {raw_path} (nor .tsv.gz / .parquet)")
         return 0
 
     if pon_parquet_path is None:
-        # No PON — just copy file and add z_score=0 column
+        # No PON, so there is no z-score. NaN, not 0.0: a zero here is
+        # indistinguishable from "sits exactly at the healthy baseline", which
+        # is a measurement, and a reader has no way to tell the two apart.
         df = load_entropy_tsv(raw_path)
-        df["z_score"] = 0.0
+        df["z_score"] = float("nan")
         write_table(
             df,
             output_path,
@@ -145,7 +155,11 @@ def process_region_entropy(
             compress=compress,
             float_format="%.4f",
         )
-        logger.debug(f"No PON baseline, wrote {len(df)} labels with z_score=0")
+        logger.warning(
+            f"No PON supplied: {output_path.name} written with z_score = NaN for "
+            f"all {len(df)} labels. The column is absent, not average -- supply "
+            "--pon-model for a comparative reading."
+        )
         return 0
 
     n_matched = _core.region_entropy.apply_pon_zscore(
@@ -156,13 +170,19 @@ def process_region_entropy(
     # PON contains no matching baseline table (e.g. a PON built before
     # TFBS/ATAC baselines existed). Degrade to the no-PON behaviour instead of
     # asserting on a file that was never created.
+    #
+    # `.exists()` and not resolve_table_path(): the question here is "did Rust
+    # write its plain TSV *just now*", which is exactly one filename. Resolving
+    # would accept a `.parquet` left by a previous run into the same directory
+    # -- a re-run, or a Nextflow retry -- and then read that stale file below
+    # as though it were this run's z-scored result.
     if not output_path.exists():
         logger.warning(
             f"PON has no '{baseline_table}' baseline; writing {output_path.name} "
-            f"with z_score=0. Rebuild the PON with build-pon to get z-scores."
+            f"with z_score = NaN. Rebuild the PON with build-pon to get z-scores."
         )
         df = load_entropy_tsv(raw_path)
-        df["z_score"] = 0.0
+        df["z_score"] = float("nan")
         write_table(
             df,
             output_path,
@@ -174,7 +194,15 @@ def process_region_entropy(
 
     # Rust apply_pon_zscore writes plain TSV; re-write through write_table()
     # to honour --output-format and --compress flags (parquet, gzip).
-    df = load_entropy_tsv(output_path)
+    #
+    # read_exact_table, not load_entropy_tsv: the latter goes through
+    # read_table, which is parquet-first, so a stale `.parquet` sibling would
+    # be preferred over the TSV holding this run's z-scores -- the same way the
+    # FSD write-back discarded its own log-ratios (c92ed86).
+    scored = read_exact_table(output_path)
+    if scored is None:  # pragma: no cover -- guarded by the exists() check above
+        raise RuntimeError(f"Rust wrote no entropy output at {output_path}")
+    df = scored
     write_table(
         df,
         output_path,

@@ -16,7 +16,12 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from .output_utils import read_table, resolve_table_path, write_table
+from .output_utils import (
+    read_exact_table,
+    read_table,
+    resolve_table_path,
+    write_table,
+)
 
 logger = logging.getLogger("core.fsd_processor")
 
@@ -142,12 +147,10 @@ def _write_fsd_output(tsv_path: Path, output_format: str, compress: bool) -> Non
     # normalisation. Resolving would silently discard the log-ratios we just
     # computed and write the raw counts straight back -- which is exactly what
     # it did, with "41 arms normalized" logged immediately above.
-    import pandas as pd
-
-    if not tsv_path.exists():
+    df = read_exact_table(tsv_path)
+    if df is None:
         logger.warning(f"FSD output not found for format conversion: {tsv_path}")
         return
-    df = pd.read_csv(tsv_path, sep="\t", comment="#")
 
     logger.debug(
         f"FSD format conversion: {len(df)} rows, "

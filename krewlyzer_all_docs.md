@@ -5050,7 +5050,7 @@ FOXA1   892     165.8       4.98      -0.32
 | `count` | FLOAT | GC-weighted fragment count overlapping TF regions |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON; `NaN` if the label is absent from the baseline) |
+| `z_score` | FLOAT | PON-normalized z-score. **`NaN` when no PON was supplied, or when the label is absent from the baseline** — never 0, which would be indistinguishable from a measured "exactly at baseline" |
 
 ### ATAC Output: `{sample}.ATAC.tsv`
 
@@ -5060,7 +5060,7 @@ FOXA1   892     165.8       4.98      -0.32
 | `count` | FLOAT | GC-weighted fragment count overlapping cancer peaks |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON; `NaN` if the label is absent from the baseline) |
+| `z_score` | FLOAT | PON-normalized z-score. **`NaN` when no PON was supplied, or when the label is absent from the baseline** — never 0, which would be indistinguishable from a measured "exactly at baseline" |
 
 ---
 

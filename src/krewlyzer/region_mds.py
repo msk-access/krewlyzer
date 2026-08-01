@@ -19,7 +19,11 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
-from .core.output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .core.output_utils import (
+    read_exact_table,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 from . import __version__
 
 
@@ -253,8 +257,9 @@ def region_mds(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )
             else:
-                # Read gene output with Parquet-first auto-detection
-                df = read_table(output_gene)
+                # Exact, not parquet-first: Rust wrote this file moments ago
+                # and a stale sibling from an earlier run would win (c92ed86).
+                df = read_exact_table(output_gene)
                 if df is None:
                     logger.warning(
                         f"Could not read gene output for z-score: {output_gene}"
@@ -307,7 +312,8 @@ def region_mds(
         logger.debug(
             f"region_mds: converting {output_exon.name} → format={output_format!r}, compress={compress}"
         )
-        df_exon = read_table(output_exon)
+        # Exact: Rust wrote this TSV in this run.
+        df_exon = read_exact_table(output_exon)
         if df_exon is not None:
             write_table(
                 df_exon,
@@ -326,13 +332,15 @@ def region_mds(
     # When PON z-scores are added (above), write_table already handles format
     # conversion. This block ensures conversion also happens when no PON is
     # provided, PON load fails, or PON lacks region_mds baseline.
-    # Re-converting an already-converted file is safe (read_table/write_table
-    # is idempotent).
+    # Re-converting an already-converted file is safe, but only when the read
+    # targets the file this run wrote: the z-score step above writes into
+    # `output_gene`, and a resolving read would prefer a `.parquet` sibling
+    # left by an earlier run and silently drop those z-scores.
     if output_format != "tsv" or compress:
         logger.debug(
             f"region_mds: converting {output_gene.name} → format={output_format!r}, compress={compress}"
         )
-        df_gene = read_table(output_gene)
+        df_gene = read_exact_table(output_gene)
         if df_gene is not None:
             write_table(
                 df_gene,

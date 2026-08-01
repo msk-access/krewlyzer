@@ -15,7 +15,12 @@ import pandas as pd
 import numpy as np
 import logging
 
-from .output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .output_utils import (
+    read_table,
+    resolve_table_path,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 
 logger = logging.getLogger("core.fsc_processor")
 
@@ -498,8 +503,14 @@ def apply_fsc_gene_pon(
     if output_path is None:
         output_path = fsc_gene_path
 
-    if not Path(fsc_gene_path).exists():
-        logger.warning(f"FSC gene file not found: {fsc_gene_path}")
+    # Callers name the `.tsv`, but the Rust writer honours --output-format and
+    # may have written only `.parquet`. A bare `.exists()` was False there, so
+    # this returned None and no `depth_zscore` column was ever added under
+    # `--output-format parquet` -- the format 0.9.0 makes the Nextflow default.
+    if resolve_table_path(fsc_gene_path) is None:
+        logger.warning(
+            f"FSC gene file not found: {fsc_gene_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     if not pon or not pon.fsc_gene_baseline:
@@ -567,8 +578,12 @@ def apply_fsc_region_pon(
     if output_path is None:
         output_path = fsc_region_path
 
-    if not Path(fsc_region_path).exists():
-        logger.warning(f"FSC region file not found: {fsc_region_path}")
+    # Same as apply_fsc_gene_pon above: the caller names the `.tsv` and the
+    # writer may have produced only `.parquet`.
+    if resolve_table_path(fsc_region_path) is None:
+        logger.warning(
+            f"FSC region file not found: {fsc_region_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     if not pon or not pon.fsc_region_baseline:
@@ -661,8 +676,11 @@ def filter_fsc_to_e1(
     """
     fsc_regions_path = Path(fsc_regions_path)
 
-    if not fsc_regions_path.exists():
-        logger.warning(f"FSC regions file not found: {fsc_regions_path}")
+    # Same again: resolve across formats rather than assuming the `.tsv`.
+    if resolve_table_path(fsc_regions_path) is None:
+        logger.warning(
+            f"FSC regions file not found: {fsc_regions_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     # Default output base path: strip suffix so write_table appends the right one

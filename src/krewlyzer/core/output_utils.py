@@ -228,6 +228,36 @@ def resolve_table_path(base: Path) -> "Path | None":
     return None
 
 
+def read_exact_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
+    """Read *this* file. No sibling resolution, no format preference.
+
+    The counterpart to :func:`read_table`, and the right choice immediately
+    after a write. ``read_table`` is deliberately parquet-first, which is
+    correct when you are looking for "whatever was produced for this output" —
+    and wrong when you have *just written* a specific file and want it back.
+
+    That distinction has cost real data twice. The Rust backends write plain
+    TSV, Python reads it back to honour ``--output-format``; where a stale
+    ``.parquet`` sibling was sitting in the directory from an earlier run,
+    ``read_table`` preferred it and the freshly computed values were discarded
+    silently. FSD lost its log-ratios that way (``c92ed86``); region entropy
+    would have emitted a *previous* run's z-scores on any re-run into the same
+    directory, which is what a Nextflow retry or ``-resume`` produces.
+
+    Returns ``None`` when the path does not exist, matching ``read_table``.
+    """
+    import pandas as pd  # local import, as elsewhere in this module
+
+    path = Path(path)
+    if not path.exists():
+        return None
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    csv_kwargs.setdefault("sep", "\t")
+    csv_kwargs.setdefault("comment", "#")
+    return pd.read_csv(path, **csv_kwargs)
+
+
 def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
     """Parquet-first reader with TSV and ``.tsv.gz`` fallback.
 

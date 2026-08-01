@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **Reading back a file just written could return an older run's data.**
+  `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is
+  right when asking "what was produced for this output" and wrong immediately
+  after writing a specific file. The Rust backends write plain TSV and Python
+  reads it back to honour `--output-format`, so a `.parquet` sibling left by an
+  earlier run into the same directory won — which is what a Nextflow retry or
+  `-resume` produces.
+
+  Reproduced end to end for region entropy: with a stale parquet present, the
+  output carried the **previous run's** `z_score` and `entropy` rather than
+  this run's. Fixed at every read-after-write site — region entropy, mFSD, UXM,
+  region-MDS gene and exon, on-target MDS — via a new
+  `read_exact_table` helper.
+
+  Also reverts an over-correction from earlier in this branch: the post-Rust
+  existence check in `process_region_entropy` must be exact, not resolving, or
+  a stale sibling satisfies it and the degradation branch never fires.
+
+### Added
+- **`tests/real_data/` — a local cohort gate.** Point
+  `KREWLYZER_TEST_CORPUS` at a scored cohort and it runs; leave it unset and it
+  skips, so `pytest tests/` stays green and CI never sees it. No cohort data is
+  committed, and no patient identifier may appear in a test name, parameter id,
+  assertion message or artifact — `sample_label()` gives a non-reversible
+  handle where output needs one.
+
+  It exists because every defect the PON audit found needed a cohort to see: a
+  single fixture cannot reveal a constant, cannot match a real PON arm, and
+  cannot show per-anchor sample support. The unit suite proves a scorer *can*
+  run; only a cohort proves it *did*.
+
+  The four PON blocks that are built and consumed by nothing are marked
+  `xfail(strict=True)`, so Phase B wiring them turns the test red and forces
+  the marker off.
+
+- **`read_exact_table`** in `core/output_utils.py` — reads the given path with
+  no sibling resolution, the counterpart to the deliberately parquet-first
+  `read_table`.
+- **`tests/invariants/test_read_after_write.py`** — pins both readers'
+  behaviour and an AST check that no function reads with the resolving reader
+  after writing, with a reviewed allowlist that must state why each entry is
+  safe. Also fails on a stale allowlist entry, so it cannot rot.
+
+### Changed
+- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
+  existed** — `version` / `genome` / `sample_count` where real PONs write
+  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
+  `meta.get(key, default)`, it loaded as a completely empty model and the tests
+  asserted only `is not None`. `test_pon_model_loading` had been marked
+  `skip("PON parquet schema requires production format")` — true of the
+  fixture, not the loader. Fixture corrected against the bundled PON, test
+  unskipped, and both now assert real field values.
+
+- **PON scoring was skipped under `--output-format parquet` in three more
+  places.** Same shape as the FSD defect below: callers name a hardcoded
+  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
+  then False.
+
+  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
+    `depth_zscore`
+  - `apply_fsc_region_pon` and the e1-only filter, identically
+  - `process_region_entropy` skipped the whole step
+
+  All four now resolve with `resolve_table_path`. Measured before and after on
+  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
+
+- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
+  not a neutral placeholder — it is the most confident claim the column can
+  make ("this sample sits exactly at the healthy baseline"), asserted on the
+  strength of having no baseline at all, and indistinguishable from a measured
+  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
+  both when no `--pon-model` was given and when the PON lacks the table.
+
+### Added
+- **`tests/invariants/test_pon_format_parity.py`** — asserts every PON-derived
+  column is present, populated and equal across `tsv` / `parquet` / `both`.
+  One test that would have caught FSD, FSC gene, FSC region and the entropy
+  processor together. `both` is covered explicitly: it leaves a TSV *and* a
+  parquet on disk, which is what let the parquet-first reader pick the wrong
+  one.
+
 - **FSD was never PON-normalised under `--output-format parquet`.** Under
   `tsv` the bins came out as log2 ratios; under `parquet`, raw counts — same
   column names, no warning either way. **0.9.0 makes parquet the Nextflow
