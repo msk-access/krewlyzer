@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **PON scoring was skipped under `--output-format parquet` in three more
+  places.** Same shape as the FSD defect below: callers name a hardcoded
+  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
+  then False.
+
+  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
+    `depth_zscore`
+  - `apply_fsc_region_pon` and the e1-only filter, identically
+  - `process_region_entropy` skipped the whole step
+
+  All four now resolve with `resolve_table_path`. Measured before and after on
+  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
+
+- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
+  not a neutral placeholder — it is the most confident claim the column can
+  make ("this sample sits exactly at the healthy baseline"), asserted on the
+  strength of having no baseline at all, and indistinguishable from a measured
+  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
+  both when no `--pon-model` was given and when the PON lacks the table.
+
+### Added
+- **`tests/invariants/test_pon_format_parity.py`** — asserts every PON-derived
+  column is present, populated and equal across `tsv` / `parquet` / `both`.
+  One test that would have caught FSD, FSC gene, FSC region and the entropy
+  processor together. `both` is covered explicitly: it leaves a TSV *and* a
+  parquet on disk, which is what let the parquet-first reader pick the wrong
+  one.
+
 - **FSD was never PON-normalised under `--output-format parquet`.** Under
   `tsv` the bins came out as log2 ratios; under `parquet`, raw counts — same
   column names, no warning either way. **0.9.0 makes parquet the Nextflow
