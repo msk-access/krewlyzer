@@ -6868,12 +6868,31 @@ mkdir -p ./pon_temp && srun \
 `scripts/build_pon.sh` takes the two things that differ between the four
 models as arguments:
 
+!!! danger "Check the environment first"
+    ```bash
+    micromamba activate krewlyzer && krewlyzer --version
+    krewlyzer validate-pon --help >/dev/null && echo "0.9.0 or later"
+    ```
+
+    A 0.8.x `build-pon` will rebuild every defect 0.9.0 fixes — the fabricated
+    `wps_background`, the σ floors, the four unread blocks — **exit 0, and
+    produce logs that look clean**. This happened on the first attempt at the
+    0.9.0 rebuild: two jobs ran 18 minutes on `v0.8.3` before the banner was
+    spotted.
+
+    The script now refuses in that case, but check anyway: the failure is
+    silent by nature.
+
 ```bash
 sbatch scripts/build_pon.sh xs1 all_unique
 sbatch scripts/build_pon.sh xs2 all_unique
 sbatch scripts/build_pon.sh xs1 duplex
 sbatch scripts/build_pon.sh xs2 duplex
 ```
+
+The variant comes from the sample list, not a flag — `build-pon` has none.
+`all_unique` and `duplex` differ only in which BAMs the list points at, so
+each needs its own (`{assay}_allUniq_pon.txt` and `{assay}_duplex_pon.txt`).
 
 Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
 `KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.

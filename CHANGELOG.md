@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **`scripts/build_pon.sh` refuses to run on a pre-0.9.0 krewlyzer.** A 0.8.x
+  `build-pon` rebuilds every defect this release fixes, exits 0, and produces
+  logs that look clean — the failure is invisible until someone opens the
+  model. Caught in practice: the first 0.9.0 rebuild attempt ran 18 minutes on
+  `v0.8.3` before the banner was noticed.
+
+  Also corrects the sample-list default from `{assay}_all_unique_pon.txt` to
+  `{assay}_allUniq_pon.txt`, which is what the lists are actually called — the
+  script had invented a convention rather than using the existing one.
+
 ### Changed
 - **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
   and variant as arguments. The old script was hardcoded to xs2 and carried a

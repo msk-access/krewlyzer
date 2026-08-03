@@ -37,7 +37,16 @@ case "$VARIANT" in all_unique|duplex) ;; *) echo "unknown variant: $VARIANT" >&2
 
 # --- Configuration -----------------------------------------------------------
 BASE="/data1/shahr2/shahr2/test/krewlyzer"
-SAMPLE_LIST="${SAMPLE_LIST:-${BASE}/${ASSAY}_${VARIANT}_pon.txt}"
+
+# The sample list decides the variant -- build-pon has no variant flag, so
+# all_unique and duplex differ only in which BAMs the list points at. The
+# existing lists use `allUniq`, not `all_unique`; mapped rather than renamed so
+# the files on disk stay as they are.
+case "$VARIANT" in
+    all_unique) LIST_TOKEN="allUniq" ;;
+    duplex)     LIST_TOKEN="duplex" ;;
+esac
+SAMPLE_LIST="${SAMPLE_LIST:-${BASE}/${ASSAY}_${LIST_TOKEN}_pon.txt}"
 REFERENCE="${REFERENCE:-/data1/core006/access/production/resources/reference/versions/hg19/Homo_sapiens_assembly19.fasta}"
 OUTPUT_DIR="${OUTPUT_DIR:-${BASE}/pon/${ASSAY}}"
 OUTPUT="${OUTPUT_DIR}/${ASSAY}.${VARIANT}.pon.parquet"
@@ -55,7 +64,20 @@ KEEP_DIR="${KEEP_DIR:-${OUTPUT_DIR}/${VARIANT}.sample_outputs}"
 COHORT_LABEL="${COHORT_LABEL:-${ASSAY}-${VARIANT}-healthy-donors}"
 
 eval "$(micromamba shell hook --shell bash)"
-micromamba activate "${KREWLYZER_ENV:-pygbcms}"
+micromamba activate "${KREWLYZER_ENV:-krewlyzer}"
+
+# Refuse to build with a krewlyzer that predates this work.
+#
+# 0.8.x build-pon exits 0 on a model whose wps_background block is a hardcoded
+# 167.0/5.0 -- that is how four of them shipped. A build from the wrong
+# environment is indistinguishable from a good one until someone opens the
+# file, so the check belongs here rather than in a runbook step.
+if ! krewlyzer validate-pon --help >/dev/null 2>&1; then
+    echo "FATAL: this krewlyzer has no validate-pon, so it predates 0.9.0." >&2
+    echo "       $(krewlyzer --version 2>&1 | head -1)" >&2
+    echo "       Building with it would reproduce the defects 0.9.0 fixes." >&2
+    exit 3
+fi
 
 mkdir -p "${OUTPUT_DIR}"
 
