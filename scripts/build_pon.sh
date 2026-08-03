@@ -66,16 +66,26 @@ COHORT_LABEL="${COHORT_LABEL:-${ASSAY}-${VARIANT}-healthy-donors}"
 eval "$(micromamba shell hook --shell bash)"
 micromamba activate "${KREWLYZER_ENV:-krewlyzer}"
 
-# Refuse to build with a krewlyzer that predates this work.
+# Refuse to build with an install that lacks the PON work.
 #
-# 0.8.x build-pon exits 0 on a model whose wps_background block is a hardcoded
-# 167.0/5.0 -- that is how four of them shipped. A build from the wrong
-# environment is indistinguishable from a good one until someone opens the
-# file, so the check belongs here rather than in a runbook step.
+# Deliberately a *capability* check, not a version check. `krewlyzer --version`
+# reports 0.8.3 on current develop and will keep doing so until the release
+# bump, so a version comparison would reject exactly the build we want and
+# accept nothing useful. What matters is whether the code in this environment
+# has the PON fixes, and the presence of `validate-pon` answers that directly.
+#
+# It matters because the failure is silent: a build-pon without these fixes
+# exits 0 on a model whose wps_background block is a hardcoded 167.0/5.0, which
+# is how four of them shipped. An 18-minute run on the wrong environment
+# preceded this check being written.
 if ! krewlyzer validate-pon --help >/dev/null 2>&1; then
-    echo "FATAL: this krewlyzer has no validate-pon, so it predates 0.9.0." >&2
-    echo "       $(krewlyzer --version 2>&1 | head -1)" >&2
-    echo "       Building with it would reproduce the defects 0.9.0 fixes." >&2
+    echo "FATAL: this krewlyzer has no 'validate-pon', so it is missing the" >&2
+    echo "       PON rebuild work. Building with it would silently reproduce" >&2
+    echo "       the defects the rebuild exists to remove." >&2
+    echo "" >&2
+    echo "       Reported version: $(krewlyzer --version 2>&1 | head -1)" >&2
+    echo "       (that string is not the test -- develop still reports 0.8.3)" >&2
+    echo "       Install from a develop checkout: maturin develop --release" >&2
     exit 3
 fi
 

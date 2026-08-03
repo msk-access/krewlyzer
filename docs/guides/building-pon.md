@@ -334,20 +334,24 @@ mkdir -p ./pon_temp && srun \
 `scripts/build_pon.sh` takes the two things that differ between the four
 models as arguments:
 
-!!! danger "Check the environment first"
+!!! danger "Check the environment first — and don't use the version string"
     ```bash
-    micromamba activate krewlyzer && krewlyzer --version
-    krewlyzer validate-pon --help >/dev/null && echo "0.9.0 or later"
+    micromamba activate krewlyzer
+    krewlyzer validate-pon --help >/dev/null && echo "has the PON work"
     ```
 
-    A 0.8.x `build-pon` will rebuild every defect 0.9.0 fixes — the fabricated
-    `wps_background`, the σ floors, the four unread blocks — **exit 0, and
-    produce logs that look clean**. This happened on the first attempt at the
-    0.9.0 rebuild: two jobs ran 18 minutes on `v0.8.3` before the banner was
-    spotted.
+    **`krewlyzer --version` will not tell you.** It reports `0.8.3` on current
+    `develop` and will keep doing so until the release bump, so a version
+    comparison rejects exactly the build you want. The presence of
+    `validate-pon` is the honest test: it answers "does this code have the PON
+    fixes", which is the actual question.
 
-    The script now refuses in that case, but check anyway: the failure is
-    silent by nature.
+    It matters because the failure is silent. A `build-pon` without these fixes
+    exits 0 on a model whose `wps_background` is a hardcoded `167.0/5.0` —
+    which is how four of them shipped. The first attempt at this rebuild ran 18
+    minutes on such a build before the banner was noticed.
+
+    The script refuses in that case, but check anyway.
 
 ```bash
 sbatch scripts/build_pon.sh xs1 all_unique
