@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **`scripts/build_pon_array.sh`** — one SLURM task per sample, feeding
+  `build-pon --from-outputs`. Extraction across a cohort is embarrassingly
+  parallel and the cluster already has a scheduler for it, so doing it four at
+  a time inside one process leaves most of the machine idle:
+
+  | route | 47 samples |
+  |---|---:|
+  | in-process, 4 parallel (`build_pon.sh`) | ~15.5 h |
+  | in-process, `--parallel-samples 0` | ~6.2 h |
+  | this array, 12 concurrent | ~5.9 h |
+  | this array, unthrottled | ~1.5 h |
+
+  Nextflow would fan out the same way, but every module pins
+  `krewlyzer:0.8.3` and the SLURM profile enables singularity — a run today
+  would silently execute 0.8.3 and reproduce the defects 0.9.0 removes. That
+  needs a 0.9.0 container, which needs the release, which needs this PON. An
+  sbatch array needs neither. `--from-outputs` will accept Nextflow's output
+  unchanged once a container exists; it is the same layout.
+
+  A finished sample is skipped on resubmission, keyed on the same last-written
+  marker `--from-outputs` checks, so a partial directory is never mistaken for
+  a complete one. `SAMPLE_LIST` is required rather than derived, as in
+  `build_pon.sh`, and a task index past the end of the list is refused —
+  a short array would otherwise build a quietly smaller cohort.
+
+### Added
 - **`krewlyzer build-pon --from-outputs DIR`** — build a PON by aggregating
   per-sample `run-all` output directories, reading only files. No BAM is
   opened.
