@@ -164,6 +164,44 @@ def _get_gc_weight(frag_len: int, gc_frac: float, correction_factors: dict) -> f
     return correction_factors.get((len_bin, gc_pct), 1.0)
 
 
+def add_pon_channel_columns(frame: "pd.DataFrame", pon) -> "pd.DataFrame":
+    """Add ``{channel}_log2`` and ``{channel}_reliability`` in place.
+
+    Split out of ``process_fsc`` so it can be tested without a fragment BED.
+    A branch only reachable through a full pipeline run is a branch nothing
+    checks, and this one silently fabricated a value for years.
+
+    Both fall back to NaN, never to a literal:
+
+    ``log2 = 0.0`` says "this sample sits exactly at the healthy baseline" --
+    the most confident statement the column can make, asserted precisely when
+    there is no baseline to compare against. Measured with ``gc_bias`` absent:
+    three windows whose raw values differed fourfold all read 0.0.
+
+    ``reliability = 1.0`` is not neutral either. With ``RELIABILITY_K`` at
+    0.01 it is what a PON variance of 0.99 would produce -- a specific and
+    unremarkable reading, indistinguishable from a measured one.
+
+    The PON's ``gc_bias`` block reaches here through ``PonModel.get_mean``, so
+    a model missing that block used to produce a confident zero in every window
+    of every sample rather than a visibly absent column.
+    """
+    for ch in CHANNELS:
+        mean = pon.get_mean(ch) if hasattr(pon, "get_mean") else None
+        var = pon.get_variance(ch) if hasattr(pon, "get_variance") else None
+
+        if mean and mean > 0:
+            frame[f"{ch}_log2"] = np.log2(frame[ch] / mean + 1e-9)
+        else:
+            frame[f"{ch}_log2"] = np.nan
+
+        if var is not None:
+            frame[f"{ch}_reliability"] = 1.0 / (var + RELIABILITY_K)
+        else:
+            frame[f"{ch}_reliability"] = np.nan
+    return frame
+
+
 def process_fsc(
     counts_df: pd.DataFrame,
     output_path: Path,
@@ -252,21 +290,7 @@ def process_fsc(
     # Compute PoN log2 ratios and reliability if model provided
     if pon is not None:
         logger.info("Computing PoN log2 ratios...")
-        for ch in CHANNELS:
-            mean = pon.get_mean(ch) if hasattr(pon, "get_mean") else None
-            var = pon.get_variance(ch) if hasattr(pon, "get_variance") else None
-
-            if mean and mean > 0:
-                # log2(channel / PoN_mean)
-                final_df[f"{ch}_log2"] = np.log2(final_df[ch] / mean + 1e-9)
-            else:
-                final_df[f"{ch}_log2"] = 0.0
-
-            if var is not None:
-                # reliability = 1 / (PoN_variance + k)
-                final_df[f"{ch}_reliability"] = 1.0 / (var + RELIABILITY_K)
-            else:
-                final_df[f"{ch}_reliability"] = 1.0
+        add_pon_channel_columns(final_df, pon)
 
     # Write output
     _write_fsc_output(
