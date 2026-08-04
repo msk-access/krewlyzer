@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **A `region-mds` failure during a PON build was swallowed by `except: pass`.**
+  `region_mds` and `region_mds_exon` are both built by globbing the files that
+  step writes, so a failure means two baselines silently missing from the
+  model — and the build reported success. Found while inspecting a live
+  rebuild: 4 of 4 completed samples had no `MDS.gene.tsv`, and `grep -i mds`
+  over 1,803 log lines returned nothing, because there was nothing to find.
+
+  Now warns with the exception type and message, and separately says when the
+  gate did not open at all — no gene BED resolved, or the input is a fragment
+  BED rather than a BAM. At aggregation, a BAM cohort that produced no MDS
+  files at all is an error rather than an empty block.
+
 ### Added
 - **`krewlyzer stamp-pon`** — records the release a built PON ships with.
 

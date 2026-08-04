@@ -184,8 +184,32 @@ def _process_sample_subprocess(
                 max_len=400,  # Standard cfDNA range for motifs
                 silent=True,
             )
-        except Exception:
-            pass  # Non-critical, continue without MDS
+        except Exception as exc:
+            # Not "non-critical": region_mds is the only source of the
+            # region_mds and region_mds_exon baselines, and both are built by
+            # globbing the files this writes. Swallowing the error produces a
+            # PON silently missing two blocks, which is the exact failure mode
+            # the rest of this release exists to remove.
+            #
+            # Warned rather than raised so one bad sample does not lose a
+            # four-hour build; the count is reconciled at aggregation, where a
+            # baseline with no inputs is now an error.
+            logger.warning(
+                f"[{sample_name}] region-mds failed, so this sample "
+                f"contributes to neither the region_mds nor the "
+                f"region_mds_exon baseline: {type(exc).__name__}: {exc}"
+            )
+    elif is_bam_input and not (gene_bed and gene_bed.exists()):
+        logger.warning(
+            f"[{sample_name}] no gene BED resolved for assay {assay!r}; "
+            "region_mds and region_mds_exon baselines will be empty"
+        )
+    elif not is_bam_input:
+        logger.warning(
+            f"[{sample_name}] input is not a BAM/CRAM, so region-mds cannot "
+            "run. The region_mds and region_mds_exon baselines need alignment "
+            "records, not a fragment BED."
+        )
 
     return outputs
 
@@ -676,7 +700,10 @@ def build_pon(
                                 silent=True,
                             )
                         except Exception as e:
-                            logger.debug(f"    Could not run region-mds: {e}")
+                            logger.warning(
+                                f"    region-mds failed for {sample_name}: "
+                                f"{type(e).__name__}: {e}"
+                            )
 
                 except Exception as e:
                     logger.warning(f"  ✗ Failed: {e}")
@@ -1170,6 +1197,21 @@ def build_pon(
         # statistics are not separately modelled -- 285-326 anchors is too
         # few to be worth a second block, and they overlap the genome-wide set.
         wps_baseline_panel, _ = _compute_wps_baseline(wps_panel_paths)
+
+    # A BAM cohort with no MDS files means every region-mds call failed.
+    #
+    # Both baselines are built by globbing files the per-sample step writes, so
+    # "no files" and "no baseline" are the same thing here -- and until now the
+    # build reported success either way. `validate-pon` would catch the missing
+    # blocks afterwards, but four hours later.
+    n_bam_inputs = sum(1 for p, _ in sample_infos if str(p).endswith((".bam", ".cram")))
+    if n_bam_inputs and not mds_gene_paths:
+        logger.error(
+            f"None of the {n_bam_inputs} BAM/CRAM samples produced an "
+            "MDS.gene file, so the region_mds and region_mds_exon baselines "
+            "would be empty. Check the region-mds warnings above -- a PON "
+            "without them is missing gene- and exon-level scoring entirely."
+        )
 
     # Build Region MDS baseline (per-gene MDS statistics)
     region_mds_baseline = None
