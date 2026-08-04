@@ -194,6 +194,96 @@ def _sample_dir(root: Path, index: int, *, band_limited: bool = False) -> Path:
         ),
         Path(f"{base}.FSC.gene"),
     )
+    # On-target counterparts.
+    #
+    # An assay like xs1 resolves bundled target regions, so a run-all directory
+    # for it is panel mode and carries every one of these. Omitting them left
+    # the built model short of nine on-target blocks -- which the gate's
+    # packing-list check reported, correctly, as an incomplete PON.
+    _write_pair(
+        pd.DataFrame(
+            {
+                "mean_gc": [0.38, 0.42, 0.46, 0.50],
+                "ultra_short": rng.integers(40, 80, 4),
+                "core_short": rng.integers(150, 350, 4),
+                "mono_nucl": rng.integers(600, 1000, 4),
+                "di_nucl": rng.integers(80, 180, 4),
+                "long": rng.integers(20, 60, 4),
+            }
+        ),
+        Path(f"{base}.fsc_counts.ontarget"),
+    )
+    _write_pair(
+        pd.DataFrame(
+            [
+                {"arm": arm, **{b: float(rng.integers(10, 400)) for b in bins}}
+                for arm in ("1p", "1q", "2p")
+            ]
+        ),
+        Path(f"{base}.FSD.ontarget"),
+    )
+    pq.write_table(
+        pa.Table.from_pandas(
+            pd.DataFrame(
+                {
+                    "region_id": [f"PANEL|{g}|1" for g in GENES],
+                    "wps_nuc": [
+                        list(
+                            (1.1 + 0.25 * g + 0.04 * index)
+                            * np.sin(np.arange(200) / (11.0 + g) + index + g)
+                        )
+                        for g in range(len(GENES))
+                    ],
+                    "wps_tf": [
+                        list(
+                            (0.7 + 0.15 * g)
+                            * np.sin(np.arange(200) / (4.0 + g) + index * 0.6)
+                        )
+                        for g in range(len(GENES))
+                    ],
+                }
+            ),
+            schema=pa.schema(
+                [
+                    ("region_id", pa.string()),
+                    ("wps_nuc", pa.list_(pa.float32())),
+                    ("wps_tf", pa.list_(pa.float32())),
+                ]
+            ),
+        ),
+        Path(f"{base}.WPS.panel.parquet"),
+    )
+    for suffix, centre in ((".OCF.ontarget", 11.0), (".OCF.offtarget", 9.0)):
+        _write_pair(
+            pd.DataFrame(
+                {
+                    "region_id": ["Lymph", "Liver"],
+                    "ocf": list(spread(centre, 1.5, 2)),
+                }
+            ),
+            Path(f"{base}{suffix}"),
+        )
+    for feature in ("TFBS", "ATAC"):
+        _write_pair(
+            pd.DataFrame(
+                {"label": ["CTCF", "AR"], "entropy": list(spread(0.66, 0.03, 2))}
+            ),
+            Path(f"{base}.{feature}.ontarget"),
+        )
+    on_counts = rng.integers(400, 1200, len(KMERS)).astype(float)
+    on_freq = on_counts / on_counts.sum()
+    _write_pair(
+        pd.DataFrame({"Motif": KMERS, "Frequency": np.round(on_freq, 6)}),
+        Path(f"{base}.EndMotif.ontarget"),
+    )
+    on_entropy = -float(np.sum(on_freq * np.log2(on_freq + 1e-12))) / np.log2(
+        len(KMERS)
+    )
+    _write_pair(
+        pd.DataFrame([{"Sample": stem, "MDS": round(on_entropy, 6)}]),
+        Path(f"{base}.MDS.ontarget"),
+    )
+
     _write_pair(
         pd.DataFrame(
             [

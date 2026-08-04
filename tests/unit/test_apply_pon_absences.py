@@ -201,3 +201,109 @@ def test_why_zero_was_the_worst_answer_here():
     # 0.14 above the baseline -- as sitting exactly on it.
     old_sigma = 0.0
     assert not old_sigma > 1e-9, "the Rust guard would have emitted 0.0 here"
+
+
+# ---------------------------------------------------------------------------
+# the Rust half of the entropy fix
+# ---------------------------------------------------------------------------
+
+
+def _entropy_inputs(tmp_path, std):
+    """A raw entropy table plus a PON whose sigma is whatever the test needs."""
+    raw = tmp_path / "s.TFBS.tsv"
+    pd.DataFrame(
+        {
+            "label": ["CTCF", "AR"],
+            "count": [1200, 900],
+            "mean_size": [166.0, 171.0],
+            "entropy": [0.85, 0.61],
+        }
+    ).to_csv(raw, sep="\t", index=False)
+
+    pon = tmp_path / "t.pon.parquet"
+    pd.concat(
+        [
+            pd.DataFrame([{"table": "metadata", "schema_version": "1.0"}]),
+            pd.DataFrame(
+                {
+                    "table": "tfbs_baseline",
+                    "label": ["CTCF", "AR"],
+                    "entropy_mean": [0.71, 0.60],
+                    "entropy_std": [std, 0.04],
+                }
+            ),
+        ],
+        ignore_index=True,
+    ).to_parquet(pon)
+    return raw, pon
+
+
+def _z_scores(tmp_path, std):
+    from krewlyzer import _core
+
+    raw, pon = _entropy_inputs(tmp_path, std)
+    out = tmp_path / "s.TFBS.z.tsv"
+    _core.region_entropy.apply_pon_zscore(str(raw), str(pon), str(out), "tfbs_baseline")
+    frame = pd.read_csv(out, sep="\t")
+    return dict(zip(frame["label"], frame["z_score"]))
+
+
+def test_an_unmeasurable_entropy_sigma_gives_no_zscore(tmp_path):
+    """It used to give 0.0 -- "exactly at the healthy baseline".
+
+    CTCF is 0.14 above its baseline mean here. Reporting that as z = 0.0 is the
+    most confident possible reading of a comparison that could not be made.
+    """
+    scores = _z_scores(tmp_path, std=0.0)
+    assert math.isnan(scores["CTCF"]), f"fabricated z = {scores['CTCF']}"
+    # ...while the label that *does* have a spread is still scored.
+    assert math.isfinite(scores["AR"]) and scores["AR"] != 0.0
+
+
+def test_a_nan_sigma_from_the_builder_also_gives_no_zscore(tmp_path):
+    """The builder now stores NaN for a single-donor label, so Rust sees NaN.
+
+    `NaN > 1e-9` is false, so it takes the same branch. Pinned because the two
+    halves of this fix were written separately and must agree.
+    """
+    scores = _z_scores(tmp_path, std=float("nan"))
+    assert math.isnan(scores["CTCF"])
+
+
+def test_a_real_sigma_still_produces_a_real_zscore(tmp_path):
+    """So the fix cannot be 'return NaN always'."""
+    scores = _z_scores(tmp_path, std=0.05)
+    assert scores["CTCF"] == pytest.approx((0.85 - 0.71) / 0.05, abs=1e-4)
+
+
+def test_a_baseline_missing_its_sigma_column_scores_nothing(tmp_path):
+    """`position(...).unwrap_or(0)` read column *zero* when a column was absent.
+
+    In a PON parquet column zero is `table`, so a renamed or missing
+    `entropy_std` was scored against the literal string "tfbs_baseline" --
+    parsed as a double, failing, and falling back to the 1.0 default. Two
+    fabrications stacked, and neither said anything.
+    """
+    from krewlyzer import _core
+
+    raw = tmp_path / "s.TFBS.tsv"
+    pd.DataFrame({"label": ["CTCF"], "entropy": [0.85]}).to_csv(
+        raw, sep="\t", index=False
+    )
+    pon = tmp_path / "t.pon.parquet"
+    pd.concat(
+        [
+            pd.DataFrame([{"table": "metadata", "schema_version": "1.0"}]),
+            # No `entropy_std` at all.
+            pd.DataFrame(
+                {"table": "tfbs_baseline", "label": ["CTCF"], "entropy_mean": [0.71]}
+            ),
+        ],
+        ignore_index=True,
+    ).to_parquet(pon)
+
+    out = tmp_path / "s.TFBS.z.tsv"
+    _core.region_entropy.apply_pon_zscore(str(raw), str(pon), str(out), "tfbs_baseline")
+    if out.exists():
+        z = pd.read_csv(out, sep="\t")["z_score"].iloc[0]
+        assert math.isnan(z), f"scored against a missing column: {z}"

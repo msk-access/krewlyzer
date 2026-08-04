@@ -479,6 +479,18 @@ def build_pon(
         logger.error(f"No samples found in {source}")
         raise typer.Exit(1)
 
+    # What the cohort was made of, recorded in the model.
+    #
+    # Derived here, before `samples` is rewritten to the aggregated sample ids
+    # further down. The gate uses it to decide whether a missing `mds_baseline`
+    # or `region_mds` is legitimate: those need a BAM, so their absence is
+    # expected for a fragment-BED cohort and a defect for a BAM one.
+    if from_outputs is not None:
+        input_kind = "outputs"
+    else:
+        n_bam = sum(1 for s in samples if str(s).endswith((".bam", ".cram")))
+        input_kind = "bam" if n_bam == n_samples else ("bed" if n_bam == 0 else "mixed")
+
     # Initialize AssetManager for bundled asset access
     from krewlyzer.assets import AssetManager
 
@@ -1422,7 +1434,10 @@ def build_pon(
         # Provenance, from the sample list actually read at the top of this
         # function. The four models already in the repo record only n_samples,
         # so none of them can be reproduced or checked against a rebuild.
-        **build_provenance(samples, __version__, cohort_label),
+        # `input_kind` lets the gate tell "not asked for" from "went wrong":
+        # mds_baseline and region_mds need a BAM, so their absence is
+        # legitimate for a fragment-BED cohort and a defect for a BAM one.
+        **build_provenance(samples, __version__, cohort_label, input_kind),
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
@@ -2511,6 +2526,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
                 # and the four models already in the repo still load.
                 "krewlyzer_version": model.krewlyzer_version,
                 "cohort_digest": model.cohort_digest,
+                "input_kind": model.input_kind,
                 "cohort_label": model.cohort_label,
             }
         ]

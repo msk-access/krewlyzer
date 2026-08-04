@@ -908,6 +908,11 @@ class PonModel:
     krewlyzer_version: str = ""
     cohort_digest: str = ""
     cohort_label: str = ""
+    #: What the cohort was made of: "bam", "bed", "mixed" or "outputs".
+    #: Empty for models built before the field existed. `validate-pon` uses it
+    #: to tell a block that was never asked for from one that failed --
+    #: `mds_baseline` and `region_mds` need a BAM.
+    input_kind: str = ""
 
     # Off-target baselines (primary - always present)
     gc_bias: Optional[GcBiasModel] = None
@@ -1398,6 +1403,7 @@ class PonModel:
             krewlyzer_version=str(meta.get("krewlyzer_version", "")),
             cohort_digest=str(meta.get("cohort_digest", "")),
             cohort_label=str(meta.get("cohort_label", "")),
+            input_kind=str(meta.get("input_kind", "") or ""),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,

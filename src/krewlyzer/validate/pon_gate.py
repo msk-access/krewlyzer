@@ -50,6 +50,67 @@ SCALAR_BLOCKS = {
     "wps_shape_baseline": ("region_id", ("log_amplitude", "shape_corr_fisher")),
 }
 
+#: Blocks whose σ lives in per-bin columns rather than one ``*_std`` column.
+#:
+#: ``fsd_baseline`` stores one row per (arm, bin) and ``gc_bias`` one row per GC
+#: bin, so neither fits `SCALAR_BLOCKS`. Both were therefore unchecked -- and
+#: both are applied: FSD supplies the log-ratios, and `gc_bias` reaches FSC and
+#: FSR through ``PonModel.get_mean`` / ``get_variance``.
+VECTOR_BLOCKS = {
+    "fsd_baseline": ("arm", ("std",)),
+    "fsd_baseline_ontarget": ("arm", ("std",)),
+    "gc_bias": (
+        "gc_bin",
+        ("short_std", "intermediate_std", "long_std"),
+    ),
+    "gc_bias_ontarget": (
+        "gc_bin",
+        ("short_std", "intermediate_std", "long_std"),
+    ),
+}
+
+#: Blocks every PON must carry, whatever it was built from.
+#:
+#: All of these are computed from the fragment BED, so no input choice explains
+#: their absence. Missing means something failed quietly.
+CORE_BLOCKS = (
+    "gc_bias",
+    "fsd_baseline",
+    "wps_baseline",
+    "wps_shape_baseline",
+    "wps_background",
+    "ocf_baseline",
+    "tfbs_baseline",
+    "atac_baseline",
+)
+
+#: Blocks that need BAM/CRAM input, so a BED-built PON legitimately lacks them.
+#:
+#: Warned rather than failed: the metadata records `panel_mode` but not whether
+#: the cohort was BAMs or fragment BEDs, so the gate cannot tell "not asked for"
+#: from "went wrong". Saying so is better than guessing either way.
+BAM_ONLY_BLOCKS = (
+    "mds_baseline",
+    "region_mds",
+    "region_mds_exon",
+)
+
+#: Additionally required when ``panel_mode`` is set.
+PANEL_BLOCKS = (
+    "gc_bias_ontarget",
+    "fsd_baseline_ontarget",
+    "wps_baseline_panel",
+    "ocf_baseline_ontarget",
+    "ocf_baseline_offtarget",
+    "fsc_gene_baseline",
+    "fsc_region_baseline",
+    "tfbs_baseline_ontarget",
+    "atac_baseline_ontarget",
+)
+
+#: Panel blocks that also need BAM/CRAM input.
+PANEL_BAM_ONLY_BLOCKS = ("mds_baseline_ontarget",)
+
 #: Below this, a baseline entry is an anecdote. Matches MIN_SAMPLES_PER_KEY in
 #: the builder; asserted here because the two are enforced in different places.
 MIN_SAMPLES = 3
@@ -86,8 +147,100 @@ def check_pon(path: Path) -> List[Finding]:
         ]
 
     findings.extend(_check_provenance(table, path))
+    findings.extend(_check_required_blocks(table))
     findings.extend(_check_blocks(table))
     return findings
+
+
+def _check_required_blocks(table: pd.DataFrame) -> List[Finding]:
+    """Is everything that should be here, here?
+
+    Every other check reads the blocks *present in the file* and skips the rest,
+    so a block that vanished entirely is invisible to all of them -- it looks
+    exactly like one that was never expected. Demonstrated on a real model:
+    deleting `region_mds`, or `fsc_gene_baseline`, or almost every baseline at
+    once, produced an identical finding list each time.
+
+    That is not hypothetical either. `region_mds` really did vanish, because a
+    Rust reader was handed a format it could not parse, returned nothing, and
+    the builder logged one warning and carried on. Build, gate and downstream
+    all reported success on a PON with no per-gene MDS in it.
+
+    This is the packing list: the check that notices a box never arrived.
+    """
+    found: List[Finding] = []
+    present = set(table["table"].dropna().unique())
+
+    meta = table[table["table"] == "metadata"]
+    panel_mode = False
+    if not meta.empty:
+        raw = meta.iloc[0].get("panel_mode")
+        panel_mode = bool(raw) and str(raw).lower() not in ("false", "0", "nan")
+
+    expected_error = list(CORE_BLOCKS) + (list(PANEL_BLOCKS) if panel_mode else [])
+    expected_warn = list(BAM_ONLY_BLOCKS) + (
+        list(PANEL_BAM_ONLY_BLOCKS) if panel_mode else []
+    )
+
+    missing = [b for b in expected_error if b not in present]
+    if missing:
+        found.append(
+            Finding(
+                id="PON.BLOCK_MISSING",
+                severity=Severity.ERROR,
+                # DEGENERACY, not STRUCTURAL. Structural means "is this even a
+                # PON" and exits 2; a model that parses fine but is short a
+                # block is a contract violation like any other, and exits 1.
+                # The bundled 0.8.x models are exactly that -- they predate
+                # `wps_shape_baseline` -- and they should fail the same way
+                # their fabricated sigma already makes them fail.
+                category=Category.DEGENERACY,
+                message=(
+                    f"absent from the model: {', '.join(missing)}. These are "
+                    "built from the fragment BED, so no input choice explains "
+                    "them being gone -- something failed quietly during the "
+                    "build. Nothing else here can see a block that is not in "
+                    "the file."
+                ),
+                evidence={"missing": missing, "panel_mode": panel_mode},
+            )
+        )
+
+    missing_bam = [b for b in expected_warn if b not in present]
+    if missing_bam:
+        # `input_kind` decides the severity. A fragment-BED cohort has no
+        # k-mers and no per-gene MDS, so their absence is expected; a BAM
+        # cohort should have produced them, and their absence is the exact
+        # failure that let `region_mds` disappear behind one warning line.
+        #
+        # Models built before the field exists record nothing, and stay a
+        # warning -- guessing either way would be worse than saying so.
+        kind = ""
+        if not meta.empty:
+            kind = str(meta.iloc[0].get("input_kind", "") or "").strip().lower()
+        from_bams = kind in ("bam", "mixed", "outputs")
+
+        found.append(
+            Finding(
+                id="PON.BLOCK_MISSING_BAM_ONLY",
+                severity=Severity.ERROR if from_bams else Severity.WARN,
+                category=Category.DEGENERACY if from_bams else Category.SCHEMA,
+                message=(
+                    f"absent from the model: {', '.join(missing_bam)}. "
+                    + (
+                        f"The cohort was {kind!r}, which should have produced "
+                        "them -- check the build log for region-mds warnings."
+                        if from_bams
+                        else "These need BAM/CRAM input. This model does not "
+                        "record what its cohort was made of (built before "
+                        "`input_kind`), so a fragment-BED cohort and a failed "
+                        "build look the same here."
+                    )
+                ),
+                evidence={"missing": missing_bam, "input_kind": kind},
+            )
+        )
+    return found
 
 
 def _check_provenance(table: pd.DataFrame, path: Path) -> List[Finding]:
@@ -146,13 +299,31 @@ def _check_provenance(table: pd.DataFrame, path: Path) -> List[Finding]:
 
 
 def _check_blocks(table: pd.DataFrame) -> List[Finding]:
-    """Per-block: is this fitted, and can it vary?"""
+    """Per-block: is this fitted, and can it vary?
+
+    `VECTOR_BLOCKS` join `SCALAR_BLOCKS` here. They were left out originally
+    because their σ sits in per-bin columns rather than one ``*_std`` -- but
+    both are applied, so being awkward to check is not a reason not to. A
+    degenerate `gc_bias` is the worst of the lot: it feeds every FSC log-ratio
+    through ``PonModel.get_mean``.
+    """
     found: List[Finding] = []
-    for name, (key, prefixes) in SCALAR_BLOCKS.items():
+    checked = {
+        **{n: (k, p, False) for n, (k, p) in SCALAR_BLOCKS.items()},
+        **{n: (k, p, True) for n, (k, p) in VECTOR_BLOCKS.items()},
+    }
+    for name, (key, prefixes, is_vector) in checked.items():
         block = table[table["table"] == name]
         if block.empty:
             continue
-        for column in _std_columns(block, prefixes):
+        # Vector blocks name their σ columns outright; scalar ones take a
+        # prefix and have `_std` appended.
+        columns = (
+            [c for c in prefixes if c in block.columns]
+            if is_vector
+            else _std_columns(block, prefixes)
+        )
+        for column in columns:
             values = pd.to_numeric(block[column], errors="coerce")
             finite = values[np.isfinite(values)]
 
