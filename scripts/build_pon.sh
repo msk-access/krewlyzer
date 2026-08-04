@@ -39,14 +39,18 @@ case "$VARIANT" in all_unique|duplex) ;; *) echo "unknown variant: $VARIANT" >&2
 BASE="/data1/shahr2/shahr2/test/krewlyzer"
 
 # The sample list decides the variant -- build-pon has no variant flag, so
-# all_unique and duplex differ only in which BAMs the list points at. The
-# existing lists use `allUniq`, not `all_unique`; mapped rather than renamed so
-# the files on disk stay as they are.
+# all_unique and duplex differ only in which BAMs the list points at.
+#
+# The names below are the ones that exist, not ones derived from the variant:
+# duplex is the unsuffixed default (`xs1_pon.txt`) and all_unique carries the
+# suffix (`xs1_allUniq_pon.txt`). Deriving them from the variant name produced
+# two wrong guesses in a row -- `xs1_all_unique_pon.txt` and
+# `xs1_duplex_pon.txt`, neither of which is a real file.
 case "$VARIANT" in
-    all_unique) LIST_TOKEN="allUniq" ;;
-    duplex)     LIST_TOKEN="duplex" ;;
+    all_unique) LIST_NAME="${ASSAY}_allUniq_pon.txt" ;;
+    duplex)     LIST_NAME="${ASSAY}_pon.txt" ;;
 esac
-SAMPLE_LIST="${SAMPLE_LIST:-${BASE}/${ASSAY}_${LIST_TOKEN}_pon.txt}"
+SAMPLE_LIST="${SAMPLE_LIST:-${BASE}/${LIST_NAME}}"
 REFERENCE="${REFERENCE:-/data1/core006/access/production/resources/reference/versions/hg19/Homo_sapiens_assembly19.fasta}"
 OUTPUT_DIR="${OUTPUT_DIR:-${BASE}/pon/${ASSAY}}"
 OUTPUT="${OUTPUT_DIR}/${ASSAY}.${VARIANT}.pon.parquet"

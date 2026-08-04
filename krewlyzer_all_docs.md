@@ -6946,8 +6946,17 @@ sbatch scripts/build_pon.sh xs2 duplex
 ```
 
 The variant comes from the sample list, not a flag — `build-pon` has none.
-`all_unique` and `duplex` differ only in which BAMs the list points at, so
-each needs its own (`{assay}_allUniq_pon.txt` and `{assay}_duplex_pon.txt`).
+`all_unique` and `duplex` differ only in which BAMs the list points at, so each
+needs its own:
+
+| variant | list |
+|---|---|
+| `duplex` | `{assay}_pon.txt` — the unsuffixed default |
+| `all_unique` | `{assay}_allUniq_pon.txt` |
+
+Override with `SAMPLE_LIST=...` if yours are named differently. The script
+exits 2 naming the path it looked for, so a wrong guess costs seconds rather
+than a four-hour build.
 
 Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
 `KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.
