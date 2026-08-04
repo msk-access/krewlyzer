@@ -9679,6 +9679,18 @@ features = {
 
 **File:** `{sample}.FSC.tsv` / `{sample}.FSC.ontarget.tsv`
 
+> **Changed in 0.9.0.** `FSC.ontarget` normalises against the PON's
+> `gc_bias_ontarget` curves; it previously used the genome-wide ones, so its
+> `*_log2` and `*_reliability` values shift. Capture enrichment gives
+> on-target fragments a different GC profile, which is why panel mode fits a
+> separate block — one that was stored by every panel PON and read by nothing.
+> A PON without that block falls back to the genome-wide curves.
+>
+> Also in 0.9.0: `*_log2` and `*_reliability` are **NaN** when the PON has no
+> GC-bias block, where they were previously `0.0` and `1.0`. Zero is not a
+> neutral log-ratio — it asserts the sample sits exactly at the healthy
+> baseline.
+
 FSC counts fragments in 6 non-overlapping size channels across 5 Mb windows — the foundational multi-channel coverage feature.
 
 #### Columns
@@ -9937,6 +9949,16 @@ X = df[["wps_nuc_mean", "wps_tf_mean", "prot_frac_nuc", "prot_frac_tf"]].values
 **Requires:** `--assay`
 
 Same columns as `WPS.parquet`, filtered to panel gene anchors (~1,820 for xs2). Rows are panel-gene TSS and CTCF sites.
+
+**Since 0.9.0 these anchors are PON-scored.** They carry the same derived
+columns as `WPS.parquet` — `wps_nuc_z`, `wps_log_amplitude`,
+`wps_shape_corr`, `wps_phase_shift_bp` and their z-scores — computed against
+the PON's `wps_baseline_panel` block. Before 0.9.0 that block was built and
+stored by every panel-mode PON and read by nothing, so the anchors closest to
+the targeted regions were the only WPS output with no healthy comparison. The
+shape statistics borrow the genome-wide `wps_shape_baseline`: a few hundred
+panel anchors is too few to fit a second one, and they overlap the
+genome-wide set.
 
 #### ML Use Case
 
