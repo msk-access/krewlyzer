@@ -5,6 +5,57 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **A zero spread was reported as a measurement in three of the four PON
+  builders.** `pandas.std(ddof=1)` returns `0.0` for identical values, not NaN
+  — NaN only when `count < 2`. Only `_compute_fsc_gene_baseline` converted
+  that; the other three did not, while carrying comments claiming they did
+  ("NaN where pandas could not measure a spread", "an unmeasurable spread
+  yields NaN"). A comment asserting behaviour the code lacks is worse than no
+  comment: it stops the next reader checking. The Rust twin `mean_and_sd` was
+  correct, which is why the WPS blocks passed `validate-pon` and the Python
+  ones did not.
+
+  One `sample_std_or_nan` helper now serves all six sites. Identity is tested
+  on the values rather than the result: `std([0.95, 0.95, 0.95])` is
+  `1.36e-16`, not `0.0` — cancellation in the variance sum leaves residue, so
+  a `sd <= 0` guard misses the exact case it exists for, and a z divided by
+  `1.36e-16` is `1e16`, worse than the zero it replaced.
+
+- **The PON averaged the edge of the NRL search band in with real
+  measurements.** `nrl_bp = 250` is the top of the FFT window, and
+  `nrl_at_band_limit` says so on every affected row — the builder ignored the
+  flag. Across the xs2 duplex cohort all 174 band-limited rows carry exactly
+  250.0, one unique value with zero variance, against 194.9 ± 24.0 for the
+  other 414. Twelve of 28 groups are partly limited, four entirely, so those
+  groups reported the edge of the search as the healthy expectation.
+
+  The NRL is now fitted from the rows that measured one, and the group keeps
+  its row either way — absent, not dropped, because a group xs1 can measure
+  and xs2 cannot is information when the two models are compared. New
+  `n_at_band_limit` and `n_nrl_fitted` columns record why a baseline is
+  missing. Below `MIN_SAMPLES_PER_KEY` measured rows the mean goes too, not
+  just the spread: a cohort baseline averaged over one donor is the same
+  fabrication as a hardcoded one.
+
+  Periodicity is deliberately still fitted from *all* rows. Those same 174
+  band-limited rows hold 174 distinct periodicity values spanning 0.37–0.86 —
+  only the peak's position hit the edge, its strength was measured. `nrl_bp`,
+  `periodicity_score` and now `nrl_at_band_limit` are all required.
+
+- **`WpsBackgroundBaseline.get_periodicity_stats` invented a standard normal.**
+  `row.get("periodicity_mean", 0), row.get("periodicity_std", 1)` made a
+  missing column produce a z equal to the raw periodicity — about 0.47, an
+  unremarkable number nobody would have questioned. The same fabricated
+  baseline the block itself was rebuilt to remove, one level down in the
+  reader. Now indexed, so a missing column raises.
+
+  Verified against all three models already built on the cluster by rebuilding
+  only the affected blocks from cached per-sample outputs — no BAM re-read.
+  `xs1.duplex` went from three `PON.NONPOSITIVE_SIGMA` findings to none;
+  `xs2.duplex` and `xs2.all_unique` from one each to none. All three now exit
+  0 under `validate-pon`.
+
+### Fixed
 - **A `region-mds` failure during a PON build was swallowed by `except: pass`.**
   `region_mds` and `region_mds_exon` are both built by globbing the files that
   step writes, so a failure means two baselines silently missing from the
