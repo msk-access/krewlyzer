@@ -1592,8 +1592,16 @@ def _compute_wps_baseline(
     result = _core.pon_builder.compute_wps_baseline(wps_paths)
 
     if not result:
+        # "no data returned from Rust" named the wrong thing. The usual cause
+        # is the >=3-sample floor added in 4cd634b dropping every anchor, which
+        # is what a cohort below that floor looks like from here -- and the old
+        # message sent the reader looking for a Rust bug instead.
         raise RuntimeError(
-            "WPS baseline computation failed: no data returned from Rust"
+            f"WPS baseline is empty after reading {len(wps_paths)} sample(s). "
+            f"Every anchor was backed by fewer than {MIN_SAMPLES_PER_KEY} "
+            "samples, so none has a measurable spread. A cohort this small "
+            "cannot support a WPS baseline -- see the 'skipped N of M anchors' "
+            "line above for the count."
         )
 
     logger.info(f"WPS vector baseline computed: {len(result)} regions")

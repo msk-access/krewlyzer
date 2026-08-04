@@ -162,3 +162,44 @@ def test_the_mds_baseline_uses_the_sample_standard_deviation():
     baseline = _compute_mds_baseline([{"mds": v, "kmers": {}} for v in values])
     assert baseline.mds_std == pytest.approx(np.std(values, ddof=1))
     assert baseline.mds_std != pytest.approx(np.std(values))
+
+
+def test_an_empty_wps_baseline_says_why(tmp_path):
+    """The message has to name the sample floor, not blame the backend.
+
+    A cohort below `MIN_SAMPLES_PER_KEY` has every anchor dropped, so the Rust
+    call correctly returns nothing — and the old wording, "no data returned
+    from Rust", sent the reader hunting a backend bug. Met in practice while
+    reproducing a build with two samples.
+    """
+    import numpy as np
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from krewlyzer.pon.build import MIN_SAMPLES_PER_KEY, _compute_wps_baseline
+
+    schema = pa.schema(
+        [
+            ("region_id", pa.string()),
+            ("wps_nuc", pa.list_(pa.float32())),
+            ("wps_tf", pa.list_(pa.float32())),
+        ]
+    )
+    paths = []
+    for i in range(MIN_SAMPLES_PER_KEY - 1):
+        frame = pd.DataFrame(
+            {
+                "region_id": ["TSS|A|1"],
+                "wps_nuc": [list(np.sin(np.arange(200) / 12.0 + i))],
+                "wps_tf": [list(np.sin(np.arange(200) / 6.0))],
+            }
+        )
+        path = tmp_path / f"s{i}.WPS.parquet"
+        pq.write_table(pa.Table.from_pandas(frame, schema=schema), path)
+        paths.append(str(path))
+
+    with pytest.raises(RuntimeError) as excinfo:
+        _compute_wps_baseline(paths)
+    message = str(excinfo.value)
+    assert str(MIN_SAMPLES_PER_KEY) in message, "does not name the floor"
+    assert "Rust" not in message, "still blames the backend"
