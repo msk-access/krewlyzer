@@ -6,9 +6,10 @@ This module provides the CLI and logic for building unified PON models.
 
 import typer
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from datetime import datetime
 import logging
+import tempfile
 
 import numpy as np
 import pandas as pd
@@ -512,7 +513,6 @@ def build_pon(
             "WPS background file not found - Alu baseline will not be computed"
         )
 
-    import tempfile
     import shutil
     import time
     from concurrent.futures import (
@@ -1564,6 +1564,46 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
     )
 
 
+def _as_plain_tsv(paths: List[str], staging: Path) -> Tuple[List[str], List[str]]:
+    """Return every input as a plain TSV, materialising the ones that are not.
+
+    Parquet and gzipped tables are read with ``read_exact_table`` and written
+    out uncompressed into ``staging``. Plain TSVs are passed through untouched,
+    so the common in-process case copies nothing.
+
+    ``read_exact_table``, not ``read_table``: the caller has already resolved
+    which file it wants, and ``read_table`` is parquet-first, so it would
+    happily return a stale sibling instead of the file named here.
+
+    Returns ``(readable, complaints)`` -- nothing is dropped without a reason
+    the caller can print.
+    """
+    from krewlyzer.core.output_utils import read_exact_table
+
+    readable: List[str] = []
+    complaints: List[str] = []
+    for raw in paths:
+        path = Path(raw)
+        if path.suffix == ".tsv":
+            readable.append(raw)
+            continue
+        try:
+            frame = read_exact_table(path)
+        except Exception as exc:
+            # Reported, never dropped. Silently shrinking the cohort is the
+            # failure this function exists to prevent, not an acceptable
+            # response to one bad file.
+            complaints.append(f"{path.name}: {type(exc).__name__}: {exc}")
+            continue
+        if frame is None or frame.empty:
+            complaints.append(f"{path.name}: unreadable or empty")
+            continue
+        materialised = staging / f"{len(readable):04d}.{path.name}.tsv"
+        frame.to_csv(materialised, sep="\t", index=False)
+        readable.append(str(materialised))
+    return readable, complaints
+
+
 def _compute_fsd_baseline(
     all_fsd_data: List[pd.DataFrame], fsd_paths: Optional[List[str]] = None
 ) -> Optional[FsdBaseline]:
@@ -1589,10 +1629,33 @@ def _compute_fsd_baseline(
 
     from krewlyzer import _core
 
-    result = _core.pon_builder.compute_fsd_baseline(fsd_paths)
+    # The Rust reader takes plain TSV -- `BufReader::lines()`, no gzip and no
+    # parquet. `File::open` succeeds on both of those anyway, the header parse
+    # then yields no bin columns, and every sample is skipped: 3 samples in,
+    # 0 arms out, exit 0.
+    #
+    # `run-all` writes `.FSD.parquet` and `.FSD.tsv.gz` and no plain `.tsv`, so
+    # this is the normal case for any output directory rather than an edge one.
+    # Normalising here rather than in each caller keeps the constraint in the
+    # one place that knows about it.
+    with tempfile.TemporaryDirectory(prefix="krewlyzer-fsd-") as staging:
+        readable, unreadable = _as_plain_tsv(fsd_paths, Path(staging))
+        if not readable:
+            raise RuntimeError(
+                f"None of the {len(fsd_paths)} FSD tables could be read: "
+                f"{unreadable[0] if unreadable else 'unknown'}"
+            )
+        result = _core.pon_builder.compute_fsd_baseline(readable)
+
     if not result:
+        # Not "no data returned from Rust". That wording sent a reader hunting
+        # a backend bug once already (see `_compute_wps_baseline`); the backend
+        # is doing exactly what it was asked.
         raise RuntimeError(
-            "FSD baseline computation failed: no data returned from Rust"
+            f"FSD baseline is empty after reading {len(readable)} tables. "
+            "The inputs parsed but held no size-bin columns -- FSD headers "
+            "must carry bins like '65-69'. First input: "
+            f"{Path(fsd_paths[0]).name}"
         )
 
     logger.info(f"FSD baseline computed: {len(result)} arms")
@@ -1897,21 +1960,43 @@ def _compute_region_mds_baseline(
     logger.info(f"Computing region-MDS baseline from {len(valid_paths)} samples...")
 
     try:
-        # Use Rust-accelerated aggregation
-        result = _core.pon_builder.compute_region_mds_baseline(valid_paths)
+        # Plain TSV, as with FSD -- this Rust reader is the other `BufReader`
+        # one. A `run-all` directory holds `.MDS.gene.parquet` and
+        # `.MDS.gene.tsv.gz` and no plain `.tsv`, and handing either straight
+        # over produced an empty result, one warning line, and a PON with no
+        # `region_mds` block at all. `validate-pon` skips absent blocks, so
+        # nothing downstream would have said so.
+        with tempfile.TemporaryDirectory(prefix="krewlyzer-mdsgene-") as staging:
+            readable, unreadable = _as_plain_tsv(valid_paths, Path(staging))
+            if not readable:
+                raise RuntimeError(
+                    f"none of the {len(valid_paths)} MDS.gene tables could be "
+                    f"read: {unreadable[0] if unreadable else 'unknown'}"
+                )
+            result = _core.pon_builder.compute_region_mds_baseline(readable)
 
         if not result:
-            logger.warning("Region-MDS baseline computation returned empty result")
-            return None
+            # Loud. This block being quietly absent is exactly the failure the
+            # warning above used to allow.
+            raise RuntimeError(
+                f"region-MDS baseline is empty after reading {len(readable)} "
+                "MDS.gene tables. They parsed but yielded no per-gene MDS -- "
+                f"check the columns of {Path(valid_paths[0]).name}"
+            )
 
-        # Convert to RegionMdsBaseline
+        # Convert to RegionMdsBaseline.
+        #
+        # No `0.0` / `1.0` defaults: that pair is a standard normal, so a
+        # missing statistic would make z equal the raw MDS -- about 0.95, an
+        # entirely ordinary-looking number. The same fabrication removed from
+        # `_compute_mds_baseline` and `get_periodicity_stats`.
         gene_baseline = {}
         for gene, data in result.items():
             gene_baseline[gene] = {
-                "mds_mean": data.get("mds_mean", 0.0),
-                "mds_std": data.get("mds_std", 1.0),
-                "mds_e1_mean": data.get("mds_e1_mean", 0.0),
-                "mds_e1_std": data.get("mds_e1_std", 1.0),
+                "mds_mean": data.get("mds_mean", float("nan")),
+                "mds_std": data.get("mds_std", float("nan")),
+                "mds_e1_mean": data.get("mds_e1_mean", float("nan")),
+                "mds_e1_std": data.get("mds_e1_std", float("nan")),
                 "n_samples": data.get("n_samples", 0),
             }
 
