@@ -4,6 +4,71 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`krewlyzer build-pon --from-outputs DIR`** — build a PON by aggregating
+  per-sample `run-all` output directories, reading only files. No BAM is
+  opened.
+
+  The in-process builder re-runs feature extraction itself, four samples at a
+  time on one node: 55–97 minutes per sample, roughly 15 hours for a
+  47-sample cohort. `run-all` already computes every one of those features, and
+  its output directory is a strict superset of what the builder consumes. Every
+  defect found in the 0.9.0 models so far has been in *aggregation*, not
+  extraction — so each one cost a full rebuild to re-check. Re-aggregating now
+  costs minutes.
+
+  Both routes stay and converge on the same collectors, so neither can drift
+  into producing a model the other cannot read. `SAMPLE_LIST` and
+  `--from-outputs` are mutually exclusive: accepting both would leave it
+  ambiguous which cohort the digest describes.
+
+  A directory is aggregated only if it holds the *last* file its pipeline
+  writes (`MDS.gene`) plus the inputs no baseline can do without. An incomplete
+  directory is named and stops the build unless `--allow-failures` is given —
+  silently aggregating a half-written one makes the cohort smaller than its own
+  metadata claims.
+
+  One difference is unavoidable: `EndMotif` stores frequencies rounded to six
+  decimals, while the in-process path keeps them unrounded in memory. At a
+  typical k-mer frequency of 0.0039 against a cross-donor σ of 2.7e-4, that is
+  0.37% of σ — the two routes agree on σ to within 0.08% and on z to within
+  about 0.002. Since Parquet is the product and the product is what rounds,
+  that is the precision that actually exists.
+
+  **A 0.8.3 output directory cannot seed the `wps_background` block.** It
+  predates `nrl_at_band_limit`, and without that flag there is no way to tell a
+  repeat length from the edge of the window it was searched in. The refusal
+  says so. Every other block builds from 0.8.3 output.
+
+### Fixed
+- **Two Rust baseline readers parse plain TSV and were being handed parquet.**
+  `compute_fsd_baseline` and `compute_region_mds_baseline` read with
+  `BufReader::lines()` — no gzip, no parquet. `File::open` succeeds on both
+  anyway, the header parse then finds no usable columns, and every sample is
+  skipped: three samples in, zero out.
+
+  Not an edge case. A `run-all` directory writes `.parquet` and `.tsv.gz` and
+  *no* plain `.tsv`, so it is the normal case for the layout `--from-outputs`
+  reads. Found against the real 0.8.3 corpus, where `region_mds` came back
+  empty from the same files `region_mds_exon` read fine.
+
+  The two failed differently and the quieter one was worse. FSD raised, but
+  blamed the backend — "no data returned from Rust", the same misleading
+  wording already fixed once in `_compute_wps_baseline`. `region_mds` logged
+  one warning and returned `None`, so the block was simply *absent* from the
+  model; `validate-pon` iterates the blocks present in the file and skips empty
+  ones, so a block that vanished entirely cannot be checked. Build, gate and
+  downstream all reported success.
+
+  Inputs are now normalised to plain TSV where the constraint lives, in the two
+  callers that know about it. Unreadable inputs are reported rather than
+  dropped. Both empty-result paths raise and name an input file.
+
+- **`region_mds` fell back to a standard normal.** `data.get("mds_mean", 0.0),
+  data.get("mds_std", 1.0)` makes z equal the raw MDS — about 0.95, an
+  ordinary-looking number for a statistic that was never computed. Third
+  instance after `_compute_mds_baseline` and `get_periodicity_stats`.
+
 ### Fixed
 - **A zero spread was reported as a measurement in three of the four PON
   builders.** `pandas.std(ddof=1)` returns `0.0` for identical values, not NaN

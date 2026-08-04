@@ -261,9 +261,15 @@ def _process_sample_subprocess(
 
 
 def build_pon(
-    sample_list: Path = typer.Argument(
-        ...,
-        help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline.",
+    sample_list: Optional[Path] = typer.Argument(
+        None,
+        help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline. Omit when using --from-outputs.",
+    ),
+    from_outputs: Optional[Path] = typer.Option(
+        None,
+        "--from-outputs",
+        help="Aggregate an existing directory of per-sample run-all outputs "
+        "instead of extracting features. No BAM is read.",
     ),
     assay: str = typer.Option(
         ..., "--assay", "-a", help="Assay name (e.g., msk-access-v2)"
@@ -389,12 +395,31 @@ def build_pon(
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
 
-    # Validate inputs
-    if not sample_list.exists():
+    # Validate inputs.
+    #
+    # Exactly one source of samples. Accepting both would leave it ambiguous
+    # which cohort the model was actually built from -- and the cohort digest
+    # would record only one of them.
+    if (sample_list is None) == (from_outputs is None):
+        logger.error(
+            "Give either a SAMPLE_LIST or --from-outputs, not both and not "
+            "neither. SAMPLE_LIST extracts features from BAMs; --from-outputs "
+            "aggregates a directory of per-sample run-all outputs."
+        )
+        raise typer.Exit(2)
+
+    if sample_list is not None and not sample_list.exists():
         logger.error(f"Sample list not found: {sample_list}")
         raise typer.Exit(1)
 
-    if not reference.exists():
+    if from_outputs is not None and not from_outputs.is_dir():
+        logger.error(f"--from-outputs is not a directory: {from_outputs}")
+        raise typer.Exit(1)
+
+    # The reference is read during extraction only. Requiring it for an
+    # aggregation would be asking for a 3 GB file nothing opens -- but its
+    # *name* is still recorded in the model, so it stays a required option.
+    if from_outputs is None and not reference.exists():
         logger.error(f"Reference FASTA not found: {reference}")
         raise typer.Exit(1)
 
@@ -411,17 +436,47 @@ def build_pon(
         logger.debug(f"Validating user-provided target regions: {target_regions}")
         validate_file(target_regions, FileSchema.BED3)
 
-    # Read sample list
-    with open(sample_list) as f:
-        samples = [
-            Path(line.strip())
-            for line in f
-            if line.strip() and not line.startswith("#")
+    # Read the cohort, from whichever source was given.
+    #
+    # `from_output_dirs` is resolved here rather than later so an incomplete
+    # directory fails in seconds, before any setup work.
+    from_output_dirs: List[Path] = []
+    if from_outputs is not None:
+        from krewlyzer.pon import from_outputs as _from_outputs
+
+        candidates = _from_outputs.discover_samples(from_outputs)
+        from_output_dirs = [
+            d for d in candidates if _from_outputs.incomplete_reason(d) is None
         ]
+        refused = [
+            (d, _from_outputs.incomplete_reason(d))
+            for d in candidates
+            if _from_outputs.incomplete_reason(d) is not None
+        ]
+        for directory, reason in refused:
+            logger.warning(f"  skipping {directory.name}: {reason}")
+        if refused and not allow_failures:
+            logger.error(
+                f"{len(refused)} of {len(candidates)} sample directories are "
+                "incomplete (listed above). A half-written directory "
+                "aggregates into a cohort quietly smaller than its own "
+                "metadata claims. Use --allow-failures to build anyway."
+            )
+            raise typer.Exit(1)
+        samples = [Path(d) for d in from_output_dirs]
+    else:
+        assert sample_list is not None  # guarded above
+        with open(sample_list) as f:
+            samples = [
+                Path(line.strip())
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
 
     n_samples = len(samples)
     if n_samples < 1:
-        logger.error("No samples found in sample list")
+        source = "output directory" if from_outputs is not None else "sample list"
+        logger.error(f"No samples found in {source}")
         raise typer.Exit(1)
 
     # Initialize AssetManager for bundled asset access
@@ -622,9 +677,17 @@ def build_pon(
             return name
 
         # Build sample info list
-        sample_infos = [
-            (sample_path, get_sample_name(sample_path)) for sample_path in samples
-        ]
+        # Extraction is skipped entirely for --from-outputs: the features
+        # already exist on disk. An empty list means the processing loop below
+        # runs zero times rather than needing to be wrapped in a conditional,
+        # which would re-indent 150 lines of working code for no gain.
+        sample_infos = (
+            []
+            if from_outputs is not None
+            else [
+                (sample_path, get_sample_name(sample_path)) for sample_path in samples
+            ]
+        )
 
         if actual_parallel > 1:
             # ─────────────────────────────────────────────────────────────────
@@ -767,7 +830,7 @@ def build_pon(
             f"Processing complete: {len(all_outputs)} succeeded, {len(failed_samples)} failed ({processing_elapsed:.1f}s)"
         )
 
-        if len(all_outputs) < 1:
+        if from_outputs is None and len(all_outputs) < 1:
             logger.error("No samples processed successfully")
             raise typer.Exit(1)
 
@@ -1112,8 +1175,58 @@ def build_pon(
             logger.debug(f"Cleaned up temp directory after error: {temp_output_dir}")
         raise
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # --from-outputs: fill the same collectors by reading files
+    # ═══════════════════════════════════════════════════════════════════════
+    #
+    # Everything below this point is shared. The two routes differ only in how
+    # these lists get filled -- one extracts features from BAMs, the other
+    # reads features someone already extracted -- and they converge here so
+    # neither can drift into producing a model the other cannot.
+    if from_outputs is not None:
+        from krewlyzer.pon import from_outputs as _from_outputs
+
+        logger.info("=" * 60)
+        logger.info(f"AGGREGATING {len(from_output_dirs)} run-all output directories")
+        logger.info("=" * 60)
+        collected, skipped = _from_outputs.collect(from_output_dirs)
+        for directory, reason in skipped:
+            logger.warning(f"  skipped {directory.name}: {reason}")
+        logger.info(f"  {_from_outputs.describe(collected)}")
+
+        all_gc_data = collected.gc
+        all_gc_data_ontarget = collected.gc_ontarget
+        all_fsd_data = collected.fsd
+        all_fsd_data_ontarget = collected.fsd_ontarget
+        all_ocf_data = collected.ocf
+        all_ocf_data_ontarget = collected.ocf_ontarget
+        all_ocf_data_offtarget = collected.ocf_offtarget
+        all_mds_data = collected.mds
+        all_mds_data_ontarget = collected.mds_ontarget
+        all_tfbs_data = collected.tfbs
+        all_tfbs_data_ontarget = collected.tfbs_ontarget
+        all_atac_data = collected.atac
+        all_atac_data_ontarget = collected.atac_ontarget
+        all_fsc_gene_data = collected.fsc_gene
+        all_fsc_region_data = collected.fsc_region
+        fsd_paths = collected.fsd_paths
+        fsd_ontarget_paths = collected.fsd_ontarget_paths
+        wps_paths = collected.wps_paths
+        wps_panel_paths = collected.wps_panel_paths
+        wps_background_paths = collected.wps_background_paths
+        mds_gene_paths = collected.mds_gene_paths
+        mds_exon_paths = collected.mds_exon_paths
+
+        # The digest must record what was aggregated, not what was asked for.
+        samples = [Path(stem) for stem in collected.sample_ids]
+
     if len(all_gc_data) < 1:
-        logger.error("No samples processed successfully")
+        source = (
+            "aggregated from the output directories"
+            if from_outputs is not None
+            else "processed successfully"
+        )
+        logger.error(f"No samples {source}")
         raise typer.Exit(1)
 
     logger.info("=" * 60)
@@ -2116,11 +2229,23 @@ def _compute_wps_background_baseline(
             if c not in combined.columns
         ]
         if missing:
+            hint = ""
+            if missing == [limit_col]:
+                # By far the likeliest cause, and worth naming: pre-0.9.0
+                # output has every other column. Met immediately on the 0.8.3
+                # healthy-control corpus, which cannot seed this block.
+                hint = (
+                    " This table looks like pre-0.9.0 output: everything else "
+                    "is present. Without the flag there is no way to tell a "
+                    "repeat length from the edge of the window it was searched "
+                    "in, so re-run WPS_background with 0.9.0 to build this "
+                    "block."
+                )
             raise ValueError(
                 f"WPS_background is missing {missing}; found "
                 f"{sorted(combined.columns)}. Refusing to substitute a default "
                 "-- a fabricated baseline cannot be told apart from a measured "
-                "one once it is written."
+                f"one once it is written.{hint}"
             )
 
         # Aggregate by group_id.
