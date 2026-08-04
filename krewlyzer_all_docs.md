@@ -6939,24 +6939,14 @@ models as arguments:
     The script refuses in that case, but check anyway.
 
 ```bash
-sbatch scripts/build_pon.sh xs1 all_unique
-sbatch scripts/build_pon.sh xs2 all_unique
-sbatch scripts/build_pon.sh xs1 duplex
-sbatch scripts/build_pon.sh xs2 duplex
+SAMPLE_LIST=<list> OUTPUT_DIR=<dir> sbatch scripts/build_pon.sh <assay> <variant>
 ```
 
-The variant comes from the sample list, not a flag — `build-pon` has none.
-`all_unique` and `duplex` differ only in which BAMs the list points at, so each
-needs its own:
-
-| variant | list |
-|---|---|
-| `duplex` | `{assay}_pon.txt` — the unsuffixed default |
-| `all_unique` | `{assay}_allUniq_pon.txt` |
-
-Override with `SAMPLE_LIST=...` if yours are named differently. The script
-exits 2 naming the path it looked for, so a wrong guess costs seconds rather
-than a four-hour build.
+`SAMPLE_LIST` is required and never derived. **The variant comes from the
+sample list, not a flag** — `build-pon` has none, and `all_unique` and `duplex`
+differ only in which BAMs the list points at. So each variant needs its own
+list, and only you know which is which; a script that guessed the filename
+would build the wrong variant under the right name.
 
 Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
 `KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.

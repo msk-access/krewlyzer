@@ -12,8 +12,8 @@
 # ==============================================================================
 # Build one PON from unfiltered BAMs.
 #
-#   sbatch scripts/build_pon.sh xs2 all_unique
-#   sbatch scripts/build_pon.sh xs1 duplex
+#   SAMPLE_LIST=/path/to/list.txt sbatch scripts/build_pon.sh xs2 all_unique
+#   SAMPLE_LIST=/path/to/list.txt sbatch scripts/build_pon.sh xs1 duplex
 #
 # Replaces build_pon_unfiltered.sh, which was hardcoded to xs2 and carried a
 # header claiming "47 samples" inherited from the xs1 copy it was made from --
@@ -36,23 +36,26 @@ case "$ASSAY" in xs1|xs2) ;; *) echo "unknown assay: $ASSAY" >&2; exit 2 ;; esac
 case "$VARIANT" in all_unique|duplex) ;; *) echo "unknown variant: $VARIANT" >&2; exit 2 ;; esac
 
 # --- Configuration -----------------------------------------------------------
-BASE="/data1/shahr2/shahr2/test/krewlyzer"
 
 # The sample list decides the variant -- build-pon has no variant flag, so
 # all_unique and duplex differ only in which BAMs the list points at.
 #
-# The names below are the ones that exist, not ones derived from the variant:
-# duplex is the unsuffixed default (`xs1_pon.txt`) and all_unique carries the
-# suffix (`xs1_allUniq_pon.txt`). Deriving them from the variant name produced
-# two wrong guesses in a row -- `xs1_all_unique_pon.txt` and
-# `xs1_duplex_pon.txt`, neither of which is a real file.
-case "$VARIANT" in
-    all_unique) LIST_NAME="${ASSAY}_allUniq_pon.txt" ;;
-    duplex)     LIST_NAME="${ASSAY}_pon.txt" ;;
-esac
-SAMPLE_LIST="${SAMPLE_LIST:-${BASE}/${LIST_NAME}}"
+# Required, never guessed. Earlier versions composed a filename from the
+# variant and got it wrong twice; naming conventions for these lists are a
+# property of whoever assembled the cohort, not something this script can
+# derive. Passing it explicitly costs one argument and removes the whole class
+# of error -- and a wrong path fails in seconds rather than after a four-hour
+# build against the wrong BAMs.
+if [ -z "${SAMPLE_LIST:-}" ]; then
+    echo "usage: SAMPLE_LIST=<file> build_pon.sh <assay> <variant>" >&2
+    echo "" >&2
+    echo "  SAMPLE_LIST must name the BAM list for this assay and variant." >&2
+    echo "  It is not derived: all_unique and duplex differ only in which" >&2
+    echo "  BAMs they point at, and the naming is yours, not this script's." >&2
+    exit 2
+fi
 REFERENCE="${REFERENCE:-/data1/core006/access/production/resources/reference/versions/hg19/Homo_sapiens_assembly19.fasta}"
-OUTPUT_DIR="${OUTPUT_DIR:-${BASE}/pon/${ASSAY}}"
+OUTPUT_DIR="${OUTPUT_DIR:-$(pwd)/pon/${ASSAY}}"
 OUTPUT="${OUTPUT_DIR}/${ASSAY}.${VARIANT}.pon.parquet"
 
 # Per-sample feature outputs, kept.
@@ -97,7 +100,6 @@ mkdir -p "${OUTPUT_DIR}"
 
 if [ ! -f "${SAMPLE_LIST}" ]; then
     echo "Sample list not found: ${SAMPLE_LIST}" >&2
-    echo "Set SAMPLE_LIST=... to override." >&2
     exit 2
 fi
 
