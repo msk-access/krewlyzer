@@ -110,6 +110,9 @@ def _wps_bg_paths(tmp_path, value):
                 "group_id": ["Global_All"],
                 "nrl_bp": [value],
                 "periodicity_score": [0.4],
+                # Required since the band-limit change: these donors measured
+                # a real NRL, they just all measured the same one.
+                "nrl_at_band_limit": [False],
             }
         ).to_parquet(p)
         paths.append(str(p))
@@ -157,7 +160,12 @@ def test_a_varying_cohort_still_gets_a_real_sigma(tmp_path):
     for i, v in enumerate((185.0, 190.0, 196.0)):
         p = tmp_path / f"v{i}.WPS_background.parquet"
         pd.DataFrame(
-            {"group_id": ["Global_All"], "nrl_bp": [v], "periodicity_score": [0.4 + i]}
+            {
+                "group_id": ["Global_All"],
+                "nrl_bp": [v],
+                "periodicity_score": [0.4 + i],
+                "nrl_at_band_limit": [False],
+            }
         ).to_parquet(p)
         paths.append(str(p))
     row = _compute_wps_background_baseline(paths).groups.iloc[0]

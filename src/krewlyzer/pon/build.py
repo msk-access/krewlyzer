@@ -1967,11 +1967,18 @@ def _compute_wps_background_baseline(
     Aggregates nucleosome repeat length (NRL) and periodicity values across samples
     for Alu element stacking analysis.
 
+    Rows whose NRL sits at the FFT search-band edge (`nrl_at_band_limit`) are
+    excluded from the NRL fit but not from periodicity, and the group keeps its
+    row either way -- with NaN when fewer than `MIN_SAMPLES_PER_KEY` rows
+    measured an NRL. A group that xs1 can measure and xs2 cannot is itself
+    information when the two models are compared, which a dropped row destroys.
+
     Args:
         wps_background_paths: List of paths to WPS_background.parquet files
 
     Returns:
-        WpsBackgroundBaseline with per-group NRL/periodicity mean/std
+        WpsBackgroundBaseline with per-group NRL/periodicity mean/std, plus
+        `n_at_band_limit` and `n_nrl_fitted` recording why an NRL is absent
     """
     from .model import WpsBackgroundBaseline
 
@@ -2017,7 +2024,12 @@ def _compute_wps_background_baseline(
         # substitutes a literal is worse than a missing one: it is present,
         # plausible, and passes every schema check.
         nrl_col, periodicity_col = "nrl_bp", "periodicity_score"
-        missing = [c for c in (nrl_col, periodicity_col) if c not in combined.columns]
+        limit_col = "nrl_at_band_limit"
+        missing = [
+            c
+            for c in (nrl_col, periodicity_col, limit_col)
+            if c not in combined.columns
+        ]
         if missing:
             raise ValueError(
                 f"WPS_background is missing {missing}; found "
@@ -2026,23 +2038,51 @@ def _compute_wps_background_baseline(
                 "one once it is written."
             )
 
-        # Aggregate by group_id
+        # Aggregate by group_id.
+        #
+        # The NRL is fitted from the rows that measured one. `nrl_bp = 250` is
+        # the top of the FFT search band, not a repeat length: across the xs2
+        # duplex cohort all 174 band-limited rows carry exactly 250.0, one
+        # unique value with zero variance, while the 414 others spread
+        # 194.9 +/- 24.0. Averaging the two together reports the edge of the
+        # search as the healthy expectation -- invariant #3, with the irony
+        # that `nrl_at_band_limit` exists because of the original `nrl_bp`
+        # degeneracy.
+        #
+        # Periodicity is fitted from *all* rows, including band-limited ones.
+        # It was measured, not floored: the same 174 rows hold 174 distinct
+        # periodicity values spanning 0.37-0.86. Only the peak position hit the
+        # band edge; the peak's strength is still a measurement, and dropping
+        # it would discard 30% of the cohort for no reason.
         group_stats = []
         for group_id in combined["group_id"].unique():
             group_data = combined[combined["group_id"] == group_id]
+            at_limit = group_data[limit_col].fillna(False).astype(bool)
+            nrl_fit = group_data.loc[~at_limit, nrl_col]
+
+            # Below the floor there is no cohort to speak of, so the mean goes
+            # too -- not just the spread. A "healthy baseline" averaged over
+            # one donor is the same fabrication as a hardcoded one, and five
+            # xs2 duplex groups land here (four with no usable row at all,
+            # Chr13_All with exactly one).
+            fittable = len(nrl_fit.dropna()) >= MIN_SAMPLES_PER_KEY
 
             group_stats.append(
                 {
                     "group_id": group_id,
                     "n_samples": int(group_data[nrl_col].notna().sum()),
-                    "nrl_mean": group_data[nrl_col].mean(),
+                    # Recorded so the model says *why* a baseline is absent.
+                    # Without it an all-limited group is indistinguishable from
+                    # one that simply failed, and the reader cannot tell that
+                    # xs1 measured a group xs2 could not.
+                    "n_at_band_limit": int(at_limit.sum()),
+                    "n_nrl_fitted": int(len(nrl_fit.dropna())),
                     # No floor. An unmeasurable spread yields NaN, which
                     # propagates to an absent z rather than an enormous one --
                     # dividing by a placeholder turns "no information" into
-                    # "infinite precision". Same reasoning as
-                    # `nrl_at_band_limit`: a boundary value is not a
-                    # measurement.
-                    "nrl_std": sample_std_or_nan(group_data[nrl_col]),
+                    # "infinite precision".
+                    "nrl_mean": float(nrl_fit.mean()) if fittable else float("nan"),
+                    "nrl_std": sample_std_or_nan(nrl_fit) if fittable else float("nan"),
                     "periodicity_mean": group_data[periodicity_col].mean(),
                     "periodicity_std": sample_std_or_nan(group_data[periodicity_col]),
                 }

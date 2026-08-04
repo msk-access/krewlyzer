@@ -442,7 +442,12 @@ class WpsBackgroundBaseline:
     independent of gene expression patterns.
     """
 
-    # DataFrame: group_id, nrl_mean, nrl_std, periodicity_mean, periodicity_std
+    # DataFrame: group_id, n_samples, n_at_band_limit, n_nrl_fitted,
+    #            nrl_mean, nrl_std, periodicity_mean, periodicity_std
+    #
+    # `nrl_mean`/`nrl_std` are NaN when fewer than MIN_SAMPLES_PER_KEY rows
+    # measured an NRL away from the search-band edge; `n_at_band_limit` and
+    # `n_nrl_fitted` say which of the two it was.
     groups: pd.DataFrame
 
     def get_nrl_stats(self, group_id: str = GENOME_WIDE_GROUP) -> Optional[tuple]:
@@ -481,9 +486,22 @@ class WpsBackgroundBaseline:
         """
         match = self.groups[self.groups["group_id"] == group_id]
         if match.empty:
+            # Same warning as `get_nrl_stats`: silent on one and loud on the
+            # other is how a naming mistake reaches only half the output.
+            logger.warning(
+                f"WPS background baseline has no group {group_id!r}; "
+                f"available: {sorted(self.groups['group_id'].unique())[:5]}..."
+            )
             return None
         row = match.iloc[0]
-        return (row.get("periodicity_mean", 0), row.get("periodicity_std", 1))
+        # Indexed, not `.get(..., 0)` / `.get(..., 1)`.
+        #
+        # Those defaults were a standard normal, so a missing column made the
+        # z-score equal the raw periodicity -- ~0.47, an unremarkable number
+        # that would never have been questioned. It is the same fabricated
+        # baseline this block was rebuilt to remove, one level down in the
+        # reader. A missing column is now a KeyError, which is what it is.
+        return (row["periodicity_mean"], row["periodicity_std"])
 
     def compute_nrl_zscore(
         self, observed_nrl: float, group_id: str = GENOME_WIDE_GROUP
