@@ -1514,7 +1514,7 @@ class PonModel:
                 f"PON model built for {self.assay}, sample may be from different assay ({sample_assay})"
             )
 
-    def get_mean(self, channel: str) -> Optional[float]:
+    def get_mean(self, channel: str, ontarget: bool = False) -> Optional[float]:
         """
         Get expected mean coverage for a fragment size channel.
 
@@ -1524,11 +1524,21 @@ class PonModel:
         Args:
             channel: One of 'short', 'intermediate', 'long', 'ultra_short',
                      'core_short', 'mono_nucl', 'di_nucl'
+            ontarget: Read `gc_bias_ontarget` instead of the genome-wide
+                curves. Capture enrichment gives on-target fragments a
+                different GC profile, which is why panel mode fits a separate
+                block -- and that block was built, stored and read by nothing,
+                so on-target FSC normalised against the genome-wide curves
+                regardless. Falls back to them when it is absent, which is
+                what a pre-panel-mode PON has.
 
         Returns:
             Expected mean coverage (1.0 = no bias), or None if not available
         """
-        if self.gc_bias is None:
+        gc_bias = self.gc_bias_ontarget if ontarget else self.gc_bias
+        if gc_bias is None:
+            gc_bias = self.gc_bias
+        if gc_bias is None:
             return None
 
         # Map FSC channels to GC bias model channels
@@ -1545,9 +1555,9 @@ class PonModel:
         gc_channel = channel_map.get(channel, channel)
 
         # Return expected at median GC (0.45)
-        return self.gc_bias.get_expected(0.45, gc_channel)
+        return gc_bias.get_expected(0.45, gc_channel)
 
-    def get_variance(self, channel: str) -> Optional[float]:
+    def get_variance(self, channel: str, ontarget: bool = False) -> Optional[float]:
         """
         Get variance for a fragment size channel from PoN samples.
 
@@ -1555,11 +1565,16 @@ class PonModel:
 
         Args:
             channel: Fragment size channel name
+            ontarget: Read `gc_bias_ontarget`, as `get_mean` does. Falls back
+                to the genome-wide curves when that block is absent.
 
         Returns:
             Variance across PoN samples, or None if not available
         """
-        if self.gc_bias is None:
+        gc_bias = self.gc_bias_ontarget if ontarget else self.gc_bias
+        if gc_bias is None:
+            gc_bias = self.gc_bias
+        if gc_bias is None:
             return None
 
         # Map channels to GC bias std arrays
@@ -1576,9 +1591,9 @@ class PonModel:
 
         # Get appropriate std array
         std_map = {
-            "short": self.gc_bias.short_std,
-            "intermediate": self.gc_bias.intermediate_std,
-            "long": self.gc_bias.long_std,
+            "short": gc_bias.short_std,
+            "intermediate": gc_bias.intermediate_std,
+            "long": gc_bias.long_std,
         }
 
         std_list = std_map.get(gc_channel)

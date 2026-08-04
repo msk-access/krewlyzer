@@ -105,10 +105,10 @@ def test_fsc_log2_is_still_computed_when_the_baseline_is_there():
     from krewlyzer.core.fsc_processor import add_pon_channel_columns
 
     class _Pon:
-        def get_mean(self, channel):
+        def get_mean(self, channel, ontarget=False):
             return 200.0
 
-        def get_variance(self, channel):
+        def get_variance(self, channel, ontarget=False):
             return 0.04
 
     frame = add_pon_channel_columns(_fsc_frame(), _Pon())
@@ -307,3 +307,91 @@ def test_a_baseline_missing_its_sigma_column_scores_nothing(tmp_path):
     if out.exists():
         z = pd.read_csv(out, sep="\t")["z_score"].iloc[0]
         assert math.isnan(z), f"scored against a missing column: {z}"
+
+
+# ---------------------------------------------------------------------------
+# the two blocks that were built, stored, and read by nothing
+# ---------------------------------------------------------------------------
+
+
+def _gc(short_expected: float, short_std: float):
+    from krewlyzer.pon.model import GcBiasModel
+
+    bins = [0.30, 0.40, 0.50]
+    return GcBiasModel(
+        gc_bins=bins,
+        short_expected=[short_expected] * 3,
+        short_std=[short_std] * 3,
+        intermediate_expected=[1.0] * 3,
+        intermediate_std=[0.06] * 3,
+        long_expected=[1.0] * 3,
+        long_std=[0.07] * 3,
+    )
+
+
+def test_on_target_fsc_uses_the_on_target_gc_curves():
+    """`gc_bias_ontarget` was stored by every panel PON and read by nothing.
+
+    Capture enrichment shifts the GC profile, which is the entire reason panel
+    mode fits a second block -- and on-target FSC normalised against the
+    genome-wide curves regardless, so the block may as well not have existed.
+    """
+    pon = _pon_without_gc_bias()
+    pon.gc_bias = _gc(200.0, 0.04)
+    pon.gc_bias_ontarget = _gc(500.0, 0.09)
+
+    assert pon.get_mean("short") == pytest.approx(200.0)
+    assert pon.get_mean("short", ontarget=True) == pytest.approx(500.0)
+    assert pon.get_variance("short") == pytest.approx(0.04**2)
+    assert pon.get_variance("short", ontarget=True) == pytest.approx(0.09**2)
+
+
+def test_the_on_target_curves_fall_back_when_the_block_is_absent():
+    """A PON built before panel mode has only the genome-wide curves.
+
+    Falling back beats returning None: the genome-wide expectation is an
+    approximation, where None would drop the column entirely.
+    """
+    pon = _pon_without_gc_bias()
+    pon.gc_bias = _gc(200.0, 0.04)
+    assert pon.gc_bias_ontarget is None
+    assert pon.get_mean("short", ontarget=True) == pytest.approx(200.0)
+
+
+def test_on_target_fsc_columns_differ_from_genome_wide_ones():
+    """The observable consequence: the numbers actually change."""
+    from krewlyzer.core.fsc_processor import add_pon_channel_columns
+
+    pon = _pon_without_gc_bias()
+    pon.gc_bias = _gc(200.0, 0.04)
+    pon.gc_bias_ontarget = _gc(500.0, 0.09)
+
+    genome_wide = add_pon_channel_columns(_fsc_frame(), pon)["core_short_log2"].tolist()
+    on_target = add_pon_channel_columns(_fsc_frame(), pon, ontarget=True)[
+        "core_short_log2"
+    ].tolist()
+    assert genome_wide != on_target, "the on-target block still is not reaching FSC"
+
+
+def test_the_panel_wps_baseline_is_selectable():
+    """`wps_baseline_panel` was the other orphan.
+
+    `apply_wps_pon` ran only on the genome-wide file, so the anchors closest to
+    the targeted regions were the one WPS output with no healthy comparison.
+    """
+    import inspect
+
+    from krewlyzer.core.wps_pon import apply_wps_pon
+
+    params = inspect.signature(apply_wps_pon).parameters
+    assert "baseline_attr" in params
+    assert params["baseline_attr"].default == "wps_baseline"
+
+
+def test_the_panel_wps_output_is_scored_against_the_panel_baseline():
+    """And the caller actually asks for it."""
+    from krewlyzer.core import unified_processor
+
+    source = open((unified_processor.__file__ or "").replace(".pyc", ".py")).read()
+    assert 'baseline_attr="wps_baseline_panel"' in source, "panel WPS still unscored"
+    assert "ontarget=True," in source, "on-target FSC still uses genome-wide GC"

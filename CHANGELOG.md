@@ -4,6 +4,75 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **The two PON blocks that were built, stored, and read by nothing are now
+  applied.** Found by tracing all 21 baseline blocks from build → parquet →
+  read → apply; 19 were reaching scoring code and two were not.
+
+  `wps_baseline_panel` (326 anchors in the xs2 model) — `apply_wps_pon` ran
+  only on the genome-wide WPS, so `{sample}.WPS.panel.parquet` shipped raw.
+  The anchors closest to the targeted regions were the one WPS output with no
+  comparison to a healthy cohort. They now carry the same derived and z-scored
+  columns as the genome-wide file. The shape statistics borrow the genome-wide
+  `wps_shape_baseline`: a few hundred panel anchors is too few to fit a second
+  one, and they overlap the genome-wide set.
+
+  `gc_bias_ontarget` (25 bins) — `PonModel.get_mean` and `get_variance` read
+  `self.gc_bias` only, so on-target FSC and FSR normalised against the
+  genome-wide GC curves. Capture enrichment shifts the GC profile, which is the
+  entire reason panel mode fits a second block. `{sample}.FSC.ontarget`
+  `*_log2` and `*_reliability` values change as a result. A PON without the
+  block falls back to the genome-wide curves rather than dropping the column.
+
+- **A scored column is NaN when its baseline is absent, not 0.0.** Six
+  fabrications in the apply path, after `zscore_or_nan` removed nine from the
+  baseline classes:
+
+  | where | when | was | now |
+  |---|---|---|---|
+  | `fsc_processor` | no `gc_bias` | `{ch}_log2 = 0.0` | NaN |
+  | `fsc_processor` | no variance | `{ch}_reliability = 1.0` | NaN |
+  | `fsr_processor` | no long fragments | `ratio = short_count` | NaN |
+  | `fsr_processor` | ratio ≤ 0 | `short_long_log2 = 0.0` | NaN |
+  | `region_entropy.rs` | σ unmeasurable | `z = 0.0` | NaN |
+  | `region_entropy.rs` | σ column absent | σ ← 1.0, mean ← 0.0 | NaN |
+
+  Zero is never the cautious choice. A log2 ratio or z-score of zero says
+  "this sample sits exactly at the healthy baseline" — the most confident
+  statement either column can make, asserted precisely when nothing could be
+  compared. Measured: with `gc_bias` absent, three windows whose raw values
+  differed fourfold all read `0.0`.
+
+  The Rust pair defeated the Python fix until both were done. `entropy_std`
+  defaulted to `1.0` and `entropy_mean` to `0.0` — a standard normal — so a
+  builder storing NaN for a single-donor label produced the raw difference
+  rather than no score. And `position(...).unwrap_or(0)` read *column zero*
+  when a column was not found, which in a PON parquet is `table`.
+
+  `region_entropy_processor` was the fifth site of the `sample_std_or_nan`
+  defect and the only one outside `pon/build.py`.
+
+### Added
+- **`validate-pon` checks a packing list.** It read the blocks present in the
+  file and skipped the rest, so a block that vanished entirely was invisible to
+  every check — indistinguishable from one never expected. Demonstrated on the
+  real xs2 model: deleting `region_mds`, or `fsc_gene_baseline`, or almost
+  every baseline at once, produced an identical finding list each time.
+
+  That is the hole `region_mds` fell through when a Rust reader was handed a
+  format it could not parse. New findings: `PON.BLOCK_MISSING` for a core block
+  and `PON.BLOCK_MISSING_BAM_ONLY` for one that needs BAM input.
+
+  `fsd_baseline` and `gc_bias` also join the σ checks. Their σ lives in per-bin
+  columns rather than one `*_std`, which is why they were skipped — but both
+  are applied, and a degenerate `gc_bias` reaches every FSC log-ratio.
+
+- **`input_kind` in PON provenance** — `"bam"`, `"bed"`, `"mixed"` or
+  `"outputs"`. `mds_baseline` and `region_mds` need a BAM, so their absence is
+  legitimate for a fragment-BED cohort and a defect for a BAM one; without this
+  the gate could only warn either way. Models built before it record nothing
+  and still warn.
+
 ### Added
 - **`scripts/build_pon_array.sh`** — one SLURM task per sample, feeding
   `build-pon --from-outputs`. Extraction across a cohort is embarrassingly

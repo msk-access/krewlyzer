@@ -164,7 +164,9 @@ def _get_gc_weight(frag_len: int, gc_frac: float, correction_factors: dict) -> f
     return correction_factors.get((len_bin, gc_pct), 1.0)
 
 
-def add_pon_channel_columns(frame: "pd.DataFrame", pon) -> "pd.DataFrame":
+def add_pon_channel_columns(
+    frame: "pd.DataFrame", pon, ontarget: bool = False
+) -> "pd.DataFrame":
     """Add ``{channel}_log2`` and ``{channel}_reliability`` in place.
 
     Split out of ``process_fsc`` so it can be tested without a fragment BED.
@@ -185,10 +187,19 @@ def add_pon_channel_columns(frame: "pd.DataFrame", pon) -> "pd.DataFrame":
     The PON's ``gc_bias`` block reaches here through ``PonModel.get_mean``, so
     a model missing that block used to produce a confident zero in every window
     of every sample rather than a visibly absent column.
+
+    ``ontarget`` selects ``gc_bias_ontarget``. Capture enrichment gives
+    on-target fragments a different GC profile, which is why panel mode fits a
+    separate block -- one that was built and stored by every panel PON and read
+    by nothing, so on-target FSC normalised against the genome-wide curves.
     """
     for ch in CHANNELS:
-        mean = pon.get_mean(ch) if hasattr(pon, "get_mean") else None
-        var = pon.get_variance(ch) if hasattr(pon, "get_variance") else None
+        mean = pon.get_mean(ch, ontarget=ontarget) if hasattr(pon, "get_mean") else None
+        var = (
+            pon.get_variance(ch, ontarget=ontarget)
+            if hasattr(pon, "get_variance")
+            else None
+        )
 
         if mean and mean > 0:
             frame[f"{ch}_log2"] = np.log2(frame[ch] / mean + 1e-9)
@@ -210,6 +221,7 @@ def process_fsc(
     pon=None,
     output_format: str = "tsv",
     compress: bool = False,
+    ontarget: bool = False,
 ) -> Path:
     """
     Process GC-weighted fragment counts into FSC ML features.
@@ -290,7 +302,7 @@ def process_fsc(
     # Compute PoN log2 ratios and reliability if model provided
     if pon is not None:
         logger.info("Computing PoN log2 ratios...")
-        add_pon_channel_columns(final_df, pon)
+        add_pon_channel_columns(final_df, pon, ontarget=ontarget)
 
     # Write output
     _write_fsc_output(
