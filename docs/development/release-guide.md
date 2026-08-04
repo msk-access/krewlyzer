@@ -165,6 +165,25 @@ silently.
 
 ---
 
+## Phase 2.7: Stamp the bundled PONs
+
+The version-update script in Phase 2 uses `sed`, and a PON is a Parquet file —
+so the models are the one place a version literal does **not** get updated by
+it. They record the version of whatever built them, which is a `develop`
+checkout still reporting the previous release.
+
+```bash
+krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version X.Y.Z
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet
+```
+
+`stamp-pon` refuses to stamp a model that fails `validate-pon`, so a broken
+model cannot be blessed by this step. Re-run `validate-pon` afterwards anyway:
+the file that ships should be the file that was checked.
+
+Commit the restamped models with `git lfs push --all` **before** pushing the
+branch, or the pointers land without the objects.
+
 ## Phase 3: Update CHANGELOG
 
 Add new entry at the top of `CHANGELOG.md`:

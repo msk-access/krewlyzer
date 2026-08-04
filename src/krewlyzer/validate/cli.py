@@ -180,6 +180,58 @@ def validate_pon(
     raise typer.Exit(exit_code(result.findings))
 
 
+def stamp_pon(
+    pon_model: List[Path] = typer.Argument(
+        ..., exists=True, help="PON parquet file(s) to stamp."
+    ),
+    version: str = typer.Option(
+        ...,
+        "--version",
+        help="The release these models ship with, e.g. 0.9.0.",
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Report what would change and write nothing."
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Stamp even if validate-pon fails. For re-stamping a model that "
+        "already passed, not for blessing one that does not.",
+    ),
+) -> None:
+    """Stamp built PONs with the release they ship with.
+
+    A PON is built from `develop`, where the version still reads the previous
+    release -- so the model records that, however new the code is. Rather than
+    bump the version before a four-hour build, set it here as part of cutting
+    the release.
+
+    After this, `krewlyzer_version` means **the release this model is published
+    with**, not the code that produced it. That is what a compatibility guard
+    needs, and `build_date` still records when it was actually built.
+
+    Only the metadata row changes; every baseline is copied through unchanged
+    and the cohort digest is untouched. Re-run `validate-pon` afterwards --
+    the file that ships should be the file that was checked.
+    """
+    from .pon_stamp import stamp_release
+
+    for path in pon_model:
+        try:
+            previous = stamp_release(path, version, dry_run=dry_run, force=force)
+        except ValueError as exc:
+            console.print(f"[red]{path.name}: {exc}[/red]")
+            raise typer.Exit(2)
+        arrow = "would become" if dry_run else "->"
+        console.print(f"  {path.name}: {previous or '(unset)'} {arrow} {version}")
+
+    if not dry_run:
+        console.print(
+            "\n[yellow]Re-run validate-pon on these files[/yellow] -- the file "
+            "that ships should be the file that was checked."
+        )
+
+
 def describe_output(
     sample_dir: Path = typer.Argument(
         ...,

@@ -121,6 +121,7 @@ These read inputs or a finished output directory rather than producing features.
 | `validate-output` | Check results against the downstream output contract |
 | `validate-cohort` | Cross-sample degeneracy checks over fingerprints |
 | `validate-pon` | Check a PON **before** anything is scored against it |
+| `stamp-pon` | Record the release a built PON ships with |
 
 ```bash
 krewlyzer validate -G hg19                        # assets are intact

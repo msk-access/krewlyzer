@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **`krewlyzer stamp-pon`** — records the release a built PON ships with.
+
+  A PON is built from `develop`, where the version still reads the previous
+  release, so the model records that however new the code is. Bumping before a
+  four-hour build would fix it at the cost of putting a release number on
+  unreleased code; this is the other order — build, then stamp when cutting the
+  release. Added to the release guide as Phase 2.7, since the `sed`-based
+  version update cannot reach inside a Parquet file.
+
+  Afterwards `krewlyzer_version` means *the release this model is published
+  with*, not the code that produced it — which is the definition a
+  compatibility guard needs. `build_date` is untouched.
+
+  **It refuses to stamp a model that fails `validate-pon`.** Without that it
+  would be the shortest path to laundering: run it on one of the models
+  carrying the fabricated `167.0 / 5.0` baseline and it would claim exactly the
+  compatibility the guard exists to deny. `PON.NO_VERSION` alone does not
+  block, since that is the condition being fixed.
+
 ### Fixed
 - **`scripts/build_pon.sh` refuses to run on a pre-0.9.0 krewlyzer.** A 0.8.x
   `build-pon` rebuilds every defect this release fixes, exits 0, and produces

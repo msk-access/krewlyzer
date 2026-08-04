@@ -47,6 +47,7 @@ features.
 | [`validate-output`](#validate-output) | Check one sample against the output contract |
 | [`validate-cohort`](#validate-cohort) | Cross-sample degeneracy checks over fingerprints |
 | [`validate-pon`](#validate-pon) | Check a PON **before** anything is scored against it |
+| [`stamp-pon`](#stamp-pon) | Record the release a built PON ships with |
 
 ---
 
@@ -226,3 +227,34 @@ non-reversible digest of the sample IDs, plus an optional free-text
 digest reveals nothing about who is in it. A PON ships in this repository, in
 the Docker image and on PyPI, so it is the last place a patient identifier may
 appear.
+
+---
+
+### `stamp-pon` {#stamp-pon}
+
+```bash
+krewlyzer stamp-pon model.pon.parquet --version 0.9.0
+krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version 0.9.0 --dry-run
+```
+
+A PON is built from `develop`, where `pyproject.toml` still reads the previous
+release — so the model records that version however new the code is. Rather
+than bump before a four-hour build, set it here when cutting the release.
+
+**This changes what the field means.** Afterwards `krewlyzer_version` is *the
+release this model is published with*, not the code that produced it. That is
+the definition a compatibility guard needs. `build_date` is untouched, so the
+two together still say when it was actually built.
+
+!!! warning "A stamp is an assertion, so it has to be earned"
+    `stamp-pon` runs `validate-pon` first and **refuses on failure**. Without
+    that it would be the shortest path to laundering: run it on one of the
+    models carrying the fabricated `167.0 / 5.0` baseline and it would claim
+    exactly the compatibility the guard exists to deny.
+
+    `PON.NO_VERSION` alone does not block — that is the condition being fixed.
+    `--force` exists for re-stamping a model that already passed, and says so.
+
+Only the metadata row changes; every baseline is copied through unchanged and
+the cohort digest is unaffected. **Re-run `validate-pon` afterwards** — the
+file that ships should be the file that was checked.

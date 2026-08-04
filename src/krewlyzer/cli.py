@@ -53,6 +53,7 @@ from krewlyzer.validate.cli import (
     report_sample,
     validate_cohort,
     validate_pon,
+    stamp_pon,
     validate_output,
 )
 from krewlyzer import __version__
@@ -175,6 +176,7 @@ app.command()(validate)
 app.command(name="validate-output")(validate_output)
 app.command(name="validate-cohort")(validate_cohort)
 app.command(name="validate-pon")(validate_pon)
+app.command(name="stamp-pon")(stamp_pon)
 app.command(name="describe-output")(describe_output)
 app.command(name="report")(report_sample)
 
