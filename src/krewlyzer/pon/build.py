@@ -49,6 +49,51 @@ logger = logging.getLogger("build-pon")
 #: rather than by three separate literals happening to match.
 MIN_SAMPLES_PER_KEY = 3
 
+
+def sample_std_or_nan(values) -> float:
+    """Sample standard deviation, or NaN when there is no spread to measure.
+
+    The one rule, in one place. Both ``pandas.std()`` and ``np.std(ddof=1)``
+    return **0.0** for identical values and NaN only below two observations --
+    and 0.0 is the single worst answer available, because a z-score divided by
+    it is infinite rather than absent.
+
+    Six call sites computed a spread here and only one converted zero to NaN.
+    Three of the other five carried comments claiming they did. The models built
+    from them failed their own gate:
+
+        fsc_region_baseline.depth_std   2 non-positive
+        region_mds_exon.mds_std          2 non-positive
+        wps_background.nrl_std           1-4 non-positive
+
+    ``ddof=1`` throughout: a PON cohort is a sample of healthy donors, not the
+    population, and the population form understates the spread -- by 2.5% at
+    n=21 -- inflating every z built from it.
+
+    Mirrors ``mean_and_sd`` in ``rust/src/pon_builder.rs``, which has been
+    correct all along. That is why the WPS blocks were clean while the Python
+    ones were not.
+    """
+    finite = pd.to_numeric(pd.Series(list(values)), errors="coerce").dropna()
+    if len(finite) < 2:
+        return float("nan")
+
+    # Identity is tested on the values, not on the result.
+    #
+    # `std([0.95, 0.95, 0.95])` is 1.36e-16, not 0.0 -- cancellation in the
+    # variance sum leaves floating-point residue. A `sd <= 0` guard therefore
+    # misses the exact case it exists for, and a z divided by 1.36e-16 is 1e16.
+    # Comparing min to max is exact and needs no invented tolerance: values
+    # that genuinely differ, however slightly, keep whatever spread they have.
+    if float(finite.max()) == float(finite.min()):
+        return float("nan")
+
+    sd = float(finite.std(ddof=1))
+    if not np.isfinite(sd) or sd <= 0.0:
+        return float("nan")
+    return sd
+
+
 # Import core tools for processing samples
 from krewlyzer import _core
 
@@ -1705,18 +1750,16 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
 
         if values:
             kmer_expected[kmer] = np.mean(values)
-            # NaN, not 0.001: one observation has no spread, and a z
+            # NaN, not 0.001: no spread is not a small spread, and a z
             # divided by 0.001 is a fabrication with three decimal places.
-            kmer_std[kmer] = (
-                float(np.std(values, ddof=1)) if len(values) > 1 else float("nan")
-            )
+            kmer_std[kmer] = sample_std_or_nan(values)
 
     # Compute MDS mean/std
     mds_values = [s["mds"] for s in all_mds_data if s.get("mds") is not None]
     # mean 0.0 / std 1.0 would make `z` equal the raw MDS value -- about 0.95,
     # a perfectly ordinary-looking z-score for a baseline that was never fitted.
     mds_mean = float(np.mean(mds_values)) if mds_values else float("nan")
-    mds_std = float(np.std(mds_values, ddof=1)) if len(mds_values) > 1 else float("nan")
+    mds_std = sample_std_or_nan(mds_values)
 
     logger.info(
         f"MDS baseline: {len(kmer_expected)} k-mers, {len(all_mds_data)} samples"
@@ -1801,9 +1844,7 @@ def _compute_region_mds_exon_baseline(
         exon_key = (str(key[0]), str(key[1]))  # type: ignore[index]
         exon_stats[exon_key] = {
             "mds_mean": float(row["mean"]),
-            # NaN where pandas could not measure a spread. No floor: see
-            # zscore_or_nan in model.py.
-            "mds_std": float(row["std"]),
+            "mds_std": sample_std_or_nan(grouped.get_group(key)),
             "n_samples": int(row["count"]),
         }
 
@@ -2001,9 +2042,9 @@ def _compute_wps_background_baseline(
                     # "infinite precision". Same reasoning as
                     # `nrl_at_band_limit`: a boundary value is not a
                     # measurement.
-                    "nrl_std": group_data[nrl_col].std(),
+                    "nrl_std": sample_std_or_nan(group_data[nrl_col]),
                     "periodicity_mean": group_data[periodicity_col].mean(),
-                    "periodicity_std": group_data[periodicity_col].std(),
+                    "periodicity_std": sample_std_or_nan(group_data[periodicity_col]),
                 }
             )
 
@@ -2067,10 +2108,7 @@ def _compute_fsc_gene_baseline(
             # ddof=1: these are a sample of healthy donors, not the population.
             # np.std defaults to ddof=0 and understates the spread, which
             # inflates every z built from it -- by 2.5% at n=21.
-            std_depth = float(np.std(values, ddof=1))
-            # No floor: an unmeasurable spread yields NaN, so the z is absent
-            # rather than enormous. See _log_baseline_quality.
-            data[gene] = (mean_depth, std_depth or float("nan"), len(values))
+            data[gene] = (mean_depth, sample_std_or_nan(values), len(values))
         else:
             skipped += 1
 
@@ -2131,10 +2169,7 @@ def _compute_fsc_region_baseline(
             # ddof=1: these are a sample of healthy donors, not the population.
             # np.std defaults to ddof=0 and understates the spread, which
             # inflates every z built from it -- by 2.5% at n=21.
-            std_depth = float(np.std(values, ddof=1))
-            # No floor: an unmeasurable spread yields NaN, so the z is absent
-            # rather than enormous. See _log_baseline_quality.
-            data[region_id] = (mean_depth, std_depth, len(values))
+            data[region_id] = (mean_depth, sample_std_or_nan(values), len(values))
         else:
             skipped += 1
 
