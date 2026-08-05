@@ -42,11 +42,17 @@ def processed_sample(tmp_path, real_bam, real_reference):
         sample_name="DONOR1",
         reference=real_reference,
         params=SampleParams(threads=1),
-        enable_fsc=True,
+        # Every feature off. The motif tables are written during *extraction*
+        # (sample_processor.py:937), well before `run_features` at 1021, so
+        # none of them is needed to test this -- and leaving them on made the
+        # test demand the LFS-backed bin file, which CI does not have. It
+        # passed locally and failed there, which is the same environment
+        # dependence the `--from-outputs` end-to-end test had.
+        enable_fsc=False,
         enable_fsr=False,
-        enable_fsd=True,
-        enable_wps=True,
-        enable_ocf=True,
+        enable_fsd=False,
+        enable_wps=False,
+        enable_ocf=False,
         pon_mode=True,
         output_format="tsv",
         compress=False,
@@ -101,7 +107,7 @@ def test_writing_them_is_off_by_default(tmp_path, real_bam, real_reference):
         sample_name="DONOR2",
         reference=real_reference,
         params=SampleParams(threads=1),
-        enable_fsc=True,
+        enable_fsc=False,
         enable_fsr=False,
         enable_fsd=False,
         enable_wps=False,
