@@ -558,7 +558,14 @@ def build_pon(
     if bin_file is None:
         bin_file = assets.bins_100kb
 
-    if not bin_file.exists():
+    # Only extraction needs it.
+    #
+    # `--from-outputs` reads tables somebody else already computed, so it opens
+    # no BAM, no reference and no bin file. Failing the build for a missing
+    # extraction asset would make the aggregation route depend on a data
+    # package it never touches -- and it did: CI has no LFS payload, so every
+    # `--from-outputs` build died on this line while passing locally.
+    if from_outputs is None and not bin_file.exists():
         logger.error(f"Bin file not found: {bin_file}")
         raise typer.Exit(1)
 

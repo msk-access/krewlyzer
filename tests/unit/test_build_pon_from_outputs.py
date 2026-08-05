@@ -398,9 +398,24 @@ def test_the_mds_score_is_recomputed_when_its_table_is_absent(corpus):
 
 
 def _build(corpus: Path, output: Path):
+    """Always panel mode, on an explicit target BED.
+
+    Without one, panel mode depends on whether the assay's bundled targets
+    happen to be present -- which they are locally and are not in CI, where
+    the payload is LFS-backed. The same test then meant two different things
+    in two places, and the difference only surfaced as a CI-only failure.
+
+    The BED is written beside the corpus and contains one region. The panel
+    baselines are aggregated from the fixture's on-target tables, so nothing
+    reads its coordinates; it exists to pin the mode.
+    """
     from typer.testing import CliRunner
 
     from krewlyzer.cli import app
+
+    targets = corpus.parent / "targets.bed"
+    if not targets.exists():
+        targets.write_text("17\t7000000\t7010000\tTP53\n")
 
     return CliRunner().invoke(
         app,
@@ -414,6 +429,8 @@ def _build(corpus: Path, output: Path):
             "/dev/null",
             "-o",
             str(output),
+            "--target-regions",
+            str(targets),
             "--cohort-label",
             "synthetic",
         ],
@@ -486,3 +503,36 @@ def test_an_incomplete_cohort_stops_the_build_unless_allowed(corpus, tmp_path):
         leftover.unlink()
 
     assert _build(corpus, tmp_path / "a.pon.parquet").exit_code == 1
+
+
+def test_aggregation_needs_no_extraction_assets(corpus, tmp_path):
+    """No BAM is opened, so no reference, bin file or anchor set is needed.
+
+    This failed in CI while passing locally: the bin file is LFS-backed, the
+    runner has no LFS payload, and `build-pon` refused before reaching the
+    branch that would never have read it. An aggregation route that depends on
+    a data package it does not touch is not much of an aggregation route.
+    """
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    output = tmp_path / "no-assets.pon.parquet"
+    result = CliRunner().invoke(
+        app,
+        [
+            "build-pon",
+            "--from-outputs",
+            str(corpus),
+            "--assay",
+            "xs1",
+            "-r",
+            "/dev/null",
+            "-o",
+            str(output),
+            "--bin-file",
+            str(tmp_path / "definitely-not-here.bed.gz"),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert output.exists()
