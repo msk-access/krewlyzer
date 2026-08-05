@@ -202,6 +202,14 @@ def _process_sample_subprocess(
         pon_mode=True,  # Skip PON normalization (we're building it)
         output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
         compress=False,  # Temp files only — no compression needed
+        # Makes the kept cache readable by --from-outputs.
+        #
+        # The k-mer counts already reach the model through memory, so this
+        # changes nothing about the PON being built. It changes what the cache
+        # is worth afterwards: without these two tables the directory is short
+        # of the one input --from-outputs cannot reconstruct, so re-aggregating
+        # after an aggregation fix meant re-reading every BAM.
+        write_motif_files=True,
     )
 
     # Log memory and time after sample processing
@@ -801,6 +809,9 @@ def build_pon(
                         pon_mode=True,  # Skip PON normalization (we're building it)
                         output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
                         compress=False,  # Temp files only — no compression needed
+                        # As in the subprocess path above: the cache is only
+                        # re-aggregatable if it carries the motif tables.
+                        write_motif_files=True,
                     )
 
                     all_outputs.append(outputs)
@@ -1660,9 +1671,14 @@ def build_pon(
 
     # Cleanup, unless the caller asked to keep the sample outputs.
     if keep_sample_outputs is not None:
+        # Name the command, because "reuse them" was not actionable and the
+        # cache could not in fact be reused until it started carrying the
+        # motif tables. Re-aggregating is minutes; re-extracting is hours.
+        logger.info(f"Kept per-sample outputs in {temp_output_dir}")
         logger.info(
-            f"Kept per-sample outputs in {temp_output_dir} -- reuse them for a "
-            "rebuild or for leave-one-out calibration instead of re-extracting."
+            "  Rebuild from them without re-reading a BAM:\n"
+            f"    krewlyzer build-pon --from-outputs {temp_output_dir} "
+            f"--assay {assay} -r {reference} -o {output}"
         )
     elif temp_output_dir and Path(temp_output_dir).exists():
         shutil.rmtree(temp_output_dir)

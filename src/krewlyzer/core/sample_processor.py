@@ -817,6 +817,7 @@ def process_sample(
     # Output format (forwarded to GC factor writes; feature outputs use run_features params)
     output_format: str = "tsv",
     compress: bool = False,
+    write_motif_files: bool = False,
 ) -> SampleOutputs:
     """
     Process a single sample through full feature extraction pipeline.
@@ -916,6 +917,44 @@ def process_sample(
         outputs.gc_observations_ontarget = result.gc_observations_ontarget
         outputs.mds_counts = result.kmer_frequencies
         outputs.mds_score = result.mds_score
+
+        # Write the motif tables, when asked.
+        #
+        # This has to live here: `write_motif_outputs` takes an
+        # `ExtractionResult`, which is live at this point and never returned,
+        # so no caller can do it afterwards. `run-all` calls it itself and
+        # `build-pon` did not, which is why a `--keep-sample-outputs` cache has
+        # no `EndMotif` or `MDS` table even though the same k-mer counts reach
+        # the model through memory two lines above.
+        #
+        # That gap made the cache unreadable by `--from-outputs`: today's
+        # builds are correct, but re-aggregating one after an aggregation fix
+        # -- the whole point of that route -- was impossible without re-reading
+        # every BAM.
+        #
+        # Default False so `run-all` keeps writing them at its own call site
+        # and nothing is written twice.
+        if write_motif_files:
+            try:
+                written = write_motif_outputs(
+                    result,
+                    output_dir,
+                    include_ontarget=bool(result.em_counts_ontarget),
+                    output_format=output_format,
+                    compress=compress,
+                )
+                logger.debug(
+                    f"[{short_id}] wrote motif tables: " f"{', '.join(sorted(written))}"
+                )
+            except Exception as exc:
+                # Loud. A cache silently short of these files is exactly the
+                # condition this flag exists to remove, and it would only
+                # surface much later as `--from-outputs` refusing the sample.
+                logger.error(
+                    f"[{short_id}] failed to write motif tables: "
+                    f"{type(exc).__name__}: {exc}. This sample's cache will be "
+                    "rejected by build-pon --from-outputs."
+                )
 
         # Log checkpoint after extraction
         elapsed = time.time() - phase_start

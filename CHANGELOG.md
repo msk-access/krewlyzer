@@ -4,6 +4,39 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **A kept `build-pon` cache could not be re-aggregated.** `--keep-sample-outputs`
+  exists so a rebuild does not re-read every BAM — 55–97 minutes per sample,
+  ~15 hours for 47 — and every defect found in the 0.9.0 models has been in
+  *aggregation*, so re-checking one should cost minutes.
+
+  It could not, because `process_sample` never called `write_motif_outputs`:
+  `run-all` did it at its own call site and `build-pon` did not. A kept cache
+  therefore had no `EndMotif` or `MDS` table, even though the same k-mer counts
+  reached the model through memory. That is the one input `--from-outputs`
+  cannot reconstruct, and `krewlyzer motif` needs a BAM, so it could not be
+  backfilled either. Measured against the real 0.9.0 cluster cache: all 47 xs1
+  duplex directories were refused, each with `missing .EndMotif`.
+
+  `process_sample` now takes `write_motif_files`, which `build-pon` passes.
+  It defaults to `False` so `run-all` keeps writing them itself and nothing is
+  written twice. The call has to live there because `write_motif_outputs` takes
+  an `ExtractionResult`, which is live inside `process_sample` and never
+  returned.
+
+  The resume story is deliberately *"re-aggregate the cache"* rather than
+  *"skip finished samples in the extraction loop"*. The in-process path
+  collects from live `SampleOutputs` objects, not from the directory, so
+  skipping extraction would skip collection too and drop the sample from every
+  baseline without saying so. On success the build now prints the exact
+  `--from-outputs` command instead of an unactionable "reuse them".
+
+- **`--from-outputs` required extraction assets it never reads.** No BAM, no
+  reference, no bin file — but `build-pon` refused when the bundled bin file
+  was missing, before reaching the branch that would not have opened it. The
+  bin file is LFS-backed, so every `--from-outputs` build failed in CI while
+  passing locally.
+
 ### Changed
 - **The two PON blocks that were built, stored, and read by nothing are now
   applied.** Found by tracing all 21 baseline blocks from build → parquet →
