@@ -31,11 +31,15 @@ def _pon(tmp_path, *, nrl_std, version="0.8.3", name="t.pon.parquet"):
                 "build_date": "2026-08-03",
                 "n_samples": 21.0,
                 "reference": "r",
-                "panel_mode": True,
+                # Not panel mode: these tests are about the version stamp,
+                # and panel mode would require nine on-target blocks the
+                # fixture has no opinion about.
+                "panel_mode": False,
                 "target_regions_file": "t",
                 "krewlyzer_version": version,
                 "cohort_digest": "abc123def4567890",
                 "cohort_label": "healthy-donors",
+                "input_kind": "bed",
             }
         ]
     )
@@ -47,8 +51,14 @@ def _pon(tmp_path, *, nrl_std, version="0.8.3", name="t.pon.parquet"):
             "nrl_std": nrl_std,
         }
     )
+    # The core blocks come from `pon_fixtures`: since the gate checks a
+    # packing list, metadata plus one block is an incomplete PON and
+    # `stamp_release` would refuse it for that rather than for its sigma.
+    from . import pon_fixtures
+
     path = tmp_path / name
-    pd.concat([meta, block], ignore_index=True).to_parquet(path)
+    frames = [meta] + pon_fixtures.core_blocks(exclude=("wps_background",)) + [block]
+    pd.concat(frames, ignore_index=True).to_parquet(path)
     return path
 
 

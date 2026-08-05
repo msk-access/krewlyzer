@@ -502,6 +502,11 @@ def run_features(
                 pon=pon_for_zscore,
                 output_format=resolved_output_format,
                 compress=resolved_compress,
+                # Normalise against the on-target GC curves, not the
+                # genome-wide ones. `gc_bias_ontarget` exists precisely
+                # because capture enrichment shifts the GC profile, and it
+                # was stored by every panel PON and read by nothing.
+                ontarget=True,
             )
             logger.info(f"✓ FSC on-target: {outputs.fsc_ontarget.name}")
 
@@ -849,6 +854,26 @@ def run_features(
                     resolved_compress,
                     True,  # silent
                 )
+                # Score the panel anchors against the panel baseline.
+                #
+                # `wps_baseline_panel` was built by every panel-mode PON,
+                # written to the parquet, read back into the model -- and
+                # consumed by nothing. `apply_wps_pon` ran only on the
+                # genome-wide file, so the anchors nearest the targeted
+                # regions were the one WPS output with no comparison to a
+                # healthy cohort.
+                if pon_for_zscore is not None:
+                    from .wps_pon import apply_wps_pon
+
+                    n_panel = apply_wps_pon(
+                        outputs.wps_panel,
+                        pon_for_zscore,
+                        output_base=outputs.wps_panel.with_suffix(""),
+                        output_format=resolved_output_format,
+                        compress=resolved_compress,
+                        baseline_attr="wps_baseline_panel",
+                    )
+                    logger.info(f"✓ WPS panel: {n_panel} anchors scored vs PON")
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")
         except Exception as e:
             logger.debug(f"Panel WPS not available: {e}")

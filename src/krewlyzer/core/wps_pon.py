@@ -125,8 +125,16 @@ def apply_wps_pon(
     output_format: str = "tsv",
     compress: bool = False,
     column: str = "wps_nuc",
+    baseline_attr: str = "wps_baseline",
 ) -> int:
     """Add PON-derived columns to a WPS table. Returns anchors scored.
+
+    ``baseline_attr`` selects which vector baseline to score against:
+    ``wps_baseline`` for the genome-wide anchors, ``wps_baseline_panel`` for
+    the assay-specific ones. The panel baseline was built and stored by every
+    panel-mode PON and read by nothing, so the ``.WPS.panel`` output shipped
+    raw -- the anchors closest to the targeted regions were the only ones with
+    no comparison to a healthy cohort.
 
     Emits, per anchor:
 
@@ -147,12 +155,15 @@ def apply_wps_pon(
         logger.warning(f"WPS output lacks region_id/{column}: {wps_path}")
         return 0
 
-    vector_baseline = getattr(pon, "wps_baseline", None)
+    vector_baseline = getattr(pon, baseline_attr, None)
+    # The shape statistics are fitted on the genome-wide anchor set only. The
+    # panel anchors overlap it and number a few hundred, too few to justify a
+    # second block, so they borrow it rather than go unscored.
     shape_baseline = getattr(pon, "wps_shape_baseline", None)
     if vector_baseline is None:
         logger.warning(
-            "PON has no wps_baseline; WPS keeps its raw profile and gets no "
-            "z-scores. Rebuild the PON with build-pon."
+            f"PON has no {baseline_attr}; WPS keeps its raw profile and gets "
+            "no z-scores. Rebuild the PON with build-pon."
         )
         return 0
     if shape_baseline is None:

@@ -442,7 +442,12 @@ class WpsBackgroundBaseline:
     independent of gene expression patterns.
     """
 
-    # DataFrame: group_id, nrl_mean, nrl_std, periodicity_mean, periodicity_std
+    # DataFrame: group_id, n_samples, n_at_band_limit, n_nrl_fitted,
+    #            nrl_mean, nrl_std, periodicity_mean, periodicity_std
+    #
+    # `nrl_mean`/`nrl_std` are NaN when fewer than MIN_SAMPLES_PER_KEY rows
+    # measured an NRL away from the search-band edge; `n_at_band_limit` and
+    # `n_nrl_fitted` say which of the two it was.
     groups: pd.DataFrame
 
     def get_nrl_stats(self, group_id: str = GENOME_WIDE_GROUP) -> Optional[tuple]:
@@ -481,9 +486,22 @@ class WpsBackgroundBaseline:
         """
         match = self.groups[self.groups["group_id"] == group_id]
         if match.empty:
+            # Same warning as `get_nrl_stats`: silent on one and loud on the
+            # other is how a naming mistake reaches only half the output.
+            logger.warning(
+                f"WPS background baseline has no group {group_id!r}; "
+                f"available: {sorted(self.groups['group_id'].unique())[:5]}..."
+            )
             return None
         row = match.iloc[0]
-        return (row.get("periodicity_mean", 0), row.get("periodicity_std", 1))
+        # Indexed, not `.get(..., 0)` / `.get(..., 1)`.
+        #
+        # Those defaults were a standard normal, so a missing column made the
+        # z-score equal the raw periodicity -- ~0.47, an unremarkable number
+        # that would never have been questioned. It is the same fabricated
+        # baseline this block was rebuilt to remove, one level down in the
+        # reader. A missing column is now a KeyError, which is what it is.
+        return (row["periodicity_mean"], row["periodicity_std"])
 
     def compute_nrl_zscore(
         self, observed_nrl: float, group_id: str = GENOME_WIDE_GROUP
@@ -890,6 +908,11 @@ class PonModel:
     krewlyzer_version: str = ""
     cohort_digest: str = ""
     cohort_label: str = ""
+    #: What the cohort was made of: "bam", "bed", "mixed" or "outputs".
+    #: Empty for models built before the field existed. `validate-pon` uses it
+    #: to tell a block that was never asked for from one that failed --
+    #: `mds_baseline` and `region_mds` need a BAM.
+    input_kind: str = ""
 
     # Off-target baselines (primary - always present)
     gc_bias: Optional[GcBiasModel] = None
@@ -1380,6 +1403,7 @@ class PonModel:
             krewlyzer_version=str(meta.get("krewlyzer_version", "")),
             cohort_digest=str(meta.get("cohort_digest", "")),
             cohort_label=str(meta.get("cohort_label", "")),
+            input_kind=str(meta.get("input_kind", "") or ""),
             gc_bias=gc_bias,
             fsd_baseline=fsd_baseline,
             wps_baseline=wps_baseline,
@@ -1490,7 +1514,7 @@ class PonModel:
                 f"PON model built for {self.assay}, sample may be from different assay ({sample_assay})"
             )
 
-    def get_mean(self, channel: str) -> Optional[float]:
+    def get_mean(self, channel: str, ontarget: bool = False) -> Optional[float]:
         """
         Get expected mean coverage for a fragment size channel.
 
@@ -1500,11 +1524,21 @@ class PonModel:
         Args:
             channel: One of 'short', 'intermediate', 'long', 'ultra_short',
                      'core_short', 'mono_nucl', 'di_nucl'
+            ontarget: Read `gc_bias_ontarget` instead of the genome-wide
+                curves. Capture enrichment gives on-target fragments a
+                different GC profile, which is why panel mode fits a separate
+                block -- and that block was built, stored and read by nothing,
+                so on-target FSC normalised against the genome-wide curves
+                regardless. Falls back to them when it is absent, which is
+                what a pre-panel-mode PON has.
 
         Returns:
             Expected mean coverage (1.0 = no bias), or None if not available
         """
-        if self.gc_bias is None:
+        gc_bias = self.gc_bias_ontarget if ontarget else self.gc_bias
+        if gc_bias is None:
+            gc_bias = self.gc_bias
+        if gc_bias is None:
             return None
 
         # Map FSC channels to GC bias model channels
@@ -1521,9 +1555,9 @@ class PonModel:
         gc_channel = channel_map.get(channel, channel)
 
         # Return expected at median GC (0.45)
-        return self.gc_bias.get_expected(0.45, gc_channel)
+        return gc_bias.get_expected(0.45, gc_channel)
 
-    def get_variance(self, channel: str) -> Optional[float]:
+    def get_variance(self, channel: str, ontarget: bool = False) -> Optional[float]:
         """
         Get variance for a fragment size channel from PoN samples.
 
@@ -1531,11 +1565,16 @@ class PonModel:
 
         Args:
             channel: Fragment size channel name
+            ontarget: Read `gc_bias_ontarget`, as `get_mean` does. Falls back
+                to the genome-wide curves when that block is absent.
 
         Returns:
             Variance across PoN samples, or None if not available
         """
-        if self.gc_bias is None:
+        gc_bias = self.gc_bias_ontarget if ontarget else self.gc_bias
+        if gc_bias is None:
+            gc_bias = self.gc_bias
+        if gc_bias is None:
             return None
 
         # Map channels to GC bias std arrays
@@ -1552,9 +1591,9 @@ class PonModel:
 
         # Get appropriate std array
         std_map = {
-            "short": self.gc_bias.short_std,
-            "intermediate": self.gc_bias.intermediate_std,
-            "long": self.gc_bias.long_std,
+            "short": gc_bias.short_std,
+            "intermediate": gc_bias.intermediate_std,
+            "long": gc_bias.long_std,
         }
 
         std_list = std_map.get(gc_channel)

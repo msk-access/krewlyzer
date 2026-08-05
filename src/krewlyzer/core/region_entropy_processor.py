@@ -88,8 +88,16 @@ class RegionEntropyBaseline:
                 std = float(np.std(values, ddof=1))
                 data[label] = (mean, std)
             elif len(values) == 1:
-                # Single sample: use value as mean, set std=0 (no normalization)
-                data[label] = (float(values[0]), 0.0)
+                # One donor measures a centre but not a spread, so the spread
+                # is NaN rather than 0.0.
+                #
+                # This is the fifth site of the `sample_std_or_nan` defect and
+                # the only one outside `pon/build.py`, which is why the earlier
+                # sweep missed it. Zero is the worst possible answer: the Rust
+                # consumer treats a sigma at or below 1e-9 as "cannot divide"
+                # and emits a z-score of 0.0, so a single-donor baseline made
+                # every sample look exactly average at that label.
+                data[label] = (float(values[0]), float("nan"))
 
         logger.info(f"Built RegionEntropyBaseline with {len(data)} labels")
         return cls(data)

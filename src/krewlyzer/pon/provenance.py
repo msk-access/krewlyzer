@@ -65,6 +65,7 @@ def build_provenance(
     sample_paths: Iterable[Path],
     krewlyzer_version: str,
     cohort_label: Optional[str] = None,
+    input_kind: str = "",
 ) -> dict:
     """The provenance fields to write into a PON's metadata row.
 
@@ -72,9 +73,17 @@ def build_provenance(
     every feature *means*, so a PON built by an earlier version is not merely
     old, it is measuring something else. Recording it is what lets the loader
     refuse one (Phase C3) instead of silently producing wrong z-scores.
+
+    ``input_kind`` records what the cohort was made of -- ``"bam"``,
+    ``"bed"``, ``"mixed"`` or ``"outputs"``. Without it the gate cannot tell a
+    block that was never asked for from one that failed: ``mds_baseline`` and
+    ``region_mds`` need a BAM, so their absence is legitimate for a fragment-BED
+    cohort and a defect for a BAM one. It stayed a warning for both until this
+    field existed. Empty for models built before it did.
     """
     return {
         "krewlyzer_version": krewlyzer_version,
         "cohort_digest": cohort_digest(sample_paths),
         "cohort_label": cohort_label or "",
+        "input_kind": input_kind,
     }

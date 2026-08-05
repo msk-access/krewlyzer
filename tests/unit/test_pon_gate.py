@@ -35,8 +35,21 @@ _SHIPPED = sorted(
 
 
 def _write(tmp_path: Path, *frames: pd.DataFrame) -> Path:
+    """A PON complete enough to reach the check under test.
+
+    The core blocks come from `pon_fixtures`: since the gate started checking a
+    packing list, a file holding only metadata plus one block fails for being
+    incomplete, which would mask whatever the test was actually about.
+    """
+    from . import pon_fixtures
+
+    meta = [f for f in frames if (f["table"] == "metadata").all()]
+    rest = [f for f in frames if not (f["table"] == "metadata").all()]
+    supplied = {str(f["table"].iloc[0]) for f in rest}
+    filler = pon_fixtures.core_blocks(exclude=tuple(supplied))
+
     path = tmp_path / "t.pon.parquet"
-    pd.concat(frames, ignore_index=True).to_parquet(path)
+    pd.concat(meta + filler + rest, ignore_index=True).to_parquet(path)
     return path
 
 
@@ -49,6 +62,10 @@ def _metadata(**overrides) -> pd.DataFrame:
         "krewlyzer_version": "0.9.0",
         "cohort_digest": "deadbeefcafe0000",
         "cohort_label": "healthy-donors",
+        # Fragment BEDs, so region_mds and mds_baseline are legitimately
+        # absent and warn rather than fail.
+        "input_kind": "bed",
+        "panel_mode": False,
     }
     row.update(overrides)
     return pd.DataFrame([row])
@@ -213,3 +230,133 @@ def test_describe_reports_provenance_without_identifiers(tmp_path):
     line = describe(path)
     assert "0.9.0" in line and "deadbeefcafe0000" in line
     assert "healthy-donors" in line
+
+
+# ---------------------------------------------------------------------------
+# the packing list
+# ---------------------------------------------------------------------------
+
+#: A sigma that varies across groups, i.e. one that was actually fitted.
+_FITTED = [4.0, 5.1, 6.2, 4.8, 5.5]
+
+
+def test_a_block_that_vanished_is_noticed(tmp_path):
+    """Every other check reads the blocks present and skips the rest.
+
+    Demonstrated on a real model before this existed: deleting `region_mds`, or
+    `fsc_gene_baseline`, or almost every baseline at once, produced an
+    identical finding list each time. A block absent from the file is invisible
+    to a check that iterates the file.
+    """
+    from . import pon_fixtures
+
+    path = pon_fixtures.complete(
+        tmp_path, _background(_FITTED), exclude=("ocf_baseline",)
+    )
+    findings = check_pon(path)
+    missing = [f for f in findings if f.id == "PON.BLOCK_MISSING"]
+    assert missing, "a missing core block went unnoticed"
+    assert "ocf_baseline" in missing[0].message
+    assert exit_code(findings) == 1
+
+
+def test_a_complete_model_is_not_accused_of_missing_anything(tmp_path):
+    """The other direction, so the check cannot be 'always complain'."""
+    from . import pon_fixtures
+
+    path = pon_fixtures.complete(tmp_path, _background(_FITTED))
+    ids = {f.id for f in check_pon(path)}
+    assert "PON.BLOCK_MISSING" not in ids
+    assert exit_code(check_pon(path)) == 0
+
+
+def test_bam_only_blocks_warn_for_a_bed_cohort_and_fail_for_a_bam_one(tmp_path):
+    """`input_kind` is what makes this decidable.
+
+    `mds_baseline` and `region_mds` need a BAM, so a fragment-BED cohort lacks
+    them legitimately. Without the field the gate could only warn either way --
+    which is how `region_mds` vanishing from a BAM build stayed a warning.
+    """
+    from . import pon_fixtures
+
+    for name in ("a", "b"):
+        (tmp_path / name).mkdir(parents=True, exist_ok=True)
+    bed = pon_fixtures.complete(tmp_path / "a", _background(_FITTED), input_kind="bed")
+    bam = pon_fixtures.complete(tmp_path / "b", _background(_FITTED), input_kind="bam")
+
+    bed_finding = [f for f in check_pon(bed) if f.id == "PON.BLOCK_MISSING_BAM_ONLY"]
+    bam_finding = [f for f in check_pon(bam) if f.id == "PON.BLOCK_MISSING_BAM_ONLY"]
+    assert bed_finding and bed_finding[0].severity is Severity.WARN
+    assert bam_finding and bam_finding[0].severity is Severity.ERROR
+    assert exit_code(check_pon(bed)) == 0, "a BED cohort must not be failed for this"
+    assert exit_code(check_pon(bam)) == 1
+
+
+def test_panel_mode_requires_the_on_target_blocks(tmp_path):
+    """A panel PON without them scores on-target regions against nothing."""
+    from . import pon_fixtures
+
+    path = pon_fixtures.complete(
+        tmp_path, _background(_FITTED), panel_mode=True, input_kind="bed"
+    )
+    missing = [f for f in check_pon(path) if f.id == "PON.BLOCK_MISSING"]
+    assert missing
+    assert "gc_bias_ontarget" in missing[0].message
+    assert "wps_baseline_panel" in missing[0].message
+
+
+# ---------------------------------------------------------------------------
+# the blocks whose sigma is shaped differently
+# ---------------------------------------------------------------------------
+
+
+def test_a_degenerate_gc_bias_is_caught(tmp_path):
+    """It was unchecked because its sigma sits in per-bin columns.
+
+    `gc_bias` is the worst one to leave unchecked: it reaches every FSC
+    log-ratio and every FSR normalisation through `PonModel.get_mean`.
+    """
+    from . import pon_fixtures
+
+    flat = pd.DataFrame(
+        {
+            "table": "gc_bias",
+            "gc_bin": [0.30, 0.35, 0.40, 0.45, 0.50],
+            "short_expected": [1.0] * 5,
+            "short_std": [0.05] * 5,  # the signature: one value, every bin
+            "intermediate_expected": [1.0] * 5,
+            "intermediate_std": [0.06, 0.07, 0.08, 0.09, 0.10],
+            "long_expected": [1.0] * 5,
+            "long_std": [0.07, 0.08, 0.09, 0.10, 0.11],
+        }
+    )
+    path = pon_fixtures.complete(
+        tmp_path, _background(_FITTED), flat, exclude=("gc_bias",)
+    )
+    hits = [
+        f
+        for f in check_pon(path)
+        if f.id == "PON.BLOCK_DEGENERATE" and f.table == "gc_bias"
+    ]
+    assert hits, "a constant gc_bias sigma was not caught"
+    assert hits[0].column == "short_std"
+
+
+def test_a_nonpositive_fsd_sigma_is_caught(tmp_path):
+    """FSD supplies the log-ratios; a zero sigma there is an infinite z."""
+    from . import pon_fixtures
+
+    bad = pd.DataFrame(
+        {
+            "table": "fsd_baseline",
+            "arm": ["1p"] * 5,
+            "size_bin": [65, 70, 75, 80, 85],
+            "expected": [0.02, 0.03, 0.04, 0.05, 0.06],
+            "std": [0.004, 0.0, 0.006, 0.007, 0.008],
+        }
+    )
+    path = pon_fixtures.complete(
+        tmp_path, _background(_FITTED), bad, exclude=("fsd_baseline",)
+    )
+    hits = [f for f in check_pon(path) if f.id == "PON.NONPOSITIVE_SIGMA"]
+    assert any(f.table == "fsd_baseline" for f in hits)
