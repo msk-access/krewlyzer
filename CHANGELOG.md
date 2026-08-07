@@ -5,6 +5,38 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 ### Fixed
+- **The Rust `mean_and_sd` reported floating-point residue as a spread.**
+  `if sd > 0.0 { sd } else { NAN }` is the same hole `sample_std_or_nan` closed
+  on the Python side, and it misses the case it exists for: summation error
+  grows with n, so identical donors give residue rather than a clean zero.
+  21 copies of `0.1` — the xs2 cohort size — yield `7.6e-9`; 8 copies of
+  `-0.3333333` yield `3.2e-8`. Both pass `> 0.0` and become divisors. The
+  existing test used `[3.0, 3.0, 3.0]`, which cancels exactly, so it passed
+  throughout.
+
+  Measured in the freshly rebuilt models, where these reach `compute_z_vector`
+  through the same `std > 0` guard:
+
+  | model | positions affected | anchors touched |
+  |---|---:|---:|
+  | `xs1.all_unique` | 4.5% | 38% |
+  | `xs2.all_unique` | 12.2% | 57% |
+  | `xs2.duplex` | 55.4% | 74% |
+
+  A typical real σ there is 0.4–1.2, so a one-unit deviation against a residue
+  σ scores **z ≈ 10¹¹**. Those are positions where every donor looked the same,
+  which is exactly where a sample doing something unusual should have been
+  reported as absent rather than astronomically significant.
+
+  Identity is now tested on the values (`min == max`), which is exact and
+  invents no tolerance — values one ULP apart keep their spread, pinned by a
+  test.
+
+  Found by inspecting `wps_baseline`, the block that is 99% of the file and the
+  one `validate-pon` cannot check, because its σ lives inside 200-element
+  vectors rather than a column.
+
+### Fixed
 - **A kept `build-pon` cache could not be re-aggregated.** `--keep-sample-outputs`
   exists so a rebuild does not re-read every BAM — 55–97 minutes per sample,
   ~15 hours for 47 — and every defect found in the 0.9.0 models has been in
