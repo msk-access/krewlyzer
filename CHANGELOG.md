@@ -35,6 +35,23 @@ All notable changes to this project will be documented in this file.
   Found by inspecting `wps_baseline`, the block that is 99% of the file and the
   one `validate-pon` cannot check, because its σ lives inside 200-element
   vectors rather than a column.
+- **`build-pon` ran region-MDS at a different fragment cap than `run-all`.**
+  It hardcoded `max_len=400`; `run-all` uses 1000, and `run-all` is how every
+  sample is measured at scoring time. MDS is normalised entropy, so the wider
+  window sees more fragments and reads higher — a baseline fitted over
+  65–400 bp and a sample measured over 65–1000 bp are not the same quantity.
+
+  Measured on the xs2 duplex cohort, the same 21 donors aggregated both ways:
+  all 146 genes shifted up by 0.0043 ± 0.0016. Against the baseline's own σ of
+  0.0043 that is a **median z bias of +1.15** — 86 genes past one σ and 11 past
+  two — in every healthy sample, from the cap alone.
+
+  Both call sites now use `sample_params.maxlen`, which defaults to the same
+  1000. Invariant #6, caught by diffing a rebuilt PON against its predecessor
+  rather than by any test, because nothing crashed.
+
+  The four models rebuilt via `--from-outputs` are unaffected: they aggregate
+  `run-all` output, so they already carry the 1000 bp measurement.
 
 ### Fixed
 - **A kept `build-pon` cache could not be re-aggregated.** `--keep-sample-outputs`
