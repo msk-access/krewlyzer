@@ -13,6 +13,7 @@ Checks:
   - write_extraction_outputs() calls missing output_format=
   - _core.run_unified_pipeline() calls missing output_format
 """
+
 from __future__ import annotations
 import pathlib
 import sys
@@ -39,26 +40,53 @@ SCAN_FILES = [
 # "call block" = the call line + next N lines (to handle multi-line calls)
 RULES: list[tuple[str, str, int, list[str]]] = [
     # (trigger, required_param, lookahead_lines, allowed_exception_substrings)
-    ("write_table(", "output_format=", 6,
-     ["output_utils.py",   # helper definition
-      "def write_table",   # function definition line
-      "#"]),               # inline comment only lines
-    ("process_region_entropy(", "output_format=", 8,
-     ["region_entropy_processor.py",  # definition site
-      "def process_region_entropy"]),
-    ("compute_and_write_gc_factors(", "output_format=", 8,
-     ["gc_correction.rs",      # Rust definition (not Python)
-      "pon/build.py",           # PON builder: intentionally TSV-only (no user-facing format choice)
-      "def compute_and_write",  # definition
-      "process_sample(",        # process_sample docstring / pon context
-      "write_extraction_outputs() -"]),  # module docstring line
-    ("write_extraction_outputs(", "output_format=", 8,
-     ["def write_extraction_outputs",          # definition
-      "write_extraction_outputs() -"]),        # module-level docstring reference
-    ("run_unified_pipeline(", "output_format", 30,
-     ["def run_unified_pipeline",  # PyO3 / Python definition
-      "rust",                      # any rust path reference
-      "run_unified_pipeline() -"]),  # docstring reference
+    (
+        "write_table(",
+        "output_format=",
+        6,
+        [
+            "output_utils.py",  # helper definition
+            "def write_table",  # function definition line
+            "#",
+        ],
+    ),  # inline comment only lines
+    (
+        "process_region_entropy(",
+        "output_format=",
+        8,
+        [
+            "region_entropy_processor.py",  # definition site
+            "def process_region_entropy",
+        ],
+    ),
+    (
+        "compute_and_write_gc_factors(",
+        "output_format=",
+        8,
+        [
+            "gc_correction.rs",  # Rust definition (not Python)
+            "pon/build.py",  # PON builder: intentionally TSV-only (no user-facing format choice)
+            "def compute_and_write",  # definition
+            "process_sample(",  # process_sample docstring / pon context
+            "write_extraction_outputs() -",
+        ],
+    ),  # module docstring line
+    (
+        "write_extraction_outputs(",
+        "output_format=",
+        8,
+        ["def write_extraction_outputs", "write_extraction_outputs() -"],  # definition
+    ),  # module-level docstring reference
+    (
+        "run_unified_pipeline(",
+        "output_format",
+        30,
+        [
+            "def run_unified_pipeline",  # PyO3 / Python definition
+            "rust",  # any rust path reference
+            "run_unified_pipeline() -",
+        ],
+    ),  # docstring reference
 ]
 
 
@@ -82,7 +110,13 @@ def check_file(path: pathlib.Path, rules: list) -> list[tuple[str, int, str]]:
             # Check the call block (this line + next N)
             block = "\n".join(lines[i : min(i + lookahead, len(lines))])
             if required not in block:
-                violations.append((rel, i + 1, f"'{trigger}' missing '{required}'  →  {stripped[:80]}"))
+                violations.append(
+                    (
+                        rel,
+                        i + 1,
+                        f"'{trigger}' missing '{required}'  →  {stripped[:80]}",
+                    )
+                )
 
     return violations
 
@@ -112,7 +146,9 @@ def main() -> int:
         print("Fix: add  output_format=<var>  and  compress=<var>  to each call.")
         return 1
 
-    print(f"✅  All output-writing call sites pass output_format= and compress=  ({len(SCAN_FILES)} files scanned)")
+    print(
+        f"✅  All output-writing call sites pass output_format= and compress=  ({len(SCAN_FILES)} files scanned)"
+    )
     return 0
 
 
