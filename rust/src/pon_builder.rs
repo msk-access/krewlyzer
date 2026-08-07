@@ -310,6 +310,32 @@ fn mean_and_sd(values: &[f32]) -> (f32, f32) {
     if finite.len() < 2 {
         return (mean, f32::NAN);
     }
+
+    // Identity is tested on the values, not on the result.
+    //
+    // `sd > 0.0` misses the case it exists for. Summation error grows with n,
+    // so identical donors give residue rather than a clean zero: 21 copies of
+    // 0.1 -- the xs2 cohort size -- yield 7.6e-9, and 8 copies of -0.3333333
+    // yield 3.2e-8. Both pass `> 0.0` and become divisors.
+    //
+    // Measured in the rebuilt models, where these reach `compute_z_vector`
+    // through the same `std > 0` guard: 4.5% of usable positions in
+    // xs1.all_unique, 12.2% in xs2.all_unique and 55% in xs2.duplex, touching
+    // 38-74% of anchors. A typical real sigma there is 0.4-1.2, so a one-unit
+    // deviation against a residue sigma scores z ~ 1e11.
+    //
+    // Comparing min to max is exact and invents no tolerance; values that
+    // genuinely differ keep whatever spread they have. Same fix as
+    // `sample_std_or_nan` on the Python side.
+    let (lo, hi) = finite
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), &x| {
+            (lo.min(x), hi.max(x))
+        });
+    if lo == hi {
+        return (mean, f32::NAN);
+    }
+
     let var = finite.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / (n - 1.0);
     let sd = var.sqrt();
     (mean, if sd > 0.0 { sd } else { f32::NAN })
@@ -886,5 +912,30 @@ mod shape_tests {
         let (m, sd) = mean_and_sd(&[2.0, 4.0, 6.0]);
         assert!((m - 4.0).abs() < 1e-6);
         assert!((sd - 2.0).abs() < 1e-5, "ddof=1 sample sd, got {sd}");
+    }
+
+    #[test]
+    fn identical_values_give_nan_even_when_the_variance_does_not_reach_zero() {
+        // `[3.0; 3]` above happens to cancel exactly, which is why a `sd > 0`
+        // guard passed that test while failing in production. Summation error
+        // grows with n: these are the real cohort sizes.
+        for (values, label) in [
+            (vec![0.1f32; 21], "21 donors, xs2"),
+            (vec![-0.3333333f32; 8], "8 donors"),
+            (vec![0.95f32; 47], "47 donors, xs1"),
+        ] {
+            let (_, sd) = mean_and_sd(&values);
+            assert!(sd.is_nan(), "{label}: identical values gave sd {sd:e}");
+        }
+    }
+
+    #[test]
+    fn a_spread_of_one_ulp_is_still_a_spread() {
+        // The identity test must not become a tolerance in disguise.
+        let a = 0.95f32;
+        let b = f32::from_bits(a.to_bits() + 1);
+        assert_ne!(a, b);
+        let (_, sd) = mean_and_sd(&[a, b]);
+        assert!(sd.is_finite() && sd > 0.0, "one ULP apart is not identical");
     }
 }

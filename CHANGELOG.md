@@ -4,107 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
-- **`build-pon` ran region-MDS at a different fragment cap than `run-all`.**
-  It hardcoded `max_len=400`; `run-all` uses 1000, and `run-all` is how every
-  sample is measured at scoring time. MDS is normalised entropy, so the wider
-  window sees more fragments and reads higher — a baseline fitted over
-  65–400 bp and a sample measured over 65–1000 bp are not the same quantity.
-
-  Measured on the xs2 duplex cohort, the same 21 donors aggregated both ways:
-  all 146 genes shifted up by 0.0043 ± 0.0016. Against the baseline's own σ of
-  0.0043 that is a **median z bias of +1.15** — 86 genes past one σ and 11 past
-  two — in every healthy sample, from the cap alone.
-
-  Both call sites now use `sample_params.maxlen`, which defaults to the same
-  1000. Invariant #6, caught by diffing a rebuilt PON against its predecessor
-  rather than by any test, because nothing crashed.
-
-  The four models rebuilt via `--from-outputs` are unaffected: they aggregate
-  `run-all` output, so they already carry the 1000 bp measurement.
-
-### Fixed
-- **A kept `build-pon` cache could not be re-aggregated.** `--keep-sample-outputs`
-  exists so a rebuild does not re-read every BAM — 55–97 minutes per sample,
-  ~15 hours for 47 — and every defect found in the 0.9.0 models has been in
-  *aggregation*, so re-checking one should cost minutes.
-
-  It could not, because `process_sample` never called `write_motif_outputs`:
-  `run-all` did it at its own call site and `build-pon` did not. A kept cache
-  therefore had no `EndMotif` or `MDS` table, even though the same k-mer counts
-  reached the model through memory. That is the one input `--from-outputs`
-  cannot reconstruct, and `krewlyzer motif` needs a BAM, so it could not be
-  backfilled either. Measured against the real 0.9.0 cluster cache: all 47 xs1
-  duplex directories were refused, each with `missing .EndMotif`.
-
-  `process_sample` now takes `write_motif_files`, which `build-pon` passes.
-  It defaults to `False` so `run-all` keeps writing them itself and nothing is
-  written twice. The call has to live there because `write_motif_outputs` takes
-  an `ExtractionResult`, which is live inside `process_sample` and never
-  returned.
-
-  The resume story is deliberately *"re-aggregate the cache"* rather than
-  *"skip finished samples in the extraction loop"*. The in-process path
-  collects from live `SampleOutputs` objects, not from the directory, so
-  skipping extraction would skip collection too and drop the sample from every
-  baseline without saying so. On success the build now prints the exact
-  `--from-outputs` command instead of an unactionable "reuse them".
-
-- **`--from-outputs` required extraction assets it never reads.** No BAM, no
-  reference, no bin file — but `build-pon` refused when the bundled bin file
-  was missing, before reaching the branch that would not have opened it. The
-  bin file is LFS-backed, so every `--from-outputs` build failed in CI while
-  passing locally.
-
-### Changed
-- **The two PON blocks that were built, stored, and read by nothing are now
-  applied.** Found by tracing all 21 baseline blocks from build → parquet →
-  read → apply; 19 were reaching scoring code and two were not.
-
-  `wps_baseline_panel` (326 anchors in the xs2 model) — `apply_wps_pon` ran
-  only on the genome-wide WPS, so `{sample}.WPS.panel.parquet` shipped raw.
-  The anchors closest to the targeted regions were the one WPS output with no
-  comparison to a healthy cohort. They now carry the same derived and z-scored
-  columns as the genome-wide file. The shape statistics borrow the genome-wide
-  `wps_shape_baseline`: a few hundred panel anchors is too few to fit a second
-  one, and they overlap the genome-wide set.
-
-  `gc_bias_ontarget` (25 bins) — `PonModel.get_mean` and `get_variance` read
-  `self.gc_bias` only, so on-target FSC and FSR normalised against the
-  genome-wide GC curves. Capture enrichment shifts the GC profile, which is the
-  entire reason panel mode fits a second block. `{sample}.FSC.ontarget`
-  `*_log2` and `*_reliability` values change as a result. A PON without the
-  block falls back to the genome-wide curves rather than dropping the column.
-
-- **A scored column is NaN when its baseline is absent, not 0.0.** Six
-  fabrications in the apply path, after `zscore_or_nan` removed nine from the
-  baseline classes:
-
-  | where | when | was | now |
-  |---|---|---|---|
-  | `fsc_processor` | no `gc_bias` | `{ch}_log2 = 0.0` | NaN |
-  | `fsc_processor` | no variance | `{ch}_reliability = 1.0` | NaN |
-  | `fsr_processor` | no long fragments | `ratio = short_count` | NaN |
-  | `fsr_processor` | ratio ≤ 0 | `short_long_log2 = 0.0` | NaN |
-  | `region_entropy.rs` | σ unmeasurable | `z = 0.0` | NaN |
-  | `region_entropy.rs` | σ column absent | σ ← 1.0, mean ← 0.0 | NaN |
-
-  Zero is never the cautious choice. A log2 ratio or z-score of zero says
-  "this sample sits exactly at the healthy baseline" — the most confident
-  statement either column can make, asserted precisely when nothing could be
-  compared. Measured: with `gc_bias` absent, three windows whose raw values
-  differed fourfold all read `0.0`.
-
-  The Rust pair defeated the Python fix until both were done. `entropy_std`
-  defaulted to `1.0` and `entropy_mean` to `0.0` — a standard normal — so a
-  builder storing NaN for a single-donor label produced the raw difference
-  rather than no score. And `position(...).unwrap_or(0)` read *column zero*
-  when a column was not found, which in a PON parquet is `table`.
-
-  `region_entropy_processor` was the fifth site of the `sample_std_or_nan`
-  defect and the only one outside `pon/build.py`.
-
 ### Added
+
 - **`validate-pon` checks a packing list.** It read the blocks present in the
   file and skipped the rest, so a block that vanished entirely was invisible to
   every check — indistinguishable from one never expected. Demonstrated on the
@@ -125,7 +26,6 @@ All notable changes to this project will be documented in this file.
   the gate could only warn either way. Models built before it record nothing
   and still warn.
 
-### Added
 - **`scripts/build_pon_array.sh`** — one SLURM task per sample, feeding
   `build-pon --from-outputs`. Extraction across a cohort is embarrassingly
   parallel and the cluster already has a scheduler for it, so doing it four at
@@ -151,7 +51,6 @@ All notable changes to this project will be documented in this file.
   `build_pon.sh`, and a task index past the end of the list is refused —
   a short array would otherwise build a quietly smaller cohort.
 
-### Added
 - **`krewlyzer build-pon --from-outputs DIR`** — build a PON by aggregating
   per-sample `run-all` output directories, reading only files. No BAM is
   opened.
@@ -187,100 +86,6 @@ All notable changes to this project will be documented in this file.
   repeat length from the edge of the window it was searched in. The refusal
   says so. Every other block builds from 0.8.3 output.
 
-### Fixed
-- **Two Rust baseline readers parse plain TSV and were being handed parquet.**
-  `compute_fsd_baseline` and `compute_region_mds_baseline` read with
-  `BufReader::lines()` — no gzip, no parquet. `File::open` succeeds on both
-  anyway, the header parse then finds no usable columns, and every sample is
-  skipped: three samples in, zero out.
-
-  Not an edge case. A `run-all` directory writes `.parquet` and `.tsv.gz` and
-  *no* plain `.tsv`, so it is the normal case for the layout `--from-outputs`
-  reads. Found against the real 0.8.3 corpus, where `region_mds` came back
-  empty from the same files `region_mds_exon` read fine.
-
-  The two failed differently and the quieter one was worse. FSD raised, but
-  blamed the backend — "no data returned from Rust", the same misleading
-  wording already fixed once in `_compute_wps_baseline`. `region_mds` logged
-  one warning and returned `None`, so the block was simply *absent* from the
-  model; `validate-pon` iterates the blocks present in the file and skips empty
-  ones, so a block that vanished entirely cannot be checked. Build, gate and
-  downstream all reported success.
-
-  Inputs are now normalised to plain TSV where the constraint lives, in the two
-  callers that know about it. Unreadable inputs are reported rather than
-  dropped. Both empty-result paths raise and name an input file.
-
-- **`region_mds` fell back to a standard normal.** `data.get("mds_mean", 0.0),
-  data.get("mds_std", 1.0)` makes z equal the raw MDS — about 0.95, an
-  ordinary-looking number for a statistic that was never computed. Third
-  instance after `_compute_mds_baseline` and `get_periodicity_stats`.
-
-### Fixed
-- **A zero spread was reported as a measurement in three of the four PON
-  builders.** `pandas.std(ddof=1)` returns `0.0` for identical values, not NaN
-  — NaN only when `count < 2`. Only `_compute_fsc_gene_baseline` converted
-  that; the other three did not, while carrying comments claiming they did
-  ("NaN where pandas could not measure a spread", "an unmeasurable spread
-  yields NaN"). A comment asserting behaviour the code lacks is worse than no
-  comment: it stops the next reader checking. The Rust twin `mean_and_sd` was
-  correct, which is why the WPS blocks passed `validate-pon` and the Python
-  ones did not.
-
-  One `sample_std_or_nan` helper now serves all six sites. Identity is tested
-  on the values rather than the result: `std([0.95, 0.95, 0.95])` is
-  `1.36e-16`, not `0.0` — cancellation in the variance sum leaves residue, so
-  a `sd <= 0` guard misses the exact case it exists for, and a z divided by
-  `1.36e-16` is `1e16`, worse than the zero it replaced.
-
-- **The PON averaged the edge of the NRL search band in with real
-  measurements.** `nrl_bp = 250` is the top of the FFT window, and
-  `nrl_at_band_limit` says so on every affected row — the builder ignored the
-  flag. Across the xs2 duplex cohort all 174 band-limited rows carry exactly
-  250.0, one unique value with zero variance, against 194.9 ± 24.0 for the
-  other 414. Twelve of 28 groups are partly limited, four entirely, so those
-  groups reported the edge of the search as the healthy expectation.
-
-  The NRL is now fitted from the rows that measured one, and the group keeps
-  its row either way — absent, not dropped, because a group xs1 can measure
-  and xs2 cannot is information when the two models are compared. New
-  `n_at_band_limit` and `n_nrl_fitted` columns record why a baseline is
-  missing. Below `MIN_SAMPLES_PER_KEY` measured rows the mean goes too, not
-  just the spread: a cohort baseline averaged over one donor is the same
-  fabrication as a hardcoded one.
-
-  Periodicity is deliberately still fitted from *all* rows. Those same 174
-  band-limited rows hold 174 distinct periodicity values spanning 0.37–0.86 —
-  only the peak's position hit the edge, its strength was measured. `nrl_bp`,
-  `periodicity_score` and now `nrl_at_band_limit` are all required.
-
-- **`WpsBackgroundBaseline.get_periodicity_stats` invented a standard normal.**
-  `row.get("periodicity_mean", 0), row.get("periodicity_std", 1)` made a
-  missing column produce a z equal to the raw periodicity — about 0.47, an
-  unremarkable number nobody would have questioned. The same fabricated
-  baseline the block itself was rebuilt to remove, one level down in the
-  reader. Now indexed, so a missing column raises.
-
-  Verified against all three models already built on the cluster by rebuilding
-  only the affected blocks from cached per-sample outputs — no BAM re-read.
-  `xs1.duplex` went from three `PON.NONPOSITIVE_SIGMA` findings to none;
-  `xs2.duplex` and `xs2.all_unique` from one each to none. All three now exit
-  0 under `validate-pon`.
-
-### Fixed
-- **A `region-mds` failure during a PON build was swallowed by `except: pass`.**
-  `region_mds` and `region_mds_exon` are both built by globbing the files that
-  step writes, so a failure means two baselines silently missing from the
-  model — and the build reported success. Found while inspecting a live
-  rebuild: 4 of 4 completed samples had no `MDS.gene.tsv`, and `grep -i mds`
-  over 1,803 log lines returned nothing, because there was nothing to find.
-
-  Now warns with the exception type and message, and separately says when the
-  gate did not open at all — no gene BED resolved, or the input is a fragment
-  BED rather than a BAM. At aggregation, a BAM cohort that produced no MDS
-  files at all is an error rather than an empty block.
-
-### Added
 - **`krewlyzer stamp-pon`** — records the release a built PON ships with.
 
   A PON is built from `develop`, where the version still reads the previous
@@ -300,33 +105,6 @@ All notable changes to this project will be documented in this file.
   compatibility the guard exists to deny. `PON.NO_VERSION` alone does not
   block, since that is the condition being fixed.
 
-### Fixed
-- **`scripts/build_pon.sh` refuses to run on a pre-0.9.0 krewlyzer.** A 0.8.x
-  `build-pon` rebuilds every defect this release fixes, exits 0, and produces
-  logs that look clean — the failure is invisible until someone opens the
-  model. Caught in practice: the first 0.9.0 rebuild attempt ran 18 minutes on
-  `v0.8.3` before the banner was noticed.
-
-  Also corrects the sample-list default from `{assay}_all_unique_pon.txt` to
-  `{assay}_allUniq_pon.txt`, which is what the lists are actually called — the
-  script had invented a convention rather than using the existing one.
-
-### Changed
-- **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
-  and variant as arguments. The old script was hardcoded to xs2 and carried a
-  header claiming "47 samples" inherited from the xs1 copy it was made from —
-  while the xs2 model it produced records 21. Four models built from four
-  edited copies of one script is how that happens.
-
-  It also passes `--keep-sample-outputs` and `--cohort-label`, and **ends by
-  running `validate-pon` on what it built**. A build that produces a model the
-  gate rejects has not succeeded, whatever `build-pon`'s exit code said.
-
-  `docs/guides/building-pon.md` gains the rebuild runbook: what to watch in the
-  log, why the sample outputs are kept, and the LFS ordering that has to be
-  right.
-
-### Added
 - **`krewlyzer validate-pon`** — gates the reference, not the results.
   `validate-output` checks what a run produced; nothing checked the model
   those results are measured against. Every PON defect fixed in this release
@@ -366,7 +144,6 @@ All notable changes to this project will be documented in this file.
   Writing is inert: `PonModel.load` reads through `meta.get(key, default)`, so
   unknown keys are ignored and existing models still load unchanged.
 
-### Added
 - **Per-motif z-scores (`EndMotif.frequency_z`, `BreakPointMotif.frequency_z`).**
   `mds_baseline` carries 625 k-mer means and σ — every 4-mer over ACGTN — and
   nothing read them; the tables shipped `Motif, Frequency` alone, so a shift in
@@ -380,26 +157,6 @@ All notable changes to this project will be documented in this file.
   biased every z upward: measured on a real sample, median **+0.37** naive
   against **−0.21** corrected.
 
-### Fixed
-- **`nrl_z` and `periodicity_z` never reached a single output file** — and the
-  machinery was fully plumbed. `compute_nrl_zscore` defaulted to
-  `group_id="all"`, and no PON has ever held a group by that name: they are
-  `Global_All`, `Chr1_All` … `Family_AluY`. Every lookup missed, the function
-  returned `None`, and `None` was indistinguishable from "this PON has no
-  baseline". The default is now a named `GENOME_WIDE_GROUP` constant, defined
-  once, and a group that matches nothing logs what it did find.
-
-  Two defects had to stack for the column to be absent: the fabricated
-  `wps_background` baseline (`4cd634b`) *and* this. With the old PON the value
-  is `−3.4` for every sample, which is what the fabricated `167.0 / 5.0` gives
-  for an `nrl_bp` pinned at 150.
-
-- **27 of 28 NRL baselines were built and never used.** Only `Global_All` was
-  scored, though the output carries an `nrl_bp` per chromosome and per Alu
-  family and the baseline has one for each. All 28 groups are now scored;
-  per-chromosome NRL drift is the reason those baselines exist.
-
-### Added
 - **WPS z-scoring — the largest PON baseline, previously read by nothing.**
   `wps_baseline` is ~128k anchors of 200-element mean and σ vectors, roughly
   90% of every PON file, and its only consumer was a log line appending
@@ -432,21 +189,6 @@ All notable changes to this project will be documented in this file.
   `wps_phase_at_search_limit` marks anchors where the ±30 search ended on its
   own edge (1.8% measured) — `nrl_at_band_limit` one level down.
 
-### Removed
-- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
-  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
-  parquet imports that existed only to serve them. The crate now builds with
-  zero warnings.
-
-  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
-  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
-  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
-  not positive. It was also unreachable: the call was gated on
-  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
-  schema-obsolete, fabricating, and implementing the statistic measurement
-  refuted.
-
-### Added
 - **Per-exon MDS baseline (`region_mds_exon`) and `MDS.exon.mds_z`.**
   `MDS.exon` is the finest localisation krewlyzer produces — 1,006 rows on
   xs2, 1,725 on xs1 — and was the only feature table with no baseline at all,
@@ -467,67 +209,6 @@ All notable changes to this project will be documented in this file.
   A PON built before 0.9.0 has no such block; `mds_z` is then `NaN` and a line
   says so.
 
-### Removed
-- **`PonModel.save`** — a second serializer that wrote only the metadata block,
-  producing a PON with no baselines at all, while `build-pon` used
-  `_save_pon_model`. Nothing in production called it. Removed rather than
-  completed: a second writer is a second thing to keep in step with every new
-  block.
-
-### Changed
-- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
-  and FSC region have required it since they were written and WPS acquired it
-  in `4cd634b`; the four now agree by construction rather than by three
-  separate literals happening to match.
-
-### Fixed
-- **An unmeasurable spread produced `z = 0.0`, in twelve places.** Ten baseline
-  classes in `pon/model.py` independently ended with
-  `if std > 0: return (x - mean) / std` followed by `return 0.0` — nine copies
-  of the same three lines, and the same defect nine times. Zero is not a
-  cautious answer: it is the most confident claim the column can make ("sits
-  exactly at the healthy baseline"), asserted precisely when the baseline
-  measured no spread, and indistinguishable from a genuine zero.
-
-  Replaced by one `zscore_or_nan` helper, so it can only be wrong once. Also:
-  `FsdBaseline.get_expected`/`get_std` returned `0.0` for an unknown arm (a
-  caller dividing by that gets infinity, not an absence), and
-  `compute_shape_score` returned `0.0` for an undefined correlation, which is
-  a real claim about shape agreement.
-
-- **`WpsBaseline.compute_z_vector` substituted `1.0` for an unusable σ.** Since
-  `4cd634b` the builder writes NaN where it could not measure spread;
-  `np.where(std > 0, std, 1.0)` is False for NaN, so every one of those became
-  a *finite* z — undoing the builder's honesty at the read side, which is the
-  harder place to notice. This is the function WPS z-scoring will use.
-
-### Changed
-- **OCF PON logging distinguishes "absent from the baseline" from "matched but
-  unscoreable".** Both correctly write NaN, but collapsing them reported
-  `0/1 regions matched` for a region that matched perfectly well and simply has
-  no variance in the cohort. That is the difference between "rebuild the PON"
-  and "expected", and only the log can say which.
-
-### Fixed
-- **Reading back a file just written could return an older run's data.**
-  `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is
-  right when asking "what was produced for this output" and wrong immediately
-  after writing a specific file. The Rust backends write plain TSV and Python
-  reads it back to honour `--output-format`, so a `.parquet` sibling left by an
-  earlier run into the same directory won — which is what a Nextflow retry or
-  `-resume` produces.
-
-  Reproduced end to end for region entropy: with a stale parquet present, the
-  output carried the **previous run's** `z_score` and `entropy` rather than
-  this run's. Fixed at every read-after-write site — region entropy, mFSD, UXM,
-  region-MDS gene and exon, on-target MDS — via a new
-  `read_exact_table` helper.
-
-  Also reverts an over-correction from earlier in this branch: the post-Rust
-  existence check in `process_region_entropy` must be exact, not resolving, or
-  a stale sibling satisfies it and the degradation branch never fires.
-
-### Added
 - **`tests/real_data/` — a local cohort gate.** Point
   `KREWLYZER_TEST_CORPUS` at a scored cohort and it runs; leave it unset and it
   skips, so `pytest tests/` stays green and CI never sees it. No cohort data is
@@ -547,42 +228,12 @@ All notable changes to this project will be documented in this file.
 - **`read_exact_table`** in `core/output_utils.py` — reads the given path with
   no sibling resolution, the counterpart to the deliberately parquet-first
   `read_table`.
+
 - **`tests/invariants/test_read_after_write.py`** — pins both readers'
   behaviour and an AST check that no function reads with the resolving reader
   after writing, with a reviewed allowlist that must state why each entry is
   safe. Also fails on a stale allowlist entry, so it cannot rot.
 
-### Changed
-- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
-  existed** — `version` / `genome` / `sample_count` where real PONs write
-  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
-  `meta.get(key, default)`, it loaded as a completely empty model and the tests
-  asserted only `is not None`. `test_pon_model_loading` had been marked
-  `skip("PON parquet schema requires production format")` — true of the
-  fixture, not the loader. Fixture corrected against the bundled PON, test
-  unskipped, and both now assert real field values.
-
-- **PON scoring was skipped under `--output-format parquet` in three more
-  places.** Same shape as the FSD defect below: callers name a hardcoded
-  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
-  then False.
-
-  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
-    `depth_zscore`
-  - `apply_fsc_region_pon` and the e1-only filter, identically
-  - `process_region_entropy` skipped the whole step
-
-  All four now resolve with `resolve_table_path`. Measured before and after on
-  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
-
-- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
-  not a neutral placeholder — it is the most confident claim the column can
-  make ("this sample sits exactly at the healthy baseline"), asserted on the
-  strength of having no baseline at all, and indistinguishable from a measured
-  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
-  both when no `--pon-model` was given and when the PON lacks the table.
-
-### Added
 - **`tests/invariants/test_pon_format_parity.py`** — asserts every PON-derived
   column is present, populated and equal across `tsv` / `parquet` / `both`.
   One test that would have caught FSD, FSC gene, FSC region and the entropy
@@ -643,7 +294,6 @@ All notable changes to this project will be documented in this file.
   donors, not the population. The population form understates the spread and
   inflates every z built from it — by 2.5% at n=21.
 
-### Added
 - **`build-pon --keep-sample-outputs DIR`.** Per-sample feature outputs were
   extracted to a temp directory and deleted on completion, so every rebuild
   re-ran extraction over every BAM from scratch (~4 h for 47 samples) and
@@ -654,46 +304,6 @@ All notable changes to this project will be documented in this file.
   measured spread, warns on those that do not, and warns when every entry
   shares one σ — the signature of a fabricated baseline.
 
-### Fixed
-- **A whole-genome run lost an entire verdict axis.** A panel run splits OCF
-  into on- and off-target; a WGS run writes neither and emits a plain
-  `.OCF.parquet`. `verdict.py`, `plots.py` and the report's run-facts strip all
-  read only the panel pair, so every WGS sample reported OCF absent with the
-  file sitting in the directory. Losing an axis makes the verdict read
-  *stronger*, not weaker — it shrinks the denominator — which is the dangerous
-  direction. The preference order now lives once, in `contract.py`, and all
-  three read it.
-
-- **Six optional outputs rendered with no interpretation.** `mFSD`, `UXM`,
-  `OCF`, `FSC.regions.e1only`, `fsc_counts` and `correction_factors` got a
-  section with a measured shape and nothing else — no lede, no direction, no
-  why/how/what — because `test_meaning_registry.py` keyed on `CONTRACT` alone
-  and those six are `NOT_CONSUMED`. mFSD in particular had a chart with no
-  explanation beside it. The registry now covers everything either command can
-  render.
-
-- **Numeric identifier columns were not redacted.** `describe-output` prefers a
-  min…max range over the example value whenever one exists, so an integer
-  patient key or accession was printed in full by the branch meant to hide it —
-  a range over one distinct value *is* the value.
-
-- **`describe-output` and `report` disagreed about the same fact.** The report
-  says *gated* / *inventory*; `describe-output` still said *read downstream*,
-  a claim about another repository that nothing here keeps in sync. Aligned on
-  the report's wording, with the distinction spelled out in the output.
-
-- **README linked to six pages that do not exist.** `/introduction/`,
-  `/installation/`, `/usage/`, `/features/extract/`, `/pipeline/` and
-  `/citation/` all 404 — they point at a docs layout reorganised out of
-  existence. Absolute URLs, so neither mkdocs nor the internal link checker
-  ever resolved them.
-
-- **`tests/unit/test_cli_documented.py` checked 8 of 19 commands.** Its regex
-  matched only `app.command(name="x")` and silently skipped the eleven
-  registered as bare `app.command()(fn)`. It is now cross-checked against typer
-  itself, which immediately surfaced a fifth undocumented command, `validate`.
-
-### Added
 - **`docs/cli/index.md` covers every command**, and two tests keep it that way:
   one cross-checks the registered commands against the reference and the
   README, the other resolves every README documentation link against the pages
@@ -922,7 +532,407 @@ All notable changes to this project will be documented in this file.
   The eleven per-tool Nextflow modules now pass `params.output_format` and
   `params.compress_tsv` through as well; previously only `runall` did.
 
+### Changed
+
+- **The two PON blocks that were built, stored, and read by nothing are now
+  applied.** Found by tracing all 21 baseline blocks from build → parquet →
+  read → apply; 19 were reaching scoring code and two were not.
+
+  `wps_baseline_panel` (326 anchors in the xs2 model) — `apply_wps_pon` ran
+  only on the genome-wide WPS, so `{sample}.WPS.panel.parquet` shipped raw.
+  The anchors closest to the targeted regions were the one WPS output with no
+  comparison to a healthy cohort. They now carry the same derived and z-scored
+  columns as the genome-wide file. The shape statistics borrow the genome-wide
+  `wps_shape_baseline`: a few hundred panel anchors is too few to fit a second
+  one, and they overlap the genome-wide set.
+
+  `gc_bias_ontarget` (25 bins) — `PonModel.get_mean` and `get_variance` read
+  `self.gc_bias` only, so on-target FSC and FSR normalised against the
+  genome-wide GC curves. Capture enrichment shifts the GC profile, which is the
+  entire reason panel mode fits a second block. `{sample}.FSC.ontarget`
+  `*_log2` and `*_reliability` values change as a result. A PON without the
+  block falls back to the genome-wide curves rather than dropping the column.
+
+- **A scored column is NaN when its baseline is absent, not 0.0.** Six
+  fabrications in the apply path, after `zscore_or_nan` removed nine from the
+  baseline classes:
+
+  | where | when | was | now |
+  |---|---|---|---|
+  | `fsc_processor` | no `gc_bias` | `{ch}_log2 = 0.0` | NaN |
+  | `fsc_processor` | no variance | `{ch}_reliability = 1.0` | NaN |
+  | `fsr_processor` | no long fragments | `ratio = short_count` | NaN |
+  | `fsr_processor` | ratio ≤ 0 | `short_long_log2 = 0.0` | NaN |
+  | `region_entropy.rs` | σ unmeasurable | `z = 0.0` | NaN |
+  | `region_entropy.rs` | σ column absent | σ ← 1.0, mean ← 0.0 | NaN |
+
+  Zero is never the cautious choice. A log2 ratio or z-score of zero says
+  "this sample sits exactly at the healthy baseline" — the most confident
+  statement either column can make, asserted precisely when nothing could be
+  compared. Measured: with `gc_bias` absent, three windows whose raw values
+  differed fourfold all read `0.0`.
+
+  The Rust pair defeated the Python fix until both were done. `entropy_std`
+  defaulted to `1.0` and `entropy_mean` to `0.0` — a standard normal — so a
+  builder storing NaN for a single-donor label produced the raw difference
+  rather than no score. And `position(...).unwrap_or(0)` read *column zero*
+  when a column was not found, which in a PON parquet is `table`.
+
+  `region_entropy_processor` was the fifth site of the `sample_std_or_nan`
+  defect and the only one outside `pon/build.py`.
+
+- **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
+  and variant as arguments. The old script was hardcoded to xs2 and carried a
+  header claiming "47 samples" inherited from the xs1 copy it was made from —
+  while the xs2 model it produced records 21. Four models built from four
+  edited copies of one script is how that happens.
+
+  It also passes `--keep-sample-outputs` and `--cohort-label`, and **ends by
+  running `validate-pon` on what it built**. A build that produces a model the
+  gate rejects has not succeeded, whatever `build-pon`'s exit code said.
+
+  `docs/guides/building-pon.md` gains the rebuild runbook: what to watch in the
+  log, why the sample outputs are kept, and the LFS ordering that has to be
+  right.
+
+- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
+  and FSC region have required it since they were written and WPS acquired it
+  in `4cd634b`; the four now agree by construction rather than by three
+  separate literals happening to match.
+
+- **OCF PON logging distinguishes "absent from the baseline" from "matched but
+  unscoreable".** Both correctly write NaN, but collapsing them reported
+  `0/1 regions matched` for a region that matched perfectly well and simply has
+  no variance in the cohort. That is the difference between "rebuild the PON"
+  and "expected", and only the log can say which.
+
+- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
+  existed** — `version` / `genome` / `sample_count` where real PONs write
+  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
+  `meta.get(key, default)`, it loaded as a completely empty model and the tests
+  asserted only `is not None`. `test_pon_model_loading` had been marked
+  `skip("PON parquet schema requires production format")` — true of the
+  fixture, not the loader. Fixture corrected against the bundled PON, test
+  unskipped, and both now assert real field values.
+
+- **PON scoring was skipped under `--output-format parquet` in three more
+  places.** Same shape as the FSD defect below: callers name a hardcoded
+  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
+  then False.
+
+  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
+    `depth_zscore`
+  - `apply_fsc_region_pon` and the e1-only filter, identically
+  - `process_region_entropy` skipped the whole step
+
+  All four now resolve with `resolve_table_path`. Measured before and after on
+  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
+
+- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
+  not a neutral placeholder — it is the most confident claim the column can
+  make ("this sample sits exactly at the healthy baseline"), asserted on the
+  strength of having no baseline at all, and indistinguishable from a measured
+  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
+  both when no `--pon-model` was given and when the PON lacks the table.
+
+### Removed
+
+- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
+  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
+  parquet imports that existed only to serve them. The crate now builds with
+  zero warnings.
+
+  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
+  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
+  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
+  not positive. It was also unreachable: the call was gated on
+  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
+  schema-obsolete, fabricating, and implementing the statistic measurement
+  refuted.
+
+- **`PonModel.save`** — a second serializer that wrote only the metadata block,
+  producing a PON with no baselines at all, while `build-pon` used
+  `_save_pon_model`. Nothing in production called it. Removed rather than
+  completed: a second writer is a second thing to keep in step with every new
+  block.
+
 ### Fixed
+
+- **The Rust `mean_and_sd` reported floating-point residue as a spread.**
+  `if sd > 0.0 { sd } else { NAN }` is the same hole `sample_std_or_nan` closed
+  on the Python side, and it misses the case it exists for: summation error
+  grows with n, so identical donors give residue rather than a clean zero.
+  21 copies of `0.1` — the xs2 cohort size — yield `7.6e-9`; 8 copies of
+  `-0.3333333` yield `3.2e-8`. Both pass `> 0.0` and become divisors. The
+  existing test used `[3.0, 3.0, 3.0]`, which cancels exactly, so it passed
+  throughout.
+
+  Measured in the freshly rebuilt models, where these reach `compute_z_vector`
+  through the same `std > 0` guard:
+
+  | model | positions affected | anchors touched |
+  |---|---:|---:|
+  | `xs1.all_unique` | 4.5% | 38% |
+  | `xs2.all_unique` | 12.2% | 57% |
+  | `xs2.duplex` | 55.4% | 74% |
+
+  A typical real σ there is 0.4–1.2, so a one-unit deviation against a residue
+  σ scores **z ≈ 10¹¹**. Those are positions where every donor looked the same,
+  which is exactly where a sample doing something unusual should have been
+  reported as absent rather than astronomically significant.
+
+  Identity is now tested on the values (`min == max`), which is exact and
+  invents no tolerance — values one ULP apart keep their spread, pinned by a
+  test.
+
+  Found by inspecting `wps_baseline`, the block that is 99% of the file and the
+  one `validate-pon` cannot check, because its σ lives inside 200-element
+  vectors rather than a column.
+
+- **`build-pon` ran region-MDS at a different fragment cap than `run-all`.**
+  It hardcoded `max_len=400`; `run-all` uses 1000, and `run-all` is how every
+  sample is measured at scoring time. MDS is normalised entropy, so the wider
+  window sees more fragments and reads higher — a baseline fitted over
+  65–400 bp and a sample measured over 65–1000 bp are not the same quantity.
+
+  Measured on the xs2 duplex cohort, the same 21 donors aggregated both ways:
+  all 146 genes shifted up by 0.0043 ± 0.0016. Against the baseline's own σ of
+  0.0043 that is a **median z bias of +1.15** — 86 genes past one σ and 11 past
+  two — in every healthy sample, from the cap alone.
+
+  Both call sites now use `sample_params.maxlen`, which defaults to the same
+  1000. Invariant #6, caught by diffing a rebuilt PON against its predecessor
+  rather than by any test, because nothing crashed.
+
+  The four models rebuilt via `--from-outputs` are unaffected: they aggregate
+  `run-all` output, so they already carry the 1000 bp measurement.
+
+- **A kept `build-pon` cache could not be re-aggregated.** `--keep-sample-outputs`
+  exists so a rebuild does not re-read every BAM — 55–97 minutes per sample,
+  ~15 hours for 47 — and every defect found in the 0.9.0 models has been in
+  *aggregation*, so re-checking one should cost minutes.
+
+  It could not, because `process_sample` never called `write_motif_outputs`:
+  `run-all` did it at its own call site and `build-pon` did not. A kept cache
+  therefore had no `EndMotif` or `MDS` table, even though the same k-mer counts
+  reached the model through memory. That is the one input `--from-outputs`
+  cannot reconstruct, and `krewlyzer motif` needs a BAM, so it could not be
+  backfilled either. Measured against the real 0.9.0 cluster cache: all 47 xs1
+  duplex directories were refused, each with `missing .EndMotif`.
+
+  `process_sample` now takes `write_motif_files`, which `build-pon` passes.
+  It defaults to `False` so `run-all` keeps writing them itself and nothing is
+  written twice. The call has to live there because `write_motif_outputs` takes
+  an `ExtractionResult`, which is live inside `process_sample` and never
+  returned.
+
+  The resume story is deliberately *"re-aggregate the cache"* rather than
+  *"skip finished samples in the extraction loop"*. The in-process path
+  collects from live `SampleOutputs` objects, not from the directory, so
+  skipping extraction would skip collection too and drop the sample from every
+  baseline without saying so. On success the build now prints the exact
+  `--from-outputs` command instead of an unactionable "reuse them".
+
+- **`--from-outputs` required extraction assets it never reads.** No BAM, no
+  reference, no bin file — but `build-pon` refused when the bundled bin file
+  was missing, before reaching the branch that would not have opened it. The
+  bin file is LFS-backed, so every `--from-outputs` build failed in CI while
+  passing locally.
+
+- **Two Rust baseline readers parse plain TSV and were being handed parquet.**
+  `compute_fsd_baseline` and `compute_region_mds_baseline` read with
+  `BufReader::lines()` — no gzip, no parquet. `File::open` succeeds on both
+  anyway, the header parse then finds no usable columns, and every sample is
+  skipped: three samples in, zero out.
+
+  Not an edge case. A `run-all` directory writes `.parquet` and `.tsv.gz` and
+  *no* plain `.tsv`, so it is the normal case for the layout `--from-outputs`
+  reads. Found against the real 0.8.3 corpus, where `region_mds` came back
+  empty from the same files `region_mds_exon` read fine.
+
+  The two failed differently and the quieter one was worse. FSD raised, but
+  blamed the backend — "no data returned from Rust", the same misleading
+  wording already fixed once in `_compute_wps_baseline`. `region_mds` logged
+  one warning and returned `None`, so the block was simply *absent* from the
+  model; `validate-pon` iterates the blocks present in the file and skips empty
+  ones, so a block that vanished entirely cannot be checked. Build, gate and
+  downstream all reported success.
+
+  Inputs are now normalised to plain TSV where the constraint lives, in the two
+  callers that know about it. Unreadable inputs are reported rather than
+  dropped. Both empty-result paths raise and name an input file.
+
+- **`region_mds` fell back to a standard normal.** `data.get("mds_mean", 0.0),
+  data.get("mds_std", 1.0)` makes z equal the raw MDS — about 0.95, an
+  ordinary-looking number for a statistic that was never computed. Third
+  instance after `_compute_mds_baseline` and `get_periodicity_stats`.
+
+- **A zero spread was reported as a measurement in three of the four PON
+  builders.** `pandas.std(ddof=1)` returns `0.0` for identical values, not NaN
+  — NaN only when `count < 2`. Only `_compute_fsc_gene_baseline` converted
+  that; the other three did not, while carrying comments claiming they did
+  ("NaN where pandas could not measure a spread", "an unmeasurable spread
+  yields NaN"). A comment asserting behaviour the code lacks is worse than no
+  comment: it stops the next reader checking. The Rust twin `mean_and_sd` was
+  correct, which is why the WPS blocks passed `validate-pon` and the Python
+  ones did not.
+
+  One `sample_std_or_nan` helper now serves all six sites. Identity is tested
+  on the values rather than the result: `std([0.95, 0.95, 0.95])` is
+  `1.36e-16`, not `0.0` — cancellation in the variance sum leaves residue, so
+  a `sd <= 0` guard misses the exact case it exists for, and a z divided by
+  `1.36e-16` is `1e16`, worse than the zero it replaced.
+
+- **The PON averaged the edge of the NRL search band in with real
+  measurements.** `nrl_bp = 250` is the top of the FFT window, and
+  `nrl_at_band_limit` says so on every affected row — the builder ignored the
+  flag. Across the xs2 duplex cohort all 174 band-limited rows carry exactly
+  250.0, one unique value with zero variance, against 194.9 ± 24.0 for the
+  other 414. Twelve of 28 groups are partly limited, four entirely, so those
+  groups reported the edge of the search as the healthy expectation.
+
+  The NRL is now fitted from the rows that measured one, and the group keeps
+  its row either way — absent, not dropped, because a group xs1 can measure
+  and xs2 cannot is information when the two models are compared. New
+  `n_at_band_limit` and `n_nrl_fitted` columns record why a baseline is
+  missing. Below `MIN_SAMPLES_PER_KEY` measured rows the mean goes too, not
+  just the spread: a cohort baseline averaged over one donor is the same
+  fabrication as a hardcoded one.
+
+  Periodicity is deliberately still fitted from *all* rows. Those same 174
+  band-limited rows hold 174 distinct periodicity values spanning 0.37–0.86 —
+  only the peak's position hit the edge, its strength was measured. `nrl_bp`,
+  `periodicity_score` and now `nrl_at_band_limit` are all required.
+
+- **`WpsBackgroundBaseline.get_periodicity_stats` invented a standard normal.**
+  `row.get("periodicity_mean", 0), row.get("periodicity_std", 1)` made a
+  missing column produce a z equal to the raw periodicity — about 0.47, an
+  unremarkable number nobody would have questioned. The same fabricated
+  baseline the block itself was rebuilt to remove, one level down in the
+  reader. Now indexed, so a missing column raises.
+
+  Verified against all three models already built on the cluster by rebuilding
+  only the affected blocks from cached per-sample outputs — no BAM re-read.
+  `xs1.duplex` went from three `PON.NONPOSITIVE_SIGMA` findings to none;
+  `xs2.duplex` and `xs2.all_unique` from one each to none. All three now exit
+  0 under `validate-pon`.
+
+- **A `region-mds` failure during a PON build was swallowed by `except: pass`.**
+  `region_mds` and `region_mds_exon` are both built by globbing the files that
+  step writes, so a failure means two baselines silently missing from the
+  model — and the build reported success. Found while inspecting a live
+  rebuild: 4 of 4 completed samples had no `MDS.gene.tsv`, and `grep -i mds`
+  over 1,803 log lines returned nothing, because there was nothing to find.
+
+  Now warns with the exception type and message, and separately says when the
+  gate did not open at all — no gene BED resolved, or the input is a fragment
+  BED rather than a BAM. At aggregation, a BAM cohort that produced no MDS
+  files at all is an error rather than an empty block.
+
+- **`scripts/build_pon.sh` refuses to run on a pre-0.9.0 krewlyzer.** A 0.8.x
+  `build-pon` rebuilds every defect this release fixes, exits 0, and produces
+  logs that look clean — the failure is invisible until someone opens the
+  model. Caught in practice: the first 0.9.0 rebuild attempt ran 18 minutes on
+  `v0.8.3` before the banner was noticed.
+
+  Also corrects the sample-list default from `{assay}_all_unique_pon.txt` to
+  `{assay}_allUniq_pon.txt`, which is what the lists are actually called — the
+  script had invented a convention rather than using the existing one.
+
+- **`nrl_z` and `periodicity_z` never reached a single output file** — and the
+  machinery was fully plumbed. `compute_nrl_zscore` defaulted to
+  `group_id="all"`, and no PON has ever held a group by that name: they are
+  `Global_All`, `Chr1_All` … `Family_AluY`. Every lookup missed, the function
+  returned `None`, and `None` was indistinguishable from "this PON has no
+  baseline". The default is now a named `GENOME_WIDE_GROUP` constant, defined
+  once, and a group that matches nothing logs what it did find.
+
+  Two defects had to stack for the column to be absent: the fabricated
+  `wps_background` baseline (`4cd634b`) *and* this. With the old PON the value
+  is `−3.4` for every sample, which is what the fabricated `167.0 / 5.0` gives
+  for an `nrl_bp` pinned at 150.
+
+- **27 of 28 NRL baselines were built and never used.** Only `Global_All` was
+  scored, though the output carries an `nrl_bp` per chromosome and per Alu
+  family and the baseline has one for each. All 28 groups are now scored;
+  per-chromosome NRL drift is the reason those baselines exist.
+
+- **An unmeasurable spread produced `z = 0.0`, in twelve places.** Ten baseline
+  classes in `pon/model.py` independently ended with
+  `if std > 0: return (x - mean) / std` followed by `return 0.0` — nine copies
+  of the same three lines, and the same defect nine times. Zero is not a
+  cautious answer: it is the most confident claim the column can make ("sits
+  exactly at the healthy baseline"), asserted precisely when the baseline
+  measured no spread, and indistinguishable from a genuine zero.
+
+  Replaced by one `zscore_or_nan` helper, so it can only be wrong once. Also:
+  `FsdBaseline.get_expected`/`get_std` returned `0.0` for an unknown arm (a
+  caller dividing by that gets infinity, not an absence), and
+  `compute_shape_score` returned `0.0` for an undefined correlation, which is
+  a real claim about shape agreement.
+
+- **`WpsBaseline.compute_z_vector` substituted `1.0` for an unusable σ.** Since
+  `4cd634b` the builder writes NaN where it could not measure spread;
+  `np.where(std > 0, std, 1.0)` is False for NaN, so every one of those became
+  a *finite* z — undoing the builder's honesty at the read side, which is the
+  harder place to notice. This is the function WPS z-scoring will use.
+
+- **Reading back a file just written could return an older run's data.**
+  `read_table` is parquet-first: given `x.tsv` it prefers `x.parquet`. That is
+  right when asking "what was produced for this output" and wrong immediately
+  after writing a specific file. The Rust backends write plain TSV and Python
+  reads it back to honour `--output-format`, so a `.parquet` sibling left by an
+  earlier run into the same directory won — which is what a Nextflow retry or
+  `-resume` produces.
+
+  Reproduced end to end for region entropy: with a stale parquet present, the
+  output carried the **previous run's** `z_score` and `entropy` rather than
+  this run's. Fixed at every read-after-write site — region entropy, mFSD, UXM,
+  region-MDS gene and exon, on-target MDS — via a new
+  `read_exact_table` helper.
+
+  Also reverts an over-correction from earlier in this branch: the post-Rust
+  existence check in `process_region_entropy` must be exact, not resolving, or
+  a stale sibling satisfies it and the degradation branch never fires.
+
+- **A whole-genome run lost an entire verdict axis.** A panel run splits OCF
+  into on- and off-target; a WGS run writes neither and emits a plain
+  `.OCF.parquet`. `verdict.py`, `plots.py` and the report's run-facts strip all
+  read only the panel pair, so every WGS sample reported OCF absent with the
+  file sitting in the directory. Losing an axis makes the verdict read
+  *stronger*, not weaker — it shrinks the denominator — which is the dangerous
+  direction. The preference order now lives once, in `contract.py`, and all
+  three read it.
+
+- **Six optional outputs rendered with no interpretation.** `mFSD`, `UXM`,
+  `OCF`, `FSC.regions.e1only`, `fsc_counts` and `correction_factors` got a
+  section with a measured shape and nothing else — no lede, no direction, no
+  why/how/what — because `test_meaning_registry.py` keyed on `CONTRACT` alone
+  and those six are `NOT_CONSUMED`. mFSD in particular had a chart with no
+  explanation beside it. The registry now covers everything either command can
+  render.
+
+- **Numeric identifier columns were not redacted.** `describe-output` prefers a
+  min…max range over the example value whenever one exists, so an integer
+  patient key or accession was printed in full by the branch meant to hide it —
+  a range over one distinct value *is* the value.
+
+- **`describe-output` and `report` disagreed about the same fact.** The report
+  says *gated* / *inventory*; `describe-output` still said *read downstream*,
+  a claim about another repository that nothing here keeps in sync. Aligned on
+  the report's wording, with the distinction spelled out in the output.
+
+- **README linked to six pages that do not exist.** `/introduction/`,
+  `/installation/`, `/usage/`, `/features/extract/`, `/pipeline/` and
+  `/citation/` all 404 — they point at a docs layout reorganised out of
+  existence. Absolute URLs, so neither mkdocs nor the internal link checker
+  ever resolved them.
+
+- **`tests/unit/test_cli_documented.py` checked 8 of 19 commands.** Its regex
+  matched only `app.command(name="x")` and silently skipped the eleven
+  registered as bare `app.command()(fn)`. It is now cross-checked against typer
+  itself, which immediately surfaced a fifth undocumented command, `validate`.
+
 - **The Nextflow pipeline discarded its own validation artifacts, and never ran
   the cohort check.** Three compounding gaps, so the scatter/gather validation
   added earlier was inert end to end:
@@ -1082,6 +1092,7 @@ All notable changes to this project will be documented in this file.
   above: a fragment whose R1 is rightmost begins before the read that produced
   it, so read order stopped being coordinate order. The writer now sorts each
   chromosome before writing. Caught by the invariant suite, not by review.
+
 - **Gene- and region-level FSC used different size bands than the genome-level
   table, so identically-named columns meant different things.** The genome-bin
   counter split at `<=100 / <=149 / <=220 / <=260 / <=400` with a sixth
@@ -1161,7 +1172,6 @@ All notable changes to this project will be documented in this file.
   the gzip codec, and `read_table()` gained a recovery path that decompresses
   the first gzip member and skips trailing bytes, so files already produced by
   <= 0.8.3 remain readable.
-
 
 - **WPS: nucleosome repeat length (NRL) was a constant, not a measurement.**
   The Alu background profile covered only the ~300bp Alu body in 30 bins, so
