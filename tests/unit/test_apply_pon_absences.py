@@ -395,3 +395,35 @@ def test_the_panel_wps_output_is_scored_against_the_panel_baseline():
     source = open((unified_processor.__file__ or "").replace(".pyc", ".py")).read()
     assert 'baseline_attr="wps_baseline_panel"' in source, "panel WPS still unscored"
     assert "ontarget=True," in source, "on-target FSC still uses genome-wide GC"
+
+
+# ---------------------------------------------------------------------------
+# the baseline must be measured the way samples are
+# ---------------------------------------------------------------------------
+
+
+def test_build_pon_runs_region_mds_at_the_sample_fragment_cap():
+    """Not a hardcoded 400, which `run-all` does not use.
+
+    `run-all` runs region-mds at maxlen=1000 and `run-all` is how every sample
+    is measured at scoring time. MDS is normalised entropy, so a wider window
+    sees more fragments and reads higher: a baseline fitted over 65-400bp and a
+    sample measured over 65-1000bp are not the same quantity.
+
+    Measured on the xs2 duplex cohort, the same 21 donors aggregated both ways:
+    all 146 genes shifted up by 0.0043 +/- 0.0016. Against the baseline's own
+    sigma of 0.0043 that is a median z bias of +1.15 -- 86 genes past one sigma
+    and 11 past two -- in every healthy sample, from the cap alone.
+
+    Caught by diffing a rebuilt PON against the previous one rather than by any
+    test, because nothing crashed. Invariant #6.
+    """
+    from krewlyzer.core.sample_processor import SampleParams
+    from krewlyzer.pon import build
+
+    source = open((build.__file__ or "").replace(".pyc", ".py")).read()
+    assert "max_len=400" not in source, "region-mds cap is hardcoded again"
+    assert source.count("max_len=sample_params.maxlen") == 2, "both call sites"
+
+    # And the default it now inherits is the one run-all uses.
+    assert SampleParams().maxlen == 1000
