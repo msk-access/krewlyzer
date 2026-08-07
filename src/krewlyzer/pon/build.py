@@ -235,7 +235,20 @@ def _process_sample_subprocess(
                 e1_only=False,
                 mapq=sample_params.mapq,
                 min_len=sample_params.minlen,
-                max_len=400,  # Standard cfDNA range for motifs
+                # The sample's own cap, not a hardcoded 400.
+                #
+                # `run-all` runs region-mds at maxlen=1000, and `run-all` is
+                # how every sample is measured at scoring time. A baseline
+                # fitted over 65-400bp and a sample measured over 65-1000bp
+                # are not the same quantity: MDS is normalised entropy, so the
+                # wider window sees more fragments and reads higher.
+                #
+                # Measured on the xs2 duplex cohort, same 21 donors both ways:
+                # every one of 146 genes shifted up, +0.0043 +/- 0.0016, which
+                # against the baseline's own sigma of 0.0043 is a median z bias
+                # of +1.15 -- 86 genes past 1 sigma and 11 past 2 -- in every
+                # healthy sample, from the cap alone. Invariant #6.
+                max_len=sample_params.maxlen,
                 silent=True,
             )
         except Exception as exc:
@@ -834,7 +847,9 @@ def build_pon(
                                 e1_only=False,
                                 mapq=sample_params.mapq,
                                 min_len=sample_params.minlen,
-                                max_len=400,
+                                # As above: match run-all, or the baseline
+                                # measures something the samples do not.
+                                max_len=sample_params.maxlen,
                                 silent=True,
                             )
                         except Exception as e:
