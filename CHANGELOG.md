@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`scripts/check_pon_env.py`** — behavioural probes that answer "does this
+  install actually have the PON fixes?". `--version` reports the previous
+  release until the bump, and a CLI flag only proves the *Python* side is
+  current; neither can see a stale compiled extension, and `git pull` does not
+  rebuild one. Each probe drives the real backend on input whose correct answer
+  is known, and fails with the remedy. Run it before any PON build.
+
 - **`validate-pon` checks a packing list.** It read the blocks present in the
   file and skipped the rest, so a block that vanished entirely was invisible to
   every check — indistinguishable from one never expected. Demonstrated on the
@@ -657,6 +664,19 @@ All notable changes to this project will be documented in this file.
   block.
 
 ### Fixed
+
+- **The vector σ had the same residue defect, in a different function.** The
+  previous fix went to `mean_and_sd`, which serves the *scalar* shape
+  statistics. `wps_baseline`'s 200-element `wps_nuc_std` comes from
+  `element_wise_std`, a separate implementation carrying its own `sd > 0.0`
+  guard — so the fix left every vector σ untouched, and a re-aggregated cohort
+  came back byte-identical.
+
+  This is the one that matters. Measured in the shipped models: residue σ
+  reaches 4.5% of usable positions in `xs1.all_unique`, 11.8% in
+  `xs2.all_unique`, 47.2% in `xs1.duplex` and 55.4% in `xs2.duplex`, touching
+  38–74% of anchors. A typical real σ there is 0.4–1.2, so a one-unit deviation
+  scores z ≈ 10¹¹.
 
 - **The Rust `mean_and_sd` reported floating-point residue as a spread.**
   `if sd > 0.0 { sd } else { NAN }` is the same hole `sample_std_or_nan` closed

@@ -431,6 +431,31 @@ fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
     
     means.iter().enumerate()
         .map(|(i, &mean)| {
+            // Identity is tested on the values, not on the result.
+            //
+            // `sd > 0.0` misses the case it exists for: summation error grows
+            // with n, so identical donors give residue rather than a clean
+            // zero. 21 copies of 0.1 -- the xs2 cohort size -- yield 7.6e-9.
+            //
+            // This is the same fix as `mean_and_sd` above, and it has to be
+            // made twice because the two are separate implementations: that
+            // one serves the scalar shape statistics, this one the 200-element
+            // vectors. Measured in the shipped models, it is this one that
+            // matters: residue reaches 4.5% of usable positions in
+            // xs1.all_unique, 11.8% in xs2.all_unique and 55.4% in xs2.duplex,
+            // touching 38-74% of anchors. A typical real sigma there is
+            // 0.4-1.2, so a one-unit deviation scores z ~ 1e11.
+            let (lo, hi) = vectors.iter().fold(
+                (f32::INFINITY, f32::NEG_INFINITY),
+                |(lo, hi), v| {
+                    let val = v.get(i).copied().unwrap_or(0.0);
+                    (lo.min(val), hi.max(val))
+                },
+            );
+            if lo == hi {
+                return f32::NAN;
+            }
+
             let variance: f32 = vectors.iter()
                 .map(|v| {
                     let val = v.get(i).copied().unwrap_or(0.0);
@@ -438,8 +463,6 @@ fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
                 })
                 .sum::<f32>() / (n - 1.0);
             let sd = variance.sqrt();
-            // Zero spread across >=2 samples is still no information about
-            // spread, so it is reported as such rather than floored.
             if sd > 0.0 { sd } else { f32::NAN }
         })
         .collect()
@@ -927,6 +950,31 @@ mod shape_tests {
             let (_, sd) = mean_and_sd(&values);
             assert!(sd.is_nan(), "{label}: identical values gave sd {sd:e}");
         }
+    }
+
+    #[test]
+    fn element_wise_std_gives_nan_for_identical_vectors() {
+        // The vector twin of `mean_and_sd`, and the one that actually reaches
+        // `wps_nuc_std`. It needed the same fix separately -- fixing only
+        // `mean_and_sd` left every 200-element sigma untouched, which is where
+        // the residue was measured in the shipped models.
+        let vectors: Vec<Vec<f32>> = (0..21).map(|_| vec![0.1f32; 4]).collect();
+        let means = element_wise_mean(&vectors);
+        let stds = element_wise_std(&vectors, &means);
+        for (i, sd) in stds.iter().enumerate() {
+            assert!(sd.is_nan(), "position {i}: identical donors gave sd {sd:e}");
+        }
+    }
+
+    #[test]
+    fn element_wise_std_keeps_a_real_spread() {
+        let vectors: Vec<Vec<f32>> = (0..21)
+            .map(|i| vec![0.1f32 + i as f32 * 0.01, 0.5f32])
+            .collect();
+        let means = element_wise_mean(&vectors);
+        let stds = element_wise_std(&vectors, &means);
+        assert!(stds[0].is_finite() && stds[0] > 0.0, "position 0 varies");
+        assert!(stds[1].is_nan(), "position 1 is identical across donors");
     }
 
     #[test]
