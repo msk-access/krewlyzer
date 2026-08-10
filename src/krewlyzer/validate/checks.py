@@ -275,6 +275,56 @@ def wps_arrays_nonempty(df: pd.DataFrame) -> List[str]:
     return problems
 
 
+#: Above this, a z-score is a broken divisor rather than biology.
+#:
+#: A z of 100 means a sample sits a hundred healthy standard deviations from
+#: the cohort. Real cfDNA does not do that; a sigma that should have been
+#: absent does. Deliberately loose -- the point is to catch arithmetic that has
+#: gone wrong by orders of magnitude, not to police interesting outliers.
+#: Measured for reference: real WPS z-scores against the 0.9.0 models reach
+#: 6.7, and 34,572 anchors over 6.9M positions produced nothing above 10.
+IMPLAUSIBLE_Z = 100.0
+
+
+def plausible_z_scores(df: pd.DataFrame) -> List[str]:
+    """No z-score should be astronomically large.
+
+    This is a divisor check wearing a statistics hat. Every fabricated-sigma
+    defect in 0.9.0 -- the hardcoded 167.0/5.0, six sigma floors, a standard
+    normal substituted for a missing block -- produced *plausible* numbers and
+    survived every schema check. The failure mode this catches is the opposite
+    one: a sigma so small the z explodes, which no schema notices either
+    because the column is present and finite.
+
+    Covers scalar `*_z` columns and vector ones (`wps_nuc_z` is 200 elements
+    per row), since a per-position z is exactly where a near-zero sigma hides.
+    """
+    problems = []
+    for col in [c for c in df.columns if c.endswith("_z") or c == "z_score"]:
+        values = df[col].dropna()
+        if values.empty:
+            continue
+        first = values.iloc[0]
+        if isinstance(first, (list, tuple, np.ndarray)):
+            flat = np.concatenate(
+                [np.asarray(v, dtype=float) for v in values if v is not None]
+            )
+        else:
+            flat = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+        finite = flat[np.isfinite(flat)]
+        if finite.size == 0:
+            continue
+        worst = float(np.abs(finite).max())
+        if worst > IMPLAUSIBLE_Z:
+            n = int((np.abs(finite) > IMPLAUSIBLE_Z).sum())
+            problems.append(
+                f"'{col}' reaches |z| = {worst:.3g} ({n} value(s) over "
+                f"{IMPLAUSIBLE_Z:g}); a z that large is a near-zero sigma, not "
+                "a measurement -- check the PON block it was scored against"
+            )
+    return problems
+
+
 def unique_group_id(df: pd.DataFrame) -> List[str]:
     if "group_id" not in df.columns:
         return ["missing column 'group_id'"]
@@ -298,6 +348,7 @@ REGISTRY: Dict[str, Callable[[pd.DataFrame], List[str]]] = {
     "fsc_has_log2": fsc_has_log2,
     "fsd_only_size_bins": fsd_only_size_bins,
     "fsr_region_format": fsr_region_format,
+    "plausible_z_scores": plausible_z_scores,
     "unique_group_id": unique_group_id,
     "wps_arrays_nonempty": wps_arrays_nonempty,
 }

@@ -6,6 +6,31 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **The 0.9.0 GRCh37 PONs.** All four rebuilt from `run-all` output via
+  `--from-outputs`, and the first to pass `validate-pon` with **zero findings**:
+  no fabricated baseline, no non-positive σ, every required block present, and
+  a cohort digest identifying what each was built from.
+
+  `test_the_gate_rejects_the_currently_shipped_models` has flipped to
+  `test_the_shipped_models_pass_their_own_gate`. Its original docstring said
+  that flip would be the acceptance record for the rebuild; this is it. Two
+  further assertions join it: every shipped model records its provenance, and
+  no two share a `wps_background` — the byte-identical baseline across four
+  models is the defect that started this release.
+
+- **`plausible_z_scores` in `validate-output`** — a z-score above 100 is a
+  near-zero divisor, not biology. Every fabricated-σ defect in 0.9.0 produced
+  *plausible* numbers and survived every schema check; this catches the
+  opposite failure, where σ is so small the z explodes, which no schema notices
+  either because the column is present, typed and finite.
+
+  Runs on every table rather than a listed few, so a new output cannot opt out
+  by omission, and its columns are read even where the contract does not
+  declare them. Covers vector z columns element-wise — `wps_nuc_z` carries 200
+  values per row, and a per-position σ is exactly where a near-zero divisor
+  hides. For scale: real WPS z-scores against these models reach 6.7, with
+  nothing above 10 across 6.9M positions.
+
 - **`scripts/check_pon_env.py`** — behavioural probes that answer "does this
   install actually have the PON fixes?". `--version` reports the previous
   release until the bump, and a CLI flag only proves the *Python* side is

@@ -147,6 +147,16 @@ def _read_table(path: Path, rule: TableRule) -> Tuple[pd.DataFrame, int]:
     available = set(handle.schema_arrow.names)
     wanted = [c.name for c in rule.columns if c.name in available]
 
+    # `plausible_z_scores` runs on every table, so its columns have to be read
+    # even when the contract does not declare them -- otherwise the check sees
+    # an absent column and reports nothing, which is the quietest way for a
+    # check to do no work.
+    wanted = list(
+        dict.fromkeys(
+            wanted + [c for c in available if c.endswith("_z") or c == "z_score"]
+        )
+    )
+
     # Domain checks may read columns the contract does not declare (FSD size
     # bins, FSC channels, *_log2), so they get the whole row instead.
     columns = None if rule.checks else (wanted or None)
@@ -223,7 +233,13 @@ def _check_table(
             continue
         observations[col.name] = degeneracy.observe(sample, df[col.name], col.kind)
 
-    for name in rule.checks:
+    # `plausible_z_scores` runs on every table, not per rule.
+    #
+    # It is a divisor check: any `*_z` column reaching |z| = 100 means a sigma
+    # that should have been absent. Listing it on 25 rules would work today and
+    # be silently missing from the 26th, and it costs nothing where there is no
+    # z column to look at.
+    for name in (*rule.checks, "plausible_z_scores"):
         fn = check_registry.REGISTRY.get(name)
         if fn is None:
             raise KeyError(f"unknown check '{name}' referenced by {rule.suffix}")
