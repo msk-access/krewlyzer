@@ -92,28 +92,62 @@ def _background(nrl_std) -> pd.DataFrame:
 
 @pytest.mark.skipif(not _SHIPPED, reason="bundled PONs not available (git lfs pull)")
 @pytest.mark.parametrize("path", _SHIPPED, ids=lambda p: p.parent.name + "/" + p.stem)
-def test_the_gate_rejects_the_currently_shipped_models(path):
-    """A gate that passes the models we know are wrong is not a gate.
+def test_the_shipped_models_pass_their_own_gate(path):
+    """This is the acceptance record for the 0.9.0 rebuild.
 
-    All four carry the fabricated `wps_background` and no provenance. When the
-    0.9.0 rebuild lands this test flips to asserting they pass — and that flip
-    is the acceptance record for the rebuild.
+    It used to assert the opposite. The four models shipped before 0.9.0 each
+    carried a hardcoded `167.0 / 5.0` in `wps_background` -- byte-identical
+    across two different cohorts -- and no provenance at all, and this test
+    asserted the gate caught both. Its docstring said it would flip when the
+    rebuild landed, and this is that flip.
+
+    The four now in the tree were built from run-all output via
+    `--from-outputs`, and pass with zero findings: no fabricated baseline, no
+    non-positive sigma, every required block present, and a cohort digest that
+    identifies what each was built from.
     """
     findings = check_pon(path)
-    assert exit_code(findings) == 1, "expected a contract violation"
-    ids = {f.id for f in findings}
-    assert "PON.BLOCK_DEGENERATE" in ids, "the fabricated wps_background was not caught"
-    assert "PON.NO_VERSION" in ids, "the missing provenance was not caught"
+    assert exit_code(findings) == 0, [
+        f"{f.id} {f.table}.{f.column}: {f.message}" for f in findings
+    ]
 
 
 @pytest.mark.skipif(not _SHIPPED, reason="bundled PONs not available")
-def test_the_fabricated_sigma_is_named_by_value(path=_SHIPPED[0] if _SHIPPED else None):
-    """The message has to be actionable without opening the file."""
-    degenerate = [f for f in check_pon(path) if f.id == "PON.BLOCK_DEGENERATE"]
-    assert degenerate
-    assert any(
-        "5.0" in f.message for f in degenerate
-    ), "the message should quote the repeated value"
+@pytest.mark.parametrize("path", _SHIPPED, ids=lambda p: p.parent.name + "/" + p.stem)
+def test_the_shipped_models_record_what_they_were_built_from(path):
+    """None of the pre-0.9.0 models could be reproduced or told apart."""
+    import pandas as pd
+
+    meta = pd.read_parquet(path)
+    meta = meta[meta["table"] == "metadata"].iloc[0]
+    assert str(meta.get("cohort_digest", "")).strip(), "no cohort digest"
+    assert float(meta["n_samples"]) >= MIN_SAMPLES
+    assert str(meta.get("input_kind", "")).strip(), "no input_kind"
+
+
+@pytest.mark.skipif(len(_SHIPPED) < 2, reason="need two bundled PONs to compare")
+def test_no_two_shipped_models_share_a_baseline():
+    """Invariant #1, applied to the shipped artifacts themselves.
+
+    The defect that started this release was four models carrying a
+    byte-identical `wps_background`. A single assertion that two of them differ
+    would have caught it in March.
+    """
+    import pandas as pd
+
+    seen = {}
+    for path in _SHIPPED:
+        table = pd.read_parquet(path)
+        block = table[table["table"] == "wps_background"].set_index("group_id")
+        seen[path.stem] = pd.to_numeric(block["nrl_mean"], errors="coerce")
+
+    names = list(seen)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            common = seen[a].index.intersection(seen[b].index)
+            assert (
+                not seen[a].loc[common].equals(seen[b].loc[common])
+            ), f"{a} and {b} carry an identical wps_background"
 
 
 # ---------------------------------------------------------------------------
