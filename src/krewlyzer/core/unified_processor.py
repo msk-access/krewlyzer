@@ -453,7 +453,20 @@ def run_features(
     pon_for_zscore = None  # Separate variable for z-score normalization
     if resolved_pon_model:
         pon = load_pon_model(resolved_pon_model)
-        pon_parquet = resolved_pon_model
+        # Only after the load succeeded.
+        #
+        # `pon_parquet` is handed to the Rust scorers as a *path* -- FSD, WPS,
+        # OCF and region-entropy each read the parquet themselves. Setting it
+        # unconditionally meant a PON the version guard had just refused was
+        # still normalised against by every one of them: the Python half
+        # stopped and the Rust half carried on.
+        pon_parquet = resolved_pon_model if pon else None
+        if resolved_pon_model and not pon:
+            logger.error(
+                f"PON at {resolved_pon_model.name} was refused; every feature "
+                "keeps its raw values and gets no z-score. Nothing is scored "
+                "against a model this build cannot vouch for."
+            )
         if pon:
             logger.info(f"PON loaded: {pon.assay} (n={pon.n_samples})")
             # When skip_pon_zscore is True (--skip-pon mode), don't pass PON for z-scores
