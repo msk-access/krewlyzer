@@ -122,8 +122,6 @@ def apply_wps_pon(
     wps_path: Path,
     pon,
     output_base: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
     column: str = "wps_nuc",
     baseline_attr: str = "wps_baseline",
 ) -> int:
@@ -236,11 +234,23 @@ def apply_wps_pon(
     frame["wps_phase_shift_bp"] = shifts
     frame["wps_phase_at_search_limit"] = at_limit
 
+    # Parquet, always -- not whatever `--output-format` says.
+    #
+    # WPS is the one family the output contract pins to Parquet
+    # (docs/reference/output-files.md), because the 200-element vectors are
+    # unusable as text. The Rust step writes `.WPS.parquet` unconditionally,
+    # so honouring `--output-format` here wrote the z-scores to a *second*
+    # file, `.WPS.tsv`, and left the parquet as the raw profile.
+    #
+    # Downstream reads Parquet only (invariant #2). Measured on a real run:
+    # `.WPS.tsv` carried all seven PON columns, `.WPS.parquet` carried none,
+    # and the consumer would have read the one without them -- WPS scoring
+    # present on disk and absent from the product.
     write_table(
         frame,
         output_base or wps_path.with_suffix(""),
-        output_format=output_format,
-        compress=compress,
+        output_format="parquet",
+        compress=False,
     )
 
     logger.info(f"WPS PON: {n_scored}/{len(frame)} anchors scored ({wps_path.name})")
