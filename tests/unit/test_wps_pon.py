@@ -209,9 +209,7 @@ def test_every_promised_column_is_emitted():
     from krewlyzer.core.wps_pon import apply_wps_pon
 
     pon, directory, paths = _pon_from([_frame(s) for s in range(5)])
-    apply_wps_pon(
-        Path(paths[0]), pon, output_base=directory / "o", output_format="parquet"
-    )
+    apply_wps_pon(Path(paths[0]), pon, output_base=directory / "o")
     out = pd.read_parquet(directory / "o.parquet")
     for column in (
         "wps_nuc_z",
@@ -267,9 +265,7 @@ def test_a_pon_without_a_shape_block_still_writes_the_z_vectors():
 
     pon, directory, paths = _pon_from([_frame(s) for s in range(5)])
     pon.wps_shape_baseline = None
-    apply_wps_pon(
-        Path(paths[0]), pon, output_base=directory / "o", output_format="parquet"
-    )
+    apply_wps_pon(Path(paths[0]), pon, output_base=directory / "o")
     out = pd.read_parquet(directory / "o.parquet")
     assert out["wps_nuc_z"].notna().any(), "the z vectors must survive"
     assert (
@@ -292,12 +288,40 @@ def test_scoring_a_sample_inside_its_own_baseline_shrinks_z():
 
     frames = [_frame(s) for s in range(6)]
     pon, directory, paths = _pon_from(frames)
-    apply_wps_pon(
-        Path(paths[0]), pon, output_base=directory / "self", output_format="parquet"
-    )
+    apply_wps_pon(Path(paths[0]), pon, output_base=directory / "self")
     included = pd.read_parquet(directory / "self.parquet")
     z = pd.to_numeric(included["wps_shape_corr_z"], errors="coerce").dropna()
     cap = (len(frames) - 1) / math.sqrt(len(frames))
     assert (
         z.abs().max() <= cap + 0.1
     ), f"self-included |z| reached {z.abs().max():.2f}, above the {cap:.2f} cap"
+
+
+def test_the_output_is_parquet_whatever_the_run_format_is():
+    """WPS is Parquet by contract, and this writer no longer takes an opinion.
+
+    It used to honour `--output-format`, whose default is `tsv`. The Rust step
+    writes `.WPS.parquet` unconditionally, so a default run produced *two*
+    files: a `.WPS.tsv` carrying all seven PON columns and a `.WPS.parquet`
+    carrying none. Downstream reads Parquet only (invariant #2), so the WPS
+    scoring was present on disk and absent from the product.
+
+    Measured on a real 89,034-anchor run before the fix: `.tsv` had 18 columns,
+    `.parquet` had 11, and the parquet was the older file.
+    """
+    import inspect
+    from pathlib import Path
+
+    from krewlyzer.core.wps_pon import apply_wps_pon
+
+    assert (
+        "output_format" not in inspect.signature(apply_wps_pon).parameters
+    ), "the knob is back; it can only be set wrong"
+
+    pon, directory, paths = _pon_from([_frame(s) for s in range(5)])
+    apply_wps_pon(Path(paths[0]), pon, output_base=directory / "fmt")
+
+    assert (directory / "fmt.parquet").exists(), "no parquet written"
+    assert not (directory / "fmt.tsv").exists(), "wrote a TSV nobody reads"
+    out = pd.read_parquet(directory / "fmt.parquet")
+    assert "wps_nuc_z" in out.columns

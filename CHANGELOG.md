@@ -690,6 +690,23 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **WPS z-scores were written to a file nobody reads.** `apply_wps_pon`
+  honoured `--output-format`, whose default is `tsv`, while the Rust step
+  writes `.WPS.parquet` unconditionally. A default run therefore produced two
+  files: a `.WPS.tsv` carrying all seven PON columns and a `.WPS.parquet`
+  carrying none. Downstream reads Parquet only (invariant #2), so WPS scoring
+  was present on disk and absent from the product.
+
+  Measured on a real 89,034-anchor run: the TSV had 18 columns at 928 MB, the
+  parquet 11 at 144 MB, and the parquet was the older file. WPS is Parquet-only
+  by contract precisely because of that size ratio — 200-element vectors are
+  ~6× larger as text.
+
+  The writer no longer takes an `output_format` at all, so the knob cannot be
+  set wrong; when a run requests another format, the WPS exception is logged
+  rather than silently applied. Introduced in `8265ad3`, and missed because
+  every unit test passed `output_format="parquet"` explicitly.
+
 - **The vector σ had the same residue defect, in a different function.** The
   previous fix went to `mean_and_sd`, which serves the *scalar* shape
   statistics. `wps_baseline`'s 200-element `wps_nuc_std` comes from
