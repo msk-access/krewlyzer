@@ -184,6 +184,31 @@ the file that ships should be the file that was checked.
 Commit the restamped models with `git lfs push --all` **before** pushing the
 branch, or the pointers land without the objects.
 
+## Phase 2.8: Does this release change what a PON means?
+
+Almost always **no**, and then there is nothing to do here.
+
+`MIN_PON_VERSION` in `src/krewlyzer/pon/provenance.py` is a compatibility
+floor, not the package version. It is a tuple — `(0, 9, 0)` — precisely so the
+`sed` in Phase 2 cannot move it, and so a PON stamped 0.9.0 keeps working at
+krewlyzer 1.0 and beyond. Ordinary releases leave it alone.
+
+Raise it **only** when this release changes what an existing feature *means*,
+such that a PON built before it would score samples against a different
+quantity. The 0.9.0 examples:
+
+- `wps_background` held a hardcoded `167.0 / 5.0` for every group
+- six σ floors turned "no spread measured" into a divisor
+- region-MDS was fitted over 65–400 bp while samples are measured over
+  65–1000 bp — a median bias of +1.15 σ in every gene
+
+Adding a *new* feature or block is not that: an older PON simply lacks it, and
+`validate-pon`'s packing-list check reports the absence.
+
+If you do raise it, every bundled PON must be rebuilt — not merely re-stamped.
+Stamping a model that predates the change would launder exactly the
+incompatibility the floor exists to catch.
+
 ## Phase 3: Update CHANGELOG
 
 Add new entry at the top of `CHANGELOG.md`:

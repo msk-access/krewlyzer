@@ -38,6 +38,10 @@ def sample_pon_parquet(tmp_path):
             "reference": ["Homo_sapiens_assembly19"],
             "panel_mode": [True],
             "target_regions_file": ["xs1.targets.bed.gz"],
+            # `load_pon_model` refuses anything below MIN_PON_VERSION, so a
+            # fixture standing in for a *valid* PON has to carry a version.
+            # Recording one is now part of what valid means.
+            "krewlyzer_version": ["0.9.0"],
         }
     )
 

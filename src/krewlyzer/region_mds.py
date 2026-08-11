@@ -320,12 +320,19 @@ def region_mds(
     # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
         try:
-            from krewlyzer.pon.model import PonModel
+            # The guarded loader, as in run-all: it carries the version floor,
+            # and `PonModel.load` does not.
+            from krewlyzer.core.pon_integration import load_pon_model
 
             logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
-            pon = PonModel.load(resolved_pon_path)
+            pon = load_pon_model(resolved_pon_path)
 
-            if pon.region_mds is None:
+            if pon is None:
+                logger.warning(
+                    "No usable PON: per-gene MDS keeps its raw values and gets "
+                    "no z-scores"
+                )
+            elif pon.region_mds is None:
                 logger.warning(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )

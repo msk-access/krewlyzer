@@ -13,6 +13,34 @@ All notable changes to this project will be documented in this file.
   thinking to look for it. It would have found the FSD duplication above
   unprompted.
 
+- **`load_pon_model` refuses a PON older than 0.9.0.** Recording
+  `krewlyzer_version` was only half a guard: `stamp-pon` writes it and
+  `validate-pon` flags it missing, but nothing stopped a run scoring against a
+  model built before the meaning changed — a fabricated `wps_background`, six
+  floored σ, a region-MDS fitted over 65–400 bp while samples are measured over
+  65–1000 bp. Every z-score against such a model is wrong in a way no schema
+  check can see, because the columns are present and finite.
+
+  Refusing, not warning. A warning in a log nobody reads is not a guard, and a
+  plausible wrong number is the failure this release exists to remove. Set
+  `KREWLYZER_ALLOW_OLD_PON=1` to override deliberately — without a documented
+  way out, someone edits the parquet instead and the version stops meaning
+  anything.
+
+  Writing it exposed two holes it would otherwise not have covered:
+
+  - `motif` and `region-mds` called `PonModel.load` directly, so those
+    subcommands would have scored against a model `run-all` refuses —
+    invariant #6. Both now use the guarded loader, and a test forbids any
+    other caller.
+  - The Rust scorers take a parquet *path* and read it themselves, and that
+    path was set regardless of whether the Python load succeeded. A refused
+    PON still reached FSD, WPS, OCF and region entropy: the Python half
+    stopped and the Rust half carried on.
+
+  The floor is a tuple, `(0, 9, 0)`, not a string — it is a compatibility
+  floor, not the package version, and stays put at krewlyzer 1.5.0.
+
 - **The 0.9.0 GRCh37 PONs.** All four rebuilt from `run-all` output via
   `--from-outputs`, and the first to pass `validate-pon` with **zero findings**:
   no fabricated baseline, no non-positive σ, every required block present, and
