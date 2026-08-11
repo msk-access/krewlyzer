@@ -632,6 +632,36 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`BreakPointMotif` was scored against the `EndMotif` baseline** — and so
+  were the two on-target motif tables. `apply_motif_pon` used
+  `pon.mds_baseline` for all four, an **end-motif, genome-wide** block.
+
+  An end motif is the 4-mer at the fragment's 5′ terminus, what the nuclease
+  left. A breakpoint motif spans the cut site and includes reference bases
+  *not present in the fragment*. The two frequency vectors correlate only
+  **0.696** on the same sample, so `frequency_z` there measured the offset
+  between two definitions rather than any departure from healthy:
+
+  | | `EndMotif` median / >10 | `BreakPointMotif` median / >10 |
+  |---|---|---|
+  | XS1 | 1.82 / 0 of 256 | 5.85 / **70** of 256 |
+  | XS2 | 4.47 / 39 of 256 | 11.25 / **136** of 256 |
+
+  A correctly fitted baseline gives a median near 0.67 — the half-normal
+  median. Demonstrated on synthetic cohorts with the real correlation
+  structure: median |z| 6.75 with 86 of 256 beyond 10 against the end-motif
+  baseline, **0.75 with none beyond 10** against its own.
+
+  The PON gains `breakpoint_motif_baseline` and
+  `breakpoint_motif_baseline_ontarget`, built by both routes. `mds_mean` and
+  `mds_std` are NaN in those blocks: MDS is defined on end motifs, and a number
+  there would be a different statistic under the same name.
+
+  `mds_baseline_ontarget` needed no new work — it already existed and was
+  already used for the whole-sample MDS z, just not for the per-motif
+  frequencies. A PON without the breakpoint blocks (every one built before
+  0.9.0) now yields no `frequency_z` on those tables rather than a wrong one.
+
 - **A σ of 10⁻¹⁷ was used as a divisor.** Every PON built to date carries
   positions whose baseline spread is floating-point residue: 4.6 % of positive
   σ in xs1.all_unique, 12.0 % in xs2.all_unique, 47.2 % and 55.4 % in the

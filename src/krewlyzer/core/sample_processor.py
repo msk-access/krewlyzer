@@ -645,7 +645,24 @@ def write_motif_outputs(
     if pon is not None:
         from .motif_pon import apply_motif_pon
 
-        for key in ("edm", "bpm", "edm_ontarget", "bpm_ontarget"):
+        # Each table against its own baseline. Until 0.9.0 all four used
+        # `mds_baseline` -- an end-motif, genome-wide block -- so three of them
+        # were scored against the wrong distribution.
+        #
+        # Breakpoint motifs are not end motifs: an end motif is the 4-mer at
+        # the fragment's 5' terminus, a breakpoint motif spans the cut site and
+        # includes reference bases not in the fragment. The two correlate 0.696
+        # on one sample, and `BreakPointMotif` came out at median |z| 5.85
+        # (XS1) and 11.25 (XS2) where a correct baseline gives ~0.67.
+        #
+        # `mds_baseline_ontarget` already existed and was already used for the
+        # whole-sample MDS z -- just not for the per-motif frequencies.
+        for key, baseline_attr in (
+            ("edm", "mds_baseline"),
+            ("bpm", "breakpoint_motif_baseline"),
+            ("edm_ontarget", "mds_baseline_ontarget"),
+            ("bpm_ontarget", "breakpoint_motif_baseline_ontarget"),
+        ):
             path = outputs.get(key)
             if path is None:
                 continue
@@ -655,6 +672,7 @@ def write_motif_outputs(
                 output_base=Path(strip_table_extension(str(path))),
                 output_format=output_format,
                 compress=compress,
+                baseline_attr=baseline_attr,
             )
 
     logger.info(f"  Wrote {len(outputs)} motif files")

@@ -963,6 +963,24 @@ class PonModel:
     gc_bias_ontarget: Optional[GcBiasModel] = None
     fsd_baseline_ontarget: Optional[FsdBaseline] = None
     mds_baseline_ontarget: Optional[MdsBaseline] = None  # On-target k-mer MDS
+
+    #: Breakpoint 4-mers are a different distribution from end 4-mers.
+    #:
+    #: An end motif is the 4-mer at the fragment's 5' terminus -- what the
+    #: nuclease left. A breakpoint motif spans the cut site and includes
+    #: reference bases that are *not in the fragment*. Measured on one sample,
+    #: the two frequency vectors correlate 0.696.
+    #:
+    #: Before 0.9.0 `BreakPointMotif` was scored against `mds_baseline`, an
+    #: end-motif baseline, so `frequency_z` measured the offset between two
+    #: definitions rather than the sample's departure from healthy: median |z|
+    #: 5.85 against EndMotif's 1.82 on XS1, and 11.25 against 4.47 on XS2,
+    #: where a correct baseline gives ~0.67.
+    #:
+    #: `mds_mean`/`mds_std` are NaN here: MDS is defined on end motifs, so the
+    #: scalar has no meaning for this block and must not be fabricated.
+    breakpoint_motif_baseline: Optional[MdsBaseline] = None
+    breakpoint_motif_baseline_ontarget: Optional[MdsBaseline] = None
     tfbs_baseline_ontarget: Optional[TfbsBaseline] = None  # Panel-specific TFBS regions
     atac_baseline_ontarget: Optional[AtacBaseline] = None  # Panel-specific ATAC regions
 
@@ -1185,31 +1203,37 @@ class PonModel:
                 mds_std=float(row.get("mds_std", 1)),
             )
 
-        # Parse on-target MDS baseline (panel mode)
-        # Uses on-target k-mer frequencies for separate panel-mode MDS baseline
-        mds_on_df = df_all[df_all["table"] == "mds_baseline_ontarget"]
-        mds_baseline_ontarget = None
-        if not mds_on_df.empty:
-            row_on = mds_on_df.iloc[0]
-            kmer_expected_on = {}
-            kmer_std_on = {}
-            if "kmer_expected" in mds_on_df.columns:
-                kmer_data = row_on.get("kmer_expected", {})
-                if isinstance(kmer_data, dict):
-                    kmer_expected_on = kmer_data
-            if "kmer_std" in mds_on_df.columns:
-                kmer_data = row_on.get("kmer_std", {})
-                if isinstance(kmer_data, dict):
-                    kmer_std_on = kmer_data
-            mds_baseline_ontarget = MdsBaseline(
-                kmer_expected=kmer_expected_on,
-                kmer_std=kmer_std_on,
-                mds_mean=float(row_on.get("mds_mean", 0)),
-                mds_std=float(row_on.get("mds_std", 1)),
+        # Parse the k-mer blocks. Four of them now, identical in shape:
+        # end motifs and breakpoint motifs, each genome-wide and on-target.
+        def _kmer_block(table: str) -> Optional[MdsBaseline]:
+            block = df_all[df_all["table"] == table]
+            if block.empty:
+                return None
+            row = block.iloc[0]
+            expected = row.get("kmer_expected", {}) if "kmer_expected" in block else {}
+            stds = row.get("kmer_std", {}) if "kmer_std" in block else {}
+            return MdsBaseline(
+                kmer_expected=expected if isinstance(expected, dict) else {},
+                kmer_std=stds if isinstance(stds, dict) else {},
+                mds_mean=float(row.get("mds_mean", 0) or 0),
+                mds_std=float(row.get("mds_std", 1) or 1),
             )
+
+        mds_baseline_ontarget = _kmer_block("mds_baseline_ontarget")
+        breakpoint_motif_baseline = _kmer_block("breakpoint_motif_baseline")
+        breakpoint_motif_baseline_ontarget = _kmer_block(
+            "breakpoint_motif_baseline_ontarget"
+        )
+        if mds_baseline_ontarget:
             logger.debug(
                 f"Loaded MDS on-target baseline: mean={mds_baseline_ontarget.mds_mean:.4f}"
             )
+        for name, block in (
+            ("breakpoint_motif_baseline", breakpoint_motif_baseline),
+            ("breakpoint_motif_baseline_ontarget", breakpoint_motif_baseline_ontarget),
+        ):
+            if block:
+                logger.debug(f"Loaded {name}: {len(block.kmer_expected)} k-mers")
 
         # Parse on-target FSD baseline (panel mode)
         fsd_on_df = df_all[df_all["table"] == "fsd_baseline_ontarget"]
@@ -1433,6 +1457,8 @@ class PonModel:
             ocf_baseline_offtarget=ocf_baseline_offtarget,
             mds_baseline=mds_baseline,
             mds_baseline_ontarget=mds_baseline_ontarget,
+            breakpoint_motif_baseline=breakpoint_motif_baseline,
+            breakpoint_motif_baseline_ontarget=breakpoint_motif_baseline_ontarget,
             fsd_baseline_ontarget=fsd_baseline_ontarget,
             gc_bias_ontarget=gc_bias_ontarget,
             tfbs_baseline=tfbs_baseline,

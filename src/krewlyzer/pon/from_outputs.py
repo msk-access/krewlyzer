@@ -106,6 +106,10 @@ class CollectedInputs:
     ocf_offtarget: List[pd.DataFrame] = field(default_factory=list)
     mds: List[dict] = field(default_factory=list)
     mds_ontarget: List[dict] = field(default_factory=list)
+    #: Breakpoint 4-mers, which are a different distribution from end 4-mers
+    #: and need their own baseline -- see `core/motif_pon.py`.
+    breakpoint_motif: List[dict] = field(default_factory=list)
+    breakpoint_motif_ontarget: List[dict] = field(default_factory=list)
     tfbs: List[dict] = field(default_factory=list)
     tfbs_ontarget: List[dict] = field(default_factory=list)
     atac: List[dict] = field(default_factory=list)
@@ -215,7 +219,12 @@ def _ocf_record(frame: pd.DataFrame) -> Optional[pd.DataFrame]:
     return None
 
 
-def _motif_record(sample_dir: Path, stem: str, suffix: str = "") -> Optional[dict]:
+def _motif_record(
+    sample_dir: Path,
+    stem: str,
+    suffix: str = "",
+    table: str = "EndMotif",
+) -> Optional[dict]:
     """K-mer frequencies and the MDS score, from the files rather than memory.
 
     This is the one input the in-process path never wrote: ``process_sample``
@@ -229,10 +238,15 @@ def _motif_record(sample_dir: Path, stem: str, suffix: str = "") -> Optional[dic
     """
     from krewlyzer.core.motif_processor import compute_mds
 
-    frame = _read(sample_dir / f"{stem}.EndMotif{suffix}")
+    frame = _read(sample_dir / f"{stem}.{table}{suffix}")
     if frame is None or not {"Motif", "Frequency"}.issubset(frame.columns):
         return None
     kmers = dict(zip(frame["Motif"], frame["Frequency"]))
+
+    # MDS is defined on *end* motifs, so it is not computed for breakpoints:
+    # a number there would be a different statistic wearing the same name.
+    if table != "EndMotif":
+        return {"kmers": kmers, "mds": None}
 
     score: Optional[float] = None
     mds_frame = _read(sample_dir / f"{stem}.MDS{suffix}")
@@ -373,12 +387,14 @@ def collect(sample_dirs: List[Path]) -> Tuple[CollectedInputs, List[Tuple[Path, 
                 frames.append(ocf_frame)
 
         # --- motifs -------------------------------------------------------
-        motif_targets: Tuple[Tuple[str, List[dict]], ...] = (
-            ("", collected.mds),
-            (".ontarget", collected.mds_ontarget),
+        motif_targets: Tuple[Tuple[str, str, List[dict]], ...] = (
+            ("EndMotif", "", collected.mds),
+            ("EndMotif", ".ontarget", collected.mds_ontarget),
+            ("BreakPointMotif", "", collected.breakpoint_motif),
+            ("BreakPointMotif", ".ontarget", collected.breakpoint_motif_ontarget),
         )
-        for suffix, motif_bucket in motif_targets:
-            motif = _motif_record(sample_dir, stem, suffix)
+        for table, suffix, motif_bucket in motif_targets:
+            motif = _motif_record(sample_dir, stem, suffix, table=table)
             if motif is not None:
                 motif_bucket.append(motif)
 
