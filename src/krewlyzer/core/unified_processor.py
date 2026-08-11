@@ -804,6 +804,21 @@ def run_features(
 
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
+        # Say so rather than ignoring the flag.
+        #
+        # WPS is Parquet-only by contract, because of size: the 200-element
+        # vectors measure 928 MB as text against 144 MB as Parquet for the
+        # same 89k anchors. Honouring `--output-format tsv` here previously
+        # wrote the z-scores to a `.WPS.tsv` and left the `.WPS.parquet` the
+        # Rust step had written as the raw profile -- and downstream reads
+        # Parquet, so the scoring never reached the product. Silently
+        # disregarding a flag is its own defect, so it is logged.
+        if resolved_output_format != "parquet":
+            logger.info(
+                f"WPS ignores --output-format {resolved_output_format}: the "
+                "WPS tables are Parquet-only (200-element vectors are ~6x "
+                "larger as text). Every other feature honours the flag."
+            )
         if skip_pon_zscore and pon:
             logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(outputs.wps, outputs.wps_background, pon=pon_for_zscore)
@@ -811,12 +826,12 @@ def run_features(
             # The largest baseline in the PON, and until 0.9.0 read by nothing.
             from .wps_pon import apply_wps_pon
 
+            # No output_format: WPS is Parquet by contract, and the writer
+            # enforces it rather than taking the caller's word.
             apply_wps_pon(
                 outputs.wps,
                 pon_for_zscore,
                 output_base=outputs.wps.with_suffix(""),
-                output_format=resolved_output_format,
-                compress=resolved_compress,
             )
         logger.info(f"✓ WPS: {outputs.wps.name}")
 
@@ -869,8 +884,6 @@ def run_features(
                         outputs.wps_panel,
                         pon_for_zscore,
                         output_base=outputs.wps_panel.with_suffix(""),
-                        output_format=resolved_output_format,
-                        compress=resolved_compress,
                         baseline_attr="wps_baseline_panel",
                     )
                     logger.info(f"✓ WPS panel: {n_panel} anchors scored vs PON")
