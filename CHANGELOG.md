@@ -6,6 +6,27 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **The four GRCh37 PONs re-aggregated with the σ fix and the breakpoint
+  blocks**, and stamped 0.9.0. Rebuilt via `--from-outputs` from the same
+  `run-all` directories, so all four cohort digests are unchanged —
+  `1e7158a60f3e3ca7`, `a0fed96df4c948ae`, `5c8c873ec1def225`,
+  `655a5962b075cea2` — and 22 blocks become 24.
+
+  The rebuild is provably a NaN-ing of residue and nothing else. Against the
+  previous build: identical anchor sets, **bit-identical means**, **bit-identical
+  σ at all 24.7 M surviving positions**, 1,177,647 positions newly NaN whose old
+  σ topped out at 7.9 × 10⁻¹³, and **zero** positions newly finite.
+
+  Residue σ falls to zero in three models and to 2 positions of 15.8 M in
+  `xs2.all_unique` (σ 2.2 × 10⁻⁷ against a mean of 9.7 × 10⁻⁸ — the same
+  phenomenon two decades above the 10⁻⁹ floor, left rather than chased with a
+  reactive threshold change).
+
+  `validate-pon` passes all four with **zero findings** — the first clean pass.
+  On a real XS1 plasma sample, `BreakPointMotif` median |z| falls from 5.85 to
+  **2.36**, max from 159 to 8.5, and motifs beyond |z| = 10 from 70 to **none**,
+  putting it alongside `EndMotif` at 1.82 rather than 3× worse.
+
 - **The product now records what produced it.** `{sample}.metadata.parquet` —
   the consumer's completion marker — gains five columns:
   `krewlyzer_version`, `pon_applied`, `pon_model`, `pon_cohort_digest` and
