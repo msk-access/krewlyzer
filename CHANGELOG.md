@@ -601,6 +601,30 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **WPS z-scores were written to a file nothing reads, then destroyed their own
+  input when that was fixed.** Two defects stacked, both introduced by the Rust
+  port earlier in this release and both caught by reviewing the *product*
+  rather than the code.
+
+  `run-all` passes `{sample}.WPS` as the output base — a stem carrying a
+  compound extension. `Path("s.WPS").with_suffix(".parquet")` reads `.WPS` as
+  the suffix and replaces it, so the scored 18-column table landed on
+  `{sample}.parquet` while `{sample}.WPS.parquet` stayed the raw 11-column
+  profile. Downstream reads Parquet only (invariant #2) — the same failure the
+  `--output-format` fix removed earlier in this release, in a second disguise,
+  under a comment that asserted the correct behaviour while the code did the
+  opposite.
+
+  Fixing the path exposed the second: the normal case *is* in place, and the
+  scorer streams its input in batches while `File::create` truncated that same
+  file out from under the reader. It now writes a sibling temp and renames
+  atomically, so a crash leaves the original intact rather than a half-written
+  product, and a return of 0 still writes nothing.
+
+  Every earlier test used a simple stem (`tmp_path / "o"`), which has no
+  compound extension and so could not see either. The new tests use the shape
+  the caller actually passes.
+
 - **The four shipped PONs are stamped `0.9.0`.** They were built from
   `develop`, where the version still read `0.8.3`, so every model recorded the
   previous release however new the code was. `krewlyzer_version` now means the

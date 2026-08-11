@@ -338,6 +338,60 @@ def test_the_output_is_parquet_whatever_the_run_format_is(tmp_path):
     assert "wps_nuc_z" in out.columns
 
 
+def test_the_scored_table_lands_on_the_file_downstream_reads(tmp_path):
+    """The production `output_base` carries a compound extension.
+
+    `run-all` passes `{sample}.WPS` (and `{sample}.WPS.panel`), and
+    `Path("s.WPS").with_suffix(".parquet")` reads `.WPS` as the suffix and
+    replaces it — giving `s.parquet`. The scored 18-column table landed under a
+    name nothing reads while `{sample}.WPS.parquet` stayed the raw 11-column
+    profile, and downstream reads Parquet only (invariant #2).
+
+    Every earlier test here used a simple stem (`tmp_path / "o"`), which has no
+    compound extension and so could not see it. This one uses the shape the
+    caller actually passes.
+    """
+    from krewlyzer.core.wps_pon import apply_wps_pon
+
+    pon_path, paths = _pon_from([_frame(s) for s in range(5)], tmp_path)
+    sample = tmp_path / "S1.WPS.parquet"
+    sample.write_bytes(paths[0].read_bytes())
+
+    # Exactly what unified_processor passes: the input path minus its extension.
+    n = apply_wps_pon(sample, pon_path, output_base=tmp_path / "S1.WPS")
+    assert n > 0
+
+    assert not (
+        tmp_path / "S1.parquet"
+    ).exists(), "the scored table landed on `S1.parquet` — with_suffix ate the `.WPS`"
+    out = pd.read_parquet(sample)
+    assert (
+        "wps_nuc_z" in out.columns
+    ), "the file downstream reads is still the raw profile"
+
+    # And the panel stem, which has two compound parts.
+    panel = tmp_path / "S1.WPS.panel.parquet"
+    panel.write_bytes(paths[0].read_bytes())
+    apply_wps_pon(panel, pon_path, output_base=tmp_path / "S1.WPS.panel")
+    assert not (tmp_path / "S1.WPS.parquet").exists() or "wps_nuc_z" in pd.read_parquet(
+        tmp_path / "S1.WPS.parquet"
+    ), "the panel run overwrote the genome-wide file"
+    assert "wps_nuc_z" in pd.read_parquet(panel).columns
+
+
+def test_scoring_in_place_needs_no_output_base(tmp_path):
+    """Defaulting must land on the input, not a truncated sibling."""
+    from krewlyzer.core.wps_pon import apply_wps_pon
+
+    pon_path, paths = _pon_from([_frame(s) for s in range(5)], tmp_path)
+    sample = tmp_path / "S2.WPS.parquet"
+    sample.write_bytes(paths[0].read_bytes())
+
+    apply_wps_pon(sample, pon_path)
+    assert not (tmp_path / "S2.parquet").exists()
+    assert "wps_nuc_z" in pd.read_parquet(sample).columns
+
+
 def test_a_missing_pon_leaves_the_raw_table_alone(tmp_path):
     """Half-writing the product is worse than not scoring it.
 

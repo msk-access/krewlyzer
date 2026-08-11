@@ -48,6 +48,7 @@ settled, it belonged on the Rust side of the boundary in
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +67,21 @@ logger = logging.getLogger("core.wps_pon")
 #: what a poorly-matched sample and baseline look like rather than a defect.
 #: `wps_phase_at_search_limit` exists so the reader can tell which they have.
 PHASE_MAX_LAG = 30
+
+
+def _strip_known_suffix(path: Path) -> Path:
+    """Drop a trailing `.parquet` / `.tsv` / `.tsv.gz`, keeping compound stems.
+
+    `Path("s.WPS.parquet").with_suffix("")` happens to be right here, but
+    `Path("s.MDS.gene.tsv").with_suffix("")` is `s.MDS.gene` and
+    `Path("s.MDS.gene").with_suffix("")` is `s.MDS` -- so the moment this is
+    reused the trap reopens. Strip explicitly instead.
+    """
+    name = path.name
+    for suffix in (".parquet", ".tsv.gz", ".tsv"):
+        if name.endswith(suffix):
+            return path.parent / name[: -len(suffix)]
+    return path
 
 
 def apply_wps_pon(
@@ -115,18 +131,53 @@ def apply_wps_pon(
         logger.warning(f"PON not found for WPS scoring: {pon_parquet_path}")
         return 0
 
-    # `.parquet` explicitly, not `with_suffix`: `output_base` is a stem, and the
-    # in-place case (base == the input's stem) must land on the same file the
-    # Rust step wrote, which is the file downstream reads.
-    output_path = (output_base or wps_path.with_suffix("")).with_suffix(".parquet")
-
-    n_scored = _core.wps.apply_pon_zscore(
-        str(wps_path),
-        str(pon_parquet_path),
-        str(output_path),
-        baseline_table,
-        column,
+    # Appended, never `with_suffix`.
+    #
+    # `output_base` is a *stem* carrying a compound extension:
+    # `{sample}.WPS`, or `{sample}.WPS.panel`. `Path("s.WPS").with_suffix(
+    # ".parquet")` reads `.WPS` as the suffix and replaces it, giving
+    # `s.parquet` -- so the scored 18-column table landed beside the raw one
+    # under a name nothing reads, and `{sample}.WPS.parquet` stayed the raw
+    # 11-column profile. Downstream reads Parquet only (invariant #2), so the
+    # scoring was on disk and absent from the product.
+    #
+    # This is the same defect the `--output-format` fix removed earlier in this
+    # release, in a second disguise, and the comment that used to sit here
+    # asserted the correct behaviour while the code did the opposite.
+    base = (
+        Path(output_base) if output_base is not None else _strip_known_suffix(wps_path)
     )
+    output_path = (
+        base if base.suffix == ".parquet" else base.parent / (base.name + ".parquet")
+    )
+
+    # Write to a sibling, then rename over the target.
+    #
+    # The normal case *is* in place: `run-all` passes `{sample}.WPS` as the
+    # base, so the output is the input. The scorer streams the input in
+    # batches, and `File::create` on the same path truncates it out from under
+    # the reader -- "end of file" partway through, with the raw table already
+    # destroyed and the scored one never written.
+    #
+    # A sibling temp in the same directory keeps the rename atomic (same
+    # filesystem), so a crash leaves the original intact rather than a
+    # half-written product. It also preserves the contract that a return of 0
+    # writes nothing: Rust creates no file, so there is nothing to rename.
+    tmp_path = output_path.parent / (output_path.name + ".tmp")
+    try:
+        n_scored = _core.wps.apply_pon_zscore(
+            str(wps_path),
+            str(pon_parquet_path),
+            str(tmp_path),
+            baseline_table,
+            column,
+        )
+        if tmp_path.exists():
+            os.replace(tmp_path, output_path)
+    finally:
+        # A failed run must not leave a partial table looking like an output.
+        if tmp_path.exists():
+            tmp_path.unlink()
 
     # Rust returns 0 *and writes nothing* when the PON carries no matching
     # baseline -- a PON built before the block existed, or a panel PON asked
