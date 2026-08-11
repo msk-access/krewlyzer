@@ -6,6 +6,37 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **The product now records what produced it.** `{sample}.metadata.parquet` —
+  the consumer's completion marker — gains five columns:
+  `krewlyzer_version`, `pon_applied`, `pon_model`, `pon_cohort_digest` and
+  `pon_krewlyzer_version`.
+
+  The version *was* recorded, in `{sample}.features.json`, which invariant #2
+  says downstream never reads. So the one fact needed to tell two runs apart
+  lived precisely where the product ignores it. That mattered the moment this
+  release changed what several columns mean: given a results directory there
+  was no way to answer *was this produced before or after the FSD bin fix?*
+  except by re-running it.
+
+  `pon_model` is the **basename** only. The full path would put the operator's
+  home directory into a shipped table.
+
+  Stamped by `run_features`, so a single-feature CLI run records the same
+  provenance as `run-all` (invariant #6), and stamped from `pon_for_zscore`
+  rather than `pon` — a model loaded but withheld by `--skip-pon` scored
+  nothing, and recording it as applied would be a lie about the columns present.
+
+- **`validate-output` requires the PON-derived columns when, and only when, a
+  PON was applied.** The contract declared none of them, so the seven WPS
+  columns and FSD's `pon_stability` could vanish entirely and the gate would
+  pass — which is exactly what happened twice in this release. They cannot be
+  required unconditionally, because `--skip-pon`, no PON, and a PON the version
+  guard refused are all legitimately unscored; `pon_applied` above is what
+  tells the cases apart.
+
+  A directory with no `pon_applied` at all was written by a build older than
+  0.9.0, and is reported rather than assumed either way.
+
 - **`no_collided_columns` in `validate-output`** — a `.1`-suffixed or repeated
   column name means a frame collision was written to disk, and no reader can
   tell which copy is current. Generic and universal: it runs on every table, so
@@ -600,6 +631,14 @@ All notable changes to this project will be documented in this file.
   `params.compress_tsv` through as well; previously only `runall` did.
 
 ### Fixed
+
+- **`fsd_only_size_bins` fired on every PON-scored FSD table.** The check's
+  reserved column set was written for the raw table and never updated when PON
+  scoring began writing into the same file, so it reported all 67 `{bin}_logR`
+  columns plus `pon_stability` as stray — 68 spurious errors on every scored
+  sample. A gate that fires on correct output is a gate nobody reads. It went
+  unnoticed because the synthetic cohort carried no PON columns until now, so
+  the check had never once seen the shape it runs against in production.
 
 - **The WPS column reference documented five columns that do not exist, missed
   eight that do, and typed the profiles as scalars.** Found by diffing the

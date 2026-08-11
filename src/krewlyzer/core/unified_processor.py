@@ -1394,6 +1394,26 @@ def run_features(
         if p and p.exists()
     )
 
+    # Record what produced this sample, and what it was scored against.
+    #
+    # Here rather than in `wrapper.py` so a single-feature CLI run gets the
+    # same treatment as `run-all` (invariant #6), and here rather than at
+    # extraction because the PON is not loaded yet at that point.
+    #
+    # `pon_for_zscore`, not `pon`: a model that loaded but was withheld by
+    # --skip-pon scored nothing, and recording it as applied would be a lie
+    # about the columns in this directory.
+    from .output_provenance import stamp_metadata
+
+    stamp_metadata(
+        output_dir,
+        sample_name,
+        pon=pon_for_zscore,
+        pon_path=pon_parquet if pon_for_zscore is not None else None,
+        output_format=resolved_output_format,
+        compress=resolved_compress,
+    )
+
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     logger.info(f"Complete: {output_count} files generated in {total_duration:.2f}s")
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
