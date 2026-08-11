@@ -764,14 +764,16 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
         let row = row_result?;
         
         // Check if this row is from fsd_baseline table
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != table_name {
-                continue;
-            }
-        } else {
-            continue;
+        // By name, and skip when absent: `unwrap_or(0)` read column zero,
+        // which in a PON parquet is `table` itself -- so a PON without the
+        // column would have compared every row against its own first value.
+        match row
+            .get_column_iter()
+            .position(|(n, _)| n == "table")
+            .and_then(|i| row.get_string(i).ok())
+        {
+            Some(table) if table == table_name => {}
+            _ => continue,
         }
         
         // Parse arm, size_bin, expected, std.

@@ -607,6 +607,19 @@ All notable changes to this project will be documented in this file.
   by a median of **4709%** on all 41 arms. Sigma is now interpolated at the
   requested size, exactly as `expected` already was.
 
+- **The same column-lookup defect closed in `ocf.rs`, the third and last copy.**
+  `position(...).unwrap_or(0)` made an absent column read column zero, and
+  `ocf_mean`/`ocf_std` defaulted to `0.0`/`1.0` — together making z the raw
+  difference from zero. OCF's values parse correctly today (verified against a
+  shipped PON: an observation 2σ above the mean scores exactly 2.0), so this
+  closes a landmine rather than fixing a wrong number. It would have fired the
+  moment a column was renamed. The `table` lookups in `fsd.rs` and
+  `region_entropy.rs` are by name now too.
+
+  Two `unwrap_or(0)` lookups remain, both on **TSV headers** rather than PON
+  columns, where column zero genuinely is the label in most files. Left alone
+  deliberately.
+
 - **Three more fabricated defaults on the FSD baseline path**, the same family
   removed from nine baseline classes as `zscore_or_nan` this release: an
   unreadable sigma defaulted to `1.0` (which with the 0.01 floor reads as a
