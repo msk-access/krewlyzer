@@ -573,6 +573,21 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The four shipped PONs are stamped `0.9.0`.** They were built from
+  `develop`, where the version still read `0.8.3`, so every model recorded the
+  previous release however new the code was. `krewlyzer_version` now means the
+  release a model is *published* with — which is what the compatibility guard
+  needs — while `build_date` still records when it was built. Only the metadata
+  row changed: all four cohort digests, block counts and row counts are
+  unchanged, and `validate-pon` passes on the stamped files, which are the
+  files that ship.
+
+- **`validate-pon` reported `0 sample(s)` after checking four models.** The
+  summary line is shared with `validate-output`, which counts samples; the PON
+  gate fills no samples, so it printed a line saying nothing was inspected
+  directly above one saying the contract was satisfied. It now reports what it
+  actually checked: `4 model(s)`.
+
 - **Every FSD log-ratio was scored against the wrong size bin.** The largest
   output defect found in this release, and it reached every sample ever
   normalised against a PON.
