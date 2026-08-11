@@ -776,8 +776,17 @@ def run_features(
         logger.info(f"✓ FSD: {outputs.fsd.name}")
 
         # On-target FSD: use fsd_baseline_ontarget table from PON
+        #
+        # `resolve_table_path`, not `.exists()` on the `.tsv` -- the same fix
+        # already applied to the genome-wide branch fifteen lines above, and
+        # missed here. The FSD writer honours --output-format, so under
+        # `parquet` this `.tsv` never exists, the whole block was skipped, and
+        # the on-target table shipped unscored: 69 columns and zero `_logR`
+        # against the genome-wide table's 137. Confirmed on a real XS1 and XS2
+        # plasma sample before the fix.
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
-        if is_panel_mode and out_fsd_on.exists():
+        resolved_fsd_on = resolve_table_path(out_fsd_on)
+        if is_panel_mode and resolved_fsd_on is not None:
             outputs.fsd_ontarget = out_fsd_on
             process_fsd(
                 out_fsd_on,
@@ -788,6 +797,12 @@ def run_features(
             )
             logger.info(
                 f"✓ FSD on-target: {outputs.fsd_ontarget.name} (using fsd_baseline_ontarget)"
+            )
+        elif is_panel_mode:
+            logger.warning(
+                f"FSD on-target table not found for {sample_name} (looked for "
+                f"{out_fsd_on.name} in any format); it will carry no PON "
+                "log-ratios."
             )
 
     # =========================================================================
@@ -913,8 +928,28 @@ def run_features(
     # - all.ocf.tsv, all.sync.tsv (ALL fragments)
     # - all.ocf.ontarget.tsv, all.sync.ontarget.tsv (on-target)
     # - all.ocf.offtarget.tsv, all.sync.offtarget.tsv (off-target)
+    #
+    # These are TSV whatever --output-format says: the temp directory is an
+    # internal intermediate and Python owns OCF's conversion (see the comment
+    # in rust/src/pipeline.rs). The checks below are `.exists()` on those exact
+    # names, so if that ever stops being true the tables vanish silently --
+    # which is precisely what happened under `parquet`, losing all six.
     if enable_ocf and ocf_tmp_dir:
         import shutil
+
+        # Say so when the intermediates are not where they should be.
+        #
+        # Every `if rust_*.exists():` below treats an absent file as "this
+        # split was not produced", which is legitimate for on/off-target in
+        # WGS mode and a silent catastrophe for the primary table. One check
+        # up front distinguishes them.
+        if not any(ocf_tmp_dir.glob("all.ocf*")):
+            logger.error(
+                f"OCF ran but wrote no readable intermediate into "
+                f"{ocf_tmp_dir.name}; every OCF table will be missing from "
+                f"this sample. Found: {sorted(p.name for p in ocf_tmp_dir.glob('*')) or 'nothing'}. "
+                "The mover expects plain TSV -- see rust/src/pipeline.rs."
+            )
 
         # Primary output (ALL fragments - WGS-comparable)
         rust_ocf = ocf_tmp_dir / "all.ocf.tsv"

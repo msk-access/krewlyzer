@@ -68,19 +68,24 @@ def test_the_pon_path_is_never_recorded_in_full(tmp_path):
     typically sits under a home or scratch directory. The basename answers
     *which model*; the rest answers *whose machine*.
     """
+    # A deep absolute path, but deliberately *not* under `/Users` or `/home`:
+    # `scripts/check_phi_guard.sh` refuses either in any tracked file, and it
+    # is right to — a test that asserts we never publish a home path should not
+    # itself contain one. The behaviour under test is basename extraction from
+    # a long absolute path, which this exercises identically.
     _marker(tmp_path)
     stamp_metadata(
         tmp_path,
         "S1",
         pon=_Pon(),
-        pon_path=Path("/Users/someone/OneDrive/private/xs1.duplex.pon.parquet"),
+        pon_path=Path("/mnt/scratch/analyst-a/private/xs1.duplex.pon.parquet"),
         output_format="parquet",
     )
     recorded = str(
         pd.read_parquet(tmp_path / "S1.metadata.parquet")["pon_model"].iloc[0]
     )
     assert recorded == "xs1.duplex.pon.parquet"
-    assert "/" not in recorded and "Users" not in recorded
+    assert "/" not in recorded and "scratch" not in recorded
 
 
 def test_an_unscored_run_says_so_rather_than_saying_nothing(tmp_path):

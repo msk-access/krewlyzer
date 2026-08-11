@@ -632,6 +632,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`--output-format parquet` silently discarded every OCF table.** All six —
+  `OCF`, `OCF.sync`, `OCF.{on,off}target`, `OCF.{on,off}target.sync`. Measured
+  on a real XS1 plasma BAM: 44 logical tables under `both`, **38** under
+  `parquet`, exactly the OCF six missing.
+
+  The OCF temp directory is an internal intermediate — Python moves the files
+  to their final names and converts them, because `_core.ocf.apply_pon_zscore`
+  reads TSV line by line. `pipeline.rs` nonetheless dispatched that
+  intermediate write on the user's `--output-format`, so Parquet mode wrote
+  `all.ocf.parquet` while the mover looked for `all.ocf.tsv`. Nothing matched,
+  nothing moved, the temp directory was deleted. No warning, because an absent
+  file is indistinguishable from "OCF was not requested".
+
+  The FSC counts three lines above already carried the right rule — *"an
+  internal intermediate; keep as TSV"*. OCF follows it now, and the mover
+  reports an empty intermediate as an error. The `.sync` tables are the large
+  ones (483 KB TSV vs 56 KB Parquet), so this removed orientation-aware
+  fragmentation from precisely the format the release ships in (invariant #2).
+
+- **On-target FSD was never PON-scored under Parquet.** The same defect one
+  branch below its own fix: `.exists()` on a hardcoded `.FSD.ontarget.tsv`,
+  fifteen lines under the comment explaining why the genome-wide branch had
+  stopped doing that. Confirmed on real XS1 and XS2 plasma samples — 69 columns
+  and zero `_logR` against the genome-wide table's 137. Resolved with
+  `resolve_table_path`; an absent table is now warned about.
+
+- **On/off-target OCF left its intermediate `.tsv` beside the Parquet.**
+  `apply_ocf_python_pon` wrote the final format but never called
+  `cleanup_intermediate_tsv`, which the genome-wide path does — so a Parquet
+  run shipped two files for one table with no way to tell which was current.
+
 - **`fsd_only_size_bins` fired on every PON-scored FSD table.** The check's
   reserved column set was written for the raw table and never updated when PON
   scoring began writing into the same file, so it reported all 67 `{bin}_logR`

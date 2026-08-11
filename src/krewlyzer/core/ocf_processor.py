@@ -185,6 +185,14 @@ def apply_ocf_python_pon(
     n_scored = n_matched - n_unscoreable
 
     write_table(df, ocf_path, output_format=output_format, compress=compress)
+    # Same cleanup the genome-wide path does via `_write_ocf_output`.
+    #
+    # Without it a `--output-format parquet` run left `{sample}.OCF.ontarget.tsv`
+    # and `.offtarget.tsv` beside their Parquet, while the genome-wide table
+    # correctly had none. Two files for one table, differing in age, and no way
+    # for a reader to tell which is current -- the ambiguity `no_collided_columns`
+    # exists to catch one level down.
+    cleanup_intermediate_tsv(ocf_path, output_format, compress)
     logger.info(
         f"OCF Python PON ({baseline_attr}): {n_matched}/{len(df)} regions matched, "
         f"{n_scored} scored ({ocf_path.name})"
