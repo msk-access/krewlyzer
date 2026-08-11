@@ -61,7 +61,7 @@ pub fn apply_pon_zscore(
 raw table on a zero, so a scorer that half-writes on a missing baseline
 destroys the product it could not improve (invariant #2).
 
-### Two traps when reading a PON parquet
+### Three traps when reading a PON parquet
 
 **String width.** The builder writes `large_string`, not `string`; a bare
 `downcast_ref::<StringArray>()` returns `None` on every shipped PON and yields
@@ -78,6 +78,40 @@ table is ~120 columns across ~130k rows.
 builder's own fixtures write `list<float>`. A reader that accepts one silently
 finds no anchors in the other. `wps.rs` accepts both and logs the type it
 could not read rather than returning nothing.
+
+**Numeric width -- the one that actually shipped wrong.** A PON is a *single*
+long-format table, so every row belonging to another block carries a null in
+your column, and the union comes out `float64` even for values that are
+conceptually integers. `size_bin` is a double in every PON. The parquet row
+API does **not** coerce: `row.get_int()` on a Double returns `Err`.
+
+`fsd.rs` fell through that `Err` to `unwrap_or(0)`, so every `size_bin` became
+0, `size >= *size_bins.last()` held for every query, and all 67 bins were
+scored against the last one. Measured: 41/41 arms of a real sample matched the
+last-bin baseline exactly. The log-ratios still varied across bins -- the
+sample numerator varies -- so they were present, finite and non-degenerate.
+Invariant #1 is not enough on its own here: the metric *did* vary with the
+data, just against the wrong comparator.
+
+Read numerics by trying the widths in turn, and **skip the row** when none
+parse rather than defaulting:
+
+```rust
+let numeric = |name: &str| -> Option<f64> {
+    let i = column(name)?;
+    row.get_double(i)
+        .or_else(|_| row.get_float(i).map(|v| v as f64))
+        .or_else(|_| row.get_int(i).map(|v| v as f64))
+        .or_else(|_| row.get_long(i).map(|v| v as f64))
+        .ok()
+};
+```
+
+And look columns up **by name, skipping when absent**. `position(...)
+.unwrap_or(0)` reads column zero, which in a PON parquet is `table`. That copy
+existed three times -- `region_entropy.rs`, `fsd.rs`, `ocf.rs` -- and was
+fixed once, twice, then finally everywhere. A rule applied N times is wrong
+N times until something fails when it is.
 
 ### Which language
 
