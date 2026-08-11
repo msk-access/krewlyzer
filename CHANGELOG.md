@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`no_collided_columns` in `validate-output`** — a `.1`-suffixed or repeated
+  column name means a frame collision was written to disk, and no reader can
+  tell which copy is current. Generic and universal: it runs on every table, so
+  the next step that appends instead of replacing is caught without anyone
+  thinking to look for it. It would have found the FSD duplication above
+  unprompted.
+
 - **The 0.9.0 GRCh37 PONs.** All four rebuilt from `run-all` output via
   `--from-outputs`, and the first to pass `validate-pon` with **zero findings**:
   no fabricated baseline, no non-positive σ, every required block present, and
@@ -706,6 +713,36 @@ All notable changes to this project will be documented in this file.
   set wrong; when a run requests another format, the WPS exception is logged
   rather than silently applied. Introduced in `8265ad3`, and missed because
   every unit test passed `output_format="parquet"` explicitly.
+
+- **FSD log-ratios accumulated on every re-run.** `apply_pon_logratio` found its
+  size bins by taking any header whose text before the first `-` parsed as an
+  integer — so `65-69_logR`, a column it had written itself, came back as bin 65
+  on the next pass. Each run then appended a fresh set of log-ratios *and*
+  log-ratios of the previous ones.
+
+  Measured on a real 67-bin sample: **69 columns raw, 137 after one pass, 273
+  after two**, every `_logR` name repeated. `_write_fsd_output` reads that back
+  with pandas, which renames the collisions to `_logR.1` / `_logR.2` and writes
+  those to disk. The correct answer was in the file three times with no way to
+  say which was current — and `read_csv` returns the first, which is the oldest.
+
+  Nothing marked the work as done, so a rerun into the same directory, a
+  Nextflow retry or a resumed job all triggered it. The normaliser now drops the
+  columns it previously produced and rebuilds them, so running it twice gives
+  byte-identical output; a size bin is recognised as exactly `{int}-{int}`; and
+  it logs when it is replacing rather than appending.
+
+  **The PONs are unaffected** — verified, not assumed. Their cohorts were built
+  with `--skip-pon`, so no `_logR` column ever existed for the builder to
+  mistake for a bin, and all four models carry exactly 41 arms × 67 bins with no
+  duplicates.
+
+- **Two more fabrications in the same function.** `log_ratio = 0.0` when the arm
+  is absent from the baseline, and `pon_stability = 1.0` when no σ was measured.
+  Zero says "exactly at the healthy baseline" and 1.0 is what an average
+  variance of 0.99 would give — both specific readings asserted where nothing
+  was measured. Now NaN, as in `zscore_or_nan`, the FSC log2, the FSR ratio and
+  the entropy z.
 
 - **The vector σ had the same residue defect, in a different function.** The
   previous fix went to `mean_and_sd`, which serves the *scalar* shape

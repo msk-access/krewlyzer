@@ -325,6 +325,55 @@ def plausible_z_scores(df: pd.DataFrame) -> List[str]:
     return problems
 
 
+def no_collided_columns(df: pd.DataFrame) -> List[str]:
+    """A `.1`-suffixed or repeated column name is a frame collision on disk.
+
+    pandas renames a duplicate column to `name.1` when it reads one, and writes
+    that name straight back out. So the suffix in a shipped file means some
+    step appended a set of columns that were already there -- and the reader
+    cannot tell which copy is current. `read_csv` returns the first, which is
+    the oldest.
+
+    Found in FSD: `apply_pon_logratio` matched its own `65-69_logR` output as
+    size bin 65, so every re-run appended another generation. A real 67-bin
+    sample went 69 columns to 137 to 273, carrying `_logR`, `_logR.1` and
+    `_logR.2` with the correct answer somewhere among them.
+
+    Deliberately generic. Nothing about this check is FSD-specific, and the
+    next step to append instead of replace will be caught without anyone
+    thinking to look for it.
+    """
+    problems = []
+    names = list(df.columns)
+
+    repeated = sorted({n for n in names if names.count(n) > 1})
+    if repeated:
+        problems.append(
+            f"duplicate column name(s) {repeated[:5]}; a reader cannot tell "
+            "which copy is current, and pandas returns the first"
+        )
+
+    # `foo.1`, `foo.12` -- pandas' own de-duplication, written back to disk.
+    #
+    # The un-suffixed name has to be present too. Without that condition every
+    # `foo.N` flags itself, because a name always contributes its own base to
+    # the comparison set, and legitimate names like `chr1.2` get reported.
+    # Requiring the pair keeps this specific to an actual collision.
+    present = set(names)
+    suffixed = sorted(
+        n
+        for n in names
+        if "." in n and n.rsplit(".", 1)[1].isdigit() and n.rsplit(".", 1)[0] in present
+    )
+    if suffixed:
+        problems.append(
+            f"column(s) {suffixed[:5]} carry a pandas de-duplication suffix; "
+            "some step appended columns that were already present rather than "
+            "replacing them"
+        )
+    return problems
+
+
 def unique_group_id(df: pd.DataFrame) -> List[str]:
     if "group_id" not in df.columns:
         return ["missing column 'group_id'"]
@@ -348,6 +397,7 @@ REGISTRY: Dict[str, Callable[[pd.DataFrame], List[str]]] = {
     "fsc_has_log2": fsc_has_log2,
     "fsd_only_size_bins": fsd_only_size_bins,
     "fsr_region_format": fsr_region_format,
+    "no_collided_columns": no_collided_columns,
     "plausible_z_scores": plausible_z_scores,
     "unique_group_id": unique_group_id,
     "wps_arrays_nonempty": wps_arrays_nonempty,
