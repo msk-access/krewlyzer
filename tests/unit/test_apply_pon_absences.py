@@ -383,9 +383,12 @@ def test_the_panel_wps_baseline_is_selectable():
 
     from krewlyzer.core.wps_pon import apply_wps_pon
 
+    # `baseline_table`, not `baseline_attr`: since the port the scoring runs in
+    # Rust and reads the PON parquet itself, so the argument names a *table* in
+    # that file rather than an attribute on a loaded model.
     params = inspect.signature(apply_wps_pon).parameters
-    assert "baseline_attr" in params
-    assert params["baseline_attr"].default == "wps_baseline"
+    assert "baseline_table" in params
+    assert params["baseline_table"].default == "wps_baseline"
 
 
 def test_the_panel_wps_output_is_scored_against_the_panel_baseline():
@@ -393,7 +396,7 @@ def test_the_panel_wps_output_is_scored_against_the_panel_baseline():
     from krewlyzer.core import unified_processor
 
     source = open((unified_processor.__file__ or "").replace(".pyc", ".py")).read()
-    assert 'baseline_attr="wps_baseline_panel"' in source, "panel WPS still unscored"
+    assert 'baseline_table="wps_baseline_panel"' in source, "panel WPS still unscored"
     assert "ontarget=True," in source, "on-target FSC still uses genome-wide GC"
 
 

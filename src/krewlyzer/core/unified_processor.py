@@ -822,15 +822,19 @@ def run_features(
         if skip_pon_zscore and pon:
             logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(outputs.wps, outputs.wps_background, pon=pon_for_zscore)
-        if pon_for_zscore is not None:
+        if pon_for_zscore is not None and pon_parquet:
             # The largest baseline in the PON, and until 0.9.0 read by nothing.
             from .wps_pon import apply_wps_pon
 
+            # The path, not the loaded model: the scoring runs in Rust and
+            # reads the parquet itself. `pon_for_zscore` still gates the call
+            # because it is what --skip-pon clears.
+            #
             # No output_format: WPS is Parquet by contract, and the writer
             # enforces it rather than taking the caller's word.
             apply_wps_pon(
                 outputs.wps,
-                pon_for_zscore,
+                pon_parquet,
                 output_base=outputs.wps.with_suffix(""),
             )
         logger.info(f"✓ WPS: {outputs.wps.name}")
@@ -877,14 +881,14 @@ def run_features(
                 # genome-wide file, so the anchors nearest the targeted
                 # regions were the one WPS output with no comparison to a
                 # healthy cohort.
-                if pon_for_zscore is not None:
+                if pon_for_zscore is not None and pon_parquet:
                     from .wps_pon import apply_wps_pon
 
                     n_panel = apply_wps_pon(
                         outputs.wps_panel,
-                        pon_for_zscore,
+                        pon_parquet,
                         output_base=outputs.wps_panel.with_suffix(""),
-                        baseline_attr="wps_baseline_panel",
+                        baseline_table="wps_baseline_panel",
                     )
                     logger.info(f"✓ WPS panel: {n_panel} anchors scored vs PON")
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")

@@ -573,6 +573,54 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **WPS PON scoring moved from Python to Rust** (`rust/src/wps.rs::apply_pon_zscore`).
+  It was the last PON z-score still computed in Python, and it was the largest:
+  89k anchors, a ±30 lag search each, about 5.4M correlations.
+  `.agents/rules/architecture.md` puts "PON z-score", "loops over >1000 rows"
+  and "row-level computation" on the Rust side; this was all three.
+
+  Measured on a real 76,595-anchor output against a shipped PON: **9.5 s
+  against ~17 min**, roughly 107×.
+
+  Written in Python first on purpose, and that is not an apology — three of its
+  decisions changed under measurement and would not have survived being written
+  in the faster language first: the `log1p` amplitude (raw range correlates
+  +0.512 with depth), the Fisher transform (bounded *r* left 302 of 400 anchors
+  unable to reach +2), and the deliberate absence of a phase-shift baseline
+  (intraclass correlation 0.479). The port is **bug-for-bug**, including a tie
+  in the lag search resolving to the most negative lag — measured incidence 0
+  in 317 anchors, and correcting it would have destroyed the oracle's ability
+  to tell a porting slip from an intended change.
+
+  The Python reference is frozen as that oracle in
+  `tests/unit/test_rust_python_equivalence.py`. Nothing imports it outside
+  tests; the shipping module is now a ~40-line call. Tolerance was fixed at
+  `1e-6` relative *before* the first comparison; measured worst case **2.2e-13**
+  on synthetic anchors and **9.0e-14** against real data.
+
+  `apply_wps_pon` now takes the PON **path** rather than a loaded model, and
+  `baseline_attr` is renamed `baseline_table` — the argument names a table in
+  the parquet, not an attribute on an object.
+
+- **Two silent-read traps found while porting**, both of the "present,
+  plausible, returns nothing" class that this release is mostly about:
+
+  Every shipped PON stores `table` and `region_id` as Arrow `large_string`,
+  never `string`. A reader that downcasts to `StringArray` gets `None` and
+  yields an *empty* baseline — a legitimate state that degrades silently
+  instead of raising. `pon_model.rs::PonModel::load` does exactly that and is
+  blind to every PON this project has ever shipped. It survived because it has
+  **no callers**: each reader loads what it needs, and `pub` items are exempt
+  from dead-code warnings. Recorded in `architecture.md` rather than deleted,
+  pending an explicit decision on scope.
+
+  Vector columns are `list<double>` from the Python builder and `list<float>`
+  from the Rust one. The new reader accepts both and logs the type it could not
+  read, rather than reporting no anchors.
+
+- **Four `eprintln!("DEBUG: …")` calls in `wps.rs` now go through the logger.**
+  They wrote to stderr on every WPS run, below no level and past every filter.
+
 - **The two PON blocks that were built, stored, and read by nothing are now
   applied.** Found by tracing all 21 baseline blocks from build → parquet →
   read → apply; 19 were reaching scoring code and two were not.

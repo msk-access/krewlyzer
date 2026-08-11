@@ -73,50 +73,6 @@ impl GcBiasModel {
     }
 }
 
-/// WPS baseline for a single region.
-#[derive(Debug, Clone)]
-pub struct WpsRegionBaseline {
-    pub wps_long_mean: f64,
-    pub wps_long_std: f64,
-    pub wps_short_mean: f64,
-    pub wps_short_std: f64,
-}
-
-/// WPS baseline model containing per-region statistics.
-#[derive(Debug, Clone, Default)]
-pub struct WpsBaseline {
-    pub regions: HashMap<String, WpsRegionBaseline>,
-}
-
-impl WpsBaseline {
-    /// Get baseline for a region.
-    pub fn get_baseline(&self, region_id: &str) -> Option<&WpsRegionBaseline> {
-        self.regions.get(region_id)
-    }
-    
-    /// Compute z-score for WPS long.
-    pub fn compute_z_long(&self, region_id: &str, sample_mean: f64) -> Option<f64> {
-        self.get_baseline(region_id).map(|b| {
-            if b.wps_long_std > 0.0 {
-                (sample_mean - b.wps_long_mean) / b.wps_long_std
-            } else {
-                0.0
-            }
-        })
-    }
-    
-    /// Compute z-score for WPS short.
-    pub fn compute_z_short(&self, region_id: &str, sample_mean: f64) -> Option<f64> {
-        self.get_baseline(region_id).map(|b| {
-            if b.wps_short_std > 0.0 {
-                (sample_mean - b.wps_short_mean) / b.wps_short_std
-            } else {
-                0.0
-            }
-        })
-    }
-}
-
 /// FSD baseline for a single chromosome arm.
 #[derive(Debug, Clone)]
 pub struct FsdArmBaseline {
@@ -203,7 +159,6 @@ pub struct PonModel {
     pub reference: String,
     
     pub gc_bias: GcBiasModel,
-    pub wps_baseline: WpsBaseline,
     pub fsd_baseline: FsdBaseline,
     pub ocf_baseline: OcfBaseline,
 }
@@ -299,33 +254,6 @@ impl PonModel {
                             }
                         }
                     },
-                    "wps_baseline" => {
-                        // Parse WPS baseline row
-                        let region_id = batch.column_by_name("region_id")
-                            .and_then(|c| c.as_any().downcast_ref::<StringArray>())
-                            .map(|a| a.value(row).to_string());
-                        let wps_long_mean = batch.column_by_name("wps_long_mean")
-                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
-                            .map(|a| a.value(row)).unwrap_or(0.0);
-                        let wps_long_std = batch.column_by_name("wps_long_std")
-                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
-                            .map(|a| a.value(row)).unwrap_or(1.0);
-                        let wps_short_mean = batch.column_by_name("wps_short_mean")
-                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
-                            .map(|a| a.value(row)).unwrap_or(0.0);
-                        let wps_short_std = batch.column_by_name("wps_short_std")
-                            .and_then(|c| c.as_any().downcast_ref::<Float64Array>())
-                            .map(|a| a.value(row)).unwrap_or(1.0);
-                            
-                        if let Some(region) = region_id {
-                            model.wps_baseline.regions.insert(region, WpsRegionBaseline {
-                                wps_long_mean,
-                                wps_long_std,
-                                wps_short_mean,
-                                wps_short_std,
-                            });
-                        }
-                    },
                     "ocf_baseline" => {
                         // Parse OCF baseline row
                         let region_id = batch.column_by_name("region_id")
@@ -351,9 +279,6 @@ impl PonModel {
         }
         
         info!("Loaded PON model: {} (n={})", model.assay, model.n_samples);
-        if !model.wps_baseline.regions.is_empty() {
-            info!("  WPS baseline: {} regions", model.wps_baseline.regions.len());
-        }
         if !model.ocf_baseline.regions.is_empty() {
             info!("  OCF baseline: {} regions", model.ocf_baseline.regions.len());
         }

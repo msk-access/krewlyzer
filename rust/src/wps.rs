@@ -18,7 +18,7 @@
 //! - adjusted_score: periodicity_score × deviation_penalty
 
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::io::{BufRead, Write};
 use std::fs::File;
 use anyhow::{Result, Context, anyhow};
@@ -27,7 +27,7 @@ use pyo3::prelude::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use rust_htslib::faidx;
-use log::{info, debug, warn};
+use log::{info, debug, warn, error};
 use rayon::prelude::*;
 
 // GC correction support 
@@ -1090,7 +1090,7 @@ impl WpsConsumer {
         }
 
         
-        eprintln!("DEBUG: Loop complete. Processed {} regions with data", processed_count);
+        debug!("Loop complete. Processed {} regions with data", processed_count);
         
         // Build arrays
         let arrays: Vec<ArrayRef> = vec![
@@ -1108,19 +1108,19 @@ impl WpsConsumer {
         ];
         
         // Log array lengths for debugging
-        eprintln!("DEBUG: Array lengths: region_id={}, chrom={}, center={}, strand={}, type={}, wps_nuc={}, wps_tf={}, mask={}, prot_nuc={}, prot_tf={}, depth={}",
+        debug!("Array lengths: region_id={}, chrom={}, center={}, strand={}, type={}, wps_nuc={}, wps_tf={}, mask={}, prot_nuc={}, prot_tf={}, depth={}",
             arrays[0].len(), arrays[1].len(), arrays[2].len(), arrays[3].len(), arrays[4].len(),
             arrays[5].len(), arrays[6].len(), arrays[7].len(), arrays[8].len(), arrays[9].len(), arrays[10].len());
         
         let batch = match RecordBatch::try_new(StdArc::new(schema), arrays) {
             Ok(b) => b,
             Err(e) => {
-                eprintln!("ERROR: RecordBatch::try_new failed: {:?}", e);
+                error!("RecordBatch::try_new failed: {:?}", e);
                 return Err(anyhow::anyhow!("RecordBatch creation failed: {}", e));
             }
         };
         
-        eprintln!("DEBUG: Created batch with {} rows, writing to {:?}", batch.num_rows(), output_path);
+        debug!("Created batch with {} rows, writing to {:?}", batch.num_rows(), output_path);
         
         // Write Parquet
         let file = File::create(output_path)
@@ -1988,4 +1988,830 @@ mod background_periodicity_tests {
         let (nrl_bp, score, _) = WpsBackgroundConsumer::estimate_periodicity(&profile);
         assert_eq!((nrl_bp, score), (0.0, 0.0));
     }
+}
+
+// ===========================================================================
+// PON scoring for the WPS foreground
+// ===========================================================================
+//
+// Ported from `core/wps_pon.py`, which held the only PON z-score still
+// computed in Python. `architecture.md` puts "PON z-score / log-ratio",
+// "loops over >1000 rows" and "row-level computation" on the Rust side, and
+// this was all three: 89,034 anchors, a +/-30 lag search per anchor, about
+// 5.4M correlations, ~13 minutes per sample.
+//
+// It was written in Python first for good reason -- three of its decisions
+// changed under measurement, and would not have survived being written here
+// first. `log1p` amplitude, because raw range correlates +0.512 with depth.
+// Fisher-z on the correlation, because bounded r left 302 of 400 anchors
+// unable to reach +2. And no z-score at all on the phase shift, because its
+// intraclass correlation came out at 0.479. The Python version stays on as
+// the equivalence oracle in tests/unit/test_rust_python_equivalence.py.
+//
+// This is a bug-for-bug port. Where the Python is arguably wrong -- ties in
+// the lag search resolving to the most negative lag -- the behaviour is
+// reproduced and commented, not corrected, because an oracle you have
+// deliberately diverged from cannot tell a porting error from an intended
+// change. Measured incidence of those ties: 0 in 317 anchors.
+
+/// How far the phase search looks, in positions. Mirrors `PHASE_MAX_LAG`.
+const PHASE_MAX_LAG: i32 = 30;
+
+/// Peak-to-trough range on a log scale, or NaN from fewer than two finite points.
+fn wps_log_amplitude(profile: &[f64]) -> f64 {
+    let finite: Vec<f64> = profile.iter().copied().filter(|v| v.is_finite()).collect();
+    if finite.len() < 2 {
+        return f64::NAN;
+    }
+    let max = finite.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min = finite.iter().cloned().fold(f64::INFINITY, f64::min);
+    (max - min).ln_1p()
+}
+
+/// Pearson r over positions finite in both, or NaN.
+///
+/// The `1e-12` floor matches `np.std(a) < 1e-12` in the Python: a constant
+/// window has no correlation to report, and dividing by its spread would
+/// manufacture one.
+fn wps_shape_correlation(profile: &[f64], baseline: &[f64]) -> f64 {
+    let pairs: Vec<(f64, f64)> = profile
+        .iter()
+        .zip(baseline.iter())
+        .filter(|(a, b)| a.is_finite() && b.is_finite())
+        .map(|(a, b)| (*a, *b))
+        .collect();
+    if pairs.len() < 3 {
+        return f64::NAN;
+    }
+    let n = pairs.len() as f64;
+    let mean_a = pairs.iter().map(|(a, _)| a).sum::<f64>() / n;
+    let mean_b = pairs.iter().map(|(_, b)| b).sum::<f64>() / n;
+    // Population std, as numpy's default -- ddof=0. The correlation is
+    // scale-free so the choice cancels, but it is matched for exactness.
+    let var_a = pairs.iter().map(|(a, _)| (a - mean_a).powi(2)).sum::<f64>() / n;
+    let var_b = pairs.iter().map(|(_, b)| (b - mean_b).powi(2)).sum::<f64>() / n;
+    if var_a.sqrt() < 1e-12 || var_b.sqrt() < 1e-12 {
+        return f64::NAN;
+    }
+    let cov = pairs
+        .iter()
+        .map(|(a, b)| (a - mean_a) * (b - mean_b))
+        .sum::<f64>()
+        / n;
+    cov / (var_a.sqrt() * var_b.sqrt())
+}
+
+/// `arctanh(r)`, clipped as the Python clips, so a perfect correlation is finite.
+fn wps_fisher_z(r: f64) -> f64 {
+    if !r.is_finite() {
+        return f64::NAN;
+    }
+    r.clamp(-0.999_999, 0.999_999).atanh()
+}
+
+/// Displacement of the sample against the baseline, and whether the search
+/// ended on its own window edge.
+///
+/// The edge flag is `nrl_at_band_limit` one level down: a search that stops at
+/// its boundary has found the boundary, not a measurement.
+fn wps_phase_shift(profile: &[f64], baseline: &[f64], max_lag: i32) -> (f64, bool) {
+    let n = profile.len().min(baseline.len());
+    if (n as i32) < 4 * max_lag {
+        return (f64::NAN, false);
+    }
+    let lo = max_lag as usize;
+    let core = &baseline[lo..n - lo];
+    let mut best_r = f64::NEG_INFINITY;
+    let mut best_lag = 0i32;
+    for k in -max_lag..=max_lag {
+        let start = (lo as i32 + k) as usize;
+        let window = &profile[start..start + core.len()];
+        let r = wps_shape_correlation(window, core);
+        // Strictly greater, so a tie keeps the earliest lag scanned -- the most
+        // negative. Reproduced from the Python deliberately; see the header.
+        if r.is_finite() && r > best_r {
+            best_r = r;
+            best_lag = k;
+        }
+    }
+    if !best_r.is_finite() {
+        return (f64::NAN, false);
+    }
+    (best_lag as f64, best_lag.abs() == max_lag)
+}
+
+/// `(x - mean) / std` per position, NaN where sigma is unusable.
+///
+/// Never a substituted 1.0: the builder writes NaN for positions whose spread
+/// it could not measure, and a default here would undo that at the read side.
+fn wps_z_vector(profile: &[f64], mean: &[f64], std: &[f64]) -> Vec<f64> {
+    let n = profile.len().min(mean.len()).min(std.len());
+    (0..n)
+        .map(|i| {
+            // Sigma alone, as `compute_z_vector` gates in model.py. A non-finite
+            // profile or mean needs no test of its own: the subtraction carries
+            // the NaN through, which is what the Python relies on too.
+            if std[i].is_finite() && std[i] > 0.0 {
+                (profile[i] - mean[i]) / std[i]
+            } else {
+                f64::NAN
+            }
+        })
+        .collect()
+}
+
+/// `zscore_or_nan` for the derived scalar statistics.
+fn wps_scalar_z(observed: f64, mean: f64, std: f64) -> f64 {
+    if !std.is_finite() || std <= 0.0 || !mean.is_finite() || !observed.is_finite() {
+        return f64::NAN;
+    }
+    (observed - mean) / std
+}
+
+#[cfg(test)]
+mod pon_scoring_tests {
+    use super::*;
+
+    #[test]
+    fn amplitude_needs_two_finite_points() {
+        assert!(wps_log_amplitude(&[]).is_nan());
+        assert!(wps_log_amplitude(&[1.0]).is_nan());
+        assert!(wps_log_amplitude(&[f64::NAN, 2.0]).is_nan());
+        // ln(1 + (5 - 1))
+        assert!((wps_log_amplitude(&[1.0, 5.0]) - 4.0f64.ln_1p()).abs() < 1e-12);
+    }
+
+    #[test]
+    fn correlation_refuses_a_constant_window() {
+        let flat = [2.0, 2.0, 2.0, 2.0];
+        let ramp = [1.0, 2.0, 3.0, 4.0];
+        assert!(wps_shape_correlation(&flat, &ramp).is_nan(), "no spread to correlate");
+        assert!((wps_shape_correlation(&ramp, &ramp) - 1.0).abs() < 1e-12);
+        let down = [4.0, 3.0, 2.0, 1.0];
+        assert!((wps_shape_correlation(&ramp, &down) + 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn correlation_needs_three_shared_finite_points() {
+        let a = [1.0, 2.0, f64::NAN, f64::NAN];
+        let b = [1.0, 2.0, 3.0, 4.0];
+        assert!(wps_shape_correlation(&a, &b).is_nan());
+    }
+
+    #[test]
+    fn fisher_z_is_finite_at_a_perfect_correlation() {
+        assert!(wps_fisher_z(1.0).is_finite(), "the clip is what makes this finite");
+        assert!(wps_fisher_z(f64::NAN).is_nan());
+        assert!((wps_fisher_z(0.0)).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_zero_sigma_gives_no_z() {
+        assert!(wps_scalar_z(1.0, 0.5, 0.0).is_nan());
+        assert!(wps_scalar_z(1.0, 0.5, f64::NAN).is_nan());
+        assert!(wps_scalar_z(f64::NAN, 0.5, 1.0).is_nan());
+        assert!((wps_scalar_z(1.5, 0.5, 0.5) - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn the_z_vector_is_absent_where_sigma_is() {
+        let z = wps_z_vector(&[1.0, 2.0, 3.0], &[0.0, 0.0, 0.0], &[1.0, 0.0, f64::NAN]);
+        assert!((z[0] - 1.0).abs() < 1e-12);
+        assert!(z[1].is_nan(), "a zero sigma is not a divisor");
+        assert!(z[2].is_nan());
+    }
+
+    #[test]
+    fn a_profile_too_short_for_the_search_gets_no_shift() {
+        let short = vec![1.0; 4 * PHASE_MAX_LAG as usize - 1];
+        let (lag, hit) = wps_phase_shift(&short, &short, PHASE_MAX_LAG);
+        assert!(lag.is_nan());
+        assert!(!hit);
+    }
+
+    #[test]
+    fn a_shifted_profile_reports_its_shift() {
+        // Sign convention, taken from the Python oracle rather than intuition.
+        //
+        // For lag k the search compares `profile[30+k ..]` against
+        // `baseline[30 .. n-30]`. A profile that leads the baseline by 5 --
+        // `profile[i] == baseline[i+5]` -- therefore matches at k = -5, since
+        // `profile[30-5 ..] == baseline[30 ..]`. The lag is where the *window*
+        // sits, not how far the signal moved.
+        //
+        // This test first asserted +5 on my assumption and failed. Confirmed
+        // against `phase_shift` in wps_pon.py on the identical input: -5.
+        let n = 200usize;
+        let base: Vec<f64> = (0..n).map(|i| (i as f64 / 12.0).sin()).collect();
+        let shifted: Vec<f64> = (0..n).map(|i| ((i as f64 + 5.0) / 12.0).sin()).collect();
+        let (lag, hit) = wps_phase_shift(&shifted, &base, PHASE_MAX_LAG);
+        assert_eq!(lag, -5.0, "sign convention changed; check against the oracle");
+        assert!(!hit, "5 is well inside the +/-30 window");
+    }
+
+    /// A helper matching `_wave` in tests/unit/test_wps_pon.py.
+    fn wave(n: usize, period: f64, offset: f64, scale: f64) -> Vec<f64> {
+        (0..n)
+            .map(|i| scale * ((i as f64 - offset) / period).sin())
+            .collect()
+    }
+
+    #[test]
+    fn amplitude_is_not_a_coverage_measurement() {
+        // Raw peak-to-trough range measures how deeply the sample was
+        // sequenced. Measured on the real cohort: raw amplitude correlates
+        // +0.512 with local_depth and is skewed 11.6; the log form drops that
+        // to -0.036 and 1.6. A z on the raw scale would rank samples by depth.
+        let shallow = wps_log_amplitude(&wave(200, 12.0, 0.0, 1.0));
+        let deep = wps_log_amplitude(&wave(200, 12.0, 0.0, 100.0));
+        assert!(deep > shallow, "a deeper profile must still register larger");
+        assert!(
+            deep / shallow < 10.0,
+            "100x the depth must not be ~100x the statistic ({:.1}x)",
+            deep / shallow
+        );
+    }
+
+    #[test]
+    fn the_fisher_transform_removes_a_binding_ceiling() {
+        // A correlation is bounded at 1.0. On the real cohort the shape
+        // correlation sits at mean 0.844 with sigma 0.099, so the largest
+        // attainable positive z is ~1.5 and 302 of 400 anchors could not reach
+        // +2 however tumour-like the sample. On the Fisher scale there is no
+        // bound to run into.
+        assert!(
+            (1.0 - 0.844) / 0.0985 < 2.0,
+            "the raw ceiling should be binding"
+        );
+        assert!(wps_fisher_z(0.999) > wps_fisher_z(0.99));
+        assert!(wps_fisher_z(0.99) > wps_fisher_z(0.9));
+    }
+
+    #[test]
+    fn correlation_sees_a_wrong_shape() {
+        // The point of the statistic: same amplitude, different structure.
+        let r = wps_shape_correlation(&wave(200, 12.0, 0.0, 1.0), &wave(200, 40.0, 0.0, 1.0));
+        assert!(r < 0.9, "a different period should not correlate at {r}");
+    }
+
+    #[test]
+    fn the_search_reports_ending_on_its_own_edge() {
+        // `nrl_at_band_limit` one level down: a search that stops at its
+        // boundary has found the boundary, not a measurement.
+        let ramp: Vec<f64> = (0..200).map(|i| i as f64).collect();
+        let inverted: Vec<f64> = ramp.iter().map(|v| -v).collect();
+        let (_, hit) = wps_phase_shift(&inverted, &ramp, PHASE_MAX_LAG);
+        assert!(hit, "a search ending on the edge must say so");
+    }
+
+    #[test]
+    fn an_identical_profile_reports_no_shift() {
+        let n = 200usize;
+        let base: Vec<f64> = (0..n).map(|i| (i as f64 / 12.0).sin()).collect();
+        let (lag, hit) = wps_phase_shift(&base, &base, PHASE_MAX_LAG);
+        assert_eq!(lag, 0.0);
+        assert!(!hit);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Reading the PON blocks
+// ---------------------------------------------------------------------------
+
+use arrow::record_batch::RecordBatch;
+
+/// One anchor's baseline profile: the mean and sigma vectors.
+struct WpsVectorEntry {
+    mean: Vec<f64>,
+    std: Vec<f64>,
+}
+
+/// One anchor's baselines for the derived scalars, as `(mean, std)` pairs.
+///
+/// Mirrors `WPS_SHAPE_STATS` in `pon/model.py`. Kept as a struct rather than a
+/// map so that adding a statistic there and forgetting it here is a compile
+/// error instead of a column of NaN.
+#[derive(Clone, Copy)]
+struct WpsShapeEntry {
+    log_amplitude: (f64, f64),
+    shape_corr_fisher: (f64, f64),
+}
+
+/// Everything `apply_pon_zscore` needs out of the PON parquet.
+struct WpsPonBaselines {
+    /// region_id -> the 200-element mean and sigma profiles
+    vectors: HashMap<String, WpsVectorEntry>,
+    /// region_id -> the derived-scalar baselines; empty for a pre-0.9.0 PON
+    shapes: HashMap<String, WpsShapeEntry>,
+}
+
+/// Materialise a Utf8 column as owned strings, tolerating either offset width.
+///
+/// `table` and `region_id` arrive as `large_string` from the Python builder and
+/// as plain `string` from anything written by a bare `pandas.to_parquet` --
+/// logically identical, differing only in whether offsets are i32 or i64. A
+/// reader that downcasts to one of them reads **nothing** from the other, and
+/// reads it silently, because an empty baseline is a legitimate state that the
+/// caller degrades on rather than raises.
+///
+/// That is not hypothetical: every PON this project ships is `large_string`,
+/// and `pon_model.rs::PonModel::load` downcasts to `StringArray` only. It is
+/// unreachable today, which is the only reason the blindness has never shown
+/// up in an output.
+fn batch_utf8_column(batch: &RecordBatch, name: &str) -> Option<Vec<Option<String>>> {
+    use arrow::array::{Array, LargeStringArray, StringArray};
+
+    let col = batch.column_by_name(name)?;
+    if let Some(a) = col.as_any().downcast_ref::<StringArray>() {
+        return Some(
+            (0..a.len())
+                .map(|i| (!a.is_null(i)).then(|| a.value(i).to_string()))
+                .collect(),
+        );
+    }
+    if let Some(a) = col.as_any().downcast_ref::<LargeStringArray>() {
+        return Some(
+            (0..a.len())
+                .map(|i| (!a.is_null(i)).then(|| a.value(i).to_string()))
+                .collect(),
+        );
+    }
+    warn!(
+        "WPS PON: column '{name}' is {:?}, which is not a string type; treating \
+         it as absent",
+        col.data_type()
+    );
+    None
+}
+
+/// Materialise a numeric column as f64, NaN where null.
+///
+/// Accepts f64 and f32 because the PON's own writers disagree: the Python
+/// builder emits doubles, the Rust builder floats.
+fn batch_f64_column(batch: &RecordBatch, name: &str) -> Option<Vec<f64>> {
+    use arrow::array::{Array, Float32Array, Float64Array};
+
+    let col = batch.column_by_name(name)?;
+    if let Some(a) = col.as_any().downcast_ref::<Float64Array>() {
+        return Some(
+            (0..a.len())
+                .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) })
+                .collect(),
+        );
+    }
+    if let Some(a) = col.as_any().downcast_ref::<Float32Array>() {
+        return Some(
+            (0..a.len())
+                .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+                .collect(),
+        );
+    }
+    warn!(
+        "WPS PON: column '{name}' is {:?}, which is not a float type; treating \
+         it as absent",
+        col.data_type()
+    );
+    None
+}
+
+/// Materialise a list-of-float column as one `Vec<f64>` per row.
+///
+/// The shipped PONs store `list<double>`; the Rust builder's own fixtures store
+/// `list<float>`. Both are read, and anything else is reported rather than
+/// quietly yielding no anchors.
+fn batch_vector_column(batch: &RecordBatch, name: &str) -> Option<Vec<Option<Vec<f64>>>> {
+    use arrow::array::{Array, Float32Array, Float64Array, ListArray};
+
+    let col = batch.column_by_name(name)?;
+    let list = match col.as_any().downcast_ref::<ListArray>() {
+        Some(list) => list,
+        None => {
+            warn!(
+                "WPS PON: column '{name}' is {:?}, not a list; treating it as absent",
+                col.data_type()
+            );
+            return None;
+        }
+    };
+    let mut out = Vec::with_capacity(list.len());
+    for row in 0..list.len() {
+        if list.is_null(row) {
+            out.push(None);
+            continue;
+        }
+        let inner = list.value(row);
+        if let Some(a) = inner.as_any().downcast_ref::<Float64Array>() {
+            out.push(Some(
+                (0..a.len())
+                    .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) })
+                    .collect(),
+            ));
+        } else if let Some(a) = inner.as_any().downcast_ref::<Float32Array>() {
+            out.push(Some(
+                (0..a.len())
+                    .map(|i| if a.is_null(i) { f64::NAN } else { a.value(i) as f64 })
+                    .collect(),
+            ));
+        } else {
+            warn!(
+                "WPS PON: '{name}' holds {:?}, not floats; treating it as absent",
+                inner.data_type()
+            );
+            return None;
+        }
+    }
+    Some(out)
+}
+
+/// Read the vector and shape baselines out of a long-format PON parquet.
+///
+/// Projected down to the eight columns actually needed. A PON is a single wide
+/// table of ~120 columns in which each block populates its own few, so reading
+/// it whole to reach `wps_nuc_mean` would materialise every other block's
+/// columns for all ~130k rows.
+fn load_wps_pon_baselines(
+    pon_path: &Path,
+    vector_table: &str,
+    column: &str,
+) -> Result<WpsPonBaselines> {
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    use parquet::arrow::ProjectionMask;
+
+    let mean_col = format!("{column}_mean");
+    let std_col = format!("{column}_std");
+    let wanted = [
+        "table",
+        "region_id",
+        mean_col.as_str(),
+        std_col.as_str(),
+        "log_amplitude_mean",
+        "log_amplitude_std",
+        "shape_corr_fisher_mean",
+        "shape_corr_fisher_std",
+    ];
+
+    let file = File::open(pon_path)
+        .with_context(|| format!("Failed to open PON file: {pon_path:?}"))?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .context("Creating the PON parquet reader")?;
+
+    // Project by *root* index, not by leaf name: a list column's leaf is named
+    // "element", so a name-based mask would miss the vectors entirely.
+    let roots = builder.parquet_schema().root_schema().get_fields();
+    let indices: Vec<usize> = roots
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| wanted.contains(&f.name()))
+        .map(|(i, _)| i)
+        .collect();
+    let found: Vec<&str> = roots
+        .iter()
+        .map(|f| f.name())
+        .filter(|n| wanted.contains(n))
+        .collect();
+    for name in wanted.iter() {
+        if !found.contains(name) {
+            debug!("WPS PON: '{name}' is not a column of this PON");
+        }
+    }
+    let mask = ProjectionMask::roots(builder.parquet_schema(), indices);
+    let reader = builder
+        .with_projection(mask)
+        .build()
+        .context("Building the projected PON reader")?;
+
+    let mut vectors: HashMap<String, WpsVectorEntry> = HashMap::new();
+    let mut shapes: HashMap<String, WpsShapeEntry> = HashMap::new();
+    let mut saw_vector_table = false;
+    let mut saw_shape_table = false;
+
+    for batch in reader {
+        let batch = batch.context("Reading a PON batch")?;
+        let tables = match batch_utf8_column(&batch, "table") {
+            Some(tables) => tables,
+            // Not a long-format PON at all. Loud, because every block would
+            // otherwise come back empty and read as "PON has no WPS baseline".
+            None => return Err(anyhow!("PON parquet has no readable 'table' column")),
+        };
+        let ids = batch_utf8_column(&batch, "region_id");
+        let means = batch_vector_column(&batch, &mean_col);
+        let stds = batch_vector_column(&batch, &std_col);
+        let amp_mean = batch_f64_column(&batch, "log_amplitude_mean");
+        let amp_std = batch_f64_column(&batch, "log_amplitude_std");
+        let corr_mean = batch_f64_column(&batch, "shape_corr_fisher_mean");
+        let corr_std = batch_f64_column(&batch, "shape_corr_fisher_std");
+
+        for row in 0..batch.num_rows() {
+            let table = match tables[row].as_deref() {
+                Some(table) => table,
+                None => continue,
+            };
+            let region_id = match ids.as_ref().and_then(|c| c[row].clone()) {
+                Some(id) => id,
+                None => continue,
+            };
+            if table == vector_table {
+                saw_vector_table = true;
+                if let (Some(mean), Some(std)) = (
+                    means.as_ref().and_then(|c| c[row].clone()),
+                    stds.as_ref().and_then(|c| c[row].clone()),
+                ) {
+                    vectors.insert(region_id, WpsVectorEntry { mean, std });
+                }
+            } else if table == "wps_shape_baseline" {
+                saw_shape_table = true;
+                let at = |c: &Option<Vec<f64>>| c.as_ref().map_or(f64::NAN, |v| v[row]);
+                shapes.insert(
+                    region_id,
+                    WpsShapeEntry {
+                        log_amplitude: (at(&amp_mean), at(&amp_std)),
+                        shape_corr_fisher: (at(&corr_mean), at(&corr_std)),
+                    },
+                );
+            }
+        }
+    }
+
+    // Distinguish "the block is not in this PON" from "the block is there but
+    // its columns did not parse". Both give zero anchors; only one is a bug.
+    if saw_vector_table && vectors.is_empty() {
+        warn!(
+            "WPS PON: the '{vector_table}' block is present but no anchor \
+             yielded both '{mean_col}' and '{std_col}'. The PON may predate \
+             the vector format, or the columns may have an unexpected type."
+        );
+    }
+    if saw_shape_table && shapes.is_empty() {
+        warn!("WPS PON: 'wps_shape_baseline' is present but parsed to no anchors.");
+    }
+    info!(
+        "WPS PON: loaded {} anchors from '{vector_table}' and {} from \
+         'wps_shape_baseline'",
+        vectors.len(),
+        shapes.len()
+    );
+    Ok(WpsPonBaselines { vectors, shapes })
+}
+
+// ---------------------------------------------------------------------------
+// The entry point
+// ---------------------------------------------------------------------------
+
+/// Score a WPS table against the PON, writing an extended copy.
+///
+/// Adds, per anchor:
+///
+/// | column | |
+/// |---|---|
+/// | `{column}_z`                | 200-element z vector, null where the anchor is absent |
+/// | `wps_log_amplitude`         | + `_z` |
+/// | `wps_shape_corr`            | + `_z`, computed on the Fisher scale |
+/// | `wps_phase_shift_bp`        | raw displacement, deliberately not z-scored |
+/// | `wps_phase_at_search_limit` | the boundary flag |
+///
+/// Every input column is carried through untouched: the schema is taken from
+/// the file rather than restated here, so a new column added by the WPS writer
+/// survives this step without anyone remembering to update it.
+///
+/// Returns the number of anchors scored. Writes nothing and returns 0 when the
+/// PON has no matching vector baseline, matching `region_entropy::apply_pon_zscore`
+/// so the Python caller can degrade to a raw output rather than assert on a
+/// file that was never created.
+#[pyfunction]
+#[pyo3(signature = (wps_path, pon_parquet_path, output_path, baseline_table="wps_baseline", column="wps_nuc"))]
+pub fn apply_pon_zscore(
+    wps_path: PathBuf,
+    pon_parquet_path: PathBuf,
+    output_path: PathBuf,
+    baseline_table: &str,
+    column: &str,
+) -> PyResult<usize> {
+    apply_pon_zscore_inner(
+        &wps_path,
+        &pon_parquet_path,
+        &output_path,
+        baseline_table,
+        column,
+    )
+    .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("WPS PON scoring: {e:#}")))
+}
+
+fn apply_pon_zscore_inner(
+    wps_path: &Path,
+    pon_parquet_path: &Path,
+    output_path: &Path,
+    baseline_table: &str,
+    column: &str,
+) -> Result<usize> {
+    use arrow::array::{
+        ArrayRef, BooleanBuilder, Float64Builder, ListBuilder,
+    };
+    use arrow::datatypes::{DataType, Field, Schema};
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+    use parquet::arrow::ArrowWriter;
+    use parquet::basic::Compression;
+    use parquet::file::properties::WriterProperties;
+
+    let baselines = load_wps_pon_baselines(pon_parquet_path, baseline_table, column)?;
+    if baselines.vectors.is_empty() {
+        warn!(
+            "WPS PON: no '{baseline_table}' anchors; {} keeps its raw profile \
+             and gets no z-scores. Rebuild the PON with build-pon.",
+            wps_path.display()
+        );
+        return Ok(0);
+    }
+    if baselines.shapes.is_empty() {
+        info!(
+            "WPS PON: no 'wps_shape_baseline' (PON built before 0.9.0); the \
+             per-position z vectors are still written, the derived shape \
+             z-scores are not."
+        );
+    }
+
+    let file = File::open(wps_path)
+        .with_context(|| format!("Failed to open WPS table: {wps_path:?}"))?;
+    let wps_builder = ParquetRecordBatchReaderBuilder::try_new(file)
+        .context("Creating the WPS parquet reader")?;
+    let input_schema = wps_builder.schema().clone();
+    let reader = wps_builder.build().context("Building the WPS parquet reader")?;
+
+    // Same order as the Python oracle wrote them, so a reader that indexes by
+    // position rather than by name sees no change across the port.
+    let z_field = format!("{column}_z");
+    let mut fields: Vec<Field> = input_schema.fields().iter().map(|f| f.as_ref().clone()).collect();
+    fields.push(Field::new(
+        &z_field,
+        DataType::List(Arc::new(Field::new("element", DataType::Float64, true))),
+        true,
+    ));
+    for name in [
+        "wps_log_amplitude",
+        "wps_log_amplitude_z",
+        "wps_shape_corr",
+        "wps_shape_corr_z",
+        "wps_phase_shift_bp",
+    ] {
+        fields.push(Field::new(name, DataType::Float64, true));
+    }
+    fields.push(Field::new("wps_phase_at_search_limit", DataType::Boolean, true));
+    let out_schema = Arc::new(Schema::new(fields));
+
+    // Snappy, matching what the Python oracle wrote via pandas. The default is
+    // uncompressed, and these tables are 200 doubles an anchor across ~89k
+    // anchors -- the one place in this pipeline where the codec is load-bearing.
+    let props = WriterProperties::builder()
+        .set_compression(Compression::SNAPPY)
+        .build();
+    let out_file = File::create(output_path)
+        .with_context(|| format!("Creating {output_path:?}"))?;
+    let mut writer = ArrowWriter::try_new(out_file, out_schema.clone(), Some(props))
+        .context("Creating the WPS output writer")?;
+
+    let mut n_rows = 0usize;
+    let mut n_scored = 0usize;
+    let mut n_absent = 0usize;
+    let mut n_mismatched = 0usize;
+    let mut n_at_limit = 0usize;
+
+    for batch in reader {
+        let batch = batch.context("Reading a WPS batch")?;
+        let ids = batch_utf8_column(&batch, "region_id")
+            .ok_or_else(|| anyhow!("WPS table has no readable 'region_id' column"))?;
+        let profiles = batch_vector_column(&batch, column)
+            .ok_or_else(|| anyhow!("WPS table has no readable '{column}' column"))?;
+
+        let rows = batch.num_rows();
+        // `.with_field`, not the default: ListBuilder names its inner field
+        // "item" while the schema above declares "element" -- and arrow
+        // compares list fields by name, so the two disagree at assembly. The
+        // name is "element" because that is what the Python oracle wrote, and
+        // a downstream reader that checks the type would see a changed schema
+        // otherwise.
+        let mut z_builder = ListBuilder::new(Float64Builder::new())
+            .with_field(Arc::new(Field::new("element", DataType::Float64, true)));
+        let mut amp = Float64Builder::with_capacity(rows);
+        let mut amp_z = Float64Builder::with_capacity(rows);
+        let mut corr = Float64Builder::with_capacity(rows);
+        let mut corr_z = Float64Builder::with_capacity(rows);
+        let mut shift = Float64Builder::with_capacity(rows);
+        let mut limit = BooleanBuilder::with_capacity(rows);
+
+        for row in 0..rows {
+            n_rows += 1;
+            let profile = profiles[row].clone().unwrap_or_default();
+
+            // Amplitude needs no baseline, so it is measured for every anchor
+            // -- including those absent from the PON, which then carry a raw
+            // reading with no z beside it.
+            let amplitude = wps_log_amplitude(&profile);
+            amp.append_value(amplitude);
+
+            let entry = ids[row]
+                .as_deref()
+                .and_then(|id| baselines.vectors.get(id));
+            // A baseline profile of a different length than the sample is a
+            // corrupt pairing, not a measurement. Truncating to the shorter of
+            // the two -- which is what zipping them would do -- yields a
+            // full-looking z vector computed from misaligned positions, and
+            // nothing downstream could tell. The Python raises a broadcast
+            // error here and takes the whole sample down with it; this reports
+            // the count and scores the rest.
+            let entry = entry.filter(|e| {
+                let ok = e.mean.len() == profile.len() && e.std.len() == profile.len();
+                if !ok {
+                    n_mismatched += 1;
+                }
+                ok
+            });
+            let entry = match entry {
+                Some(entry) => entry,
+                None => {
+                    n_absent += 1;
+                    z_builder.append_null();
+                    corr.append_value(f64::NAN);
+                    shift.append_value(f64::NAN);
+                    limit.append_value(false);
+                    amp_z.append_value(f64::NAN);
+                    corr_z.append_value(f64::NAN);
+                    continue;
+                }
+            };
+
+            for z in wps_z_vector(&profile, &entry.mean, &entry.std) {
+                z_builder.values().append_value(z);
+            }
+            z_builder.append(true);
+
+            let r = wps_shape_correlation(&profile, &entry.mean);
+            corr.append_value(r);
+            let (lag, hit) = wps_phase_shift(&profile, &entry.mean, PHASE_MAX_LAG);
+            shift.append_value(lag);
+            limit.append_value(hit);
+            n_at_limit += usize::from(hit);
+            n_scored += 1;
+
+            match ids[row].as_deref().and_then(|id| baselines.shapes.get(id)) {
+                Some(shape) => {
+                    amp_z.append_value(wps_scalar_z(
+                        amplitude,
+                        shape.log_amplitude.0,
+                        shape.log_amplitude.1,
+                    ));
+                    corr_z.append_value(wps_scalar_z(
+                        wps_fisher_z(r),
+                        shape.shape_corr_fisher.0,
+                        shape.shape_corr_fisher.1,
+                    ));
+                }
+                // Absent from the shape baseline reads the same as unmeasured.
+                None => {
+                    amp_z.append_value(f64::NAN);
+                    corr_z.append_value(f64::NAN);
+                }
+            }
+        }
+
+        let mut columns: Vec<ArrayRef> = batch.columns().to_vec();
+        columns.push(Arc::new(z_builder.finish()));
+        columns.push(Arc::new(amp.finish()));
+        columns.push(Arc::new(amp_z.finish()));
+        columns.push(Arc::new(corr.finish()));
+        columns.push(Arc::new(corr_z.finish()));
+        columns.push(Arc::new(shift.finish()));
+        columns.push(Arc::new(limit.finish()));
+        let out_batch = RecordBatch::try_new(out_schema.clone(), columns)
+            .context("Assembling the scored WPS batch")?;
+        writer.write(&out_batch).context("Writing a scored batch")?;
+    }
+    writer.close().context("Closing the WPS output writer")?;
+
+    info!(
+        "WPS PON: {n_scored}/{n_rows} anchors scored ({})",
+        wps_path.file_name().unwrap_or_default().to_string_lossy()
+    );
+    if n_absent > 0 {
+        warn!(
+            "WPS PON: {n_absent}/{n_rows} anchors are absent from the baseline \
+             and get no z-score. Anchors backed by fewer than 3 samples are \
+             dropped at build time, so this is expected to be large for duplex \
+             PONs."
+        );
+    }
+    if n_mismatched > 0 {
+        warn!(
+            "WPS PON: {n_mismatched}/{n_rows} anchors have a baseline profile \
+             of a different length than the sample and were left unscored. \
+             This is a PON/sample mismatch -- check that the PON was built \
+             with the same anchor set."
+        );
+    }
+    if n_at_limit > 0 {
+        warn!(
+            "WPS PON: {n_at_limit}/{n_rows} anchors hit the +/-{PHASE_MAX_LAG} \
+             phase-search window. wps_phase_shift_bp is the edge of the search \
+             there, not a measurement -- see wps_phase_at_search_limit."
+        );
+    }
+    Ok(n_scored)
 }

@@ -37,28 +37,58 @@ alwaysApply: true
 | `uxm.rs` | Fragment-level methylation |
 | `gc_correction.rs` | LOESS GC bias correction |
 | `gc_reference.rs` | Pre-computed GC reference generation |
-| `pon_model.rs` | PON model loading and hybrid correction |
+| `pon_model.rs` | `FsdBaseline` structs for `fsd.rs`. Its `PonModel::load` has **no callers** and downcasts `table`/`region_id` to `StringArray`, which every shipped PON stores as `large_string` -- so it would read zero rows if anything did call it. Do not reach for it; each reader loads what it needs. |
 | `pon_builder.rs` | PON model construction |
 | `filters.rs` | Fragment filtering logic |
 
 ## PON Z-Score Pattern
 
-All PON z-score functions read baselines directly from Parquet:
+Every PON z-score reads its baseline directly from the Parquet, taking the
+*path* rather than a loaded model -- the Python side never materialises a PON
+just to hand it over. The exact signatures differ per module; read the one you
+are calling. `wps.rs::apply_pon_zscore` is the current shape:
 
 ```rust
-// Rust signature pattern
 pub fn apply_pon_zscore(
-    input_path: PathBuf,
+    wps_path: PathBuf,
+    pon_parquet_path: PathBuf,
     output_path: PathBuf,
-    pon_parquet: Option<PathBuf>,
-    baseline_table: &str,  // "tfbs_baseline", "atac_baseline", etc.
-) -> PyResult<bool>
+    baseline_table: &str,  // "wps_baseline", "wps_baseline_panel"
+    column: &str,          // "wps_nuc", "wps_tf"
+) -> PyResult<usize>       // anchors scored; 0 means nothing was written
 ```
 
-```python
-# Python call pattern
-_core.module.apply_pon_zscore(input, output, pon_parquet, "baseline_table")
-```
+**Returning 0 must mean writing nothing.** The Python caller degrades to the
+raw table on a zero, so a scorer that half-writes on a missing baseline
+destroys the product it could not improve (invariant #2).
+
+### Two traps when reading a PON parquet
+
+**String width.** The builder writes `large_string`, not `string`; a bare
+`downcast_ref::<StringArray>()` returns `None` on every shipped PON and yields
+an empty baseline -- which is a legitimate state, so it degrades silently
+rather than raising. Handle both widths, or use the row API
+(`SerializedFileReader::get_row_iter`), which is logical-typed and sees both.
+The row API reads *every* column of every row, so it is only viable for the
+small blocks; `wps.rs` projects by root index instead, because the wide PON
+table is ~120 columns across ~130k rows.
+
+**Vector element type.** The Python builder writes `list<double>`; the Rust
+builder's own fixtures write `list<float>`. A reader that accepts one silently
+finds no anchors in the other. `wps.rs` accepts both and logs the type it
+could not read rather than returning nothing.
+
+### Which language
+
+Scoring belongs in Rust, but the *design* of a statistic may not start there.
+The WPS scoring shipped in Python through 0.8.x on purpose: three of its
+decisions -- the `log1p` amplitude, the Fisher transform, and the absent phase
+baseline -- were settled by measurement on a real cohort and changed several
+times. It moved to `wps.rs` in 0.9.0 once settled, measured at 9.5 s against
+~17 min for the Python, on the same 76,595-anchor output. The Python survives
+as a frozen equivalence oracle in
+`tests/unit/test_rust_python_equivalence.py`; the port is bug-for-bug, so a
+divergence there is a finding rather than a sync.
 
 ## Chromosome Normalization
 
