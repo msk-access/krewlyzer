@@ -37,7 +37,6 @@ alwaysApply: true
 | `uxm.rs` | Fragment-level methylation |
 | `gc_correction.rs` | LOESS GC bias correction |
 | `gc_reference.rs` | Pre-computed GC reference generation |
-| `pon_model.rs` | `FsdBaseline` structs for `fsd.rs`. Its `PonModel::load` has **no callers** and downcasts `table`/`region_id` to `StringArray`, which every shipped PON stores as `large_string` -- so it would read zero rows if anything did call it. Do not reach for it; each reader loads what it needs. |
 | `pon_builder.rs` | PON model construction |
 | `filters.rs` | Fragment filtering logic |
 
@@ -67,7 +66,9 @@ destroys the product it could not improve (invariant #2).
 **String width.** The builder writes `large_string`, not `string`; a bare
 `downcast_ref::<StringArray>()` returns `None` on every shipped PON and yields
 an empty baseline -- which is a legitimate state, so it degrades silently
-rather than raising. Handle both widths, or use the row API
+rather than raising. `pon_model.rs` did this and was deleted in 0.9.0: its
+`PonModel::load` had no callers, so the blindness and the deadness hid each
+other, and `pub` items are exempt from dead-code warnings. Handle both widths, or use the row API
 (`SerializedFileReader::get_row_iter`), which is logical-typed and sees both.
 The row API reads *every* column of every row, so it is only viable for the
 small blocks; `wps.rs` projects by root index instead, because the wide PON

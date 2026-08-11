@@ -445,7 +445,64 @@ pub fn load_target_regions(path: &Path, chrom_map: &mut ChromosomeMap) -> Result
 // PON Log-Ratio Normalization (High-Performance Rust Implementation)
 // =============================================================================
 
-use crate::pon_model::FsdBaseline;
+/// FSD baseline for a single chromosome arm.
+///
+/// Moved here verbatim when `pon_model.rs` was deleted. That module held one
+/// `PonModel` loader with no callers -- blind to `large_string`, so it would
+/// have read zero rows from any shipped PON had anything called it -- plus
+/// these two structs, which were the only part of it with a consumer. They
+/// live beside that consumer now.
+#[derive(Debug, Clone)]
+pub struct FsdArmBaseline {
+    pub size_bins: Vec<i32>,
+    pub expected: Vec<f64>,
+    pub std: Vec<f64>,
+}
+
+impl FsdArmBaseline {
+    /// Interpolate the expected value for a size.
+    pub fn get_expected(&self, size: i32) -> f64 {
+        if self.size_bins.is_empty() || self.expected.is_empty() {
+            return 0.0;
+        }
+
+        // Linear interpolation
+        if size <= self.size_bins[0] {
+            return self.expected[0];
+        }
+        if size >= *self.size_bins.last().unwrap() {
+            return *self.expected.last().unwrap();
+        }
+
+        for i in 0..self.size_bins.len() - 1 {
+            if size >= self.size_bins[i] && size < self.size_bins[i + 1] {
+                let t = (size - self.size_bins[i]) as f64
+                    / (self.size_bins[i + 1] - self.size_bins[i]) as f64;
+                return self.expected[i] + t * (self.expected[i + 1] - self.expected[i]);
+            }
+        }
+        0.0
+    }
+}
+
+/// FSD baseline model containing per-arm statistics.
+#[derive(Debug, Clone, Default)]
+pub struct FsdBaseline {
+    pub arms: HashMap<String, FsdArmBaseline>,
+}
+
+impl FsdBaseline {
+    /// Get (expected, std) for an arm at a given size.
+    pub fn get_stats(&self, arm: &str, size: i32) -> Option<(f64, f64)> {
+        self.arms.get(arm).map(|baseline| {
+            (
+                baseline.get_expected(size),
+                baseline.std.first().copied().unwrap_or(1.0),
+            )
+        })
+    }
+}
+
 
 /// Six decimals, or the literal `NaN`.
 ///
@@ -658,7 +715,7 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     let file = File::open(path)?;
     let reader = SerializedFileReader::new(file)?;
     
-    let mut arms: HashMap<String, crate::pon_model::FsdArmBaseline> = HashMap::new();
+    let mut arms: HashMap<String, FsdArmBaseline> = HashMap::new();
     
     for row_result in reader.get_row_iter(None)? {
         let row = row_result?;
@@ -692,7 +749,7 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
         ).unwrap_or(1.0);
         
         // Add to arm baseline
-        let baseline = arms.entry(arm).or_insert_with(|| crate::pon_model::FsdArmBaseline {
+        let baseline = arms.entry(arm).or_insert_with(|| FsdArmBaseline {
             size_bins: Vec::new(),
             expected: Vec::new(),
             std: Vec::new(),

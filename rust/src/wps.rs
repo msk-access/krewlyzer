@@ -2315,9 +2315,11 @@ struct WpsPonBaselines {
 /// caller degrades on rather than raises.
 ///
 /// That is not hypothetical: every PON this project ships is `large_string`,
-/// and `pon_model.rs::PonModel::load` downcasts to `StringArray` only. It is
-/// unreachable today, which is the only reason the blindness has never shown
-/// up in an output.
+/// and the deleted `pon_model.rs::PonModel::load` downcast to `StringArray`
+/// only. It never showed up in an output solely because nothing called it --
+/// the blindness and the deadness hid each other. Handle both widths here, or
+/// use the row API as `fsd.rs` and `region_entropy.rs` do (logical-typed, so
+/// it sees both, at the cost of reading every column of every row).
 fn batch_utf8_column(batch: &RecordBatch, name: &str) -> Option<Vec<Option<String>>> {
     use arrow::array::{Array, LargeStringArray, StringArray};
 

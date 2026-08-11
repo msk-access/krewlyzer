@@ -39,7 +39,6 @@ pub mod extract_motif;
 pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;
-pub mod pon_model;
 pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
 pub mod region_entropy;  // TFBS/ATAC size entropy
