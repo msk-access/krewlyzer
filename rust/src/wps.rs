@@ -2106,12 +2106,19 @@ fn wps_phase_shift(profile: &[f64], baseline: &[f64], max_lag: i32) -> (f64, boo
 /// it could not measure, and a default here would undo that at the read side.
 fn wps_z_vector(profile: &[f64], mean: &[f64], std: &[f64]) -> Vec<f64> {
     let n = profile.len().min(mean.len()).min(std.len());
+    let floor = crate::pon_builder::SIGMA_FLOOR as f64;
     (0..n)
         .map(|i| {
             // Sigma alone, as `compute_z_vector` gates in model.py. A non-finite
             // profile or mean needs no test of its own: the subtraction carries
             // the NaN through, which is what the Python relies on too.
-            if std[i].is_finite() && std[i] > 0.0 {
+            //
+            // `>= SIGMA_FLOOR`, not `> 0.0`. The builder refuses to *write* a
+            // residue sigma, but all four PONs shipped before it did, carrying
+            // 4.6-55.4% of positions at ~1e-17. Enforcing the same floor here
+            // is what makes those models safe without a rebuild -- and keeps
+            // any future model with the defect from reaching an output.
+            if std[i].is_finite() && std[i] >= floor {
                 (profile[i] - mean[i]) / std[i]
             } else {
                 f64::NAN
@@ -2122,7 +2129,12 @@ fn wps_z_vector(profile: &[f64], mean: &[f64], std: &[f64]) -> Vec<f64> {
 
 /// `zscore_or_nan` for the derived scalar statistics.
 fn wps_scalar_z(observed: f64, mean: f64, std: f64) -> f64 {
-    if !std.is_finite() || std <= 0.0 || !mean.is_finite() || !observed.is_finite() {
+    // Same floor as the vector path; see `pon_builder::SIGMA_FLOOR`.
+    if !std.is_finite()
+        || std < crate::pon_builder::SIGMA_FLOOR as f64
+        || !mean.is_finite()
+        || !observed.is_finite()
+    {
         return f64::NAN;
     }
     (observed - mean) / std

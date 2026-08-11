@@ -632,6 +632,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **A σ of 10⁻¹⁷ was used as a divisor.** Every PON built to date carries
+  positions whose baseline spread is floating-point residue: 4.6 % of positive
+  σ in xs1.all_unique, 12.0 % in xs2.all_unique, 47.2 % and 55.4 % in the
+  duplex pair. On a real XS2 plasma sample that produced **728,007**
+  `wps_nuc_z` above 100 and **354,260** above 10⁶, peaking at 6.1 × 10¹⁸.
+
+  WPS is (fragments spanning a position) − (fragments ending near it), and each
+  fragment carries a fractional GC-correction weight. Where no donor had
+  coverage, or the two terms cancel, the true value is zero — but it computes
+  as ~10⁻¹⁷ rather than `0.0`, so the exact `min == max` test added earlier in
+  this release never fired. `wps_tf` corroborates it: 0 % residue and 185,079
+  honest NaN, because TF-sized fragments are rare enough that those positions
+  sum to exact zero.
+
+  `SIGMA_FLOOR = 1e-9` now applies in the builder (`element_wise_std`,
+  `mean_and_sd`) *and* in the scorers, so the four models already in the wild
+  are safe without a rebuild. Not a taste threshold: across the 24.7 M positive
+  σ of the shipped xs1.all_unique baseline, 1,177,647 sit below 10⁻¹², **none**
+  sit between 10⁻¹² and 10⁻⁶, and the rest are measurements — 10⁻⁹ is the
+  log-space midpoint of six empty decades. Mirrored in
+  `pon/model.py::SIGMA_FLOOR` and asserted equal in `validate/claims.py`.
+
+  Measured on a real XS1 plasma sample against the **unchanged** shipped PON:
+  max |z| falls from 2.8 × 10¹⁷ to 3.7 × 10⁴ and values above 10⁶ from 18,398
+  to **zero**.
+
+  `scripts/check_pon_env.py` gains a matching probe. The existing one asserts
+  that *identical* donor vectors give NaN and passed throughout, because the
+  real case is *near*-identical; the new one was confirmed to fail against the
+  pre-fix binary before it passed against the fixed one.
+
 - **`--output-format parquet` silently discarded every OCF table.** All six —
   `OCF`, `OCF.sync`, `OCF.{on,off}target`, `OCF.{on,off}target.sync`. Measured
   on a real XS1 plasma BAM: 44 logical tables under `both`, **38** under

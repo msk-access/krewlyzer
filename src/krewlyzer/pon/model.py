@@ -32,6 +32,20 @@ logger = logging.getLogger("pon")
 #: The same reasoning that took the sigma floors out of the builder (4cd634b)
 #: and `z_score = 0.0` out of region entropy: a value a reader cannot tell
 #: apart from a measurement must be a measurement, or absent.
+#: Below this, a spread is floating-point residue rather than a measurement.
+#:
+#: Mirrors ``SIGMA_FLOOR`` in ``rust/src/pon_builder.rs``, which is where the
+#: reasoning lives and where the builder enforces it. Asserted equal in
+#: ``validate/claims.py`` -- a constant kept in two languages drifts unless
+#: something fails when it does (invariant #5).
+#:
+#: In short: the two populations do not overlap. Across the 24.7M positive
+#: sigmas of the shipped xs1.all_unique WPS baseline, 1,177,647 sit below
+#: 1e-12, **none** sit between 1e-12 and 1e-6, and the rest are measurements.
+#: 1e-9 is the log-space midpoint of those six empty decades.
+SIGMA_FLOOR = 1e-9
+
+
 def zscore_or_nan(
     observed: Optional[float], mean: Optional[float], std: Optional[float]
 ) -> float:
@@ -39,8 +53,12 @@ def zscore_or_nan(
 
     NaN propagates to an absent column value rather than a fabricated zero,
     and — unlike zero — cannot be mistaken for a reading.
+
+    ``std < SIGMA_FLOOR`` counts as unusable, not just ``std <= 0``. Every PON
+    shipped before 0.9.0 carries positions whose sigma is float residue at
+    ~1e-17; dividing by one produced z-scores up to 6.1e18 on a real sample.
     """
-    if std is None or not np.isfinite(std) or std <= 0:
+    if std is None or not np.isfinite(std) or std < SIGMA_FLOOR:
         return float("nan")
     if mean is None or observed is None:
         return float("nan")
@@ -265,7 +283,8 @@ class WpsBaseline:
         # the builder's honesty at the read side, which is the harder place to
         # notice it.
         with np.errstate(divide="ignore", invalid="ignore"):
-            usable = np.isfinite(std) & (std > 0)
+            # `>= SIGMA_FLOOR`, not `> 0`: a residue sigma is not a spread.
+            usable = np.isfinite(std) & (std >= SIGMA_FLOOR)
             return np.where(
                 usable, (sample_vector - mean) / np.where(usable, std, 1.0), np.nan
             )

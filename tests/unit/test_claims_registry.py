@@ -100,3 +100,24 @@ def test_every_entry_explains_itself():
     reader nothing about whether they may change it."""
     for entry in (*CLAIMS, *KNOWN_DIVERGENCES):
         assert len(entry.why) > 30, f"{entry.id}: 'why' is too thin to be useful"
+
+
+def test_the_python_sigma_floor_matches_the_rust_one():
+    """One rule, two languages, and nothing else keeps them equal.
+
+    The builder refuses to *write* a residue sigma; the read side refuses to
+    *divide* by one, which is what makes the four PONs shipped before 0.9.0
+    safe without a rebuild. If the two constants drift, one half of that
+    protection silently stops applying.
+    """
+    import re
+    from pathlib import Path
+
+    from krewlyzer.pon.model import SIGMA_FLOOR
+
+    rust = (Path(__file__).resolve().parents[2] / "rust/src/pon_builder.rs").read_text()
+    match = re.search(r"pub const SIGMA_FLOOR: f32 = ([0-9.e-]+);", rust)
+    assert match, "SIGMA_FLOOR is gone from rust/src/pon_builder.rs"
+    assert (
+        float(match.group(1)) == SIGMA_FLOOR
+    ), f"Rust says {match.group(1)}, Python says {SIGMA_FLOOR}"
