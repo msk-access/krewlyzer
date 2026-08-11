@@ -10562,25 +10562,49 @@ GC-bias correction weights per (fragment length bin, GC content) pair.
 Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
 for easy ingestion into PON pipelines and pandas workflows.
 
+!!! warning "This table is the completion marker"
+    The downstream consumer treats `{sample}.metadata.parquet` as the signal that a
+    sample finished. A sample without it is dropped from the cohort **silently** —
+    no warning, no error. Never delete it to "clean up" a directory.
+
 ```python
 import pandas as pd
-meta = pd.read_csv("sample.metadata.tsv", sep="\t").iloc[0].to_dict()
-print(meta["total_fragments"], meta["on_target_rate"])
+
+meta = pd.read_parquet("sample.metadata.parquet").iloc[0].to_dict()
+print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 ```
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `sample_id` | str | Sample identifier |
-| `krewlyzer_version` | str | Version string |
+| `total_fragments` | int | Total fragments extracted |
 | `genome` | str | Genome build used (`hg19`, `hg38`) |
 | `assay` | str | Assay name (or empty for WGS) |
-| `total_fragments` | int | Total fragments extracted |
-| `on_target_rate` | float | Fraction of fragments overlapping targets |
-| `mean_fragment_size` | float | Mean fragment length (bp) |
-| `duplication_rate` | float | Estimated duplicate fraction |
-| `processing_time_s` | float | Wall-clock processing time in seconds |
+| `panel_mode` | bool | Whether target regions were supplied |
+| `target_regions` | str | Path to the target BED, when in panel mode |
+| `extraction_time_seconds` | float | Wall-clock extraction time |
+| `mds_score` | float | Genome-wide motif diversity score |
+| `filters_mapq` | int | Minimum MAPQ applied |
+| `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
+| `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `timestamp` | str | ISO timestamp of the run |
 
-**Use**: Filter samples by QC thresholds before ML training (e.g. `total_fragments > 5M`, `on_target_rate > 0.3`).
+**Provenance, since 0.9.0.** Which build wrote this sample, and what it was
+scored against. Absent from any directory produced by an earlier release — and
+that absence is itself the answer, because 0.9.0 changed what several columns
+mean.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `krewlyzer_version` | str | The build that wrote this sample |
+| `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon`, for no PON, and for a PON the version guard refused — all three are legitimately unscored, and this is what distinguishes them from scoring that failed |
+| `pon_model` | str | The PON, by **basename** — never the full path |
+| `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
+| `pon_krewlyzer_version` | str | The release the PON was stamped with |
+
+**Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
+and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
+produced by one build against one baseline.
 
 ---
 
