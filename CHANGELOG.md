@@ -632,6 +632,28 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The gate could not see four of the six tables Parquet mode dropped.**
+  `.OCF.parquet` and all three `.sync` tables were absent from the output
+  contract; only the two on/off-target summaries were declared, and they are
+  what reported the loss. All four are declared now, with `ocf_z` marked
+  `requires_pon` — the `.sync` tables carry the per-position profiles the
+  summaries are reduced from, which is the large half of OCF.
+
+- **`FSC.regions.is_e1` / `is_alt_e1` were declared `string` and written
+  `int64`.** `gene_bed.py` parses `fields[8] == "1"` into a Python bool, which
+  lands as int64 0/1 — so the contract was wrong, not the writer. The
+  synthetic cohort wrote strings too, so fixture and contract agreed with each
+  other and neither with the code, which is how it survived. These columns are
+  new in 0.9.0, so nothing older disagrees.
+
+- **`fsc_gene_ratios_sum_to_one` flagged regions that have no fragments.** All
+  six channels are zero, so the sum is zero and the row reads as a maximal
+  partition failure — "worst deviation 1.000000" — when nothing is wrong with
+  it. 3 of 1725 regions on a real XS1 plasma sample, 13 of 1725 on a shallow
+  one, making the count a function of sequencing depth and burying any real
+  break among them. Zero-fragment regions are now excluded; a region with even
+  one counted fragment must still partition it.
+
 - **`BreakPointMotif` was scored against the `EndMotif` baseline** — and so
   were the two on-target motif tables. `apply_motif_pon` used
   `pon.mds_baseline` for all four, an **end-motif, genome-wide** block.

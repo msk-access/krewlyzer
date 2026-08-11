@@ -142,6 +142,17 @@ def _sample_dir(root: Path, index: int, *, band_limited: bool = False) -> Path:
         pd.DataFrame({"Motif": KMERS, "Frequency": np.round(freq, 6)}),
         Path(f"{base}.EndMotif"),
     )
+    # Breakpoint motifs: a *different* distribution from end motifs, which is
+    # the whole reason they need their own baseline. Drawn independently so a
+    # model built from this fixture would fail if the two were conflated.
+    bp_counts = rng.integers(500, 1500, len(KMERS)).astype(float)
+    _write_pair(
+        pd.DataFrame(
+            {"Motif": KMERS, "Frequency": np.round(bp_counts / bp_counts.sum(), 6)}
+        ),
+        Path(f"{base}.BreakPointMotif"),
+    )
+
     entropy = -float(np.sum(freq * np.log2(freq + 1e-12))) / np.log2(len(KMERS))
     _write_pair(
         pd.DataFrame([{"Sample": stem, "MDS": round(entropy, 6)}]), Path(f"{base}.MDS")
@@ -276,6 +287,17 @@ def _sample_dir(root: Path, index: int, *, band_limited: bool = False) -> Path:
         pd.DataFrame({"Motif": KMERS, "Frequency": np.round(on_freq, 6)}),
         Path(f"{base}.EndMotif.ontarget"),
     )
+    on_bp_counts = rng.integers(400, 1200, len(KMERS)).astype(float)
+    _write_pair(
+        pd.DataFrame(
+            {
+                "Motif": KMERS,
+                "Frequency": np.round(on_bp_counts / on_bp_counts.sum(), 6),
+            }
+        ),
+        Path(f"{base}.BreakPointMotif.ontarget"),
+    )
+
     on_entropy = -float(np.sum(on_freq * np.log2(on_freq + 1e-12))) / np.log2(
         len(KMERS)
     )

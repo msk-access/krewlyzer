@@ -272,6 +272,34 @@ MEANINGS: Dict[str, Meaning] = {
         pon_columns=("mds_z",),
     ),
     # -- orientation and accessibility --------------------------------------
+    ".OCF.sync.parquet": Meaning(
+        "The per-position orientation profile the OCF summary is reduced "
+        "from: upstream and downstream fragment-end counts at each offset "
+        "around a tissue's open-chromatin regions.",
+        "the phased peak-trough structure flattens or shifts as the tissue "
+        "contribution changes",
+        caveat=(
+            "Raw counts, not PON-normalised. Read the shape across positions "
+            "rather than any single offset."
+        ),
+        why=(
+            "The OCF summary is one number per tissue. The profile behind it shows whether that number came from a clean phased signal or from noise, which the summary alone cannot distinguish."
+        ),
+        how=(
+            "Fragment ends are counted separately upstream (`left_count`) and downstream (`right_count`) of each region centre, at every offset on a fixed grid, then normalised per tissue."
+        ),
+        what=(
+            "Look for the characteristic asymmetry between the left and right profiles. A tissue actively shedding shows a phased excess; a flat pair means no orientation signal, whatever the summary says."
+        ),
+    ),
+    ".OCF.ontarget.sync.parquet": Meaning(
+        "As OCF.sync, over captured regions.", "as OCF.sync"
+    ),
+    ".OCF.offtarget.sync.parquet": Meaning(
+        "As OCF.sync, over off-target fragments — the unbiased view where "
+        "capture applies.",
+        "as OCF.sync",
+    ),
     ".OCF.ontarget.parquet": Meaning(
         "Orientation-aware fragmentation at tissue-specific open chromatin. "
         "Fragments ending upstream versus downstream of a region are counted "

@@ -140,6 +140,31 @@ _ASSET_ANNOTATION = (
     "so it is identical across every sample by construction"
 )
 
+_OCF_COLS: Tuple[ColumnRule, ...] = (
+    label("tissue", _TISSUE),
+    metric("OCF", Vary.BOTH),
+    pon_metric("ocf_z", vary=Vary.BOTH),
+)
+
+#: Per-position orientation counts around each tissue's open-chromatin regions.
+#: The summary table is a reduction of these.
+_OCF_SYNC_COLS: Tuple[ColumnRule, ...] = (
+    label("tissue", _TISSUE),
+    ColumnRule(
+        "position",
+        Kind.NUMERIC,
+        Vary.NEVER,
+        constant_reason=(
+            "the offset grid around the region centre, identical in every "
+            "sample by construction"
+        ),
+    ),
+    metric("left_count", Vary.BOTH),
+    metric("left_norm", Vary.BOTH),
+    metric("right_count", Vary.BOTH),
+    metric("right_norm", Vary.BOTH),
+)
+
 _ENTROPY_COLS = (
     label("label", _TISSUE),
     metric("count"),
@@ -260,8 +285,18 @@ CONTRACT: Tuple[TableRule, ...] = (
             # are annotations, and the degeneracy check would otherwise flag
             # them every run.
             label("strand", _ASSET_ANNOTATION),
-            label("is_e1", _ASSET_ANNOTATION),
-            label("is_alt_e1", _ASSET_ANNOTATION),
+            # NUMERIC, not STRING: `gene_bed.py` parses these as `fields[8] ==
+            # "1"`, a Python bool, and they land as int64 0/1. The contract said
+            # `string` and had never been checked against a real table -- these
+            # columns are new in 0.9.0, so nothing older disagrees. Declared the
+            # way the other boolean flags are (`nrl_at_band_limit`,
+            # `wps_phase_at_search_limit`), since pandas reports bool as numeric.
+            ColumnRule(
+                "is_e1", Kind.NUMERIC, Vary.NEVER, constant_reason=_ASSET_ANNOTATION
+            ),
+            ColumnRule(
+                "is_alt_e1", Kind.NUMERIC, Vary.NEVER, constant_reason=_ASSET_ANNOTATION
+            ),
             metric("total", Vary.BOTH),
             *_FSC_RATIOS,
         ),
@@ -315,22 +350,21 @@ CONTRACT: Tuple[TableRule, ...] = (
     ),
     TableRule(".MDS.exon.parquet", (label("gene", _ID), metric("mds", Vary.BOTH))),
     # -- regulatory ---------------------------------------------------------
-    TableRule(
-        ".OCF.ontarget.parquet",
-        (
-            label("tissue", _TISSUE),
-            metric("OCF", Vary.BOTH),
-            metric("ocf_z", Vary.BOTH),
-        ),
-    ),
-    TableRule(
-        ".OCF.offtarget.parquet",
-        (
-            label("tissue", _TISSUE),
-            metric("OCF", Vary.BOTH),
-            metric("ocf_z", Vary.BOTH),
-        ),
-    ),
+    #
+    # The genome-wide table and every `.sync` table were absent from this
+    # contract, so four of the six tables that `--output-format parquet`
+    # silently dropped were invisible to the gate; the two summaries below were
+    # declared, and they are what reported the loss.
+    #
+    # `.sync` carries the per-position orientation profiles the summaries are
+    # reduced from -- the large half of OCF, and the reason Parquet matters for
+    # it at all (483 KB TSV against 56 KB Parquet).
+    TableRule(".OCF.parquet", _OCF_COLS),
+    TableRule(".OCF.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.ontarget.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.offtarget.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.ontarget.parquet", _OCF_COLS),
+    TableRule(".OCF.offtarget.parquet", _OCF_COLS),
     TableRule(".TFBS.parquet", _ENTROPY_COLS),
     TableRule(".TFBS.ontarget.parquet", _ENTROPY_COLS),
     TableRule(".ATAC.parquet", _ENTROPY_COLS),

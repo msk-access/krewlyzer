@@ -268,11 +268,24 @@ def fsc_gene_ratios_sum_to_one(df: pd.DataFrame) -> List[str]:
         len(FSC_GENE_RATIOS), written_decimals(df["ultra_short_ratio"])
     )
     summed = df[FSC_GENE_RATIOS].sum(axis=1)
-    off = int(((summed - 1.0).abs() > tol).sum())
+
+    # A region with no fragments has no ratios to partition.
+    #
+    # All six channels are 0, so the sum is 0 and the row reads as a maximal
+    # partition failure -- "worst deviation 1.000000" -- when nothing is wrong
+    # with it. Measured on a real XS1 plasma sample: 3 of 1725 regions, and 13
+    # of 1725 on a shallow one, every single one with all six channels exactly
+    # zero. Reporting those as broken arithmetic buries a real break among them
+    # and makes the count depend on sequencing depth.
+    #
+    # Exactly zero, not a tolerance: a region with even one counted fragment
+    # must still partition it.
+    empty = summed == 0.0
+    off = int(((summed - 1.0).abs() > tol)[~empty].sum())
     if not off:
         return []
 
-    worst = float((summed - 1.0).abs().max())
+    worst = float((summed - 1.0).abs()[~empty].max())
     return [
         f"{off} row(s) whose six ratios sum to 1 +/- more than {tol:g} "
         f"(worst deviation {worst:.6f}); the size channels no longer partition "
