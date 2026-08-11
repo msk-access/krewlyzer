@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{BufRead, Write};
 use std::collections::HashMap;
 use crate::bed;
-use log::{debug, info};
+use log::{debug, info, warn};
 
 
 /// Calculate Fragment Size Distribution (FSD)
@@ -483,6 +483,37 @@ impl FsdArmBaseline {
         }
         0.0
     }
+
+    /// Interpolate the spread at a size, mirroring [`Self::get_expected`].
+    ///
+    /// NaN, not a substituted 1.0, when there is no sigma to report. The
+    /// caller gates on `std > 0.0`, which is false for NaN, so an unmeasurable
+    /// spread drops out of `pon_stability` instead of contributing a
+    /// confident-looking 1.0 -- which with the 0.01 floor would read as a
+    /// stability of 0.990, a specific and entirely fabricated number.
+    pub fn get_std(&self, size: i32) -> f64 {
+        // The loader pushes and sorts all three vectors together, so they are
+        // parallel by construction. Checked anyway: indexing `std[i + 1]` off
+        // a shorter vector would panic inside a per-arm loop, and the cost of
+        // the check is one comparison per lookup.
+        if self.size_bins.is_empty() || self.std.len() != self.size_bins.len() {
+            return f64::NAN;
+        }
+        if size <= self.size_bins[0] {
+            return self.std[0];
+        }
+        if size >= *self.size_bins.last().unwrap() {
+            return *self.std.last().unwrap();
+        }
+        for i in 0..self.size_bins.len() - 1 {
+            if size >= self.size_bins[i] && size < self.size_bins[i + 1] {
+                let t = (size - self.size_bins[i]) as f64
+                    / (self.size_bins[i + 1] - self.size_bins[i]) as f64;
+                return self.std[i] + t * (self.std[i + 1] - self.std[i]);
+            }
+        }
+        f64::NAN
+    }
 }
 
 /// FSD baseline model containing per-arm statistics.
@@ -493,13 +524,24 @@ pub struct FsdBaseline {
 
 impl FsdBaseline {
     /// Get (expected, std) for an arm at a given size.
+    ///
+    /// Both are interpolated *at that size*. The sigma used to be
+    /// `std.first().copied().unwrap_or(1.0)` -- the first size bin's spread,
+    /// returned for every size asked for, and 1.0 when there was none.
+    ///
+    /// It reaches the output through `pon_stability`, which averages the
+    /// sigmas it is handed. Measured on the shipped xs1 all-unique PON: sigma
+    /// varies 41.6x (median) across the 67 size bins of an arm, up to 56.4x,
+    /// so every arm was handed 67 copies of bin 0's value. `pon_stability`
+    /// came out wrong by a median of 4709% on all 41 arms.
+    ///
+    /// Nothing could have caught it downstream: the column was present,
+    /// finite, and varied by arm, so it passed every schema check and the
+    /// anti-degeneracy assertion alike.
     pub fn get_stats(&self, arm: &str, size: i32) -> Option<(f64, f64)> {
-        self.arms.get(arm).map(|baseline| {
-            (
-                baseline.get_expected(size),
-                baseline.std.first().copied().unwrap_or(1.0),
-            )
-        })
+        self.arms
+            .get(arm)
+            .map(|baseline| (baseline.get_expected(size), baseline.get_std(size)))
     }
 }
 
@@ -716,6 +758,7 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     let reader = SerializedFileReader::new(file)?;
     
     let mut arms: HashMap<String, FsdArmBaseline> = HashMap::new();
+    let mut n_unreadable_bins = 0usize;
     
     for row_result in reader.get_row_iter(None)? {
         let row = row_result?;
@@ -731,23 +774,70 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
             continue;
         }
         
-        // Parse arm, size_bin, expected, std
-        let arm = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "arm").unwrap_or(0)
-        ).map_or("".to_string(), |v| v.to_string());
-        
-        let size_bin = row.get_int(
-            row.get_column_iter().position(|(name, _)| name == "size_bin").unwrap_or(0)
-        ).unwrap_or(0);
-        
-        let expected = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "expected").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
+        // Parse arm, size_bin, expected, std.
+        //
+        // `position(...).unwrap_or(0)` was the quiet defect here, the same one
+        // removed from `region_entropy.rs`: a column that could not be found
+        // read *column zero* instead, which in a PON parquet is `table`. A
+        // renamed `std` column would have been read as the literal string
+        // "fsd_baseline", failed to parse as a double, and fallen through to
+        // the fabricated default below -- two wrongs producing a plausible
+        // number.
+        let column = |name: &str| row.get_column_iter().position(|(n, _)| n == name);
+
+        // Whichever width the column happens to have.
+        //
+        // `size_bin` is an integer in every sense that matters, and it is
+        // stored as a **double**: a PON is one long-format table, so every row
+        // belonging to another block carries a null there, and the union
+        // column comes out float64. `row.get_int()` errors on a Double and
+        // returns Err -- it does not coerce.
+        //
+        // That single Err was the largest defect in this file. Every
+        // `size_bin` fell back to 0, so an arm's `size_bins` was 67 zeros,
+        // `size >= *size_bins.last()` was true for every size, and
+        // `get_expected` returned the **last row's** expectation for all 67
+        // bins. Confirmed against a shipped PON and a real sample: the emitted
+        // `_logR` columns matched the last-bin baseline exactly and the
+        // bin-matched baseline not at all.
+        //
+        // Nothing downstream could see it. The log-ratios still varied across
+        // bins -- the sample numerator varies -- so they were present, finite,
+        // non-degenerate, and wrong.
+        let numeric = |name: &str| -> Option<f64> {
+            let i = column(name)?;
+            row.get_double(i)
+                .or_else(|_| row.get_float(i).map(|v| v as f64))
+                .or_else(|_| row.get_int(i).map(|v| v as f64))
+                .or_else(|_| row.get_long(i).map(|v| v as f64))
+                .ok()
+        };
+
+        let arm = column("arm")
+            .and_then(|i| row.get_string(i).ok())
+            .map_or("".to_string(), |v| v.to_string());
+
+        let size_bin = match numeric("size_bin") {
+            Some(v) if v.is_finite() => v.round() as i32,
+            // Skip, rather than collapse the row onto bin 0 and silently
+            // corrupt every lookup for the arm.
+            _ => {
+                n_unreadable_bins += 1;
+                continue;
+            }
+        };
+
+        let expected = numeric("expected").unwrap_or(f64::NAN);
+
+        // NaN, not 1.0. A sigma of 1.0 is a measurement: with the 0.01 floor
+        // it yields a `pon_stability` of 0.990, which is indistinguishable
+        // from a real reading. The caller gates on `std > 0.0`, false for NaN,
+        // so an unreadable sigma now drops out of the average instead of
+        // dominating it.
+        let std = column("std")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
         // Add to arm baseline
         let baseline = arms.entry(arm).or_insert_with(|| FsdArmBaseline {
             size_bins: Vec::new(),
@@ -758,6 +848,27 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
         baseline.size_bins.push(size_bin);
         baseline.expected.push(expected);
         baseline.std.push(std);
+    }
+
+    if n_unreadable_bins > 0 {
+        warn!(
+            "FSD PON: {} rows of '{}' had no readable 'size_bin' and were \
+             skipped. Every lookup for the affected arm would otherwise have \
+             collapsed onto bin 0 and returned the last bin's baseline.",
+            n_unreadable_bins, table_name
+        );
+    }
+
+    // A row of the right table whose arm did not parse landed under the empty
+    // key and was never matched again -- dropped, without a count. Say how
+    // many rather than let a renamed column look like a small baseline.
+    if let Some(orphans) = arms.remove("") {
+        warn!(
+            "FSD PON: {} rows of '{}' had no readable 'arm' and were dropped. \
+             Check that the PON was built by a matching krewlyzer version.",
+            orphans.size_bins.len(),
+            table_name
+        );
     }
     
     // Sort each arm's bins
@@ -779,6 +890,130 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     Ok(FsdBaseline { arms })
 }
 
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::*;
+
+    /// An arm whose spread genuinely changes across the size range, as real
+    /// ones do: measured on the shipped xs1 all-unique PON, sigma varies 41.6x
+    /// (median) across the 67 bins of an arm and up to 56.4x.
+    fn arm() -> FsdArmBaseline {
+        FsdArmBaseline {
+            size_bins: vec![100, 150, 200],
+            expected: vec![10.0, 40.0, 20.0],
+            std: vec![1.0, 8.0, 3.0],
+        }
+    }
+
+    #[test]
+    fn the_sigma_depends_on_the_size_asked_for() {
+        // The defect this replaces: `std.first()` returned bin 100's sigma for
+        // every size, so `pon_stability` averaged 67 copies of one bin's
+        // spread and came out wrong by a median of 4709% on all 41 arms of a
+        // shipped PON.
+        //
+        // Anti-degeneracy, invariant #1: two different inputs must give two
+        // different outputs. That single assertion would have caught it.
+        let a = arm();
+        let low = a.get_std(100);
+        let high = a.get_std(150);
+        assert_ne!(
+            low, high,
+            "sigma must vary with size; a constant means `.first()` is back"
+        );
+        assert_eq!(low, 1.0);
+        assert_eq!(high, 8.0);
+    }
+
+    #[test]
+    fn the_sigma_interpolates_like_the_expectation_does() {
+        let a = arm();
+        // Halfway between bins 100 and 150: sigma halfway between 1.0 and 8.0.
+        assert!((a.get_std(125) - 4.5).abs() < 1e-12, "{}", a.get_std(125));
+        // And the expectation it is paired with uses the same scheme.
+        assert!((a.get_expected(125) - 25.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn outside_the_measured_range_it_clamps_rather_than_extrapolates() {
+        let a = arm();
+        assert_eq!(a.get_std(50), 1.0, "below the first bin");
+        assert_eq!(a.get_std(400), 3.0, "above the last bin");
+    }
+
+    #[test]
+    fn an_unmeasured_spread_is_nan_not_one() {
+        // 1.0 was the old default, and it is a *measurement*: with the 0.01
+        // floor it yields a pon_stability of 0.990, indistinguishable from a
+        // real reading.
+        let empty = FsdArmBaseline {
+            size_bins: vec![100, 150],
+            expected: vec![1.0, 2.0],
+            std: vec![],
+        };
+        assert!(empty.get_std(120).is_nan());
+        // And the caller's `std > 0.0` gate is false for NaN, so it drops out
+        // of the stability average rather than dominating it.
+        assert!(!(f64::NAN > 0.0));
+    }
+
+    #[test]
+    fn a_ragged_baseline_does_not_panic() {
+        // The loader keeps the three vectors parallel; this is the guard for
+        // anything that does not.
+        let ragged = FsdArmBaseline {
+            size_bins: vec![100, 150, 200],
+            expected: vec![1.0, 2.0, 3.0],
+            std: vec![1.0],
+        };
+        assert!(ragged.get_std(175).is_nan());
+    }
+
+    #[test]
+    fn a_baseline_whose_bins_all_collapsed_is_visible() {
+        // The shape the loader produced when `size_bin` failed to parse: 67
+        // rows, every one at bin 0. `size >= *size_bins.last()` is then true
+        // for every query, so every size gets the *last* row's value.
+        //
+        // On a shipped PON that is exactly what happened -- `size_bin` is
+        // stored as a double and the reader called `get_int`, which errors --
+        // and every `_logR` column of every sample was scored against the
+        // wrong bin. The values still varied across bins, because the sample
+        // numerator varies, so nothing downstream saw anything wrong.
+        let collapsed = FsdArmBaseline {
+            size_bins: vec![0, 0, 0],
+            expected: vec![10.0, 40.0, 20.0],
+            std: vec![1.0, 8.0, 3.0],
+        };
+        assert_eq!(collapsed.get_expected(65), 20.0, "the last bin, for any size");
+        assert_eq!(collapsed.get_expected(395), 20.0);
+        assert_eq!(
+            collapsed.get_expected(65),
+            collapsed.get_expected(395),
+            "collapsed bins make every size identical -- the signature of the bug"
+        );
+
+        // Against a properly parsed baseline the two must differ.
+        let good = arm();
+        assert_ne!(
+            good.get_expected(100),
+            good.get_expected(200),
+            "a real baseline must distinguish sizes (invariant #1)"
+        );
+    }
+
+    #[test]
+    fn get_stats_pairs_the_two_at_the_same_size() {
+        let mut arms = HashMap::new();
+        arms.insert("1p".to_string(), arm());
+        let baseline = FsdBaseline { arms };
+
+        let (expected, std) = baseline.get_stats("1p", 150).expect("arm present");
+        assert_eq!((expected, std), (40.0, 8.0));
+        assert!(baseline.get_stats("9q", 150).is_none(), "unknown arm");
+    }
+}
 
 #[cfg(test)]
 mod logratio_tests {

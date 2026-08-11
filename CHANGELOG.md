@@ -571,6 +571,52 @@ All notable changes to this project will be documented in this file.
   The eleven per-tool Nextflow modules now pass `params.output_format` and
   `params.compress_tsv` through as well; previously only `runall` did.
 
+### Fixed
+
+- **Every FSD log-ratio was scored against the wrong size bin.** The largest
+  output defect found in this release, and it reached every sample ever
+  normalised against a PON.
+
+  `size_bin` is an integer in every sense that matters, and it is stored as a
+  **double**: a PON is one long-format table, so every row belonging to another
+  block carries a null there and the union column comes out `float64`. The
+  reader called `row.get_int()`, which *errors* on a Double rather than
+  coercing, and the error fell through to `unwrap_or(0)`.
+
+  So every `size_bin` became 0. An arm's `size_bins` was 67 zeros,
+  `size >= *size_bins.last()` held for every size, and `get_expected` returned
+  the **last row's** expectation for all 67 bins.
+
+  Measured on a shipped PON and a real sample: **41/41 arms** matched the
+  last-bin baseline exactly and the bin-matched baseline not at all. After the
+  fix, 41/41 match bin-matched and 0/41 match the old behaviour. The correction
+  is large — median log2 shift −1.05, maximum |Δ| 5.10.
+
+  Nothing could have caught it downstream. The log-ratios still varied across
+  bins, because the sample numerator varies, so they were present, finite,
+  non-degenerate and wrong — invariant #1's failure mode one level subtler than
+  the constant it was written for.
+
+  **The PONs are not affected and do not need rebuilding**; the reader was
+  broken, not the model. Samples normalised against a PON do need re-running.
+
+- **`pon_stability` used one size bin's sigma for the whole arm.**
+  `FsdBaseline::get_stats` returned `std.first()` regardless of the size asked
+  for. Measured on the shipped xs1 all-unique PON: sigma varies **41.6×**
+  (median) across an arm's 67 bins, up to 56.4×, so `pon_stability` was wrong
+  by a median of **4709%** on all 41 arms. Sigma is now interpolated at the
+  requested size, exactly as `expected` already was.
+
+- **Three more fabricated defaults on the FSD baseline path**, the same family
+  removed from nine baseline classes as `zscore_or_nan` this release: an
+  unreadable sigma defaulted to `1.0` (which with the 0.01 floor reads as a
+  `pon_stability` of 0.990, indistinguishable from a measurement), an
+  unreadable expectation to `0.0`, and `position(...).unwrap_or(0)` made a
+  column that could not be found read **column zero** — `table` — the same
+  defect already removed from `region_entropy.rs` and missed here. Rows with an
+  unreadable `size_bin` or `arm` are now skipped and counted in a warning
+  rather than silently collapsing onto bin 0 or an empty key.
+
 ### Changed
 
 - **WPS PON scoring moved from Python to Rust** (`rust/src/wps.rs::apply_pon_zscore`).

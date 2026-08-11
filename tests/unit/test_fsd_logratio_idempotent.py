@@ -34,9 +34,17 @@ ARMS = ("1p", "1q", "9q")
 
 @pytest.fixture
 def fsd_and_pon(tmp_path):
+    # The sample must differ from the baseline, bin by bin, or every log-ratio
+    # is log2(1) = 0 and the test cannot tell a bin-matched lookup from a
+    # collapsed one. It used to be identical to the baseline and passed only
+    # because `size_bin` failed to parse, so all 8 bins were scored against the
+    # last one and the ratios varied for the wrong reason.
     raw = pd.DataFrame(
         [
-            {"region": a, **{b: float((i + 1) * 10) for i, b in enumerate(BINS)}}
+            {
+                "region": a,
+                **{b: float((i + 1) * 10 + 5 * i) for i, b in enumerate(BINS)},
+            }
             for a in ARMS
         ]
     )
@@ -141,6 +149,24 @@ def test_an_arm_in_the_baseline_still_gets_real_numbers(fsd_and_pon):
     values = [present[f"{b}_logR"].iloc[0] for b in BINS]
     assert all(np.isfinite(v) for v in values)
     assert len(set(values)) > 1, "log-ratios must vary across bins"
+
+    # Each bin against *its own* baseline, not the last one.
+    #
+    # `size_bin` is a double in every PON -- the long-format table carries a
+    # null there for every other block's rows -- and the reader called
+    # `get_int`, which errors on a Double rather than coercing. Every size_bin
+    # became 0, so `size >= size_bins.last()` held for every size and all 67
+    # bins were scored against the final row. Measured on a shipped PON and a
+    # real sample: 41/41 arms matched the last-bin baseline exactly.
+    pseudocount = 1.0
+    for i, b in enumerate(BINS):
+        sample = float((i + 1) * 10 + 5 * i)
+        expected = float((i + 1) * 10)
+        want = np.log2((sample + pseudocount) / (expected + pseudocount))
+        assert values[i] == pytest.approx(want, rel=1e-6), (
+            f"bin {b} scored against the wrong baseline: {values[i]:.4f} "
+            f"instead of {want:.4f}"
+        )
     assert np.isfinite(present["pon_stability"].iloc[0])
 
 
