@@ -453,7 +453,20 @@ def run_features(
     pon_for_zscore = None  # Separate variable for z-score normalization
     if resolved_pon_model:
         pon = load_pon_model(resolved_pon_model)
-        pon_parquet = resolved_pon_model
+        # Only after the load succeeded.
+        #
+        # `pon_parquet` is handed to the Rust scorers as a *path* -- FSD, WPS,
+        # OCF and region-entropy each read the parquet themselves. Setting it
+        # unconditionally meant a PON the version guard had just refused was
+        # still normalised against by every one of them: the Python half
+        # stopped and the Rust half carried on.
+        pon_parquet = resolved_pon_model if pon else None
+        if resolved_pon_model and not pon:
+            logger.error(
+                f"PON at {resolved_pon_model.name} was refused; every feature "
+                "keeps its raw values and gets no z-score. Nothing is scored "
+                "against a model this build cannot vouch for."
+            )
         if pon:
             logger.info(f"PON loaded: {pon.assay} (n={pon.n_samples})")
             # When skip_pon_zscore is True (--skip-pon mode), don't pass PON for z-scores
@@ -763,8 +776,17 @@ def run_features(
         logger.info(f"✓ FSD: {outputs.fsd.name}")
 
         # On-target FSD: use fsd_baseline_ontarget table from PON
+        #
+        # `resolve_table_path`, not `.exists()` on the `.tsv` -- the same fix
+        # already applied to the genome-wide branch fifteen lines above, and
+        # missed here. The FSD writer honours --output-format, so under
+        # `parquet` this `.tsv` never exists, the whole block was skipped, and
+        # the on-target table shipped unscored: 69 columns and zero `_logR`
+        # against the genome-wide table's 137. Confirmed on a real XS1 and XS2
+        # plasma sample before the fix.
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
-        if is_panel_mode and out_fsd_on.exists():
+        resolved_fsd_on = resolve_table_path(out_fsd_on)
+        if is_panel_mode and resolved_fsd_on is not None:
             outputs.fsd_ontarget = out_fsd_on
             process_fsd(
                 out_fsd_on,
@@ -775,6 +797,12 @@ def run_features(
             )
             logger.info(
                 f"✓ FSD on-target: {outputs.fsd_ontarget.name} (using fsd_baseline_ontarget)"
+            )
+        elif is_panel_mode:
+            logger.warning(
+                f"FSD on-target table not found for {sample_name} (looked for "
+                f"{out_fsd_on.name} in any format); it will carry no PON "
+                "log-ratios."
             )
 
     # =========================================================================
@@ -822,15 +850,19 @@ def run_features(
         if skip_pon_zscore and pon:
             logger.info("  WPS: --skip-pon active, outputting raw values (no z-scores)")
         post_process_wps(outputs.wps, outputs.wps_background, pon=pon_for_zscore)
-        if pon_for_zscore is not None:
+        if pon_for_zscore is not None and pon_parquet:
             # The largest baseline in the PON, and until 0.9.0 read by nothing.
             from .wps_pon import apply_wps_pon
 
+            # The path, not the loaded model: the scoring runs in Rust and
+            # reads the parquet itself. `pon_for_zscore` still gates the call
+            # because it is what --skip-pon clears.
+            #
             # No output_format: WPS is Parquet by contract, and the writer
             # enforces it rather than taking the caller's word.
             apply_wps_pon(
                 outputs.wps,
-                pon_for_zscore,
+                pon_parquet,
                 output_base=outputs.wps.with_suffix(""),
             )
         logger.info(f"✓ WPS: {outputs.wps.name}")
@@ -877,14 +909,14 @@ def run_features(
                 # genome-wide file, so the anchors nearest the targeted
                 # regions were the one WPS output with no comparison to a
                 # healthy cohort.
-                if pon_for_zscore is not None:
+                if pon_for_zscore is not None and pon_parquet:
                     from .wps_pon import apply_wps_pon
 
                     n_panel = apply_wps_pon(
                         outputs.wps_panel,
-                        pon_for_zscore,
+                        pon_parquet,
                         output_base=outputs.wps_panel.with_suffix(""),
-                        baseline_attr="wps_baseline_panel",
+                        baseline_table="wps_baseline_panel",
                     )
                     logger.info(f"✓ WPS panel: {n_panel} anchors scored vs PON")
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")
@@ -896,8 +928,28 @@ def run_features(
     # - all.ocf.tsv, all.sync.tsv (ALL fragments)
     # - all.ocf.ontarget.tsv, all.sync.ontarget.tsv (on-target)
     # - all.ocf.offtarget.tsv, all.sync.offtarget.tsv (off-target)
+    #
+    # These are TSV whatever --output-format says: the temp directory is an
+    # internal intermediate and Python owns OCF's conversion (see the comment
+    # in rust/src/pipeline.rs). The checks below are `.exists()` on those exact
+    # names, so if that ever stops being true the tables vanish silently --
+    # which is precisely what happened under `parquet`, losing all six.
     if enable_ocf and ocf_tmp_dir:
         import shutil
+
+        # Say so when the intermediates are not where they should be.
+        #
+        # Every `if rust_*.exists():` below treats an absent file as "this
+        # split was not produced", which is legitimate for on/off-target in
+        # WGS mode and a silent catastrophe for the primary table. One check
+        # up front distinguishes them.
+        if not any(ocf_tmp_dir.glob("all.ocf*")):
+            logger.error(
+                f"OCF ran but wrote no readable intermediate into "
+                f"{ocf_tmp_dir.name}; every OCF table will be missing from "
+                f"this sample. Found: {sorted(p.name for p in ocf_tmp_dir.glob('*')) or 'nothing'}. "
+                "The mover expects plain TSV -- see rust/src/pipeline.rs."
+            )
 
         # Primary output (ALL fragments - WGS-comparable)
         rust_ocf = ocf_tmp_dir / "all.ocf.tsv"
@@ -1375,6 +1427,26 @@ def run_features(
             outputs.atac_ontarget,
         ]
         if p and p.exists()
+    )
+
+    # Record what produced this sample, and what it was scored against.
+    #
+    # Here rather than in `wrapper.py` so a single-feature CLI run gets the
+    # same treatment as `run-all` (invariant #6), and here rather than at
+    # extraction because the PON is not loaded yet at that point.
+    #
+    # `pon_for_zscore`, not `pon`: a model that loaded but was withheld by
+    # --skip-pon scored nothing, and recording it as applied would be a lie
+    # about the columns in this directory.
+    from .output_provenance import stamp_metadata
+
+    stamp_metadata(
+        output_dir,
+        sample_name,
+        pon=pon_for_zscore,
+        pon_path=pon_parquet if pon_for_zscore is not None else None,
+        output_format=resolved_output_format,
+        compress=resolved_compress,
     )
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

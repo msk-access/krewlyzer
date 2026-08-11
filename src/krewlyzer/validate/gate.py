@@ -179,7 +179,11 @@ def _read_table(path: Path, rule: TableRule) -> Tuple[pd.DataFrame, int]:
 
 
 def _check_table(
-    sample: str, rule: TableRule, df: pd.DataFrame, n_rows: int
+    sample: str,
+    rule: TableRule,
+    df: pd.DataFrame,
+    n_rows: int,
+    pon_applied: Optional[bool] = None,
 ) -> Tuple[List[Finding], Dict[str, Observation]]:
     family = rule.family.replace(".parquet", "")
     findings: List[Finding] = []
@@ -201,13 +205,23 @@ def _check_table(
 
     for col in rule.columns:
         if col.name not in df.columns:
-            if col.required:
+            # A PON-derived column is required only when the sample says it was
+            # scored. Absent provenance (a pre-0.9.0 directory) is `None`, and
+            # is not evidence either way, so it stays quiet.
+            expected = col.required and (not col.requires_pon or pon_applied is True)
+            if expected:
+                why = (
+                    " -- this sample records pon_applied=True, so PON scoring "
+                    "ran and its output should be here"
+                    if col.requires_pon
+                    else ""
+                )
                 findings.append(
                     Finding(
                         id=f"{family}.MISSING_COLUMN.{col.name}",
                         severity=Severity.ERROR,
                         category=Category.SCHEMA,
-                        message=f"required column '{col.name}' is absent",
+                        message=f"required column '{col.name}' is absent{why}",
                         table=rule.suffix,
                         column=col.name,
                         samples=[sample],
@@ -258,6 +272,35 @@ def _check_table(
     return findings, observations
 
 
+def _pon_applied(sample_dir: Path, sample: str) -> Optional[bool]:
+    """Was this sample actually scored against a PON?
+
+    Read from `{sample}.metadata.parquet`, which `run_features` stamps after
+    the PON decision is known. Three-valued on purpose:
+
+    ``True``   scored -- the PON-derived columns must be present
+    ``False``  deliberately unscored (--skip-pon, no PON, or a PON the version
+               guard refused) -- their absence is correct
+    ``None``   unrecorded, so a build older than 0.9.0 wrote this directory and
+               there is nothing to check against
+
+    `None` is not treated as `False`: they mean different things, and only the
+    first is a reason to stay quiet about missing z-scores.
+    """
+    marker = sample_dir / f"{sample}{COMPLETION_MARKER}"
+    if not marker.exists():
+        return None
+    try:
+        frame = pd.read_parquet(marker, columns=["pon_applied"])
+    except Exception:
+        # Column absent, or the file is unreadable. Either way, unknown --
+        # the marker's own absence is already reported separately.
+        return None
+    if frame.empty or frame["pon_applied"].isna().all():
+        return None
+    return bool(frame["pon_applied"].iloc[0])
+
+
 def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerprint]:
     """Everything decidable from one sample, plus its fingerprint.
 
@@ -283,6 +326,16 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
                 table=COMPLETION_MARKER,
                 samples=[sample],
             )
+        )
+
+    # Read once, not per table: it comes from the marker and cannot change
+    # between tables of the same sample.
+    pon_applied = _pon_applied(sample_dir, sample)
+    if pon_applied is None:
+        logger.debug(
+            "%s records no pon_applied; PON-derived columns will not be "
+            "required. A build older than 0.9.0 wrote this directory.",
+            sample,
         )
 
     for rule in CONTRACT:
@@ -314,7 +367,9 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
             )
             continue
 
-        table_findings, observations = _check_table(sample, rule, df, n_rows)
+        table_findings, observations = _check_table(
+            sample, rule, df, n_rows, pon_applied=pon_applied
+        )
         findings.extend(table_findings)
         for name, observation in observations.items():
             fingerprint.observations[f"{rule.suffix}::{name}"] = observation

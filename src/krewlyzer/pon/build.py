@@ -898,6 +898,11 @@ def build_pon(
         all_ocf_data_offtarget = []
 
         all_mds_data = []
+        # Breakpoint 4-mers need their own baseline: they span the cut site and
+        # include reference bases the fragment does not, so they are a
+        # different distribution from end motifs (correlation 0.696).
+        all_bpm_data: List[dict] = []
+        all_bpm_data_ontarget: List[dict] = []
         all_tfbs_data = []
         all_atac_data = []
         all_fsd_data_ontarget = []
@@ -1107,6 +1112,22 @@ def build_pon(
                     {"kmers": outputs.mds_counts, "mds": outputs.mds_score}
                 )
 
+            # Breakpoint motifs, genome-wide and on-target. `mds` is None: MDS
+            # is defined on end motifs, and a number here would be a different
+            # statistic wearing the same name.
+            for counts, bucket in (
+                (getattr(outputs, "bpm_counts", None), all_bpm_data),
+                (getattr(outputs, "bpm_counts_ontarget", None), all_bpm_data_ontarget),
+            ):
+                total = sum(counts.values()) if counts else 0
+                if counts and total > 0:
+                    bucket.append(
+                        {
+                            "kmers": {k: v / total for k, v in counts.items()},
+                            "mds": None,
+                        }
+                    )
+
             # Collect on-target MDS data (panel mode)
             # Uses on-target k-mer frequencies for separate panel-mode baseline
             if (
@@ -1248,6 +1269,8 @@ def build_pon(
         all_ocf_data_offtarget = collected.ocf_offtarget
         all_mds_data = collected.mds
         all_mds_data_ontarget = collected.mds_ontarget
+        all_bpm_data = collected.breakpoint_motif
+        all_bpm_data_ontarget = collected.breakpoint_motif_ontarget
         all_tfbs_data = collected.tfbs
         all_tfbs_data_ontarget = collected.tfbs_ontarget
         all_atac_data = collected.atac
@@ -1327,6 +1350,25 @@ def build_pon(
             f"  Computing on-target MDS baseline ({len(all_mds_data_ontarget)} samples)..."
         )
         mds_baseline_ontarget = _compute_mds_baseline(all_mds_data_ontarget)
+
+    # Breakpoint-motif baselines. Same aggregation, different distribution:
+    # scoring BreakPointMotif against the end-motif baseline gave median |z|
+    # 5.85 (XS1) and 11.25 (XS2) where a fitted baseline gives ~0.67.
+    breakpoint_motif_baseline = None
+    if all_bpm_data:
+        logger.info(
+            f"  Computing breakpoint-motif baseline ({len(all_bpm_data)} samples)..."
+        )
+        breakpoint_motif_baseline = _compute_mds_baseline(all_bpm_data)
+    breakpoint_motif_baseline_ontarget = None
+    if is_panel_mode and all_bpm_data_ontarget:
+        logger.info(
+            f"  Computing on-target breakpoint-motif baseline "
+            f"({len(all_bpm_data_ontarget)} samples)..."
+        )
+        breakpoint_motif_baseline_ontarget = _compute_mds_baseline(
+            all_bpm_data_ontarget
+        )
         if mds_baseline_ontarget:
             logger.debug(
                 f"    On-target MDS: mean={mds_baseline_ontarget.mds_mean:.4f}"
@@ -1482,6 +1524,8 @@ def build_pon(
         ocf_baseline_offtarget=ocf_baseline_offtarget,
         mds_baseline=mds_baseline,
         mds_baseline_ontarget=mds_baseline_ontarget,
+        breakpoint_motif_baseline=breakpoint_motif_baseline,
+        breakpoint_motif_baseline_ontarget=breakpoint_motif_baseline_ontarget,
         region_mds=region_mds_baseline,
         region_mds_exon=region_mds_exon_baseline,
         tfbs_baseline=tfbs_baseline,
@@ -2670,6 +2714,33 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             ]
         )
 
+    # Breakpoint-motif blocks. Same columns as the MDS blocks -- they reuse
+    # `MdsBaseline` -- but `mds_mean`/`mds_std` are NaN, because MDS is defined
+    # on end motifs and a number here would be a different statistic under the
+    # same name.
+    breakpoint_dfs = []
+    for table, block in (
+        ("breakpoint_motif_baseline", model.breakpoint_motif_baseline),
+        (
+            "breakpoint_motif_baseline_ontarget",
+            model.breakpoint_motif_baseline_ontarget,
+        ),
+    ):
+        if block:
+            breakpoint_dfs.append(
+                pd.DataFrame(
+                    [
+                        {
+                            "table": table,
+                            "mds_mean": float("nan"),
+                            "mds_std": float("nan"),
+                            "kmer_expected": block.kmer_expected,
+                            "kmer_std": block.kmer_std,
+                        }
+                    ]
+                )
+            )
+
     # Build on-target FSD baseline DataFrame (panel mode)
     fsd_ontarget_rows = []
     if model.fsd_baseline_ontarget:
@@ -2883,6 +2954,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(mds_df)
     if not mds_ontarget_df.empty:
         all_dfs.append(mds_ontarget_df)
+    all_dfs.extend(breakpoint_dfs)
     if not fsd_ontarget_df.empty:
         all_dfs.append(fsd_ontarget_df)
     if not gc_bias_ontarget_df.empty:

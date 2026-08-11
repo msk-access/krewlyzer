@@ -55,6 +55,14 @@ class ColumnRule:
     vary: Vary = Vary.CROSS
     required: bool = True
     constant_reason: Optional[str] = None
+    #: Required only when the sample was actually scored against a PON.
+    #:
+    #: A `--skip-pon` run, a run with no PON, and a run whose PON the version
+    #: guard refused are all legitimately unscored, so these columns cannot be
+    #: required unconditionally -- and leaving them undeclared was the other
+    #: extreme: PON scoring could vanish entirely and the gate would pass.
+    #: `{sample}.metadata.pon_applied` is what tells the two apart.
+    requires_pon: bool = False
 
     def __post_init__(self) -> None:
         # The whole point of the gate. Silencing a degeneracy finding must cost
@@ -113,6 +121,13 @@ def metric(name: str, vary: Vary = Vary.CROSS) -> ColumnRule:
     return ColumnRule(name, Kind.NUMERIC, vary)
 
 
+def pon_metric(
+    name: str, kind: Kind = Kind.NUMERIC, vary: Vary = Vary.CROSS
+) -> ColumnRule:
+    """A column that exists only when a PON was applied, and must exist then."""
+    return ColumnRule(name, kind, vary, requires_pon=True)
+
+
 def label(name: str, reason: str) -> ColumnRule:
     """A key/identifier column. Constant-ness is expected, so it needs a why."""
     return ColumnRule(name, Kind.STRING, Vary.NEVER, constant_reason=reason)
@@ -123,6 +138,31 @@ _TISSUE = "fixed tissue/label vocabulary from the bundled atlas"
 _ASSET_ANNOTATION = (
     "copied from the gene BED asset rather than measured from the sample, "
     "so it is identical across every sample by construction"
+)
+
+_OCF_COLS: Tuple[ColumnRule, ...] = (
+    label("tissue", _TISSUE),
+    metric("OCF", Vary.BOTH),
+    pon_metric("ocf_z", vary=Vary.BOTH),
+)
+
+#: Per-position orientation counts around each tissue's open-chromatin regions.
+#: The summary table is a reduction of these.
+_OCF_SYNC_COLS: Tuple[ColumnRule, ...] = (
+    label("tissue", _TISSUE),
+    ColumnRule(
+        "position",
+        Kind.NUMERIC,
+        Vary.NEVER,
+        constant_reason=(
+            "the offset grid around the region centre, identical in every "
+            "sample by construction"
+        ),
+    ),
+    metric("left_count", Vary.BOTH),
+    metric("left_norm", Vary.BOTH),
+    metric("right_count", Vary.BOTH),
+    metric("right_norm", Vary.BOTH),
 )
 
 _ENTROPY_COLS = (
@@ -170,17 +210,52 @@ _WPS_COLS = (
     ColumnRule("prot_frac_tf", Kind.LIST, Vary.BOTH),
 )
 
+#: What FSD PON scoring produces, by fixed name. The 67 per-bin `{bin}_logR`
+#: columns are named from the bins themselves, so they stay with the
+#: `fsd_only_size_bins` domain check rather than being enumerated here --
+#: `pon_stability` is the one fixed name, and its presence is what says the
+#: log-ratios were computed at all.
+_FSD_PON_COLS: Tuple[ColumnRule, ...] = (pon_metric("pon_stability", vary=Vary.BOTH),)
+
+#: What WPS PON scoring produces. Undeclared until 0.9.0, which meant the gate
+#: could not tell a scored run from one where the scoring silently vanished --
+#: and it did vanish, twice, in this release alone: once to a `.WPS.tsv` nobody
+#: reads and once to `{sample}.parquet` after `with_suffix` ate the `.WPS`.
+#: Both shipped a raw `.WPS.parquet` that passed every check.
+_WPS_PON_COLS: Tuple[ColumnRule, ...] = (
+    pon_metric("wps_nuc_z", Kind.LIST, Vary.BOTH),
+    pon_metric("wps_log_amplitude"),
+    pon_metric("wps_log_amplitude_z"),
+    pon_metric("wps_shape_corr"),
+    pon_metric("wps_shape_corr_z"),
+    pon_metric("wps_phase_shift_bp"),
+    # The boundary flag (invariant #3). Legitimately constant when no anchor in
+    # the sample hit the +/-30 search edge, which is the healthy case.
+    ColumnRule(
+        "wps_phase_at_search_limit",
+        # NUMERIC, as `nrl_at_band_limit` is: pandas reports a bool column as a
+        # numeric dtype, and the contract's kinds are deliberately coarse.
+        Kind.NUMERIC,
+        Vary.NEVER,
+        constant_reason=(
+            "all-False is the healthy expectation -- it means no anchor's phase "
+            "search ended on its own window edge"
+        ),
+        requires_pon=True,
+    ),
+)
+
 
 CONTRACT: Tuple[TableRule, ...] = (
     # -- fragment size ------------------------------------------------------
     TableRule(
         ".FSD.parquet",
-        (label("region", _ID), metric("total", Vary.BOTH)),
+        (label("region", _ID), metric("total", Vary.BOTH), *_FSD_PON_COLS),
         checks=("fsd_only_size_bins",),
     ),
     TableRule(
         ".FSD.ontarget.parquet",
-        (label("region", _ID), metric("total", Vary.BOTH)),
+        (label("region", _ID), metric("total", Vary.BOTH), *_FSD_PON_COLS),
         checks=("fsd_only_size_bins",),
     ),
     TableRule(".FSR.parquet", _FSR_COLS, checks=("fsr_region_format",)),
@@ -210,8 +285,18 @@ CONTRACT: Tuple[TableRule, ...] = (
             # are annotations, and the degeneracy check would otherwise flag
             # them every run.
             label("strand", _ASSET_ANNOTATION),
-            label("is_e1", _ASSET_ANNOTATION),
-            label("is_alt_e1", _ASSET_ANNOTATION),
+            # NUMERIC, not STRING: `gene_bed.py` parses these as `fields[8] ==
+            # "1"`, a Python bool, and they land as int64 0/1. The contract said
+            # `string` and had never been checked against a real table -- these
+            # columns are new in 0.9.0, so nothing older disagrees. Declared the
+            # way the other boolean flags are (`nrl_at_band_limit`,
+            # `wps_phase_at_search_limit`), since pandas reports bool as numeric.
+            ColumnRule(
+                "is_e1", Kind.NUMERIC, Vary.NEVER, constant_reason=_ASSET_ANNOTATION
+            ),
+            ColumnRule(
+                "is_alt_e1", Kind.NUMERIC, Vary.NEVER, constant_reason=_ASSET_ANNOTATION
+            ),
             metric("total", Vary.BOTH),
             *_FSC_RATIOS,
         ),
@@ -265,33 +350,35 @@ CONTRACT: Tuple[TableRule, ...] = (
     ),
     TableRule(".MDS.exon.parquet", (label("gene", _ID), metric("mds", Vary.BOTH))),
     # -- regulatory ---------------------------------------------------------
-    TableRule(
-        ".OCF.ontarget.parquet",
-        (
-            label("tissue", _TISSUE),
-            metric("OCF", Vary.BOTH),
-            metric("ocf_z", Vary.BOTH),
-        ),
-    ),
-    TableRule(
-        ".OCF.offtarget.parquet",
-        (
-            label("tissue", _TISSUE),
-            metric("OCF", Vary.BOTH),
-            metric("ocf_z", Vary.BOTH),
-        ),
-    ),
+    #
+    # The genome-wide table and every `.sync` table were absent from this
+    # contract, so four of the six tables that `--output-format parquet`
+    # silently dropped were invisible to the gate; the two summaries below were
+    # declared, and they are what reported the loss.
+    #
+    # `.sync` carries the per-position orientation profiles the summaries are
+    # reduced from -- the large half of OCF, and the reason Parquet matters for
+    # it at all (483 KB TSV against 56 KB Parquet).
+    TableRule(".OCF.parquet", _OCF_COLS),
+    TableRule(".OCF.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.ontarget.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.offtarget.sync.parquet", _OCF_SYNC_COLS),
+    TableRule(".OCF.ontarget.parquet", _OCF_COLS),
+    TableRule(".OCF.offtarget.parquet", _OCF_COLS),
     TableRule(".TFBS.parquet", _ENTROPY_COLS),
     TableRule(".TFBS.ontarget.parquet", _ENTROPY_COLS),
     TableRule(".ATAC.parquet", _ENTROPY_COLS),
     TableRule(".ATAC.ontarget.parquet", _ENTROPY_COLS),
     # -- nucleosome ---------------------------------------------------------
     TableRule(
-        ".WPS.parquet", _WPS_COLS, checks=("wps_arrays_nonempty",), scan_rows=256
+        ".WPS.parquet",
+        (*_WPS_COLS, *_WPS_PON_COLS),
+        checks=("wps_arrays_nonempty",),
+        scan_rows=256,
     ),
     TableRule(
         ".WPS.panel.parquet",
-        (*_WPS_COLS, metric("local_depth", Vary.BOTH)),
+        (*_WPS_COLS, metric("local_depth", Vary.BOTH), *_WPS_PON_COLS),
         checks=("wps_arrays_nonempty",),
         scan_rows=256,
     ),
@@ -326,7 +413,54 @@ CONTRACT: Tuple[TableRule, ...] = (
     # -- completion marker --------------------------------------------------
     TableRule(
         ".metadata.parquet",
-        (ColumnRule("sample_id", Kind.STRING, Vary.CROSS), metric("total_fragments")),
+        (
+            ColumnRule("sample_id", Kind.STRING, Vary.CROSS),
+            metric("total_fragments"),
+            # Provenance. Required, because this is the completion marker the
+            # consumer keys on, and a cohort you cannot identify is a cohort
+            # you cannot bless. A directory missing these was produced by a
+            # build older than 0.9.0 -- which is a finding, not a gap in the
+            # gate: this release changed what several columns mean.
+            ColumnRule(
+                "krewlyzer_version",
+                Kind.STRING,
+                Vary.NEVER,
+                constant_reason=(
+                    "one build writes one cohort; a mixture is what the "
+                    "cross-sample check is for"
+                ),
+            ),
+            ColumnRule(
+                "pon_applied",
+                Kind.NUMERIC,
+                Vary.NEVER,
+                constant_reason=(
+                    "a cohort is normally scored or not scored as a whole; "
+                    "it is the flag that says which"
+                ),
+            ),
+            ColumnRule(
+                "pon_model",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason="one PON per cohort, by name",
+            ),
+            ColumnRule(
+                "pon_cohort_digest",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason="one PON per cohort, by cohort digest",
+            ),
+            ColumnRule(
+                "pon_krewlyzer_version",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason="one PON per cohort, by the release it ships with",
+            ),
+        ),
         rows=Rows(exactly=1),
     ),
 )

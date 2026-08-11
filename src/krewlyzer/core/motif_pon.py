@@ -42,8 +42,23 @@ def apply_motif_pon(
     output_base: Optional[Path] = None,
     output_format: str = "tsv",
     compress: bool = False,
+    baseline_attr: str = "mds_baseline",
 ) -> int:
     """Add ``frequency_z`` to an EndMotif or BreakPointMotif table.
+
+    ``baseline_attr`` names the k-mer block to score against, and there are
+    four -- one per table. Until 0.9.0 all four tables were scored against
+    ``mds_baseline``, which is an **end-motif, genome-wide** baseline, so three
+    of the four measured the offset between two distributions rather than the
+    sample's departure from healthy.
+
+    Breakpoint motifs are the sharper case. An end motif is the 4-mer at the
+    fragment's 5' terminus -- what the nuclease left. A breakpoint motif spans
+    the cut site and includes reference bases *not present in the fragment*.
+    On one sample the two frequency vectors correlate 0.696. Measured against
+    the end-motif baseline, ``BreakPointMotif`` came out at median |z| 5.85 on
+    XS1 and 11.25 on XS2, with 70 and 136 of 256 motifs beyond |z| = 10; a
+    correct baseline gives a median near 0.67.
 
     Returns the number of motifs scored.
     """
@@ -55,13 +70,19 @@ def apply_motif_pon(
         logger.warning(f"Motif output lacks Motif/Frequency columns: {motif_path}")
         return 0
 
-    baseline = getattr(pon, "mds_baseline", None)
+    baseline = getattr(pon, baseline_attr, None)
     expected = getattr(baseline, "kmer_expected", None) if baseline else None
     stds = getattr(baseline, "kmer_std", None) if baseline else None
     if not expected or not stds:
+        # No column, not a NaN one -- `test_no_baseline_means_no_column_rather
+        # _than_a_fabricated_one` pins this, and the asymmetry is informative:
+        # a PON built before 0.9.0 has the end-motif blocks and not the
+        # breakpoint ones, so EndMotif gets `frequency_z` and BreakPointMotif
+        # visibly does not. That reads as "no baseline for this table", which
+        # is exactly what happened.
         logger.info(
-            "PON has no k-mer baseline; motif frequencies keep their raw values "
-            "and get no z-score."
+            f"PON has no '{baseline_attr}'; {motif_path.name} keeps its raw "
+            "frequencies and gets no z-score. Rebuild the PON with build-pon."
         )
         return 0
 

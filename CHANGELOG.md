@@ -6,12 +6,71 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **The product now records what produced it.** `{sample}.metadata.parquet` —
+  the consumer's completion marker — gains five columns:
+  `krewlyzer_version`, `pon_applied`, `pon_model`, `pon_cohort_digest` and
+  `pon_krewlyzer_version`.
+
+  The version *was* recorded, in `{sample}.features.json`, which invariant #2
+  says downstream never reads. So the one fact needed to tell two runs apart
+  lived precisely where the product ignores it. That mattered the moment this
+  release changed what several columns mean: given a results directory there
+  was no way to answer *was this produced before or after the FSD bin fix?*
+  except by re-running it.
+
+  `pon_model` is the **basename** only. The full path would put the operator's
+  home directory into a shipped table.
+
+  Stamped by `run_features`, so a single-feature CLI run records the same
+  provenance as `run-all` (invariant #6), and stamped from `pon_for_zscore`
+  rather than `pon` — a model loaded but withheld by `--skip-pon` scored
+  nothing, and recording it as applied would be a lie about the columns present.
+
+- **`validate-output` requires the PON-derived columns when, and only when, a
+  PON was applied.** The contract declared none of them, so the seven WPS
+  columns and FSD's `pon_stability` could vanish entirely and the gate would
+  pass — which is exactly what happened twice in this release. They cannot be
+  required unconditionally, because `--skip-pon`, no PON, and a PON the version
+  guard refused are all legitimately unscored; `pon_applied` above is what
+  tells the cases apart.
+
+  A directory with no `pon_applied` at all was written by a build older than
+  0.9.0, and is reported rather than assumed either way.
+
 - **`no_collided_columns` in `validate-output`** — a `.1`-suffixed or repeated
   column name means a frame collision was written to disk, and no reader can
   tell which copy is current. Generic and universal: it runs on every table, so
   the next step that appends instead of replacing is caught without anyone
   thinking to look for it. It would have found the FSD duplication above
   unprompted.
+
+- **`load_pon_model` refuses a PON older than 0.9.0.** Recording
+  `krewlyzer_version` was only half a guard: `stamp-pon` writes it and
+  `validate-pon` flags it missing, but nothing stopped a run scoring against a
+  model built before the meaning changed — a fabricated `wps_background`, six
+  floored σ, a region-MDS fitted over 65–400 bp while samples are measured over
+  65–1000 bp. Every z-score against such a model is wrong in a way no schema
+  check can see, because the columns are present and finite.
+
+  Refusing, not warning. A warning in a log nobody reads is not a guard, and a
+  plausible wrong number is the failure this release exists to remove. Set
+  `KREWLYZER_ALLOW_OLD_PON=1` to override deliberately — without a documented
+  way out, someone edits the parquet instead and the version stops meaning
+  anything.
+
+  Writing it exposed two holes it would otherwise not have covered:
+
+  - `motif` and `region-mds` called `PonModel.load` directly, so those
+    subcommands would have scored against a model `run-all` refuses —
+    invariant #6. Both now use the guarded loader, and a test forbids any
+    other caller.
+  - The Rust scorers take a parquet *path* and read it themselves, and that
+    path was set regardless of whether the Python load succeeded. A refused
+    PON still reached FSD, WPS, OCF and region entropy: the Python half
+    stopped and the Rust half carried on.
+
+  The floor is a tuple, `(0, 9, 0)`, not a string — it is a compatibility
+  floor, not the package version, and stays put at krewlyzer 1.5.0.
 
 - **The 0.9.0 GRCh37 PONs.** All four rebuilt from `run-all` output via
   `--from-outputs`, and the first to pass `validate-pon` with **zero findings**:
@@ -571,7 +630,304 @@ All notable changes to this project will be documented in this file.
   The eleven per-tool Nextflow modules now pass `params.output_format` and
   `params.compress_tsv` through as well; previously only `runall` did.
 
+### Fixed
+
+- **The gate could not see four of the six tables Parquet mode dropped.**
+  `.OCF.parquet` and all three `.sync` tables were absent from the output
+  contract; only the two on/off-target summaries were declared, and they are
+  what reported the loss. All four are declared now, with `ocf_z` marked
+  `requires_pon` — the `.sync` tables carry the per-position profiles the
+  summaries are reduced from, which is the large half of OCF.
+
+- **`FSC.regions.is_e1` / `is_alt_e1` were declared `string` and written
+  `int64`.** `gene_bed.py` parses `fields[8] == "1"` into a Python bool, which
+  lands as int64 0/1 — so the contract was wrong, not the writer. The
+  synthetic cohort wrote strings too, so fixture and contract agreed with each
+  other and neither with the code, which is how it survived. These columns are
+  new in 0.9.0, so nothing older disagrees.
+
+- **`fsc_gene_ratios_sum_to_one` flagged regions that have no fragments.** All
+  six channels are zero, so the sum is zero and the row reads as a maximal
+  partition failure — "worst deviation 1.000000" — when nothing is wrong with
+  it. 3 of 1725 regions on a real XS1 plasma sample, 13 of 1725 on a shallow
+  one, making the count a function of sequencing depth and burying any real
+  break among them. Zero-fragment regions are now excluded; a region with even
+  one counted fragment must still partition it.
+
+- **`BreakPointMotif` was scored against the `EndMotif` baseline** — and so
+  were the two on-target motif tables. `apply_motif_pon` used
+  `pon.mds_baseline` for all four, an **end-motif, genome-wide** block.
+
+  An end motif is the 4-mer at the fragment's 5′ terminus, what the nuclease
+  left. A breakpoint motif spans the cut site and includes reference bases
+  *not present in the fragment*. The two frequency vectors correlate only
+  **0.696** on the same sample, so `frequency_z` there measured the offset
+  between two definitions rather than any departure from healthy:
+
+  | | `EndMotif` median / >10 | `BreakPointMotif` median / >10 |
+  |---|---|---|
+  | XS1 | 1.82 / 0 of 256 | 5.85 / **70** of 256 |
+  | XS2 | 4.47 / 39 of 256 | 11.25 / **136** of 256 |
+
+  A correctly fitted baseline gives a median near 0.67 — the half-normal
+  median. Demonstrated on synthetic cohorts with the real correlation
+  structure: median |z| 6.75 with 86 of 256 beyond 10 against the end-motif
+  baseline, **0.75 with none beyond 10** against its own.
+
+  The PON gains `breakpoint_motif_baseline` and
+  `breakpoint_motif_baseline_ontarget`, built by both routes. `mds_mean` and
+  `mds_std` are NaN in those blocks: MDS is defined on end motifs, and a number
+  there would be a different statistic under the same name.
+
+  `mds_baseline_ontarget` needed no new work — it already existed and was
+  already used for the whole-sample MDS z, just not for the per-motif
+  frequencies. A PON without the breakpoint blocks (every one built before
+  0.9.0) now yields no `frequency_z` on those tables rather than a wrong one.
+
+- **A σ of 10⁻¹⁷ was used as a divisor.** Every PON built to date carries
+  positions whose baseline spread is floating-point residue: 4.6 % of positive
+  σ in xs1.all_unique, 12.0 % in xs2.all_unique, 47.2 % and 55.4 % in the
+  duplex pair. On a real XS2 plasma sample that produced **728,007**
+  `wps_nuc_z` above 100 and **354,260** above 10⁶, peaking at 6.1 × 10¹⁸.
+
+  WPS is (fragments spanning a position) − (fragments ending near it), and each
+  fragment carries a fractional GC-correction weight. Where no donor had
+  coverage, or the two terms cancel, the true value is zero — but it computes
+  as ~10⁻¹⁷ rather than `0.0`, so the exact `min == max` test added earlier in
+  this release never fired. `wps_tf` corroborates it: 0 % residue and 185,079
+  honest NaN, because TF-sized fragments are rare enough that those positions
+  sum to exact zero.
+
+  `SIGMA_FLOOR = 1e-9` now applies in the builder (`element_wise_std`,
+  `mean_and_sd`) *and* in the scorers, so the four models already in the wild
+  are safe without a rebuild. Not a taste threshold: across the 24.7 M positive
+  σ of the shipped xs1.all_unique baseline, 1,177,647 sit below 10⁻¹², **none**
+  sit between 10⁻¹² and 10⁻⁶, and the rest are measurements — 10⁻⁹ is the
+  log-space midpoint of six empty decades. Mirrored in
+  `pon/model.py::SIGMA_FLOOR` and asserted equal in `validate/claims.py`.
+
+  Measured on a real XS1 plasma sample against the **unchanged** shipped PON:
+  max |z| falls from 2.8 × 10¹⁷ to 3.7 × 10⁴ and values above 10⁶ from 18,398
+  to **zero**.
+
+  `scripts/check_pon_env.py` gains a matching probe. The existing one asserts
+  that *identical* donor vectors give NaN and passed throughout, because the
+  real case is *near*-identical; the new one was confirmed to fail against the
+  pre-fix binary before it passed against the fixed one.
+
+- **`--output-format parquet` silently discarded every OCF table.** All six —
+  `OCF`, `OCF.sync`, `OCF.{on,off}target`, `OCF.{on,off}target.sync`. Measured
+  on a real XS1 plasma BAM: 44 logical tables under `both`, **38** under
+  `parquet`, exactly the OCF six missing.
+
+  The OCF temp directory is an internal intermediate — Python moves the files
+  to their final names and converts them, because `_core.ocf.apply_pon_zscore`
+  reads TSV line by line. `pipeline.rs` nonetheless dispatched that
+  intermediate write on the user's `--output-format`, so Parquet mode wrote
+  `all.ocf.parquet` while the mover looked for `all.ocf.tsv`. Nothing matched,
+  nothing moved, the temp directory was deleted. No warning, because an absent
+  file is indistinguishable from "OCF was not requested".
+
+  The FSC counts three lines above already carried the right rule — *"an
+  internal intermediate; keep as TSV"*. OCF follows it now, and the mover
+  reports an empty intermediate as an error. The `.sync` tables are the large
+  ones (483 KB TSV vs 56 KB Parquet), so this removed orientation-aware
+  fragmentation from precisely the format the release ships in (invariant #2).
+
+- **On-target FSD was never PON-scored under Parquet.** The same defect one
+  branch below its own fix: `.exists()` on a hardcoded `.FSD.ontarget.tsv`,
+  fifteen lines under the comment explaining why the genome-wide branch had
+  stopped doing that. Confirmed on real XS1 and XS2 plasma samples — 69 columns
+  and zero `_logR` against the genome-wide table's 137. Resolved with
+  `resolve_table_path`; an absent table is now warned about.
+
+- **On/off-target OCF left its intermediate `.tsv` beside the Parquet.**
+  `apply_ocf_python_pon` wrote the final format but never called
+  `cleanup_intermediate_tsv`, which the genome-wide path does — so a Parquet
+  run shipped two files for one table with no way to tell which was current.
+
+- **`fsd_only_size_bins` fired on every PON-scored FSD table.** The check's
+  reserved column set was written for the raw table and never updated when PON
+  scoring began writing into the same file, so it reported all 67 `{bin}_logR`
+  columns plus `pon_stability` as stray — 68 spurious errors on every scored
+  sample. A gate that fires on correct output is a gate nobody reads. It went
+  unnoticed because the synthetic cohort carried no PON columns until now, so
+  the check had never once seen the shape it runs against in production.
+
+- **The WPS column reference documented five columns that do not exist, missed
+  eight that do, and typed the profiles as scalars.** Found by diffing the
+  reference against a real scored table instead of reading it.
+
+  `wps_nuc_smooth`, `wps_tf_smooth`, `wps_nuc_mean`, `wps_tf_mean` and
+  `wps_tf_z` were never written. `capture_mask`, `local_depth` and the six
+  derived PON columns were. And `wps_nuc`, `wps_tf`, `prot_frac_nuc`,
+  `prot_frac_tf` and `wps_nuc_z` are 200-element **lists**, documented as
+  `float` — so the three worked examples indexed columns that do not exist and
+  raised `KeyError`. All three are rewritten and were run against a real
+  76,595-anchor table before being committed.
+
+  A sweep now checks every `df["col"]` reference in every Python block of
+  `output-files.md` against real schemas from a full run: 0 of 40 table
+  sections reference a column that does not exist.
+
+- **FSD's histogram range was documented as the filter range.** `meaning.py`
+  said "5 bp bins over 65–1000 bp"; the histogram is 67 bins over `[65, 400)`.
+  Fragments of 400 bp and above are excluded from the bins **and** from
+  `total`, so a long-fragment fraction computed against `total` had a
+  denominator that silently excluded them. Corrected, with the range pinned in
+  `validate/claims.py` so the two cannot drift again (invariant #5).
+
+- **The FSD PON columns were documented nowhere.** `{bin}_logR` and
+  `pon_stability` — the entire product of PON scoring for FSD — appear in
+  neither `output-files.md` nor `meaning.py`. Both are now described, including
+  what `pon_stability` means and why it is NaN rather than 0.990 when no σ
+  could be measured.
+
+- **WPS z-scores were written to a file nothing reads, then destroyed their own
+  input when that was fixed.** Two defects stacked, both introduced by the Rust
+  port earlier in this release and both caught by reviewing the *product*
+  rather than the code.
+
+  `run-all` passes `{sample}.WPS` as the output base — a stem carrying a
+  compound extension. `Path("s.WPS").with_suffix(".parquet")` reads `.WPS` as
+  the suffix and replaces it, so the scored 18-column table landed on
+  `{sample}.parquet` while `{sample}.WPS.parquet` stayed the raw 11-column
+  profile. Downstream reads Parquet only (invariant #2) — the same failure the
+  `--output-format` fix removed earlier in this release, in a second disguise,
+  under a comment that asserted the correct behaviour while the code did the
+  opposite.
+
+  Fixing the path exposed the second: the normal case *is* in place, and the
+  scorer streams its input in batches while `File::create` truncated that same
+  file out from under the reader. It now writes a sibling temp and renames
+  atomically, so a crash leaves the original intact rather than a half-written
+  product, and a return of 0 still writes nothing.
+
+  Every earlier test used a simple stem (`tmp_path / "o"`), which has no
+  compound extension and so could not see either. The new tests use the shape
+  the caller actually passes.
+
+- **The four shipped PONs are stamped `0.9.0`.** They were built from
+  `develop`, where the version still read `0.8.3`, so every model recorded the
+  previous release however new the code was. `krewlyzer_version` now means the
+  release a model is *published* with — which is what the compatibility guard
+  needs — while `build_date` still records when it was built. Only the metadata
+  row changed: all four cohort digests, block counts and row counts are
+  unchanged, and `validate-pon` passes on the stamped files, which are the
+  files that ship.
+
+- **`validate-pon` reported `0 sample(s)` after checking four models.** The
+  summary line is shared with `validate-output`, which counts samples; the PON
+  gate fills no samples, so it printed a line saying nothing was inspected
+  directly above one saying the contract was satisfied. It now reports what it
+  actually checked: `4 model(s)`.
+
+- **Every FSD log-ratio was scored against the wrong size bin.** The largest
+  output defect found in this release, and it reached every sample ever
+  normalised against a PON.
+
+  `size_bin` is an integer in every sense that matters, and it is stored as a
+  **double**: a PON is one long-format table, so every row belonging to another
+  block carries a null there and the union column comes out `float64`. The
+  reader called `row.get_int()`, which *errors* on a Double rather than
+  coercing, and the error fell through to `unwrap_or(0)`.
+
+  So every `size_bin` became 0. An arm's `size_bins` was 67 zeros,
+  `size >= *size_bins.last()` held for every size, and `get_expected` returned
+  the **last row's** expectation for all 67 bins.
+
+  Measured on a shipped PON and a real sample: **41/41 arms** matched the
+  last-bin baseline exactly and the bin-matched baseline not at all. After the
+  fix, 41/41 match bin-matched and 0/41 match the old behaviour. The correction
+  is large — median log2 shift −1.05, maximum |Δ| 5.10.
+
+  Nothing could have caught it downstream. The log-ratios still varied across
+  bins, because the sample numerator varies, so they were present, finite,
+  non-degenerate and wrong — invariant #1's failure mode one level subtler than
+  the constant it was written for.
+
+  **The PONs are not affected and do not need rebuilding**; the reader was
+  broken, not the model. Samples normalised against a PON do need re-running.
+
+- **`pon_stability` used one size bin's sigma for the whole arm.**
+  `FsdBaseline::get_stats` returned `std.first()` regardless of the size asked
+  for. Measured on the shipped xs1 all-unique PON: sigma varies **41.6×**
+  (median) across an arm's 67 bins, up to 56.4×, so `pon_stability` was wrong
+  by a median of **4709%** on all 41 arms. Sigma is now interpolated at the
+  requested size, exactly as `expected` already was.
+
+- **The same column-lookup defect closed in `ocf.rs`, the third and last copy.**
+  `position(...).unwrap_or(0)` made an absent column read column zero, and
+  `ocf_mean`/`ocf_std` defaulted to `0.0`/`1.0` — together making z the raw
+  difference from zero. OCF's values parse correctly today (verified against a
+  shipped PON: an observation 2σ above the mean scores exactly 2.0), so this
+  closes a landmine rather than fixing a wrong number. It would have fired the
+  moment a column was renamed. The `table` lookups in `fsd.rs` and
+  `region_entropy.rs` are by name now too.
+
+  Two `unwrap_or(0)` lookups remain, both on **TSV headers** rather than PON
+  columns, where column zero genuinely is the label in most files. Left alone
+  deliberately.
+
+- **Three more fabricated defaults on the FSD baseline path**, the same family
+  removed from nine baseline classes as `zscore_or_nan` this release: an
+  unreadable sigma defaulted to `1.0` (which with the 0.01 floor reads as a
+  `pon_stability` of 0.990, indistinguishable from a measurement), an
+  unreadable expectation to `0.0`, and `position(...).unwrap_or(0)` made a
+  column that could not be found read **column zero** — `table` — the same
+  defect already removed from `region_entropy.rs` and missed here. Rows with an
+  unreadable `size_bin` or `arm` are now skipped and counted in a warning
+  rather than silently collapsing onto bin 0 or an empty key.
+
 ### Changed
+
+- **WPS PON scoring moved from Python to Rust** (`rust/src/wps.rs::apply_pon_zscore`).
+  It was the last PON z-score still computed in Python, and it was the largest:
+  89k anchors, a ±30 lag search each, about 5.4M correlations.
+  `.agents/rules/architecture.md` puts "PON z-score", "loops over >1000 rows"
+  and "row-level computation" on the Rust side; this was all three.
+
+  Measured on a real 76,595-anchor output against a shipped PON: **9.5 s
+  against ~17 min**, roughly 107×.
+
+  Written in Python first on purpose, and that is not an apology — three of its
+  decisions changed under measurement and would not have survived being written
+  in the faster language first: the `log1p` amplitude (raw range correlates
+  +0.512 with depth), the Fisher transform (bounded *r* left 302 of 400 anchors
+  unable to reach +2), and the deliberate absence of a phase-shift baseline
+  (intraclass correlation 0.479). The port is **bug-for-bug**, including a tie
+  in the lag search resolving to the most negative lag — measured incidence 0
+  in 317 anchors, and correcting it would have destroyed the oracle's ability
+  to tell a porting slip from an intended change.
+
+  The Python reference is frozen as that oracle in
+  `tests/unit/test_rust_python_equivalence.py`. Nothing imports it outside
+  tests; the shipping module is now a ~40-line call. Tolerance was fixed at
+  `1e-6` relative *before* the first comparison; measured worst case **2.2e-13**
+  on synthetic anchors and **9.0e-14** against real data.
+
+  `apply_wps_pon` now takes the PON **path** rather than a loaded model, and
+  `baseline_attr` is renamed `baseline_table` — the argument names a table in
+  the parquet, not an attribute on an object.
+
+- **Two silent-read traps found while porting**, both of the "present,
+  plausible, returns nothing" class that this release is mostly about:
+
+  Every shipped PON stores `table` and `region_id` as Arrow `large_string`,
+  never `string`. A reader that downcasts to `StringArray` gets `None` and
+  yields an *empty* baseline — a legitimate state that degrades silently
+  instead of raising. `pon_model.rs::PonModel::load` does exactly that and is
+  blind to every PON this project has ever shipped. It survived because it has
+  **no callers**: each reader loads what it needs, and `pub` items are exempt
+  from dead-code warnings. Recorded in `architecture.md` rather than deleted,
+  pending an explicit decision on scope.
+
+  Vector columns are `list<double>` from the Python builder and `list<float>`
+  from the Rust one. The new reader accepts both and logs the type it could not
+  read, rather than reporting no anchors.
+
+- **Four `eprintln!("DEBUG: …")` calls in `wps.rs` now go through the logger.**
+  They wrote to stderr on every WPS run, below no level and past every filter.
 
 - **The two PON blocks that were built, stored, and read by nothing are now
   applied.** Found by tracing all 21 baseline blocks from build → parquet →

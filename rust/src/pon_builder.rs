@@ -300,6 +300,33 @@ fn extract_wps_vector(col: &dyn arrow::array::Array, row: usize) -> Option<Vec<f
 
 /// Mean and sample standard deviation over the finite values, NaN when the
 /// spread cannot be measured. Never a floor -- see `element_wise_std`.
+/// Below this, a spread is floating-point residue rather than a measurement.
+///
+/// The exact `min == max` test above this constant catches donors that are
+/// *byte*-identical. It does not catch the case that actually shipped: donors
+/// that are numerically zero but not identically so. WPS is (fragments
+/// spanning a position) minus (fragments ending near it), and every fragment
+/// carries a fractional GC-correction weight, so a true zero computes as
+/// ~1e-17 after cancellation instead of `0.0`.
+///
+/// Not a taste threshold -- the two populations do not overlap. Across the
+/// 24.7M positive sigmas in the shipped xs1.all_unique WPS baseline:
+///
+/// ```text
+///     sigma < 1e-12         1,177,647 positions   (residue)
+///     1e-12 <= sigma < 1e-6         0 positions   (nothing lives here)
+///     sigma >= 1e-6            24.7M positions    (measurements)
+/// ```
+///
+/// Six empty decades. 1e-9 is their midpoint in log space, so the floor can
+/// move two orders either way without reclassifying a single position.
+///
+/// What it costs when wrong in the safe direction: a genuine spread below 1e-9
+/// on a quantity whose values are O(1)-O(1e3) would be reported as
+/// unmeasurable. What it prevents: on a real XS2 plasma sample, 728,007
+/// `wps_nuc_z` above 100 and 354,260 above 1e6, peaking at 6.1e18.
+pub const SIGMA_FLOOR: f32 = 1e-9;
+
 fn mean_and_sd(values: &[f32]) -> (f32, f32) {
     let finite: Vec<f32> = values.iter().copied().filter(|x| x.is_finite()).collect();
     if finite.is_empty() {
@@ -338,7 +365,8 @@ fn mean_and_sd(values: &[f32]) -> (f32, f32) {
 
     let var = finite.iter().map(|x| (x - mean).powi(2)).sum::<f32>() / (n - 1.0);
     let sd = var.sqrt();
-    (mean, if sd > 0.0 { sd } else { f32::NAN })
+    // `>= SIGMA_FLOOR`, not `> 0.0` -- see the constant.
+    (mean, if sd >= SIGMA_FLOOR { sd } else { f32::NAN })
 }
 
 /// Peak-to-trough range of a profile, on a log scale.
@@ -463,7 +491,11 @@ fn element_wise_std(vectors: &[Vec<f32>], means: &[f32]) -> Vec<f32> {
                 })
                 .sum::<f32>() / (n - 1.0);
             let sd = variance.sqrt();
-            if sd > 0.0 { sd } else { f32::NAN }
+            // `>= SIGMA_FLOOR`, not `> 0.0`: the exact min==max test above
+            // catches byte-identical donors; this catches donors that are
+            // numerically zero but not identically so, which is the case
+            // that reached every shipped model.
+            if sd >= SIGMA_FLOOR { sd } else { f32::NAN }
         })
         .collect()
 }
@@ -979,11 +1011,58 @@ mod shape_tests {
 
     #[test]
     fn a_spread_of_one_ulp_is_still_a_spread() {
-        // The identity test must not become a tolerance in disguise.
+        // There *is* a tolerance now -- `SIGMA_FLOOR` -- and this test bounds
+        // it from below. One ULP at 0.95 is 5.96e-8, giving sd 4.2e-8, which
+        // is 42x above the 1e-9 floor. So the smallest spread f32 can express
+        // at a magnitude the WPS baseline actually contains still survives.
+        //
+        // That is what makes the floor safe rather than a fudge: it can only
+        // discard a spread finer than f32 can represent at these magnitudes,
+        // which is by definition not a measurement.
         let a = 0.95f32;
         let b = f32::from_bits(a.to_bits() + 1);
         assert_ne!(a, b);
         let (_, sd) = mean_and_sd(&[a, b]);
         assert!(sd.is_finite() && sd > 0.0, "one ULP apart is not identical");
+        assert!(
+            sd > SIGMA_FLOOR * 10.0,
+            "one ULP gives sd {sd:e}, uncomfortably close to the {SIGMA_FLOOR:e} \
+             floor -- if these ever converge the floor is discarding real spread"
+        );
+    }
+
+    #[test]
+    fn donors_that_are_numerically_zero_give_no_sigma() {
+        // The case that shipped in all four models. Not byte-identical, so the
+        // exact min==max test never fired: WPS carries fractional GC weights,
+        // so a true zero lands at ~1e-17 after cancellation.
+        //
+        // On a real XS2 plasma sample this produced 728,007 `wps_nuc_z` above
+        // 100 and 354,260 above 1e6, peaking at 6.1e18.
+        let vectors: Vec<Vec<f32>> = (0..21)
+            .map(|i| vec![(i as f32 - 10.0) * 1e-18, 4.0 + i as f32 * 0.1])
+            .collect();
+        let means = element_wise_mean(&vectors);
+        let stds = element_wise_std(&vectors, &means);
+        assert!(
+            stds[0].is_nan(),
+            "position 0 is numerically zero across donors, got sd {:e}",
+            stds[0]
+        );
+        assert!(
+            stds[1].is_finite() && stds[1] > 0.0,
+            "position 1 has a real spread and must keep it"
+        );
+    }
+
+    #[test]
+    fn the_floor_sits_in_an_empty_gap() {
+        // Measured across the 24.7M positive sigmas of the shipped
+        // xs1.all_unique WPS baseline: 1,177,647 below 1e-12, zero between
+        // 1e-12 and 1e-6, the rest above. The floor is the log-space midpoint
+        // of six empty decades, so it may move two orders either way without
+        // reclassifying a single position. This pins that it stays there.
+        assert!(SIGMA_FLOOR > 1e-12, "floor dropped into the residue population");
+        assert!(SIGMA_FLOOR < 1e-6, "floor rose into the measured population");
     }
 }

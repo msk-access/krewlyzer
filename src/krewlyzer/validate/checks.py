@@ -28,6 +28,9 @@ import pandas as pd
 
 ACGT = set("ACGT")
 _SIZE_BIN = re.compile(r"^\d+-\d+$")
+#: The PON log-ratio for one size bin, e.g. `65-69_logR`. Named from the bin, so
+#: it cannot be enumerated in the contract the way a fixed column can.
+_SIZE_BIN_LOGRATIO = re.compile(r"^\d+-\d+_logR$")
 _REGION = re.compile(r"^chr[\dXYMT]+:\d+-\d+$")
 
 
@@ -151,9 +154,26 @@ def fsd_only_size_bins(df: pd.DataFrame) -> List[str]:
     density feature downstream and corrupts the derived entropy, so the column
     set is part of the contract rather than an implementation detail.
     """
-    reserved = {"region", "total", "chrom"}
+    # PON scoring writes into this same table, and the reserved set was never
+    # updated when it started: `{bin}_logR` and `pon_stability` are the
+    # documented product of `apply_pon_logratio`, and this check reported all
+    # 68 of them as stray on every scored sample. A gate that fires on correct
+    # output is a gate nobody reads. It went unnoticed because the synthetic
+    # cohort carried no PON columns until 0.9.0, so the check had never once
+    # seen the scored shape it runs against in production.
+    #
+    # Worth confirming against the consumer if the chance arises: the message
+    # below asserts that *any* unrecognised numeric column is taken for a size
+    # bin. If that is literally true downstream rather than a description of
+    # the `\d+-\d+` convention, these columns would need their own table --
+    # but they have shipped in this one for several releases.
+    reserved = {"region", "total", "chrom", "pon_stability"}
     numeric = set(df.select_dtypes(include="number").columns)
-    stray = sorted(c for c in numeric - reserved if not _SIZE_BIN.match(str(c)))
+    stray = sorted(
+        c
+        for c in numeric - reserved
+        if not _SIZE_BIN.match(str(c)) and not _SIZE_BIN_LOGRATIO.match(str(c))
+    )
     if stray:
         return [
             f"non-size-bin numeric column(s) {stray}: consumers treat every "
@@ -248,11 +268,24 @@ def fsc_gene_ratios_sum_to_one(df: pd.DataFrame) -> List[str]:
         len(FSC_GENE_RATIOS), written_decimals(df["ultra_short_ratio"])
     )
     summed = df[FSC_GENE_RATIOS].sum(axis=1)
-    off = int(((summed - 1.0).abs() > tol).sum())
+
+    # A region with no fragments has no ratios to partition.
+    #
+    # All six channels are 0, so the sum is 0 and the row reads as a maximal
+    # partition failure -- "worst deviation 1.000000" -- when nothing is wrong
+    # with it. Measured on a real XS1 plasma sample: 3 of 1725 regions, and 13
+    # of 1725 on a shallow one, every single one with all six channels exactly
+    # zero. Reporting those as broken arithmetic buries a real break among them
+    # and makes the count depend on sequencing depth.
+    #
+    # Exactly zero, not a tolerance: a region with even one counted fragment
+    # must still partition it.
+    empty = summed == 0.0
+    off = int(((summed - 1.0).abs() > tol)[~empty].sum())
     if not off:
         return []
 
-    worst = float((summed - 1.0).abs().max())
+    worst = float((summed - 1.0).abs()[~empty].max())
     return [
         f"{off} row(s) whose six ratios sum to 1 +/- more than {tol:g} "
         f"(worst deviation {worst:.6f}); the size channels no longer partition "

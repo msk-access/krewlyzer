@@ -243,12 +243,24 @@ class wps:
     def apply_pon_zscore(
         wps_parquet_path: str,
         pon_parquet_path: str,
-        output_path: str | None = None,
+        output_path: str,
+        baseline_table: str = "wps_baseline",
+        column: str = "wps_nuc",
     ) -> int:
-        """Apply PON z-score normalization to WPS Parquet output.
+        """Score a WPS Parquet table against the PON, writing an extended copy.
+
+        Adds the per-position z vector `{column}_z` plus the derived shape
+        columns; every input column is carried through untouched.
+
+        `baseline_table` selects the vector baseline: "wps_baseline" for the
+        genome-wide anchors, "wps_baseline_panel" for the assay-specific ones.
+
+        `output_path` is required and is written only when the PON carries a
+        matching baseline -- a return of 0 means nothing was written, so the
+        caller keeps the raw table rather than a truncated one.
 
         Returns:
-            Number of regions processed.
+            Number of anchors scored.
         """
         ...
 

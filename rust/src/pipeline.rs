@@ -88,9 +88,22 @@ impl MultiConsumer {
         
         if let Some(c) = &self.ocf {
             if let Some(p) = ocf_dir {
-                // Dispatch through format-aware method (TSV / Parquet / both)
-                c.write_output_format(&p, output_format, compress)
-                    .context("Writing OCF output")?;
+                // OCF writes into a *temp* directory that Python then moves and
+                // converts, so like the FSC counts above it is an internal
+                // intermediate and stays TSV. Python owns OCF's format
+                // conversion end to end: `_core.ocf.apply_pon_zscore` reads
+                // these files line by line and `_write_ocf_output` produces the
+                // requested format from the result.
+                //
+                // Dispatching on `output_format` here silently destroyed every
+                // OCF output under `--output-format parquet`: this wrote
+                // `all.ocf.parquet`, `unified_processor.py` looked for
+                // `all.ocf.tsv`, found nothing, moved nothing, and deleted the
+                // temp directory. Six tables gone, no warning -- an absent file
+                // is indistinguishable from "OCF was not requested". Under
+                // `both` it wrote a Parquet that was discarded unread.
+                c.write_output_format(&p, "tsv", false)
+                    .context("Writing OCF intermediate output")?;
             }
         }
         

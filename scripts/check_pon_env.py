@@ -85,6 +85,61 @@ def probe_vector_sigma() -> tuple[bool, str]:
     return True, "identical donor vectors give NaN"
 
 
+def probe_near_zero_vector_sigma() -> tuple[bool, str]:
+    """`element_wise_std`: donors that are all *numerically* zero must give NaN.
+
+    The probe above covers donors that are byte-identical. The case that
+    actually shipped is donors that differ by float residue.
+
+    WPS is (fragments spanning a position) minus (fragments ending near it),
+    and each fragment carries a fractional GC-correction weight. Where no donor
+    had coverage, or where the two terms cancel, the true value is zero -- but
+    it computes as ~1e-17 rather than exactly 0.0, so a max-equals-min test
+    never fires and the residue becomes a divisor.
+
+    Measured in the shipped models: 4.6% of positive sigmas in xs1.all_unique,
+    55.4% in xs2.duplex. On a real XS2 plasma sample that produced 728,007
+    `wps_nuc_z` values above 100 and 354,260 above 1e6, peaking at 6.1e18.
+    """
+    from krewlyzer import _core
+
+    rng = np.random.default_rng(0)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        paths = []
+        for i in range(21):
+            # Numerically zero, but not identically so -- the shape residue
+            # takes after cancellation in a GC-weighted sum.
+            noise = (rng.standard_normal(200) * 1e-17).astype(np.float32)
+            path = root / f"s{i}.WPS.parquet"
+            pq.write_table(
+                pa.Table.from_pandas(
+                    pd.DataFrame(
+                        {
+                            "region_id": ["TSS|PROBE|1"],
+                            "wps_nuc": [noise.tolist()],
+                            "wps_tf": [noise.tolist()],
+                        }
+                    ),
+                    schema=WPS_SCHEMA,
+                ),
+                path,
+            )
+            paths.append(str(path))
+        result = _core.pon_builder.compute_wps_baseline(paths)
+
+    sigma = np.asarray(result["TSS|PROBE|1"]["wps_nuc_std"], dtype=float)
+    usable = sigma[np.isfinite(sigma) & (sigma > 0)]
+    if usable.size:
+        worst = usable.min()
+        return (
+            False,
+            f"{usable.size}/200 positions kept a residue sigma (smallest "
+            f"{worst:.2e}); a real value of 0.1 there scores z = {0.1 / worst:.1e}",
+        )
+    return True, "donors that are numerically zero give NaN"
+
+
 def probe_entropy_zscore() -> tuple[bool, str]:
     """`region_entropy`: an unmeasurable sigma must give NaN, not 0.0.
 
@@ -162,6 +217,7 @@ def probe_fsd_accepts_any_format() -> tuple[bool, str]:
 
 PROBES = (
     ("vector sigma (element_wise_std)", probe_vector_sigma),
+    ("near-zero vector sigma (element_wise_std)", probe_near_zero_vector_sigma),
     ("entropy z-score (region_entropy.rs)", probe_entropy_zscore),
     ("FSD format normalisation", probe_fsd_accepts_any_format),
 )

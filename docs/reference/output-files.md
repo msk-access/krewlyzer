@@ -190,8 +190,30 @@ FSD measures how many fragments of each size (65–400 bp, 5 bp bins) come from 
 | Column | Type | Description |
 |--------|------|-------------|
 | `region` | str | Arm coordinate range, e.g. `chr1:10001-121535433`, `chr17:25263006-81195210` |
-| `65-69`, `70-74`, … `395-399` | float | GC-corrected fragment count in that 5 bp size bin |
+| `65-69`, `70-74`, … `395-399` | float | GC-corrected fragment count in that 5 bp size bin (67 bins) |
 | `total` | float | Total GC-corrected fragment count for this arm |
+
+!!! note "`total` is not the whole fragment set"
+    The length *filter* admits 65–1000 bp, but FSD bins only `[65, 400)`. Fragments
+    of 400 bp and above are counted in neither the bins nor `total`, so a
+    long-fragment fraction computed against `total` has a denominator that excludes
+    them. For the 401–1000 bp mass, use FSC's `ultra_long`.
+
+**With `--pon-model`, one log-ratio per bin plus a stability score.**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `{bin}_logR` | float | log₂ of the sample count over the healthy expectation **for that bin** — e.g. `65-69_logR`. NaN where the arm is absent from the PON or the baseline measured nothing. |
+| `pon_stability` | float | Inverse mean variance of the cohort across the arm's bins: how tightly the healthy samples agreed there. Low means the baseline itself is uncertain, so read that arm's log-ratios with less confidence. NaN when no σ was measurable — not a confident 0.990. |
+
+!!! warning "Fixed in 0.9.0 — re-run any sample normalised by an earlier build"
+    Before 0.9.0 every `_logR` column was computed against the **last** size bin's
+    expectation rather than its own, because `size_bin` is stored as a double and the
+    reader called `get_int`, which errors on a Double. Measured on a shipped PON:
+    41/41 arms matched the last-bin baseline exactly. The correction is large — a
+    median log₂ shift of −1.05 and a maximum |Δ| of 5.10. `pon_stability` was
+    separately computed from one bin's σ for the whole arm, wrong by a median of
+    4709%. The PONs are unaffected; only samples need re-running.
 
 #### Purpose & Use Cases
 
@@ -494,23 +516,49 @@ Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene 
 
 #### Columns (Parquet)
 
+!!! warning "The profile columns are 200-element lists, not scalars"
+    `wps_nuc`, `wps_tf`, `prot_frac_nuc`, `prot_frac_tf` and `wps_nuc_z` each hold
+    **one value per position** across the anchor window. This table documented them
+    as `float` until 0.9.0, alongside four columns that were never written
+    (`wps_nuc_smooth`, `wps_tf_smooth`, `wps_nuc_mean`, `wps_tf_mean`) — so the
+    example below indexed columns that do not exist and raised `KeyError`.
+
 | Column | Type | Description |
 |--------|------|-------------|
 | `region_id` | str | Anchor identifier (e.g. `ENSG00000142611_TSS`) |
 | `chrom` | str | Chromosome |
-| `center` | int | Anchor midpoint |
+| `center` | int32 | Anchor midpoint |
 | `strand` | str | `+` / `-` |
 | `region_type` | str | `TSS`, `CTCF`, etc. |
-| `wps_nuc` | float | Raw nucleosomal WPS (120–180 bp fragments) |
-| `wps_tf` | float | Raw TF footprint WPS (35–80 bp fragments) |
-| `wps_nuc_smooth` | float | Savitzky-Golay smoothed nucleosomal WPS |
-| `wps_tf_smooth` | float | Savitzky-Golay smoothed TF WPS |
-| `wps_nuc_mean` | float | Mean WPS across anchor window |
-| `wps_tf_mean` | float | Mean TF WPS across anchor window |
-| `prot_frac_nuc` | float | Fraction of window with WPS > 0 (nucleosome-covered) |
-| `prot_frac_tf` | float | Fraction of window with TF WPS > 0 |
-| `wps_nuc_z` | float | Z-score vs PON baseline (with `--pon-model`) |
-| `wps_tf_z` | float | TF WPS Z-score vs PON |
+| `wps_nuc` | list[float] | Nucleosomal WPS per position (120–180 bp fragments) |
+| `wps_tf` | list[float] | TF-footprint WPS per position (35–80 bp fragments) |
+| `capture_mask` | list[int8] | Per-position flag for panel capture overlap |
+| `prot_frac_nuc` | list[float] | Per-position protected fraction, nucleosomal |
+| `prot_frac_tf` | list[float] | Per-position protected fraction, TF |
+| `local_depth` | float | Mean coverage at the anchor |
+
+**With `--pon-model`, seven more.** Absent from a `--skip-pon` run, and absent
+per anchor when that anchor is not in the PON — `null` rather than `0.0`, since
+a z of zero is a claim of perfect agreement.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `wps_nuc_z` | list[double] | Per-position `(x − mean) / σ` against the baseline profile. NaN at positions where σ was not measurable. |
+| `wps_log_amplitude` | double | `log1p` of the profile's peak-to-trough range. Logged because the raw range correlates +0.512 with sequencing depth. |
+| `wps_log_amplitude_z` | double | Its z against the PON's `wps_shape_baseline`. |
+| `wps_shape_corr` | double | Pearson *r* between the sample profile and the baseline mean profile. |
+| `wps_shape_corr_z` | double | Its z, computed on the Fisher (`arctanh`) scale — a bounded *r* left 302 of 400 anchors unable to reach +2. |
+| `wps_phase_shift_bp` | double | Displacement against the baseline, in positions. **Deliberately not z-scored**: per anchor its intraclass correlation is 0.479, so roughly half of any lag is noise. |
+| `wps_phase_at_search_limit` | bool | The ±30 search ended on its own edge, so `wps_phase_shift_bp` is a boundary, not a measurement (invariant #3). Check this before believing a large shift. |
+
+!!! danger "Do not average `wps_nuc_z` across positions"
+    Adjacent WPS positions have lag-1 autocorrelation **0.986** — a fragment spans
+    ~167 bp and contributes to many positions at once. A mean of z over 200
+    positions has nothing like `σ/√200` precision, and a max of |z| has an expected
+    value of 2.97 under pure noise. Use the derived shape columns above, each of
+    which is z-scored against a baseline of itself.
+
+    `wps_tf` is not PON-scored: scoring runs once per table, over `wps_nuc`.
 
 #### Purpose & Use Cases
 
@@ -526,17 +574,30 @@ import pandas as pd
 
 df = pd.read_parquet("sample.WPS.parquet")
 
-# Feature vector per sample: mean WPS across all anchors
+# Feature vector per sample: mean WPS across all anchors.
+# The profile columns are 200-element lists, so stack before reducing.
+import numpy as np
+
+nuc = np.vstack(df["wps_nuc"].to_numpy())          # (n_anchors, 200)
 features = {
-    "wps_nuc_global_mean": df["wps_nuc_mean"].mean(),
-    "wps_nuc_global_std":  df["wps_nuc_mean"].std(),
+    "wps_nuc_global_mean": float(np.nanmean(nuc)),
+    "wps_nuc_global_std":  float(np.nanstd(nuc)),
     "prot_frac_nuc_mean":  df["prot_frac_nuc"].mean(),
     "prot_frac_tf_mean":   df["prot_frac_tf"].mean(),
 }
 
-# Per-anchor feature matrix for gene-level models
-X = df[["wps_nuc_mean", "wps_tf_mean", "prot_frac_nuc", "prot_frac_tf"]].values
-# shape: (~15,000 anchors, 4) — one row per TSS/CTCF
+# Per-anchor feature matrix for gene-level models.
+# The profile columns are lists, so reduce them explicitly rather than
+# indexing scalar columns that do not exist.
+import numpy as np
+
+X = np.column_stack([
+    np.vstack(df["wps_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["wps_tf"].to_numpy()).mean(axis=1),
+    df["wps_log_amplitude"].to_numpy(),      # with --pon-model
+    df["wps_shape_corr"].to_numpy(),
+])
+# shape: (n_anchors, 4) — one row per TSS/CTCF
 ```
 
 **Best for**: Deep learning input (WPS profiles as 1D signals), nucleosome periodicity score, TSS accessibility classifier.
@@ -565,12 +626,19 @@ genome-wide set.
 ```python
 df = pd.read_parquet("sample.WPS.panel.parquet")
 
-# Compact panel feature: 1820 anchors × 4 = 7280 features
-X = df[["wps_nuc_mean", "wps_tf_mean", "prot_frac_nuc", "prot_frac_tf"]].values
+# Compact panel feature: one row per anchor, reduced from the profiles.
+import numpy as np
 
-# Gene-indexed lookup
+X = np.column_stack([
+    np.vstack(df["wps_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["wps_tf"].to_numpy()).mean(axis=1),
+    np.vstack(df["prot_frac_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["prot_frac_tf"].to_numpy()).mean(axis=1),
+])
+
+# Gene-indexed lookup — the profile itself, not a scalar
 df_gene = df.set_index("region_id")
-tp53_wps = df_gene.loc["TP53_TSS", "wps_nuc_mean"]
+tp53_profile = np.asarray(df_gene.loc["TP53_TSS", "wps_nuc"])   # 200 values
 ```
 
 ---
@@ -1069,25 +1137,49 @@ GC-bias correction weights per (fragment length bin, GC content) pair.
 Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
 for easy ingestion into PON pipelines and pandas workflows.
 
+!!! warning "This table is the completion marker"
+    The downstream consumer treats `{sample}.metadata.parquet` as the signal that a
+    sample finished. A sample without it is dropped from the cohort **silently** —
+    no warning, no error. Never delete it to "clean up" a directory.
+
 ```python
 import pandas as pd
-meta = pd.read_csv("sample.metadata.tsv", sep="\t").iloc[0].to_dict()
-print(meta["total_fragments"], meta["on_target_rate"])
+
+meta = pd.read_parquet("sample.metadata.parquet").iloc[0].to_dict()
+print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 ```
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `sample_id` | str | Sample identifier |
-| `krewlyzer_version` | str | Version string |
+| `total_fragments` | int | Total fragments extracted |
 | `genome` | str | Genome build used (`hg19`, `hg38`) |
 | `assay` | str | Assay name (or empty for WGS) |
-| `total_fragments` | int | Total fragments extracted |
-| `on_target_rate` | float | Fraction of fragments overlapping targets |
-| `mean_fragment_size` | float | Mean fragment length (bp) |
-| `duplication_rate` | float | Estimated duplicate fraction |
-| `processing_time_s` | float | Wall-clock processing time in seconds |
+| `panel_mode` | bool | Whether target regions were supplied |
+| `target_regions` | str | Path to the target BED, when in panel mode |
+| `extraction_time_seconds` | float | Wall-clock extraction time |
+| `mds_score` | float | Genome-wide motif diversity score |
+| `filters_mapq` | int | Minimum MAPQ applied |
+| `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
+| `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `timestamp` | str | ISO timestamp of the run |
 
-**Use**: Filter samples by QC thresholds before ML training (e.g. `total_fragments > 5M`, `on_target_rate > 0.3`).
+**Provenance, since 0.9.0.** Which build wrote this sample, and what it was
+scored against. Absent from any directory produced by an earlier release — and
+that absence is itself the answer, because 0.9.0 changed what several columns
+mean.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `krewlyzer_version` | str | The build that wrote this sample |
+| `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon`, for no PON, and for a PON the version guard refused — all three are legitimately unscored, and this is what distinguishes them from scoring that failed |
+| `pon_model` | str | The PON, by **basename** — never the full path |
+| `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
+| `pon_krewlyzer_version` | str | The release the PON was stamped with |
+
+**Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
+and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
+produced by one build against one baseline.
 
 ---
 
@@ -1121,7 +1213,7 @@ region_mds = features["region_mds"]["gene"]
 | Cancer type / site-of-origin | OCF tissue vector, ATAC tissue vector, TFBS vector | OCF, ATAC, TFBS |
 | Gene-level amplification | FSC gene `normalized_depth`, FSD arm `total` | FSC.gene, FSD |
 | MRD (residual disease) | mFSD `VAF_GC_Corrected`, `Quality_Score`, `Delta_ALT_REF` | mFSD |
-| Promoter accessibility | WPS E1 `wps_nuc_mean`, MDS E1, FSC-E1 ratios | WPS.panel, MDS.gene, FSC.e1only |
+| Promoter accessibility | WPS E1 `wps_shape_corr_z`, MDS E1, FSC-E1 ratios | WPS.panel, MDS.gene, FSC.e1only |
 | Methylation-augmented | UXM `U`/`M` + FSR + MDS | UXM, FSR, MDS |
 
 ---

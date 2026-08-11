@@ -91,6 +91,13 @@ CORE_BLOCKS = (
 #: from "went wrong". Saying so is better than guessing either way.
 BAM_ONLY_BLOCKS = (
     "mds_baseline",
+    # Breakpoint 4-mers are a different distribution from end 4-mers, so they
+    # need their own block; scoring BreakPointMotif against `mds_baseline` gave
+    # median |z| 5.85 where a fitted baseline gives ~0.67. Every PON built
+    # before 0.9.0 lacks it, and a warning is the right level: those models are
+    # not broken, they simply predate the block, and the scorer emits no
+    # `frequency_z` rather than a wrong one.
+    "breakpoint_motif_baseline",
     "region_mds",
     "region_mds_exon",
 )
@@ -109,7 +116,10 @@ PANEL_BLOCKS = (
 )
 
 #: Panel blocks that also need BAM/CRAM input.
-PANEL_BAM_ONLY_BLOCKS = ("mds_baseline_ontarget",)
+PANEL_BAM_ONLY_BLOCKS = (
+    "mds_baseline_ontarget",
+    "breakpoint_motif_baseline_ontarget",
+)
 
 #: Below this, a baseline entry is an anecdote. Matches MIN_SAMPLES_PER_KEY in
 #: the builder; asserted here because the two are enforced in different places.

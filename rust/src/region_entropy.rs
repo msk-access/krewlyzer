@@ -718,14 +718,16 @@ fn load_entropy_baseline_from_parquet(
         let row = row_result.with_context(|| "Failed to read row")?;
         
         // Check if this row belongs to the specified table
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != table_name {
-                continue;
-            }
-        } else {
-            continue;
+        // By name, and skip when absent: `unwrap_or(0)` read column zero,
+        // which in a PON parquet is `table` itself -- so a PON without the
+        // column would have compared every row against its own first value.
+        match row
+            .get_column_iter()
+            .position(|(n, _)| n == "table")
+            .and_then(|i| row.get_string(i).ok())
+        {
+            Some(table) if table == table_name => {}
+            _ => continue,
         }
         
         // Extract label, entropy_mean, entropy_std.

@@ -39,7 +39,6 @@ pub mod extract_motif;
 pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;
-pub mod pon_model;
 pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
 pub mod region_entropy;  // TFBS/ATAC size entropy
@@ -107,6 +106,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // WPS submodule
     let wps_mod = PyModule::new(m.py(), "wps")?;
     wps_mod.add_function(wrap_pyfunction!(wps::calculate_wps, &wps_mod)?)?;
+    wps_mod.add_function(wrap_pyfunction!(wps::apply_pon_zscore, &wps_mod)?)?;
     m.add_submodule(&wps_mod)?;
 
     // OCF submodule

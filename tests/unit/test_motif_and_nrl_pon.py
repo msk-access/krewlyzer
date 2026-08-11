@@ -198,3 +198,144 @@ def test_no_baseline_means_no_column_rather_than_a_fabricated_one(tmp_path):
     )
     assert scored == 0
     assert "frequency_z" not in pd.read_parquet(path).columns
+
+
+# ---------------------------------------------------------------------------
+# Breakpoint motifs are not end motifs
+# ---------------------------------------------------------------------------
+
+
+def test_breakpoint_motifs_are_scored_against_their_own_baseline(tmp_path):
+    """Until 0.9.0 all four motif tables used `mds_baseline`.
+
+    That is an **end-motif, genome-wide** block. An end motif is the 4-mer at
+    the fragment's 5′ terminus — what the nuclease left. A breakpoint motif
+    spans the cut site and includes reference bases *not present in the
+    fragment*. On a real sample the two frequency vectors correlate 0.696, and
+    `BreakPointMotif` came out at median |z| 5.85 on XS1 and 11.25 on XS2, with
+    70 and 136 of 256 motifs beyond |z| = 10.
+
+    A correctly fitted baseline gives a median near 0.67 — the half-normal
+    median — because that is what scoring a sample against its own cohort
+    means.
+
+    Full 256-mer baselines, not a two-motif toy: the scorer renormalises over
+    the shared motifs, so a partial baseline makes the renormalisation dominate
+    and the test measure the wrong thing. The code says so itself, warning when
+    the shared mass is small.
+    """
+    rng = np.random.default_rng(0)
+    kmers = [
+        a + b + c + d for a in "ACGT" for b in "ACGT" for c in "ACGT" for d in "ACGT"
+    ]
+
+    # Two genuinely different distributions, as end and breakpoint motifs are.
+    end_p = rng.dirichlet(np.ones(256) * 40)
+    bp_p = rng.dirichlet(np.ones(256) * 40)
+    sample = bp_p * (1 + rng.normal(0, 0.02, 256))
+    sample /= sample.sum()
+
+    path = pathlib.Path(tmp_path) / "s.BreakPointMotif.parquet"
+    pd.DataFrame({"Motif": kmers, "Frequency": sample}).to_parquet(path)
+
+    pon = _motif_pon(
+        dict(zip(kmers, end_p)),
+        dict(zip(kmers, end_p * 0.02)),
+    )
+    pon.breakpoint_motif_baseline = MdsBaseline(
+        kmer_expected=dict(zip(kmers, bp_p)),
+        kmer_std=dict(zip(kmers, bp_p * 0.02)),
+        mds_mean=float("nan"),
+        mds_std=float("nan"),
+    )
+
+    def _score(attr):
+        apply_motif_pon(
+            path,
+            pon,
+            output_base=path.with_suffix(""),
+            output_format="parquet",
+            baseline_attr=attr,
+        )
+        z = pd.read_parquet(path)["frequency_z"].abs()
+        return float(z.median()), int((z > 10).sum())
+
+    right_median, right_big = _score("breakpoint_motif_baseline")
+    wrong_median, wrong_big = _score("mds_baseline")
+
+    assert right_median < 2.0, (
+        f"against its own baseline the median |z| should sit near 0.67, "
+        f"got {right_median:.2f}"
+    )
+    assert (
+        right_big == 0
+    ), f"{right_big} motifs beyond |z|=10 against the right baseline"
+    assert wrong_median > right_median * 3, (
+        f"the end-motif baseline should be visibly worse "
+        f"({wrong_median:.2f} vs {right_median:.2f}); if not, this fixture no "
+        "longer reproduces the defect"
+    )
+    assert wrong_big > 20, f"only {wrong_big} motifs misplaced by the wrong baseline"
+
+
+def test_every_motif_table_gets_its_own_baseline():
+    """Three of the four tables were scored against the wrong block.
+
+    `mds_baseline_ontarget` already existed and was already used for the
+    whole-sample MDS z — just not for the per-motif frequencies.
+    """
+    import inspect
+
+    from krewlyzer.core import sample_processor
+
+    source = inspect.getsource(sample_processor)
+    for key, attr in (
+        ('("edm", "mds_baseline")', "edm"),
+        ('("bpm", "breakpoint_motif_baseline")', "bpm"),
+        ('("edm_ontarget", "mds_baseline_ontarget")', "edm_ontarget"),
+        ('("bpm_ontarget", "breakpoint_motif_baseline_ontarget")', "bpm_ontarget"),
+    ):
+        assert key in source, f"{attr} is no longer paired with its own baseline"
+
+
+def test_a_breakpoint_record_carries_no_mds_score(tmp_path):
+    """MDS is defined on end motifs.
+
+    Computing one over breakpoint 4-mers would be a different statistic under
+    the same name, so the collector returns None rather than a number.
+    """
+    from krewlyzer.pon.from_outputs import _motif_record
+
+    d = pathlib.Path(tmp_path)
+    pd.DataFrame({"Motif": ["ACGT"], "Frequency": [1.0]}).to_parquet(
+        d / "S.BreakPointMotif.parquet"
+    )
+    pd.DataFrame({"Motif": ["ACGT"], "Frequency": [1.0]}).to_parquet(
+        d / "S.EndMotif.parquet"
+    )
+
+    bp = _motif_record(d, "S", table="BreakPointMotif")
+    end = _motif_record(d, "S", table="EndMotif")
+    assert bp is not None and bp["mds"] is None
+    assert end is not None and end["mds"] is not None
+
+
+def test_a_pon_without_the_breakpoint_block_gives_no_z(tmp_path):
+    """Every PON built before 0.9.0 lacks it.
+
+    The honest result is no `frequency_z` column at all — which is visibly
+    different from EndMotif, which does get one. That asymmetry says "no
+    baseline for this table", which is exactly the situation.
+    """
+    path = tmp_path / "s.BreakPointMotif.parquet"
+    pd.DataFrame({"Motif": ["ACGT"], "Frequency": [0.007]}).to_parquet(path)
+
+    scored = apply_motif_pon(
+        path,
+        _motif_pon({"ACGT": 0.0008}, {"ACGT": 4e-5}),
+        output_base=path.with_suffix(""),
+        output_format="parquet",
+        baseline_attr="breakpoint_motif_baseline",
+    )
+    assert scored == 0
+    assert "frequency_z" not in pd.read_parquet(path).columns

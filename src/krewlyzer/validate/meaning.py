@@ -80,7 +80,7 @@ _SIZE_DIRECTION = "higher short-fragment fraction"
 MEANINGS: Dict[str, Meaning] = {
     # -- fragment size ------------------------------------------------------
     ".FSD.parquet": Meaning(
-        "Fragment-size histogram, 5 bp bins over 65–1000 bp, per chromosome arm. "
+        "Fragment-size histogram, 67 bins of 5 bp over 65–399 bp, per chromosome arm. "
         "Summed across arms this is the sample's genome-wide size density — the "
         "most direct picture of the whole thesis.",
         "mass shifts from the ~166 bp mononucleosomal mode toward ~145 bp",
@@ -88,10 +88,12 @@ MEANINGS: Dict[str, Meaning] = {
             "Nucleosomes protect ~147 bp of DNA from nuclease digestion, so plasma cfDNA arrives in a sharply peaked size distribution. Tumour cells package and shed DNA differently, and the whole field rests on that difference being measurable."
         ),
         how=(
-            "Every fragment is binned by length into 5 bp bins from 65 to 1000 bp, counted per chromosome arm."
+            "Every fragment is binned by length into 67 bins of 5 bp spanning 65-399 bp, counted per chromosome arm. Note the range: the *filter* admits 65-1000 bp, but the histogram bins only [65, 400), so fragments of 400 bp and above are counted in neither the bins nor `total`. A long-fragment fraction computed from `total` therefore has a denominator that excludes them."
         ),
         what=(
-            "Look at where the mode sits and how heavy the sub-150 bp shoulder is. Summing across arms gives the genome-wide density; comparing arms surfaces regional differences."
+            "Look at where the mode sits and how heavy the sub-150 bp shoulder is. Summing across arms gives the genome-wide density; comparing arms surfaces regional differences. "
+            "With a PON, each bin also carries `{bin}_logR` -- log2 of the sample count over the healthy expectation for **that** bin -- so a positive value means enrichment at that size relative to healthy plasma. "
+            "`pon_stability` summarises how tightly the cohort agreed across the arm's bins (inverse mean variance): a low value means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. It is NaN when no sigma could be measured, which is the honest reading rather than a confident 0.990."
         ),
     ),
     ".FSD.ontarget.parquet": Meaning(
@@ -270,6 +272,34 @@ MEANINGS: Dict[str, Meaning] = {
         pon_columns=("mds_z",),
     ),
     # -- orientation and accessibility --------------------------------------
+    ".OCF.sync.parquet": Meaning(
+        "The per-position orientation profile the OCF summary is reduced "
+        "from: upstream and downstream fragment-end counts at each offset "
+        "around a tissue's open-chromatin regions.",
+        "the phased peak-trough structure flattens or shifts as the tissue "
+        "contribution changes",
+        caveat=(
+            "Raw counts, not PON-normalised. Read the shape across positions "
+            "rather than any single offset."
+        ),
+        why=(
+            "The OCF summary is one number per tissue. The profile behind it shows whether that number came from a clean phased signal or from noise, which the summary alone cannot distinguish."
+        ),
+        how=(
+            "Fragment ends are counted separately upstream (`left_count`) and downstream (`right_count`) of each region centre, at every offset on a fixed grid, then normalised per tissue."
+        ),
+        what=(
+            "Look for the characteristic asymmetry between the left and right profiles. A tissue actively shedding shows a phased excess; a flat pair means no orientation signal, whatever the summary says."
+        ),
+    ),
+    ".OCF.ontarget.sync.parquet": Meaning(
+        "As OCF.sync, over captured regions.", "as OCF.sync"
+    ),
+    ".OCF.offtarget.sync.parquet": Meaning(
+        "As OCF.sync, over off-target fragments — the unbiased view where "
+        "capture applies.",
+        "as OCF.sync",
+    ),
     ".OCF.ontarget.parquet": Meaning(
         "Orientation-aware fragmentation at tissue-specific open chromatin. "
         "Fragments ending upstream versus downstream of a region are counted "

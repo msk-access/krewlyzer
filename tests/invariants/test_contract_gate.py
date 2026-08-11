@@ -32,6 +32,87 @@ def test_wellformed_cohort_passes(tmp_path):
     ]
 
 
+def test_a_skip_pon_cohort_passes_without_the_pon_columns(tmp_path):
+    """`--skip-pon` is a legitimate run, not a broken one.
+
+    A run with no PON, one whose PON the version guard refused, and a
+    deliberate `--skip-pon` all produce output with no z-scores. Requiring the
+    PON-derived columns unconditionally would fail all three.
+    """
+    write_cohort(tmp_path, n_samples=3, pon_applied=False)
+    result = run(tmp_path)
+    assert result.exit_code == EXIT_PASS, [
+        f.message for f in result.findings if f.severity is Severity.ERROR
+    ]
+
+
+def test_pon_scoring_that_vanished_is_caught(tmp_path):
+    """The gap this closes.
+
+    Twice in 0.9.0 the WPS scoring was written somewhere nothing reads -- once
+    to a `.WPS.tsv`, once to `{sample}.parquet` after `with_suffix` ate the
+    `.WPS`. Both times a raw `.WPS.parquet` shipped and passed every check,
+    because the contract declared none of the columns PON scoring produces.
+
+    Now a sample that says it was scored must show the evidence.
+    """
+    write_cohort(tmp_path, n_samples=3)
+    for sample in ("S0", "S1", "S2"):
+        path = tmp_path / sample / f"{sample}.WPS.parquet"
+        frame = pd.read_parquet(path)
+        frame.drop(
+            columns=[c for c in frame.columns if c.startswith("wps_nuc_z")]
+        ).to_parquet(path, index=False)
+
+    result = run(tmp_path)
+    assert result.exit_code != EXIT_PASS, "scoring vanished and the gate passed"
+    ids = _ids(result)
+    assert "WPS.MISSING_COLUMN.wps_nuc_z" in ids, ids
+    message = next(f.message for f in result.findings if "wps_nuc_z" in f.message)
+    assert "pon_applied=True" in message, (
+        "the finding must say why the column was expected, or a reader cannot "
+        "tell it from a --skip-pon run"
+    )
+
+
+def test_an_unscored_sample_claiming_otherwise_is_caught(tmp_path):
+    """The marker and the tables must agree.
+
+    `pon_applied=True` with no z-scores anywhere is the shape of a run whose
+    scoring step failed after the metadata was stamped.
+    """
+    write_cohort(tmp_path, n_samples=2, pon_applied=False)
+    for sample in ("S0", "S1"):
+        marker = tmp_path / sample / f"{sample}.metadata.parquet"
+        frame = pd.read_parquet(marker)
+        frame["pon_applied"] = True
+        frame.to_parquet(marker, index=False)
+
+    result = run(tmp_path)
+    assert result.exit_code != EXIT_PASS
+    ids = _ids(result)
+    assert any(i.startswith("WPS.MISSING_COLUMN.") for i in ids), ids
+    assert any(i.startswith("FSD.MISSING_COLUMN.") for i in ids), ids
+
+
+def test_a_directory_with_no_provenance_is_reported(tmp_path):
+    """A cohort you cannot identify is a cohort you cannot bless.
+
+    0.9.0 changed what several columns mean, so "which build wrote this?" is
+    not optional metadata. A directory from an older build says nothing, and
+    the gate says so rather than assuming.
+    """
+    write_cohort(tmp_path, n_samples=2)
+    for sample in ("S0", "S1"):
+        marker = tmp_path / sample / f"{sample}.metadata.parquet"
+        frame = pd.read_parquet(marker)
+        frame.drop(columns=["krewlyzer_version"]).to_parquet(marker, index=False)
+
+    result = run(tmp_path)
+    assert result.exit_code != EXIT_PASS
+    assert "metadata.MISSING_COLUMN.krewlyzer_version" in _ids(result)
+
+
 def test_missing_completion_marker_is_an_error(tmp_path):
     write_cohort(tmp_path, n_samples=3)
     (tmp_path / "S1" / "S1.metadata.parquet").unlink()

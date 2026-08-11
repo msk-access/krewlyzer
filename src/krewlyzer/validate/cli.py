@@ -172,7 +172,13 @@ def validate_pon(
         console.print(f"[bold]{path.name}[/bold]  {provenance or '(no metadata)'}")
         result.findings.extend(check_pon(path))
 
-    report.render(result, console, degeneracy_note=report.PON_DEGENERACY_NOTE)
+    report.render(
+        result,
+        console,
+        degeneracy_note=report.PON_DEGENERACY_NOTE,
+        unit="model",
+        n_checked=len(pon_model),
+    )
     if json_report is not None:
         report.to_json(result, json_report, __version__)
         console.print(f"[dim]wrote {json_report}[/dim]")

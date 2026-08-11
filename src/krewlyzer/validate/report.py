@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 from rich.table import Table
@@ -48,10 +48,21 @@ def render(
     result: Result,
     console: Console,
     degeneracy_note: str = DEFAULT_DEGENERACY_NOTE,
+    unit: str = "sample",
+    n_checked: Optional[int] = None,
 ) -> None:
+    """Print the findings table.
+
+    `unit` and `n_checked` exist because this renders for two gates that count
+    different things. `validate-output` fills `result.samples`; `validate-pon`
+    checks models and leaves it empty, so it read "0 sample(s) · contract
+    satisfied" after checking four -- a summary line saying nothing was
+    inspected above a line saying it passed.
+    """
     counts = result.counts()
+    total = len(result.samples) if n_checked is None else n_checked
     console.print(
-        f"\n[bold]{len(result.samples)} sample(s)[/bold] · "
+        f"\n[bold]{total} {unit}(s)[/bold] · "
         f"[red]{counts['error']} error[/red] · "
         f"[yellow]{counts['warn']} warning[/yellow] · "
         f"[dim]{counts['skip']} skipped[/dim]"

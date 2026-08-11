@@ -37,28 +37,93 @@ alwaysApply: true
 | `uxm.rs` | Fragment-level methylation |
 | `gc_correction.rs` | LOESS GC bias correction |
 | `gc_reference.rs` | Pre-computed GC reference generation |
-| `pon_model.rs` | PON model loading and hybrid correction |
 | `pon_builder.rs` | PON model construction |
 | `filters.rs` | Fragment filtering logic |
 
 ## PON Z-Score Pattern
 
-All PON z-score functions read baselines directly from Parquet:
+Every PON z-score reads its baseline directly from the Parquet, taking the
+*path* rather than a loaded model -- the Python side never materialises a PON
+just to hand it over. The exact signatures differ per module; read the one you
+are calling. `wps.rs::apply_pon_zscore` is the current shape:
 
 ```rust
-// Rust signature pattern
 pub fn apply_pon_zscore(
-    input_path: PathBuf,
+    wps_path: PathBuf,
+    pon_parquet_path: PathBuf,
     output_path: PathBuf,
-    pon_parquet: Option<PathBuf>,
-    baseline_table: &str,  // "tfbs_baseline", "atac_baseline", etc.
-) -> PyResult<bool>
+    baseline_table: &str,  // "wps_baseline", "wps_baseline_panel"
+    column: &str,          // "wps_nuc", "wps_tf"
+) -> PyResult<usize>       // anchors scored; 0 means nothing was written
 ```
 
-```python
-# Python call pattern
-_core.module.apply_pon_zscore(input, output, pon_parquet, "baseline_table")
+**Returning 0 must mean writing nothing.** The Python caller degrades to the
+raw table on a zero, so a scorer that half-writes on a missing baseline
+destroys the product it could not improve (invariant #2).
+
+### Three traps when reading a PON parquet
+
+**String width.** The builder writes `large_string`, not `string`; a bare
+`downcast_ref::<StringArray>()` returns `None` on every shipped PON and yields
+an empty baseline -- which is a legitimate state, so it degrades silently
+rather than raising. `pon_model.rs` did this and was deleted in 0.9.0: its
+`PonModel::load` had no callers, so the blindness and the deadness hid each
+other, and `pub` items are exempt from dead-code warnings. Handle both widths, or use the row API
+(`SerializedFileReader::get_row_iter`), which is logical-typed and sees both.
+The row API reads *every* column of every row, so it is only viable for the
+small blocks; `wps.rs` projects by root index instead, because the wide PON
+table is ~120 columns across ~130k rows.
+
+**Vector element type.** The Python builder writes `list<double>`; the Rust
+builder's own fixtures write `list<float>`. A reader that accepts one silently
+finds no anchors in the other. `wps.rs` accepts both and logs the type it
+could not read rather than returning nothing.
+
+**Numeric width -- the one that actually shipped wrong.** A PON is a *single*
+long-format table, so every row belonging to another block carries a null in
+your column, and the union comes out `float64` even for values that are
+conceptually integers. `size_bin` is a double in every PON. The parquet row
+API does **not** coerce: `row.get_int()` on a Double returns `Err`.
+
+`fsd.rs` fell through that `Err` to `unwrap_or(0)`, so every `size_bin` became
+0, `size >= *size_bins.last()` held for every query, and all 67 bins were
+scored against the last one. Measured: 41/41 arms of a real sample matched the
+last-bin baseline exactly. The log-ratios still varied across bins -- the
+sample numerator varies -- so they were present, finite and non-degenerate.
+Invariant #1 is not enough on its own here: the metric *did* vary with the
+data, just against the wrong comparator.
+
+Read numerics by trying the widths in turn, and **skip the row** when none
+parse rather than defaulting:
+
+```rust
+let numeric = |name: &str| -> Option<f64> {
+    let i = column(name)?;
+    row.get_double(i)
+        .or_else(|_| row.get_float(i).map(|v| v as f64))
+        .or_else(|_| row.get_int(i).map(|v| v as f64))
+        .or_else(|_| row.get_long(i).map(|v| v as f64))
+        .ok()
+};
 ```
+
+And look columns up **by name, skipping when absent**. `position(...)
+.unwrap_or(0)` reads column zero, which in a PON parquet is `table`. That copy
+existed three times -- `region_entropy.rs`, `fsd.rs`, `ocf.rs` -- and was
+fixed once, twice, then finally everywhere. A rule applied N times is wrong
+N times until something fails when it is.
+
+### Which language
+
+Scoring belongs in Rust, but the *design* of a statistic may not start there.
+The WPS scoring shipped in Python through 0.8.x on purpose: three of its
+decisions -- the `log1p` amplitude, the Fisher transform, and the absent phase
+baseline -- were settled by measurement on a real cohort and changed several
+times. It moved to `wps.rs` in 0.9.0 once settled, measured at 9.5 s against
+~17 min for the Python, on the same 76,595-anchor output. The Python survives
+as a frozen equivalence oracle in
+`tests/unit/test_rust_python_equivalence.py`; the port is bug-for-bug, so a
+divergence there is a finding rather than a sync.
 
 ## Chromosome Normalization
 

@@ -185,6 +185,30 @@ CLAIMS: Tuple[Claim, ...] = (
         RustConst("gc_correction.rs", "NUM_BINS"),
         "5bp bins spanning 60-999bp; see the divergence below",
     ),
+    # -- PON sigma floor --------------------------------------------------
+    Claim(
+        "pon.sigma_floor",
+        "1e-9",
+        RustConst("pon_builder.rs", "SIGMA_FLOOR"),
+        "below this a spread is float residue, not a measurement. Defined in "
+        "the Rust builder and mirrored by `pon/model.py::SIGMA_FLOOR` for the "
+        "read side; the two must not drift, because one refuses to write a "
+        "residue sigma and the other refuses to divide by one",
+    ),
+    # -- FSD ------------------------------------------------------------------
+    Claim(
+        "fsd.bin_range",
+        "65..400",
+        RustPattern(
+            "fsd.rs",
+            r"for s in \((\d+\.\.\d+)\)\.step_by\(5\)",
+            "the FSD histogram's bin range",
+        ),
+        "the histogram bins [65, 400) in 67 steps of 5, while the length "
+        "*filter* admits 65-1000. meaning.py quoted the filter range as the "
+        "histogram range, which makes `total` look like it covers fragments "
+        "it excludes entirely",
+    ),
     # -- mFSD ---------------------------------------------------------------
     Claim(
         "mfsd.min_for_ks",
