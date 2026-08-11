@@ -185,6 +185,20 @@ CLAIMS: Tuple[Claim, ...] = (
         RustConst("gc_correction.rs", "NUM_BINS"),
         "5bp bins spanning 60-999bp; see the divergence below",
     ),
+    # -- FSD ------------------------------------------------------------------
+    Claim(
+        "fsd.bin_range",
+        "65..400",
+        RustPattern(
+            "fsd.rs",
+            r"for s in \((\d+\.\.\d+)\)\.step_by\(5\)",
+            "the FSD histogram's bin range",
+        ),
+        "the histogram bins [65, 400) in 67 steps of 5, while the length "
+        "*filter* admits 65-1000. meaning.py quoted the filter range as the "
+        "histogram range, which makes `total` look like it covers fragments "
+        "it excludes entirely",
+    ),
     # -- mFSD ---------------------------------------------------------------
     Claim(
         "mfsd.min_for_ks",

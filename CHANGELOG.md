@@ -601,6 +601,35 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The WPS column reference documented five columns that do not exist, missed
+  eight that do, and typed the profiles as scalars.** Found by diffing the
+  reference against a real scored table instead of reading it.
+
+  `wps_nuc_smooth`, `wps_tf_smooth`, `wps_nuc_mean`, `wps_tf_mean` and
+  `wps_tf_z` were never written. `capture_mask`, `local_depth` and the six
+  derived PON columns were. And `wps_nuc`, `wps_tf`, `prot_frac_nuc`,
+  `prot_frac_tf` and `wps_nuc_z` are 200-element **lists**, documented as
+  `float` — so the three worked examples indexed columns that do not exist and
+  raised `KeyError`. All three are rewritten and were run against a real
+  76,595-anchor table before being committed.
+
+  A sweep now checks every `df["col"]` reference in every Python block of
+  `output-files.md` against real schemas from a full run: 0 of 40 table
+  sections reference a column that does not exist.
+
+- **FSD's histogram range was documented as the filter range.** `meaning.py`
+  said "5 bp bins over 65–1000 bp"; the histogram is 67 bins over `[65, 400)`.
+  Fragments of 400 bp and above are excluded from the bins **and** from
+  `total`, so a long-fragment fraction computed against `total` had a
+  denominator that silently excluded them. Corrected, with the range pinned in
+  `validate/claims.py` so the two cannot drift again (invariant #5).
+
+- **The FSD PON columns were documented nowhere.** `{bin}_logR` and
+  `pon_stability` — the entire product of PON scoring for FSD — appear in
+  neither `output-files.md` nor `meaning.py`. Both are now described, including
+  what `pon_stability` means and why it is NaN rather than 0.990 when no σ
+  could be measured.
+
 - **WPS z-scores were written to a file nothing reads, then destroyed their own
   input when that was fixed.** Two defects stacked, both introduced by the Rust
   port earlier in this release and both caught by reviewing the *product*
