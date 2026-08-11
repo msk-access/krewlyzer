@@ -239,7 +239,7 @@ def _check_table(
     # that should have been absent. Listing it on 25 rules would work today and
     # be silently missing from the 26th, and it costs nothing where there is no
     # z column to look at.
-    for name in (*rule.checks, "plausible_z_scores"):
+    for name in (*rule.checks, "plausible_z_scores", "no_collided_columns"):
         fn = check_registry.REGISTRY.get(name)
         if fn is None:
             raise KeyError(f"unknown check '{name}' referenced by {rule.suffix}")

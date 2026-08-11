@@ -447,6 +447,19 @@ pub fn load_target_regions(path: &Path, chrom_map: &mut ChromosomeMap) -> Result
 
 use crate::pon_model::FsdBaseline;
 
+/// Six decimals, or the literal `NaN`.
+///
+/// `format!("{:.6}", f64::NAN)` already yields "NaN", but relying on that is
+/// relying on a formatting detail to carry the release's central distinction
+/// between a measurement and its absence. Written out so it cannot drift.
+fn fmt6(value: f64) -> String {
+    if value.is_finite() {
+        format!("{:.6}", value)
+    } else {
+        "NaN".to_string()
+    }
+}
+
 /// Apply PON log-ratio normalization to FSD TSV file.
 /// 
 /// Reads raw FSD counts, computes log2(sample / PON_expected) with pseudocount,
@@ -507,18 +520,46 @@ pub fn apply_pon_logratio(
     let header_line = &lines[0];
     let headers: Vec<&str> = header_line.split('\t').collect();
     
-    // Find bin columns (format: "65-69", "70-74", etc.)
-    let bin_indices: Vec<(usize, i32)> = headers.iter().enumerate()
-        .filter_map(|(i, h)| {
-            if let Some(dash_pos) = h.find('-') {
-                if let Ok(start) = h[..dash_pos].parse::<i32>() {
-                    return Some((i, start));
-                }
-            }
-            None
+    // Columns this function itself produced on an earlier run.
+    //
+    // Dropped, not carried through, so normalising twice gives the same answer
+    // as normalising once. It previously did not: the bin matcher accepted any
+    // header whose text before the first '-' parsed as an integer, so
+    // "65-69_logR" matched as bin 65 and each run appended a fresh set of
+    // log-ratios *and* log-ratios of the previous log-ratios. Measured on a
+    // real 67-bin sample: 69 columns raw, 137 after one pass, 273 after two,
+    // with every `_logR` name repeated and pandas writing them back out as
+    // `_logR.1` / `_logR.2`. The correct answer was in the file three times
+    // with no way to tell which, and `read_csv` takes the first -- the oldest.
+    //
+    // A log-ratio of a log-ratio is never the intent, so consuming our own
+    // output is always a mistake rather than a mode worth supporting.
+    let is_derived = |h: &str| h.ends_with("_logR") || h == "pon_stability";
+    let carried: Vec<usize> = headers.iter().enumerate()
+        .filter(|(_, h)| !is_derived(h))
+        .map(|(i, _)| i)
+        .collect();
+    let n_dropped = headers.len() - carried.len();
+    if n_dropped > 0 {
+        info!(
+            "FSD PON: input already carries {} derived column(s) from an \
+             earlier run; replacing them rather than appending again",
+            n_dropped
+        );
+    }
+
+    // A size bin is exactly "{start}-{end}", both integers. Matching merely on
+    // "digits before a dash" is what let the derived columns in.
+    let bin_indices: Vec<(usize, i32)> = carried.iter()
+        .filter_map(|&i| {
+            let h = headers[i];
+            let (start, end) = h.split_once('-')?;
+            let start: i32 = start.parse().ok()?;
+            end.parse::<i32>().ok()?;
+            Some((i, start))
         })
         .collect();
-    
+
     info!("FSD PON: Found {} size bin columns", bin_indices.len());
     
     // 3. Process each arm row
@@ -529,8 +570,8 @@ pub fn apply_pon_logratio(
         ))?;
     let mut writer = std::io::BufWriter::new(out_file);
     
-    // Write extended header
-    let mut new_headers = headers.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    // Write extended header, from the carried columns only
+    let mut new_headers = carried.iter().map(|&i| headers[i].to_string()).collect::<Vec<_>>();
     for (_, size) in &bin_indices {
         new_headers.push(format!("{}-{}_logR", size, size + 4));
     }
@@ -548,7 +589,9 @@ pub fn apply_pon_logratio(
         }
         
         let arm = fields[0];
-        let mut new_row = fields.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let mut new_row = carried.iter()
+            .map(|&i| fields.get(i).unwrap_or(&"").to_string())
+            .collect::<Vec<_>>();
         
         // Compute log-ratios for each bin
         let mut stds: Vec<f64> = Vec::new();
@@ -558,6 +601,13 @@ pub fn apply_pon_logratio(
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
             
+            // NaN, not 0.0, when there is nothing to compare against.
+            //
+            // A log-ratio of zero says "this sample sits exactly at the healthy
+            // baseline" -- the most confident statement the column can make,
+            // asserted precisely where the arm is absent from the baseline or
+            // the baseline measured nothing. Same fabrication removed from
+            // `zscore_or_nan`, the FSC log2, the FSR ratio and the entropy z.
             let log_ratio = if let Some((expected, std)) = fsd_baseline.get_stats(arm, *size) {
                 if std > 0.0 {
                     stds.push(std);
@@ -565,23 +615,26 @@ pub fn apply_pon_logratio(
                 if expected > 0.0 {
                     ((sample_val + pseudocount) / (expected + pseudocount)).log2()
                 } else {
-                    0.0
+                    f64::NAN
                 }
             } else {
-                0.0
+                f64::NAN
             };
-            
-            new_row.push(format!("{:.6}", log_ratio));
+
+            new_row.push(fmt6(log_ratio));
         }
         
         // Compute PON stability score (inverse variance)
+        // 1.0 is not a neutral stability either: with the 0.01 floor it is
+        // what an average variance of 0.99 would give, a specific and
+        // unremarkable reading. No sigma measured means no stability.
         let stability = if !stds.is_empty() {
             let avg_var = stds.iter().map(|s| s * s).sum::<f64>() / stds.len() as f64;
             1.0 / (avg_var + 0.01)
         } else {
-            1.0
+            f64::NAN
         };
-        new_row.push(format!("{:.6}", stability));
+        new_row.push(fmt6(stability));
         
         writeln!(writer, "{}", new_row.join("\t"))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -669,3 +722,53 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     Ok(FsdBaseline { arms })
 }
 
+
+#[cfg(test)]
+mod logratio_tests {
+    use super::*;
+
+    /// A size bin is exactly `{int}-{int}`; a derived column is not a bin.
+    ///
+    /// The old matcher accepted anything whose text before the first '-'
+    /// parsed as an integer, so `65-69_logR` came back as bin 65 and every
+    /// re-run normalised its own output. Measured on a real 67-bin sample:
+    /// 69 columns raw, 137 after one pass, 273 after two.
+    #[test]
+    fn only_exact_size_bins_are_treated_as_bins() {
+        let is_bin = |h: &str| -> bool {
+            match h.split_once('-') {
+                Some((a, b)) => a.parse::<i32>().is_ok() && b.parse::<i32>().is_ok(),
+                None => false,
+            }
+        };
+        assert!(is_bin("65-69"));
+        assert!(is_bin("395-399"));
+        assert!(!is_bin("65-69_logR"), "a derived column is not a size bin");
+        assert!(!is_bin("pon_stability"));
+        assert!(!is_bin("region"));
+        assert!(!is_bin("chr1:10001-121535433"), "a locus is not a size bin");
+    }
+
+    /// The columns this function produces, recognised so they can be replaced.
+    #[test]
+    fn derived_columns_are_recognised_for_replacement() {
+        let is_derived = |h: &str| h.ends_with("_logR") || h == "pon_stability";
+        assert!(is_derived("65-69_logR"));
+        assert!(is_derived("pon_stability"));
+        assert!(!is_derived("65-69"));
+        assert!(!is_derived("region"));
+        // The `.1` names pandas writes after a collision are the symptom, not
+        // the cause; a fixed run never produces them, so they are deliberately
+        // not matched here.
+        assert!(!is_derived("65-69_logR.1"));
+    }
+
+    /// An absent measurement formats as NaN, never as a number.
+    #[test]
+    fn non_finite_values_are_written_as_nan() {
+        assert_eq!(fmt6(f64::NAN), "NaN");
+        assert_eq!(fmt6(f64::INFINITY), "NaN");
+        assert_eq!(fmt6(-1.5), "-1.500000");
+        assert_eq!(fmt6(0.0), "0.000000", "a real zero still prints as one");
+    }
+}

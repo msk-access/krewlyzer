@@ -84,6 +84,9 @@ def test_the_check_runs_on_every_table_not_a_listed_few():
     from krewlyzer.validate import gate
 
     source = open((gate.__file__ or "").replace(".pyc", ".py")).read()
-    assert 'for name in (*rule.checks, "plausible_z_scores")' in source
+    # Matched loosely: other universal checks join this tuple over time, and
+    # an exact-line assertion would fail on their arrival rather than on a
+    # real regression.
+    assert "*rule.checks" in source and '"plausible_z_scores"' in source
     # ...and its columns are read even when the contract does not declare them.
     assert 'c.endswith("_z") or c == "z_score"' in source
