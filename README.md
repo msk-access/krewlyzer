@@ -92,7 +92,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 | Command | Description | Output |
 |---------|-------------|--------|
 | `extract` | Extract fragments from BAM | `.bed.gz` |
-| `motif` | End motif & MDS scores | `.EndMotif.tsv`, `.MDS.tsv` |
+| `motif` | End, breakpoint & MDS scores | `.EndMotif.tsv`, `.BreakPointMotif.tsv`, `.MDS.tsv` |
 | `fsc` | Fragment size coverage | `.FSC.tsv` |
 | `fsr` | Fragment size ratios | `.FSR.tsv` |
 | `fsd` | Size distribution by arm | `.FSD.tsv` |
@@ -102,7 +102,7 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o results/ \
 | `region-mds` | Gene- and exon-level MDS | `.MDS.gene.tsv`, `.MDS.exon.tsv` |
 | `uxm` | Fragment-level methylation | `.UXM.tsv` |
 | `mfsd` | Mutant vs wild-type sizes | `.mFSD.tsv` |
-| `build-pon` | Build Panel of Normals | `.pon.parquet` |
+| `build-pon` | Build Panel of Normals (`--from-outputs` re-aggregates existing runs) | `.pon.parquet` |
 | `build-gc-reference` | Build GC reference assets | `.gc_reference.tsv` |
 | `run-all` | All features in one pass | All outputs |
 
@@ -137,6 +137,35 @@ krewlyzer report results/{sample_id}/ -o report.html
 > for internal use, and use `describe-output` for anything structural that needs
 > to leave the machine. See the [CLI reference](https://msk-access.github.io/krewlyzer/cli/)
 > for exit codes and options.
+
+### Upgrading to 0.9.0 — your own PON will be refused
+
+The bundled PONs were **rebuilt** for 0.9.0, not just re-stamped. A PON you
+built yourself with an earlier version is refused rather than scored against:
+
+```
+my.pon.parquet was built for krewlyzer 0.8.3, older than the 0.9.0 floor.
+Version 0.9.0 changed what the features mean, so its baselines measure
+something else -- a fabricated wps_background, floored sigmas, and a
+region-MDS fitted over a different fragment range. Rebuild it with
+build-pon. To score against it anyway, set KREWLYZER_ALLOW_OLD_PON=1.
+```
+
+Every pre-0.9.0 model divided some z-scores by a σ of ~10⁻¹⁷ — floating-point
+residue left where a position had no real spread, not a measurement. Rebuild
+instead of overriding:
+
+```bash
+# Minutes, not hours: re-aggregates existing run-all outputs, no BAM re-read
+krewlyzer build-pon --from-outputs /path/to/runall_dirs \
+    --assay xs1 --genome hg19 -o new.pon.parquet
+krewlyzer validate-pon new.pon.parquet
+```
+
+> [!WARNING]
+> `KREWLYZER_ALLOW_OLD_PON=1` exists for reproducing an old analysis, not for
+> getting past the error. Z-scores from an old model may be divided by residue,
+> which produces values in the 10¹⁸ range that still look like numbers.
 
 ### Panel Mode (`--target-regions`)
 

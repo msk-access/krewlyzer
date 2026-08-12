@@ -14,6 +14,16 @@ CONFIG="$REPO_ROOT/.gitleaks.toml"
 remote_name="${1:-origin}"
 
 # ---------------------------------------------------------------------------
+# 0) Read the ref list ONCE.
+#
+# git hands pre-push the outgoing refs on stdin, and stdin can only be consumed
+# once. Both the protected-branch check below and `git lfs pre-push` at the end
+# need it, so capture it here and feed each from the variable. Reading it
+# straight into the loop is what would leave git-lfs with nothing to upload.
+# ---------------------------------------------------------------------------
+REF_LIST="$(cat)"
+
+# ---------------------------------------------------------------------------
 # 1) Never push straight to a protected branch. Git Flow goes through a PR.
 # ---------------------------------------------------------------------------
 while read -r _local_ref _local_sha remote_ref _remote_sha; do
@@ -25,7 +35,7 @@ while read -r _local_ref _local_sha remote_ref _remote_sha; do
             exit 1
             ;;
     esac
-done
+done <<< "$REF_LIST"
 
 # ---------------------------------------------------------------------------
 # 2) Work out what is actually being pushed.
@@ -109,6 +119,26 @@ if [ -s "$msgfile" ]; then
         echo "without rewriting history. Amend or rebase before pushing." >&2
         exit 1
     fi
+fi
+
+# ---------------------------------------------------------------------------
+# 5) Hand the ref list to git-lfs.
+#
+# `git lfs install` writes its own pre-push hook into core.hooksPath -- which is
+# THIS directory -- and it only refuses when a hook it recognises is already
+# there. Check out a commit that predates this file and the hook vanishes; the
+# next LFS command installs its own three-line stub in its place, and nothing is
+# scanning for PHI any more. That happened during the 0.9.0 release and was
+# invisible until someone listed the directory.
+#
+# Delegating here means LFS never needs to install anything, so the two cannot
+# clobber each other -- and `git push` uploads LFS objects again by itself,
+# instead of needing a separate `git lfs push --all`.
+#
+# Deliberately last: nothing should be uploaded if a check above would block.
+# ---------------------------------------------------------------------------
+if command -v git-lfs >/dev/null 2>&1; then
+    printf '%s\n' "$REF_LIST" | git lfs pre-push "$@"
 fi
 
 exit 0

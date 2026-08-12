@@ -314,3 +314,53 @@ def real_pon():
     if pon.exists():
         return pon
     pytest.skip("Real PON fixture not available")
+
+
+# =============================================================================
+# Stale extension warning
+# =============================================================================
+#
+# `src/krewlyzer/_core*.so` is gitignored and built by `maturin develop`. Python
+# imports whatever was built last, so after any rust/src/ change this suite is
+# testing the PREVIOUS binary -- it passes, and proves nothing about the code you
+# just wrote. `cargo test` reads the source directly, which is why the two can
+# disagree and why Python passing is the weaker signal.
+#
+# CLAUDE.md and AGENTS.md both state this, and prose cannot enforce it. This is
+# in conftest rather than a per-tool hook deliberately: it fires for a human, for
+# CI, and for any agent, which a Claude-only hook would not.
+#
+# A WARNING, never a failure. The comparison is mtime-based, and `git checkout`
+# rewrites mtimes without changing content, so a branch switch produces a
+# false positive. A gate that cries wolf gets ignored -- which is precisely the
+# failure it exists to prevent.
+
+
+def pytest_sessionstart(session):  # noqa: ARG001 -- pytest requires the arg
+    import glob
+    import os
+
+    root = Path(__file__).resolve().parent.parent
+    built = sorted(glob.glob(str(root / "src" / "krewlyzer" / "_core*.so")))
+    rust_src = root / "rust" / "src"
+    if not built or not rust_src.is_dir():
+        return  # no extension built, or a source-only checkout: nothing to compare
+
+    so_mtime = os.path.getmtime(built[0])
+    sources = list(rust_src.rglob("*.rs"))
+    if not sources:
+        return
+    newest = max(sources, key=lambda p: p.stat().st_mtime)
+    if newest.stat().st_mtime <= so_mtime:
+        return
+
+    print(
+        "\n"
+        f"  WARNING: {newest.relative_to(root)} is newer than "
+        f"{Path(built[0]).name}.\n"
+        "  These tests import the previously built extension, so a Rust change\n"
+        "  is NOT under test. Rebuild, then re-run:\n"
+        "      maturin develop --release --manifest-path rust/Cargo.toml\n"
+        "  (A git checkout rewrites mtimes, so this can fire without a real\n"
+        "  source change -- rebuild anyway if you are about to trust a result.)\n"
+    )

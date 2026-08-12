@@ -159,7 +159,8 @@ def check_pon_version(recorded: str, path_name: str = "PON") -> Optional[str]:
     if version is None:
         return (
             f"{path_name} records no usable krewlyzer_version "
-            f"({recorded!r}). Every PON built before 0.9.0 carries defects "
+            f"({recorded!r}). Every PON built before "
+            f"{format_version(MIN_PON_VERSION)} carries defects "
             "that change what its z-scores mean, and without a version there "
             "is no way to tell one apart. Rebuild it with build-pon, or stamp "
             f"a known-good model with `krewlyzer stamp-pon`. To score against "

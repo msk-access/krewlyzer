@@ -1383,27 +1383,69 @@ git push -u origin release/X.Y.Z
 
 ## Phase 5: Finalize Release
 
-After review and approval:
+Open a PR from the release branch into `main` and get it reviewed. `main` has no
+`pull_request` rule, so GitHub will report `BLOCKED` from the `update` rule while
+an admin merge still goes through — that status is not a real blocker.
+
+**Merge with a merge commit, never squash.** The tag sits on this history; a
+squash flattens the release branch into one commit and the `--no-ff` shape the
+rest of this guide assumes is gone.
 
 ```bash
-# Merge to main
+# After the PR is merged, tag the merge commit on main
 git checkout main
 git pull origin main
-git merge --no-ff release/X.Y.Z -m "Release X.Y.Z"
 
-# Create annotated tag
+# Confirm you are tagging the right thing before you publish anything
+grep -h '"X.Y.Z"' pyproject.toml rust/Cargo.toml src/krewlyzer/__init__.py | wc -l   # expect 3
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet                     # expect 0 findings
+
 git tag -a X.Y.Z -m "Release X.Y.Z"
-
-# Push main and tag (triggers CI release)
-git push origin main
 git push origin X.Y.Z
+```
 
-# Merge back to develop
-git checkout develop
-git merge --no-ff release/X.Y.Z -m "Merge release/X.Y.Z back to develop"
-git push origin develop
+Pushing the tag triggers `release.yml`, which **publishes to PyPI and pushes the
+container**. PyPI cannot be un-published, only yanked — so verify before pushing
+the tag, not after.
 
-# Delete release branch
+### Sync develop: merge `main`, not the release branch
+
+```bash
+# Open a PR: base develop, head main  (develop requires one approval)
+gh pr create --base develop --head main --title "Merge main back to develop after X.Y.Z"
+```
+
+Git Flow's usual advice is `git merge --no-ff release/X.Y.Z` into `develop`. **Do
+not do that here.** It leaves each branch holding a merge commit the other lacks,
+so `main` sits permanently one commit ahead and there is no cheap way to ask
+whether everything released is also in `develop`.
+
+Merging `main` instead makes it an ancestor of `develop`, so the question has a
+one-line answer that is valid after every release:
+
+```bash
+git merge-base --is-ancestor main develop && echo "develop has everything released"
+```
+
+The two produce identical *files*; only the graph differs. Adopted during 0.9.0.
+
+### The GitHub Release
+
+`release.yml` creates it, using the CHANGELOG section for the tag as the body.
+Two consequences worth knowing before you tag:
+
+- **A missing CHANGELOG section fails the step.** It runs last, so PyPI and the
+  container are already published if this is what breaks — write the section
+  first.
+- **Long sections are truncated** at a heading boundary with a link to the full
+  entry. 0.9.0's was 103,376 characters against GitHub's 125,000 limit.
+
+Before 0.9.0 this was manual and got forgotten, which is why the guide now says
+so explicitly rather than leaving the Releases page to habit.
+
+### Clean up
+
+```bash
 git branch -d release/X.Y.Z
 git push origin --delete release/X.Y.Z
 ```
@@ -10843,6 +10885,33 @@ See [build-pon CLI](../guides/building-pon.md) for detailed options.
 - Minimum 10 healthy samples recommended
 - Same assay/panel as samples to be processed
 - Same reference genome
+
+### Rebuilding without re-reading the BAMs (`--from-outputs`)
+
+A from-scratch build re-extracts every fragment and takes roughly 15 hours for
+a 47-donor cohort. Most rebuilds do not need that: **aggregation** is what
+changed, not the per-sample features. `--from-outputs` re-aggregates a
+directory of existing `run-all` outputs in minutes per model.
+
+```bash
+krewlyzer build-pon --from-outputs /path/to/runall_dirs \
+    --assay xs1 --genome hg19 -o xs1.all_unique.pon.parquet
+krewlyzer validate-pon xs1.all_unique.pon.parquet
+```
+
+This is how all four bundled models were rebuilt for 0.9.0 when the σ floor and
+the BreakPointMotif baseline changed — both aggregation-stage fixes.
+
+Use it when the **builder** changed. Use a full build when anything upstream of
+it did: the fragment filters, the GC model, or the feature code itself. The
+per-sample directories must still exist and must contain every table the model
+needs, so confirm before relying on it — a cohort cleaned up after its last
+build forces the full path.
+
+> [!NOTE]
+> The cohort digest is computed from the sample list, so re-aggregating the same
+> cohort must leave it **unchanged**. A digest that moves means the inputs moved,
+> not the aggregation — investigate before shipping the model.
 
 ## Using PON in Processing
 
