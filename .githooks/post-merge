@@ -1,0 +1,11 @@
+#!/bin/sh
+# Tracked on purpose. `git lfs install` writes this hook into core.hooksPath --
+# which is .githooks/ here -- and while installing it, it will also replace a
+# pre-push it does not recognise. Keeping LFS's own hooks in the repo means the
+# install never needs to run, so it never gets the chance to clobber the PHI
+# guard in pre-push. See scripts/check_phi_guard.sh assertion 6.
+command -v git-lfs >/dev/null 2>&1 || {
+    printf >&2 "\n%s\n\n" "This repository is configured for Git LFS but 'git-lfs' was not found on your path. Install it (brew install git-lfs) -- the bundled PON and reference data are LFS objects."
+    exit 2
+}
+git lfs post-merge "$@"
