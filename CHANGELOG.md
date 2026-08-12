@@ -48,6 +48,34 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`validate-output --expect`** — reconcile the samples you meant to run
+  against the ones that exist. Everything else in the gate validates the
+  samples it *finds*, and two failure modes leave nothing to find:
+
+  | | before |
+  |---|---|
+  | No output directory at all | invisible |
+  | Directory exists, no Parquet written | **invisible** — `discover_samples` skips it |
+  | Parquet present, no completion marker | ERROR ✓ |
+
+  A job killed between `mkdir` and its first write was indistinguishable from
+  one never submitted. At a handful of samples that is obvious; across a
+  16,000-sample cohort it is not, and the consumer reads a short cohort without
+  knowing it was short.
+
+  Takes a Nextflow samplesheet (using its `sample` column) or a plain list. The
+  two absences are reported separately, because an empty directory means the
+  job ran and its logs exist while a missing one usually means it was never
+  submitted. An unexpected sample is a WARN, not an ERROR — it corrupts
+  nothing, but it usually means an identifier that does not round-trip, which
+  makes every other count unreliable. A CSV without a `sample` column is an
+  error rather than a guess at the first column: reconciling against the wrong
+  field reports every sample missing, which reads as a catastrophic run failure
+  instead of a malformed input.
+
+  The summary table shows counts; the `--json-report` names every affected
+  sample, which is the split that keeps it readable at cohort scale.
+
 - **A check that a release actually published.** Every other gate verifies the
   repository; nothing asked the registries whether the release landed. 0.9.0
   passed every workflow while the docs site served 0.8.3 and no GitHub Release

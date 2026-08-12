@@ -15,6 +15,48 @@ from .gate import Fingerprint, Result, evaluate_cohort, run
 console = Console(stderr=True)
 
 
+def read_expected(path: Path) -> List[str]:
+    """Sample ids from a Nextflow samplesheet or a plain one-per-line list.
+
+    Both, because the two are used at different moments: the samplesheet is the
+    thing that was actually run and cannot drift from it, while a plain list is
+    what you have when the cohort was assembled some other way.
+
+    A CSV *without* a ``sample`` column is an error rather than a fallback to
+    "first column". Guessing there would silently reconcile against the wrong
+    field and report every sample missing, which reads as a catastrophic run
+    failure instead of a malformed input.
+    """
+    import csv
+
+    text = path.read_text().splitlines()
+    if not text:
+        raise typer.BadParameter(f"{path} is empty")
+
+    header = text[0]
+    if "," in header:
+        reader = csv.DictReader(text)
+        if reader.fieldnames and "sample" in reader.fieldnames:
+            ids = [
+                row["sample"].strip()
+                for row in reader
+                if row.get("sample") and row["sample"].strip()
+            ]
+            if not ids:
+                raise typer.BadParameter(f"{path} has a 'sample' column but no rows")
+            return ids
+        raise typer.BadParameter(
+            f"{path} looks like a CSV but has no 'sample' column "
+            f"(found: {', '.join(reader.fieldnames or []) or 'nothing'}). "
+            "Pass a plain list of ids instead, one per line."
+        )
+
+    ids = [line.strip() for line in text if line.strip() and not line.startswith("#")]
+    if not ids:
+        raise typer.BadParameter(f"{path} contains no sample ids")
+    return ids
+
+
 def validate_output(
     results_dir: Path = typer.Argument(
         ...,
@@ -41,6 +83,15 @@ def validate_output(
         "pass. Kilobytes per sample; this is what lets a cohort be checked "
         "without re-reading it.",
     ),
+    expect: Optional[Path] = typer.Option(
+        None,
+        "--expect",
+        exists=True,
+        help="The samples that were meant to run: a Nextflow samplesheet (uses "
+        "its 'sample' column) or a plain list, one id per line. Without this, "
+        "a sample that produced nothing is invisible -- there is no directory "
+        "to find, so the cohort is simply smaller than intended.",
+    ),
 ) -> None:
     """Validate outputs against the downstream contract.
 
@@ -56,7 +107,16 @@ def validate_output(
     """
     from krewlyzer import __version__
 
-    result = run(results_dir, min_samples=min_samples, only_samples=sample_id)
+    expected = read_expected(expect) if expect is not None else None
+    if expected is not None:
+        console.print(f"[dim]expecting {len(expected)} sample(s) from {expect}[/dim]")
+
+    result = run(
+        results_dir,
+        min_samples=min_samples,
+        only_samples=sample_id,
+        expected_samples=expected,
+    )
     report.render(result, console)
 
     if json_report is not None:
