@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3089,6 +3089,21 @@
 <p>All notable changes to this project will be documented in this file.</p>
 <h2 id="unreleased">[Unreleased]</h2>
 <h3 id="fixed">Fixed</h3>
+<ul>
+<li><strong>The Nextflow pipeline reported itself as 0.8.3.</strong> <code>manifest.version</code> sat at
+  the previous release through all of 0.9.0. Nothing functional depended on it,
+  which is why it drifted — but Nextflow writes it into every execution report,
+  trace file and Tower entry, so a 16,000-sample cohort would have been labelled
+  0.8.3 in its own provenance while running 0.9.0 containers.</li>
+</ul>
+<p>The Phase 2 version bump is a <code>sed</code> over container tags in the modules and
+  never matched this line. The release guide compounded it by listing
+  <code>nextflow.config</code> under "container tag" — there is no container pin in that
+  file at all. Both corrected, and <code>tests/unit/test_nextflow_version.py</code> now
+  pins <code>manifest.version</code> and every module container tag to <code>__version__</code>.</p>
+<p>The container half matters more than the manifest: a stale pin there does not
+  mislabel a run, it executes the previous release's defects under this
+  version's name.</p>
 <ul>
 <li><strong>The documentation site stopped publishing on 2026-07-31 and nobody noticed
   for a whole release.</strong> <code>ba13fd4</code> (#32) replaced the docs workflow with the
