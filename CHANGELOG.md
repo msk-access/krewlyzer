@@ -157,6 +157,27 @@ All notable changes to this project will be documented in this file.
   never run for it — silent cohort loss reintroduced one stage earlier than
   `--expect` can see it. The metas ride through the process so re-pairing is a
   `map`, preserving the join-free streaming this workflow is built around.
+- **RUNALL now retries up a partition ladder instead of terminating the run.**
+  Nothing set `errorStrategy` or `maxRetries`, so Nextflow's default
+  `terminate` applied: one bad sample out of 16,552 stopped everything. And
+  because `task.attempt` never exceeds 1 without a retry policy, **every
+  resource ramp in the config was dead code** — including the one commented
+  "doubles on retry".
+
+  | attempt | queue | time | memory |
+  |---|---|---|---|
+  | 1 | `cmobic_short` | 3h | 32 GB |
+  | 2 | `cmobic_cpu` | 24h | 64 GB |
+
+  Retry is gated on exit 137/140/143 — SLURM's OOM and wall-clock kills — so a
+  corrupt BAM that fails in seconds does not climb to a 7-day partition to fail
+  again. `cpushort` is deliberately not a rung: it has the idle capacity, but
+  these are 8-CPU multi-hour jobs and `--qos=priority` does not apply there.
+
+  Once the ladder is exhausted the sample is **ignored**, not terminated: the
+  run completes and `validate-output --expect` names exactly what was dropped.
+  That pairing is the design — `ignore` alone would be silent cohort loss, and
+  `terminate` at this scale means one sample can cost the run.
 
 - **`check_phi_guard.sh` runs in 2.3s instead of ~100s.** `git archive` applies
   the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
