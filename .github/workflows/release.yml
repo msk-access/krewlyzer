@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       id-token: write  # Required for PyPI Trusted Publisher OIDC
-      contents: read
+      contents: write  # Required to create the GitHub Release
       packages: write
 
     steps:
@@ -103,6 +103,62 @@ jobs:
         annotations: |
           org.opencontainers.image.title=krewlyzer
           org.opencontainers.image.description=A comprehensive toolkit for ctDNA fragmentomics analysis from GRCh37 aligned BAM files
+
+    # -----------------------------------------------------------------------
+    # Create the GitHub Release.
+    #
+    # Until 0.9.0 this workflow published to PyPI and GHCR and stopped, so the
+    # Releases page was maintained by hand -- which meant a tag could go fully
+    # green and leave nothing there at all. That is what happened for 0.9.0.
+    #
+    # Notes come from the CHANGELOG section for this tag rather than generated
+    # commit titles: the section is written deliberately and is what a reader
+    # should see. Last so it only appears once PyPI and the container are up,
+    # and a Release without artefacts is never published.
+    # -----------------------------------------------------------------------
+    - name: Extract the CHANGELOG section for this tag
+      if: startsWith(github.ref, 'refs/tags/')
+      run: |
+        python - <<'PY' > release-notes.md
+        import os, re, sys
+        tag = os.environ["GITHUB_REF_NAME"]
+        text = open("CHANGELOG.md", encoding="utf-8").read()
+        # Headings look like "## [0.9.0] - 2026-08-11"; take up to the next "## [".
+        start = re.search(rf"^## \[{re.escape(tag)}\].*$", text, re.M)
+        if not start:
+            sys.exit(f"no CHANGELOG section for {tag} -- add one before tagging")
+        rest = text[start.end():]
+        nxt = re.search(r"^## \[", rest, re.M)
+        body = (rest[:nxt.start()] if nxt else rest).strip()
+        if not body:
+            sys.exit(f"the CHANGELOG section for {tag} is empty")
+
+        # GitHub rejects a body over 125,000 characters. 0.9.0's section was
+        # 103,376 -- inside the limit but only by 17%, so the next big release
+        # would fail at the last step of a run that had already published to
+        # PyPI. Cut at a heading boundary so the notes never end mid-sentence.
+        LIMIT = 60_000
+        if len(body) > LIMIT:
+            cut = body.rfind("\n### ", 0, LIMIT)
+            if cut == -1:
+                cut = body.rfind("\n\n", 0, LIMIT)
+            body = body[: cut if cut != -1 else LIMIT].rstrip()
+            body += (
+                f"\n\n---\n\nNotes truncated. Read the full {tag} entry in "
+                f"[CHANGELOG.md](https://github.com/{os.environ['GITHUB_REPOSITORY']}"
+                f"/blob/{tag}/CHANGELOG.md)."
+            )
+        print(body)
+        PY
+        echo "--- notes: $(wc -c < release-notes.md) chars ---"
+
+    - name: Create the GitHub Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      with:
+        name: ${{ github.ref_name }}
+        body_path: release-notes.md
+        make_latest: true
           org.opencontainers.image.url=https://github.com/msk-access/krewlyzer
           org.opencontainers.image.source=https://github.com/msk-access/krewlyzer
           org.opencontainers.image.vendor=MSK-ACCESS
