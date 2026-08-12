@@ -3257,7 +3257,45 @@
   with no file would be dropped by the caller's re-pairing and RUNALL would
   never run for it — silent cohort loss reintroduced one stage earlier than
   <code>--expect</code> can see it. The metas ride through the process so re-pairing is a
-  <code>map</code>, preserving the join-free streaming this workflow is built around.</p>
+  <code>map</code>, preserving the join-free streaming this workflow is built around.
+- <strong>RUNALL now retries up a partition ladder instead of terminating the run.</strong>
+  Nothing set <code>errorStrategy</code> or <code>maxRetries</code>, so Nextflow's default
+  <code>terminate</code> applied: one bad sample out of 16,552 stopped everything. And
+  because <code>task.attempt</code> never exceeds 1 without a retry policy, <strong>every
+  resource ramp in the config was dead code</strong> — including the one commented
+  "doubles on retry".</p>
+<table>
+<thead>
+<tr>
+<th>attempt</th>
+<th>queue</th>
+<th>time</th>
+<th>memory</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>cmobic_short</code></td>
+<td>3h</td>
+<td>32 GB</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>cmobic_cpu</code></td>
+<td>24h</td>
+<td>64 GB</td>
+</tr>
+</tbody>
+</table>
+<p>Retry is gated on exit 137/140/143 — SLURM's OOM and wall-clock kills — so a
+  corrupt <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> that fails in seconds does not climb to a 7-day partition to fail
+  again. <code>cpushort</code> is deliberately not a rung: it has the idle capacity, but
+  these are 8-CPU multi-hour jobs and <code>--qos=priority</code> does not apply there.</p>
+<p>Once the ladder is exhausted the sample is <strong>ignored</strong>, not terminated: the
+  run completes and <code>validate-output --expect</code> names exactly what was dropped.
+  That pairing is the design — <code>ignore</code> alone would be silent cohort loss, and
+  <code>terminate</code> at this scale means one sample can cost the run.</p>
 <ul>
 <li>
 <p><strong><code>check_phi_guard.sh</code> runs in 2.3s instead of ~100s.</strong> <code>git archive</code> applies
