@@ -1,0 +1,82 @@
+name: Published artifacts
+
+# Checks reality, not configuration.
+#
+# Every other workflow verifies that the repository is correct. This one asks
+# the registries whether the newest release actually landed -- PyPI, GHCR, the
+# docs site's `stable` alias, and the GitHub Release.
+#
+# It exists because 0.9.0 was tagged and published to PyPI and GHCR while the
+# docs site kept serving 0.8.3 and no Release object was ever created. Both
+# were invisible: every workflow was green, because none of them looked outside
+# the repository. A config-level test cannot cover this -- one failure was a
+# deleted step, the other a step that never existed, and neither is detectable
+# by checking that some *other* step still runs.
+on:
+  # The schedule is the load-bearing trigger. A post-release check alone would
+  # not have caught the docs: the deploy had been deleted three weeks before
+  # 0.9.0, so the release did exactly what its configuration said, and the
+  # damage only became visible when someone opened the page.
+  schedule:
+    - cron: '0 9 * * 1'  # Mondays 09:00 UTC
+
+  # After the Release workflow finishes, whatever its outcome. `workflow_run`
+  # rather than a tag trigger with a sleep: publishing takes ~28 minutes, and
+  # guessing at that with `sleep` both wastes a runner and reports every
+  # release broken whenever it runs long.
+  #
+  # Not filtered on conclusion on purpose -- a Release that failed halfway is
+  # exactly when you want to know which artifacts made it out.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Version to check (default: newest release tag)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Newest tag is published everywhere
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Tags are how the script decides what "newest" is. Without them it
+          # falls back to the GitHub API -- which works, but makes the run
+          # depend on a network call it does not need.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      # Pin the version being checked, so a run triggered by 0.9.1 cannot pass
+      # by checking 0.9.0. For a workflow_run, head_branch carries the tag name
+      # of the run that triggered it.
+      - name: Decide which version to check
+        id: target
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+          TRIGGER_REF: ${{ github.event.workflow_run.head_branch }}
+          TRIGGER_EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          if [ -n "${DISPATCH_TAG}" ]; then
+            echo "args=--tag ${DISPATCH_TAG}" >> "$GITHUB_OUTPUT"
+          elif [ "${TRIGGER_EVENT}" = "push" ] && [ -n "${TRIGGER_REF}" ]; then
+            # A Release run is only ever triggered by a tag, so head_branch is
+            # the tag. Guarded anyway: if that ever stops holding, fall through
+            # to "newest" rather than checking a branch name as a version.
+            echo "args=--tag ${TRIGGER_REF}" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check published artifacts
+        run: python scripts/check_release_artifacts.py ${{ steps.target.outputs.args }}

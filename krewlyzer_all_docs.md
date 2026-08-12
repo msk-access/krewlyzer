@@ -1443,6 +1443,21 @@ Two consequences worth knowing before you tag:
 Before 0.9.0 this was manual and got forgotten, which is why the guide now says
 so explicitly rather than leaving the Releases page to habit.
 
+### Confirm it actually published
+
+The `Published artifacts` workflow runs automatically once `Release` finishes
+and asks the registries directly — PyPI, GHCR, the docs site's `stable` alias,
+and the Release object. Same check by hand:
+
+```bash
+python scripts/check_release_artifacts.py
+```
+
+It exists because 0.9.0 passed every workflow while the docs site served 0.8.3
+and no Release object existed. Green CI means the steps that *are* configured
+ran; it says nothing about steps that were deleted or never written. Exit 2 is
+"could not reach a registry" and is not a pass — rerun it.
+
 ### Clean up
 
 ```bash

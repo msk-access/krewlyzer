@@ -48,6 +48,24 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **A check that a release actually published.** Every other gate verifies the
+  repository; nothing asked the registries whether the release landed. 0.9.0
+  passed every workflow while the docs site served 0.8.3 and no GitHub Release
+  existed — both invisible, because green CI only means the configured steps
+  ran, not that the steps you need exist.
+
+  `scripts/check_release_artifacts.py` compares the newest tag against PyPI,
+  GHCR, the docs `stable` alias, and the Release object. It runs weekly, and
+  after the `Release` workflow finishes via `workflow_run` — not a tag trigger
+  with a `sleep`, which would idle a runner for 40 minutes and cry wolf
+  whenever publishing ran long. The weekly schedule is the load-bearing one: a
+  post-release check alone would not have caught the docs, because that deploy
+  had been deleted three weeks *before* 0.9.0.
+
+  Three exit codes, because "could not reach the registry" is not "in sync":
+  0 matches, 1 stale, 2 unreachable. A network failure reported as success is
+  the silent pass the whole script exists to prevent.
+
 - **`check_phi_guard.sh` assertion 6** — every tracked hook exists, matches the
   staged version, and `pre-push` still delegates to git-lfs. Compared against
   the index rather than `HEAD`, so a deliberate edit passes while an

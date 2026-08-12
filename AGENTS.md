@@ -75,6 +75,7 @@ demand, so a rule nobody opens is a rule that does not exist.
 | Before blessing a cohort or a release | `KREWLYZER_TEST_CORPUS=<dir> pytest tests/real_data` (local only) | `docs/development/release-guide.md` |
 | PHI rules touched | `bash scripts/check_phi_guard.sh` | invariant #4 below |
 | Build or QC tooling | — | `rules/development.md` |
+| After a release | `python scripts/check_release_artifacts.py` | — |
 
 Order matters: rebuild the extension before `pytest`, or you are testing the
 previous binary. What each gate is blind to, and why a passing test proves
