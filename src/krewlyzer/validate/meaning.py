@@ -93,7 +93,7 @@ MEANINGS: Dict[str, Meaning] = {
         what=(
             "Look at where the mode sits and how heavy the sub-150 bp shoulder is. Summing across arms gives the genome-wide density; comparing arms surfaces regional differences. "
             "With a PON, each bin also carries `{bin}_logR` -- log2 of the sample count over the healthy expectation for **that** bin -- so a positive value means enrichment at that size relative to healthy plasma. "
-            "`pon_stability` summarises how tightly the cohort agreed across the arm's bins (inverse mean variance): a low value means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. It is NaN when no sigma could be measured, which is the honest reading rather than a confident 0.990."
+            "`pon_stability` summarises how tightly the healthy cohort agreed across the arm's bins, as `1 / (1 + mean(CV^2))` with CV = sigma/expected. It runs in (0, 1]: 1.0 is exact agreement, lower means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. Relative rather than absolute because FSD sigma is in fragment counts -- an unnormalised inverse variance underflowed to 0.000000 on every arm. The between-arm spread is only a few percent but it is reproducible (split-half reliability 0.91-0.999), and it is comparable across assays. NaN when no sigma was measurable at all."
         ),
     ),
     ".FSD.ontarget.parquet": Meaning(

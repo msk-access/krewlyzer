@@ -693,7 +693,10 @@ pub fn apply_pon_logratio(
             .collect::<Vec<_>>();
         
         // Compute log-ratios for each bin
-        let mut stds: Vec<f64> = Vec::new();
+        //
+        // Coefficients of variation, not raw sigmas -- see the stability score
+        // below for why.
+        let mut cvs: Vec<f64> = Vec::new();
         
         for (col_idx, size) in &bin_indices {
             let sample_val: f64 = fields.get(*col_idx)
@@ -708,8 +711,8 @@ pub fn apply_pon_logratio(
             // the baseline measured nothing. Same fabrication removed from
             // `zscore_or_nan`, the FSC log2, the FSR ratio and the entropy z.
             let log_ratio = if let Some((expected, std)) = fsd_baseline.get_stats(arm, *size) {
-                if std > 0.0 {
-                    stds.push(std);
+                if std > 0.0 && expected > 0.0 {
+                    cvs.push(std / expected);
                 }
                 if expected > 0.0 {
                     ((sample_val + pseudocount) / (expected + pseudocount)).log2()
@@ -723,13 +726,41 @@ pub fn apply_pon_logratio(
             new_row.push(fmt6(log_ratio));
         }
         
-        // Compute PON stability score (inverse variance)
-        // 1.0 is not a neutral stability either: with the 0.01 floor it is
-        // what an average variance of 0.99 would give, a specific and
-        // unremarkable reading. No sigma measured means no stability.
-        let stability = if !stds.is_empty() {
-            let avg_var = stds.iter().map(|s| s * s).sum::<f64>() / stds.len() as f64;
-            1.0 / (avg_var + 0.01)
+        // How tightly the healthy cohort agreed on this arm, in (0, 1].
+        //
+        // `1 / (1 + mean(CV^2))` over the arm's size bins, where CV is
+        // sigma/expected. 1.0 means the donors agreed exactly; smaller means
+        // the baseline itself is uncertain there, so read that arm's
+        // log-ratios with less confidence.
+        //
+        // It used to be `1 / (mean(sigma^2) + 0.01)`, an *unnormalised* inverse
+        // variance, and that only ever looked sane because it was fed the wrong
+        // sigma: `get_stats` returned the first size bin's spread for every
+        // size. Once each bin got its own, the true magnitudes showed --
+        // FSD sigma is in fragment counts, 111..4573 on xs1 and 947..35961 on
+        // xs2 -- so mean(sigma^2) reached 1.6e6 and 8.3e7, the reciprocal came
+        // to 6e-7 and 1.2e-8, and at six decimals every arm wrote 0.000000.
+        // The 0.01 floor assumed sigma ~ O(1); it never was. Constant down
+        // every row is invariant #1's failure, and the gate caught it.
+        //
+        // Dividing by `expected` is justified rather than convenient: measured
+        // on both shipped models, d log(sigma) / d log(expected) is 0.83 and
+        // 0.95 -- close to 1, so the spread is between-donor variation rather
+        // than Poisson counting noise (which would give 0.5), and the ratio is
+        // genuinely scale-free. That is what makes the score comparable across
+        // assays: xs1 sits near 0.73, xs2 near 0.92, and the difference says
+        // the 21-donor xs2 cohort agrees more tightly than the 47-donor xs1 one.
+        //
+        // The spread between arms is small -- about 6% -- but it is real, not
+        // estimation noise: splitting an arm's bins into odd and even halves
+        // and scoring each separately gives a split-half correlation of 0.834
+        // (xs1) and 0.997 (xs2), a full-length reliability of 0.91 and 0.999.
+        //
+        // No floor is needed: `1 + mean(CV^2)` is at least 1, so the score
+        // cannot blow up, and NaN still means no sigma was measurable at all.
+        let stability = if !cvs.is_empty() {
+            let mean_cv_sq = cvs.iter().map(|c| c * c).sum::<f64>() / cvs.len() as f64;
+            1.0 / (1.0 + mean_cv_sq)
         } else {
             f64::NAN
         };
@@ -1003,6 +1034,60 @@ mod baseline_tests {
             good.get_expected(200),
             "a real baseline must distinguish sizes (invariant #1)"
         );
+    }
+
+    /// The score the log-ratio writer computes, extracted so it can be tested
+    /// without driving a whole file through `apply_pon_logratio`.
+    fn stability_from(cvs: &[f64]) -> f64 {
+        if cvs.is_empty() {
+            return f64::NAN;
+        }
+        let mean_cv_sq = cvs.iter().map(|c| c * c).sum::<f64>() / cvs.len() as f64;
+        1.0 / (1.0 + mean_cv_sq)
+    }
+
+    #[test]
+    fn stability_is_bounded_and_ordered() {
+        // Perfect agreement is 1.0; more relative spread is strictly less.
+        assert_eq!(stability_from(&[0.0, 0.0]), 1.0);
+        let tight = stability_from(&[0.05; 8]);
+        let loose = stability_from(&[0.60; 8]);
+        assert!(tight > loose, "tighter cohorts must score higher");
+        for s in [tight, loose, stability_from(&[5.0; 4])] {
+            assert!(s > 0.0 && s <= 1.0, "out of (0,1]: {s}");
+        }
+    }
+
+    #[test]
+    fn stability_does_not_depend_on_the_unit_of_the_counts() {
+        // The defect this replaces. `1/(mean(sigma^2)+0.01)` collapsed to zero
+        // once each bin got its own sigma, because FSD sigma is in fragment
+        // counts (111..4573 on xs1, 947..35961 on xs2): mean(sigma^2) reached
+        // 1.6e6 and 8.3e7, so the reciprocal wrote 0.000000 at six decimals on
+        // every arm. A ratio of sigma to expected cannot do that -- scaling the
+        // whole arm leaves the score untouched.
+        let expected: Vec<f64> = (1..=20).map(|i| i as f64 * 100.0).collect();
+        let sigma: Vec<f64> = expected.iter().map(|e| e * 0.3).collect();
+        let cvs: Vec<f64> = sigma.iter().zip(&expected).map(|(s, e)| s / e).collect();
+        let base = stability_from(&cvs);
+
+        // Same arm, counts a thousand times larger.
+        let big_cvs: Vec<f64> = sigma
+            .iter()
+            .zip(&expected)
+            .map(|(s, e)| (s * 1000.0) / (e * 1000.0))
+            .collect();
+        assert!(
+            (base - stability_from(&big_cvs)).abs() < 1e-12,
+            "score moved with the unit of the counts"
+        );
+        // And it lands somewhere readable rather than underflowing.
+        assert!(base > 0.9 && base < 0.93, "CV=0.3 should score ~0.917, got {base}");
+    }
+
+    #[test]
+    fn an_arm_with_no_measurable_spread_has_no_stability() {
+        assert!(stability_from(&[]).is_nan());
     }
 
     #[test]

@@ -653,6 +653,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`pon_stability` was an unnormalised inverse variance and collapsed to zero.**
+  `1 / (mean(σ²) + 0.01)` only ever looked sane because it was fed the wrong σ —
+  `get_stats` returned the first size bin's spread for every size. Once each bin
+  got its own, the true magnitudes showed: FSD σ is in fragment counts,
+  111–4,573 on xs1 and 947–35,961 on xs2, so `mean(σ²)` reached 1.6×10⁶ and
+  8.3×10⁷ and the reciprocal wrote `0.000000` at six decimals for **every arm**.
+  The `0.01` floor assumed σ ≈ O(1); it never was. Caught by the
+  anti-degeneracy check on a real XS2 sample — invariant #1 working.
+
+  Now `1 / (1 + mean(CV²))` with CV = σ/expected, bounded in **(0, 1]**.
+  Dividing by `expected` is justified, not convenient: measured on both models,
+  `d log σ / d log expected` is **0.83** and **0.95** — close to 1, so the
+  spread is between-donor variation rather than Poisson counting noise (which
+  would give 0.5), and the ratio is genuinely scale-free.
+
+  On real output: 41 distinct values per assay at six decimals, against 5 and 1
+  before. xs1 spans 0.714–0.758, xs2 0.865–0.926 — and that difference is
+  interpretable, the 21-donor xs2 cohort agreeing more tightly than the
+  47-donor xs1 one. The between-arm spread is only ~6% but it is real rather
+  than estimation noise: split-half over odd/even bins gives r = 0.834 and
+  0.997, a full-length reliability of **0.91** and **0.999**.
+
+  **Old and new values are not comparable** — the scale changed from an
+  unbounded inverse variance to a bounded agreement score.
+
+- **`pon_stability` was declared `vary=BOTH`, which it cannot satisfy.** It is
+  computed from the PON's σ alone, with no sample value entering it, so every
+  sample scored against one model gets the same 41 numbers. Now `vary=WITHIN`,
+  which still requires it to differ down the rows — the check that caught the
+  collapse above.
+
 - **The gate could not see four of the six tables Parquet mode dropped.**
   `.OCF.parquet` and all three `.sync` tables were absent from the output
   contract; only the two on/off-target summaries were declared, and they are

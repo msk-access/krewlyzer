@@ -204,7 +204,7 @@ FSD measures how many fragments of each size (65–400 bp, 5 bp bins) come from 
 | Column | Type | Description |
 |--------|------|-------------|
 | `{bin}_logR` | float | log₂ of the sample count over the healthy expectation **for that bin** — e.g. `65-69_logR`. NaN where the arm is absent from the PON or the baseline measured nothing. |
-| `pon_stability` | float | Inverse mean variance of the cohort across the arm's bins: how tightly the healthy samples agreed there. Low means the baseline itself is uncertain, so read that arm's log-ratios with less confidence. NaN when no σ was measurable — not a confident 0.990. |
+| `pon_stability` | float | How tightly the healthy cohort agreed across the arm's bins: `1 / (1 + mean(CV²))` with CV = σ/expected, so it runs in **(0, 1]**. 1.0 is exact agreement; lower means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. NaN when no σ was measurable at all. Identical for every sample scored against the same PON — it is a property of the model, not the sample. |
 
 !!! warning "Fixed in 0.9.0 — re-run any sample normalised by an earlier build"
     Before 0.9.0 every `_logR` column was computed against the **last** size bin's
@@ -213,7 +213,11 @@ FSD measures how many fragments of each size (65–400 bp, 5 bp bins) come from 
     41/41 arms matched the last-bin baseline exactly. The correction is large — a
     median log₂ shift of −1.05 and a maximum |Δ| of 5.10. `pon_stability` was
     separately computed from one bin's σ for the whole arm, wrong by a median of
-    4709%. The PONs are unaffected; only samples need re-running.
+    4709%, **and its scale changed in 0.9.0**: it was an unnormalised inverse
+    variance that underflowed to `0.000000` on every arm once each bin got its
+    own σ, and is now the bounded agreement score described above. Old and new
+    values are not comparable. The PONs are unaffected; only samples need
+    re-running.
 
 #### Purpose & Use Cases
 

@@ -215,7 +215,15 @@ _WPS_COLS = (
 #: `fsd_only_size_bins` domain check rather than being enumerated here --
 #: `pon_stability` is the one fixed name, and its presence is what says the
 #: log-ratios were computed at all.
-_FSD_PON_COLS: Tuple[ColumnRule, ...] = (pon_metric("pon_stability", vary=Vary.BOTH),)
+_FSD_PON_COLS: Tuple[ColumnRule, ...] = (
+    # WITHIN, not BOTH. `pon_stability` is computed from the PON's sigma alone
+    # -- no sample value enters it -- so every sample scored against one model
+    # gets the same 41 numbers. Requiring cross-sample variation would fail any
+    # cohort built the normal way. It must still vary *down the rows*: that is
+    # the check that caught the old unnormalised formula writing 0.000000 for
+    # every arm.
+    pon_metric("pon_stability", vary=Vary.WITHIN),
+)
 
 #: What WPS PON scoring produces. Undeclared until 0.9.0, which meant the gate
 #: could not tell a scored run from one where the scoring silently vanished --
