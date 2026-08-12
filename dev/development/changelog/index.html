@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3235,6 +3235,29 @@
 </li>
 </ul>
 <h3 id="changed">Changed</h3>
+<ul>
+<li><strong>FILTER_MAF no longer runs once per sample when the MAF is shared.</strong> It
+  scanned the entire cohort MAF, line by line in Python, to extract one
+  sample's rows — so a 16,552-sample run performed 16,552 full scans of the
+  same file, each as its own SLURM job whose scheduling overhead exceeded the
+  work it did. <code>maxForks queue_size.intdiv(2)</code> then reserved <strong>250 of 500
+  slots</strong> for it, upstream of RUNALL, so the opening wave of a run was nothing
+  but MAF filtering and no real work could start. This was the observed queue
+  clog on the 0.8.3 cohort.</li>
+</ul>
+<p>The new <code>SPLIT_MAF</code> does one pass per distinct MAF: <strong>1 job instead of
+  16,552</strong>, and the whole queue freed for RUNALL.</p>
+<p>Batching keys on <strong>(maf, single_sample)</strong>, not the MAF alone — grouping a
+  pass-through sample with a filtered one would apply a single mode to both and
+  silently corrupt one. A sheet with per-sample MAFs yields one task each and
+  behaves exactly as before; samples with no MAF keep FILTER_MAF and its
+  header-only placeholder.</p>
+<p>Every requested sample gets a file, including those with zero matching
+  variants, and <code>SPLIT_MAF</code> exits non-zero if it wrote a short set. A sample
+  with no file would be dropped by the caller's re-pairing and RUNALL would
+  never run for it — silent cohort loss reintroduced one stage earlier than
+  <code>--expect</code> can see it. The metas ride through the process so re-pairing is a
+  <code>map</code>, preserving the join-free streaming this workflow is built around.</p>
 <ul>
 <li>
 <p><strong><code>check_phi_guard.sh</code> runs in 2.3s instead of ~100s.</strong> <code>git archive</code> applies
