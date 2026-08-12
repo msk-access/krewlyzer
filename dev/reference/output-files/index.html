@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -5288,7 +5288,7 @@
 <td>Per-gene <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> + E1</td>
 </tr>
 <tr>
-<td><a href="#ocf-orientation-aware-fragmentation"><code>{s}.OCF.tsv</code></a></td>
+<td><a href="#ocf-orientation-aware-cfdna-fragmentation"><code>{s}.OCF.tsv</code></a></td>
 <td><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr></td>
 <td>Per tissue</td>
 <td>Tissue-of-origin score</td>
@@ -5647,7 +5647,7 @@ signal, use <code>OCF.offtarget.tsv</code> instead.</p>
 <tr>
 <td><code>65-69</code>, <code>70-74</code>, … <code>395-399</code></td>
 <td>float</td>
-<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected fragment count in that 5 bp size bin</td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected fragment count in that 5 bp size bin (67 bins)</td>
 </tr>
 <tr>
 <td><code>total</code></td>
@@ -5656,6 +5656,49 @@ signal, use <code>OCF.offtarget.tsv</code> instead.</p>
 </tr>
 </tbody>
 </table>
+<div class="admonition note">
+<p class="admonition-title"><code>total</code> is not the whole fragment set</p>
+<p>The length <em>filter</em> admits 65–1000 bp, but <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> bins only <code>[65, 400)</code>. Fragments
+of 400 bp and above are counted in neither the bins nor <code>total</code>, so a
+long-fragment fraction computed against <code>total</code> has a denominator that excludes
+them. For the 401–1000 bp mass, use <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>'s <code>ultra_long</code>.</p>
+</div>
+<p><strong>With <code>--pon-model</code>, one log-ratio per bin plus a stability score.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{bin}_logR</code></td>
+<td>float</td>
+<td>log₂ of the sample count over the healthy expectation <strong>for that bin</strong> — e.g. <code>65-69_logR</code>. NaN where the arm is absent from the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> or the baseline measured nothing.</td>
+</tr>
+<tr>
+<td><code>pon_stability</code></td>
+<td>float</td>
+<td>How tightly the healthy cohort agreed across the arm's bins: <code>1 / (1 + mean(CV²))</code> with CV = σ/expected, so it runs in <strong>(0, 1]</strong>. 1.0 is exact agreement; lower means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. NaN when no σ was measurable at all. Identical for every sample scored against the same <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> — it is a property of the model, not the sample.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Fixed in 0.9.0 — re-run any sample normalised by an earlier build</p>
+<p>Before 0.9.0 every <code>_logR</code> column was computed against the <strong>last</strong> size bin's
+expectation rather than its own, because <code>size_bin</code> is stored as a double and the
+reader called <code>get_int</code>, which errors on a Double. Measured on a shipped <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>:
+41/41 arms matched the last-bin baseline exactly. The correction is large — a
+median log₂ shift of −1.05 and a maximum |Δ| of 5.10. <code>pon_stability</code> was
+separately computed from one bin's σ for the whole arm, wrong by a median of
+4709%, <strong>and its scale changed in 0.9.0</strong>: it was an unnormalised inverse
+variance that underflowed to <code>0.000000</code> on every arm once each bin got its
+own σ, and is now the bounded agreement score described above. Old and new
+values are not comparable. The PONs are unaffected; only samples need
+re-running.</p>
+</div>
 <h4 id="purpose-use-cases">Purpose &amp; Use Cases</h4>
 <ul>
 <li><strong>ARM-LEVEL fragmentation fingerprint</strong>: Each arm's histogram reflects the chromatin state of that chromosomal region</li>
@@ -5776,6 +5819,18 @@ signal, use <code>OCF.offtarget.tsv</code> instead.</p>
 <hr>
 <h3 id="fsc-fragment-size-coverage"><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> (Fragment Size Coverage)</h3>
 <p><strong>File:</strong> <code>{sample}.FSC.tsv</code> / <code>{sample}.FSC.ontarget.tsv</code></p>
+<blockquote>
+<p><strong>Changed in 0.9.0.</strong> <code>FSC.ontarget</code> normalises against the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>'s
+<code>gc_bias_ontarget</code> curves; it previously used the genome-wide ones, so its
+<code>*_log2</code> and <code>*_reliability</code> values shift. Capture enrichment gives
+on-target fragments a different <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> profile, which is why panel mode fits a
+separate block — one that was stored by every panel <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and read by nothing.
+A <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> without that block falls back to the genome-wide curves.</p>
+<p>Also in 0.9.0: <code>*_log2</code> and <code>*_reliability</code> are <strong>NaN</strong> when the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> has no
+<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-bias block, where they were previously <code>0.0</code> and <code>1.0</code>. Zero is not a
+neutral log-ratio — it asserts the sample sits exactly at the healthy
+baseline.</p>
+</blockquote>
 <p><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> counts fragments in 6 non-overlapping size channels across 5 Mb windows — the foundational multi-channel coverage feature.</p>
 <h4 id="columns_2">Columns</h4>
 <table>
@@ -5908,7 +5963,7 @@ signal, use <code>OCF.offtarget.tsv</code> instead.</p>
 <tr>
 <td><code>ultra_short</code> … <code>ultra_long</code></td>
 <td>float</td>
-<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected count per size class, same six bands as <a href="#fsc-genome-bins"><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> genome bins</a></td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected count per size class, same six bands as <a href="#fsc-fragment-size-coverage"><abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> genome bins</a></td>
 </tr>
 <tr>
 <td><code>total</code></td>
@@ -6081,6 +6136,14 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 </div>
 <p>Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> or <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> site). <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> captures how protected (nucleosome-covered) a region is to fragments of two sizes.</p>
 <h4 id="columns-parquet">Columns (Parquet)</h4>
+<div class="admonition warning">
+<p class="admonition-title">The profile columns are 200-element lists, not scalars</p>
+<p><code>wps_nuc</code>, <code>wps_tf</code>, <code>prot_frac_nuc</code>, <code>prot_frac_tf</code> and <code>wps_nuc_z</code> each hold
+<strong>one value per position</strong> across the anchor window. This table documented them
+as <code>float</code> until 0.9.0, alongside four columns that were never written
+(<code>wps_nuc_smooth</code>, <code>wps_tf_smooth</code>, <code>wps_nuc_mean</code>, <code>wps_tf_mean</code>) — so the
+example below indexed columns that do not exist and raised <code>KeyError</code>.</p>
+</div>
 <table>
 <thead>
 <tr>
@@ -6102,7 +6165,7 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 </tr>
 <tr>
 <td><code>center</code></td>
-<td>int</td>
+<td>int32</td>
 <td>Anchor midpoint</td>
 </tr>
 <tr>
@@ -6117,56 +6180,94 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 </tr>
 <tr>
 <td><code>wps_nuc</code></td>
-<td>float</td>
-<td>Raw nucleosomal <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> (120–180 bp fragments)</td>
+<td>list[float]</td>
+<td>Nucleosomal <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> per position (120–180 bp fragments)</td>
 </tr>
 <tr>
 <td><code>wps_tf</code></td>
-<td>float</td>
-<td>Raw TF footprint <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> (35–80 bp fragments)</td>
+<td>list[float]</td>
+<td>TF-footprint <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> per position (35–80 bp fragments)</td>
 </tr>
 <tr>
-<td><code>wps_nuc_smooth</code></td>
-<td>float</td>
-<td>Savitzky-Golay smoothed nucleosomal <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr></td>
-</tr>
-<tr>
-<td><code>wps_tf_smooth</code></td>
-<td>float</td>
-<td>Savitzky-Golay smoothed TF <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr></td>
-</tr>
-<tr>
-<td><code>wps_nuc_mean</code></td>
-<td>float</td>
-<td>Mean <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> across anchor window</td>
-</tr>
-<tr>
-<td><code>wps_tf_mean</code></td>
-<td>float</td>
-<td>Mean TF <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> across anchor window</td>
+<td><code>capture_mask</code></td>
+<td>list[int8]</td>
+<td>Per-position flag for panel capture overlap</td>
 </tr>
 <tr>
 <td><code>prot_frac_nuc</code></td>
-<td>float</td>
-<td>Fraction of window with <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> &gt; 0 (nucleosome-covered)</td>
+<td>list[float]</td>
+<td>Per-position protected fraction, nucleosomal</td>
 </tr>
 <tr>
 <td><code>prot_frac_tf</code></td>
-<td>float</td>
-<td>Fraction of window with TF <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> &gt; 0</td>
+<td>list[float]</td>
+<td>Per-position protected fraction, TF</td>
 </tr>
 <tr>
-<td><code>wps_nuc_z</code></td>
+<td><code>local_depth</code></td>
 <td>float</td>
-<td>Z-score vs <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> baseline (with <code>--pon-model</code>)</td>
-</tr>
-<tr>
-<td><code>wps_tf_z</code></td>
-<td>float</td>
-<td>TF <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Z-score vs <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr></td>
+<td>Mean coverage at the anchor</td>
 </tr>
 </tbody>
 </table>
+<p><strong>With <code>--pon-model</code>, seven more.</strong> Absent from a <code>--skip-pon</code> run, and absent
+per anchor when that anchor is not in the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> — <code>null</code> rather than <code>0.0</code>, since
+a z of zero is a claim of perfect agreement.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wps_nuc_z</code></td>
+<td>list[double]</td>
+<td>Per-position <code>(x − mean) / σ</code> against the baseline profile. NaN at positions where σ was not measurable.</td>
+</tr>
+<tr>
+<td><code>wps_log_amplitude</code></td>
+<td>double</td>
+<td><code>log1p</code> of the profile's peak-to-trough range. Logged because the raw range correlates +0.512 with sequencing depth.</td>
+</tr>
+<tr>
+<td><code>wps_log_amplitude_z</code></td>
+<td>double</td>
+<td>Its z against the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>'s <code>wps_shape_baseline</code>.</td>
+</tr>
+<tr>
+<td><code>wps_shape_corr</code></td>
+<td>double</td>
+<td>Pearson <em>r</em> between the sample profile and the baseline mean profile.</td>
+</tr>
+<tr>
+<td><code>wps_shape_corr_z</code></td>
+<td>double</td>
+<td>Its z, computed on the Fisher (<code>arctanh</code>) scale — a bounded <em>r</em> left 302 of 400 anchors unable to reach +2.</td>
+</tr>
+<tr>
+<td><code>wps_phase_shift_bp</code></td>
+<td>double</td>
+<td>Displacement against the baseline, in positions. <strong>Deliberately not z-scored</strong>: per anchor its intraclass correlation is 0.479, so roughly half of any lag is noise.</td>
+</tr>
+<tr>
+<td><code>wps_phase_at_search_limit</code></td>
+<td>bool</td>
+<td>The ±30 search ended on its own edge, so <code>wps_phase_shift_bp</code> is a boundary, not a measurement (invariant #3). Check this before believing a large shift.</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition danger">
+<p class="admonition-title">Do not average <code>wps_nuc_z</code> across positions</p>
+<p>Adjacent <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> positions have lag-1 autocorrelation <strong>0.986</strong> — a fragment spans
+~167 bp and contributes to many positions at once. A mean of z over 200
+positions has nothing like <code>σ/√200</code> precision, and a max of |z| has an expected
+value of 2.97 under pure noise. Use the derived shape columns above, each of
+which is z-scored against a baseline of itself.</p>
+<p><code>wps_tf</code> is not <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-scored: scoring runs once per table, over <code>wps_nuc</code>.</p>
+</div>
 <h4 id="purpose-use-cases_7">Purpose &amp; Use Cases</h4>
 <ul>
 <li><strong>Nucleosome positioning</strong>: <code>wps_nuc_smooth</code> detects nucleosome phasing at <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr>/<abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> anchors</li>
@@ -6179,17 +6280,30 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 <a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
 <a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.parquet"</span><span class="p">)</span>
 <a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Feature vector per sample: mean WPS across all anchors</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>    <span class="s2">"wps_nuc_global_mean"</span><span class="p">:</span> <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>    <span class="s2">"wps_nuc_global_std"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc_mean"</span><span class="p">]</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="s2">"prot_frac_nuc_mean"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>    <span class="s2">"prot_frac_tf_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
-<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="p">}</span>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>
-<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1"># Per-anchor feature matrix for gene-level models</span>
-<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
-<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1"># shape: (~15,000 anchors, 4) — one row per TSS/CTCF</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="c1"># Feature vector per sample: mean WPS across all anchors.</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="c1"># The profile columns are 200-element lists, so stack before reducing.</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="n">nuc</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span>          <span class="c1"># (n_anchors, 200)</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="n">features</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>    <span class="s2">"wps_nuc_global_mean"</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nanmean</span><span class="p">(</span><span class="n">nuc</span><span class="p">)),</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>    <span class="s2">"wps_nuc_global_std"</span><span class="p">:</span>  <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">nanstd</span><span class="p">(</span><span class="n">nuc</span><span class="p">)),</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>    <span class="s2">"prot_frac_nuc_mean"</span><span class="p">:</span>  <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>    <span class="s2">"prot_frac_tf_mean"</span><span class="p">:</span>   <span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="p">}</span>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="c1"># Per-anchor feature matrix for gene-level models.</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="c1"># The profile columns are lists, so reduce them explicitly rather than</span>
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="c1"># indexing scalar columns that do not exist.</span>
+<a id="__codelineno-10-20" name="__codelineno-10-20" href="#__codelineno-10-20"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<a id="__codelineno-10-21" name="__codelineno-10-21" href="#__codelineno-10-21"></a>
+<a id="__codelineno-10-22" name="__codelineno-10-22" href="#__codelineno-10-22"></a><span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">column_stack</span><span class="p">([</span>
+<a id="__codelineno-10-23" name="__codelineno-10-23" href="#__codelineno-10-23"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-10-24" name="__codelineno-10-24" href="#__codelineno-10-24"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"wps_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-10-25" name="__codelineno-10-25" href="#__codelineno-10-25"></a>    <span class="n">df</span><span class="p">[</span><span class="s2">"wps_log_amplitude"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>      <span class="c1"># with --pon-model</span>
+<a id="__codelineno-10-26" name="__codelineno-10-26" href="#__codelineno-10-26"></a>    <span class="n">df</span><span class="p">[</span><span class="s2">"wps_shape_corr"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">(),</span>
+<a id="__codelineno-10-27" name="__codelineno-10-27" href="#__codelineno-10-27"></a><span class="p">])</span>
+<a id="__codelineno-10-28" name="__codelineno-10-28" href="#__codelineno-10-28"></a><span class="c1"># shape: (n_anchors, 4) — one row per TSS/CTCF</span>
 </code></pre></div>
 <p><strong>Best for</strong>: Deep learning input (<abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> profiles as 1D signals), nucleosome periodicity score, <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> accessibility classifier.</p>
 <hr>
@@ -6197,15 +6311,31 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 <p><strong>File:</strong> <code>{sample}.WPS.panel.parquet</code><br>
 <strong>Requires:</strong> <code>--assay</code></p>
 <p>Same columns as <code>WPS.parquet</code>, filtered to panel gene anchors (~1,820 for xs2). Rows are panel-gene <abbr title="Transcription Start Site - Gene transcription initiation position">TSS</abbr> and <abbr title="CCCTC-binding factor - Chromatin architecture protein">CTCF</abbr> sites.</p>
+<p><strong>Since 0.9.0 these anchors are <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>-scored.</strong> They carry the same derived
+columns as <code>WPS.parquet</code> — <code>wps_nuc_z</code>, <code>wps_log_amplitude</code>,
+<code>wps_shape_corr</code>, <code>wps_phase_shift_bp</code> and their z-scores — computed against
+the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>'s <code>wps_baseline_panel</code> block. Before 0.9.0 that block was built and
+stored by every panel-mode <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and read by nothing, so the anchors closest to
+the targeted regions were the only <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> output with no healthy comparison. The
+shape statistics borrow the genome-wide <code>wps_shape_baseline</code>: a few hundred
+panel anchors is too few to fit a second one, and they overlap the
+genome-wide set.</p>
 <h4 id="ml-use-case_7">ML Use Case</h4>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.WPS.panel.parquet"</span><span class="p">)</span>
 <a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Compact panel feature: 1820 anchors × 4 = 7280 features</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="n">X</span> <span class="o">=</span> <span class="n">df</span><span class="p">[[</span><span class="s2">"wps_nuc_mean"</span><span class="p">,</span> <span class="s2">"wps_tf_mean"</span><span class="p">,</span> <span class="s2">"prot_frac_nuc"</span><span class="p">,</span> <span class="s2">"prot_frac_tf"</span><span class="p">]]</span><span class="o">.</span><span class="n">values</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="c1"># Compact panel feature: one row per anchor, reduced from the profiles.</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># Gene-indexed lookup</span>
-<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">df_gene</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region_id"</span><span class="p">)</span>
-<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="n">tp53_wps</span> <span class="o">=</span> <span class="n">df_gene</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="s2">"TP53_TSS"</span><span class="p">,</span> <span class="s2">"wps_nuc_mean"</span><span class="p">]</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">column_stack</span><span class="p">([</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"wps_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"wps_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_nuc"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>    <span class="n">np</span><span class="o">.</span><span class="n">vstack</span><span class="p">(</span><span class="n">df</span><span class="p">[</span><span class="s2">"prot_frac_tf"</span><span class="p">]</span><span class="o">.</span><span class="n">to_numpy</span><span class="p">())</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="p">])</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="c1"># Gene-indexed lookup — the profile itself, not a scalar</span>
+<a id="__codelineno-11-14" name="__codelineno-11-14" href="#__codelineno-11-14"></a><span class="n">df_gene</span> <span class="o">=</span> <span class="n">df</span><span class="o">.</span><span class="n">set_index</span><span class="p">(</span><span class="s2">"region_id"</span><span class="p">)</span>
+<a id="__codelineno-11-15" name="__codelineno-11-15" href="#__codelineno-11-15"></a><span class="n">tp53_profile</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">df_gene</span><span class="o">.</span><span class="n">loc</span><span class="p">[</span><span class="s2">"TP53_TSS"</span><span class="p">,</span> <span class="s2">"wps_nuc"</span><span class="p">])</span>   <span class="c1"># 200 values</span>
 </code></pre></div>
 <hr>
 <h3 id="wps-background"><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> Background</h3>
@@ -6849,9 +6979,16 @@ functionally unusable. Use <code>pd.read_parquet()</code> to load <abbr title="W
 <p><strong>File:</strong> <code>{sample}.metadata.tsv</code></p>
 <p>Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
 for easy ingestion into <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> pipelines and pandas workflows.</p>
+<div class="admonition warning">
+<p class="admonition-title">This table is the completion marker</p>
+<p>The downstream consumer treats <code>{sample}.metadata.parquet</code> as the signal that a
+sample finished. A sample without it is dropped from the cohort <strong>silently</strong> —
+no warning, no error. Never delete it to "clean up" a directory.</p>
+</div>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">pandas</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">pd</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="n">meta</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s2">"sample.metadata.tsv"</span><span class="p">,</span> <span class="n">sep</span><span class="o">=</span><span class="s2">"</span><span class="se">\t</span><span class="s2">"</span><span class="p">)</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="nb">print</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s2">"total_fragments"</span><span class="p">],</span> <span class="n">meta</span><span class="p">[</span><span class="s2">"on_target_rate"</span><span class="p">])</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="n">meta</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_parquet</span><span class="p">(</span><span class="s2">"sample.metadata.parquet"</span><span class="p">)</span><span class="o">.</span><span class="n">iloc</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">to_dict</span><span class="p">()</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="nb">print</span><span class="p">(</span><span class="n">meta</span><span class="p">[</span><span class="s2">"total_fragments"</span><span class="p">],</span> <span class="n">meta</span><span class="p">[</span><span class="s2">"krewlyzer_version"</span><span class="p">],</span> <span class="n">meta</span><span class="p">[</span><span class="s2">"pon_applied"</span><span class="p">])</span>
 </code></pre></div>
 <table>
 <thead>
@@ -6868,9 +7005,9 @@ for easy ingestion into <abbr title="Panel of Normals - Reference model from hea
 <td>Sample identifier</td>
 </tr>
 <tr>
-<td><code>krewlyzer_version</code></td>
-<td>str</td>
-<td>Version string</td>
+<td><code>total_fragments</code></td>
+<td>int</td>
+<td>Total fragments extracted</td>
 </tr>
 <tr>
 <td><code>genome</code></td>
@@ -6883,33 +7020,90 @@ for easy ingestion into <abbr title="Panel of Normals - Reference model from hea
 <td>Assay name (or empty for WGS)</td>
 </tr>
 <tr>
-<td><code>total_fragments</code></td>
+<td><code>panel_mode</code></td>
+<td>bool</td>
+<td>Whether target regions were supplied</td>
+</tr>
+<tr>
+<td><code>target_regions</code></td>
+<td>str</td>
+<td>Path to the target <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, when in panel mode</td>
+</tr>
+<tr>
+<td><code>extraction_time_seconds</code></td>
+<td>float</td>
+<td>Wall-clock extraction time</td>
+</tr>
+<tr>
+<td><code>mds_score</code></td>
+<td>float</td>
+<td>Genome-wide motif diversity score</td>
+</tr>
+<tr>
+<td><code>filters_mapq</code></td>
 <td>int</td>
-<td>Total fragments extracted</td>
+<td>Minimum MAPQ applied</td>
 </tr>
 <tr>
-<td><code>on_target_rate</code></td>
-<td>float</td>
-<td>Fraction of fragments overlapping targets</td>
+<td><code>filters_min_length</code> / <code>filters_max_length</code></td>
+<td>int</td>
+<td>Fragment length filter, 65–1000 bp</td>
 </tr>
 <tr>
-<td><code>mean_fragment_size</code></td>
-<td>float</td>
-<td>Mean fragment length (bp)</td>
+<td><code>gc_correction_computed</code></td>
+<td>bool</td>
+<td>Whether <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factors were derived for this sample</td>
 </tr>
 <tr>
-<td><code>duplication_rate</code></td>
-<td>float</td>
-<td>Estimated duplicate fraction</td>
-</tr>
-<tr>
-<td><code>processing_time_s</code></td>
-<td>float</td>
-<td>Wall-clock processing time in seconds</td>
+<td><code>timestamp</code></td>
+<td>str</td>
+<td>ISO timestamp of the run</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Use</strong>: Filter samples by QC thresholds before ML training (e.g. <code>total_fragments &gt; 5M</code>, <code>on_target_rate &gt; 0.3</code>).</p>
+<p><strong>Provenance, since 0.9.0.</strong> Which build wrote this sample, and what it was
+scored against. Absent from any directory produced by an earlier release — and
+that absence is itself the answer, because 0.9.0 changed what several columns
+mean.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>krewlyzer_version</code></td>
+<td>str</td>
+<td>The build that wrote this sample</td>
+</tr>
+<tr>
+<td><code>pon_applied</code></td>
+<td>bool</td>
+<td>Whether any feature was z-scored. <code>False</code> for <code>--skip-pon</code>, for no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, and for a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> the version guard refused — all three are legitimately unscored, and this is what distinguishes them from scoring that failed</td>
+</tr>
+<tr>
+<td><code>pon_model</code></td>
+<td>str</td>
+<td>The <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, by <strong>basename</strong> — never the full path</td>
+</tr>
+<tr>
+<td><code>pon_cohort_digest</code></td>
+<td>str</td>
+<td>The salted digest of the healthy cohort that <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> was fitted to; answers "the same cohort?" without naming anyone</td>
+</tr>
+<tr>
+<td><code>pon_krewlyzer_version</code></td>
+<td>str</td>
+<td>The release the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> was stamped with</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Use</strong>: Filter samples by QC before ML training (e.g. <code>total_fragments &gt; 5e6</code>),
+and by <code>krewlyzer_version</code> / <code>pon_cohort_digest</code> to be sure a cohort was
+produced by one build against one baseline.</p>
 <hr>
 <h3 id="features-json">Features JSON</h3>
 <p><strong>File:</strong> <code>{sample}.features.json</code><br>
@@ -6967,7 +7161,7 @@ for easy ingestion into <abbr title="Panel of Normals - Reference model from hea
 </tr>
 <tr>
 <td>Promoter accessibility</td>
-<td><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> E1 <code>wps_nuc_mean</code>, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> E1, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>-E1 ratios</td>
+<td><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> E1 <code>wps_shape_corr_z</code>, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> E1, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>-E1 ratios</td>
 <td><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>.panel, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>.gene, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>.e1only</td>
 </tr>
 <tr>
@@ -7009,7 +7203,7 @@ for easy ingestion into <abbr title="Panel of Normals - Reference model from hea
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 30, 2026 23:30:20 UTC"><span class="timeago" datetime="2026-07-30T23:30:20+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 30, 2026 23:30:20 UTC">2026-07-30</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 12, 2026 10:49:04 UTC"><span class="timeago" datetime="2026-08-12T10:49:04+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 12, 2026 10:49:04 UTC">2026-08-12</span>
   </span>
 
     

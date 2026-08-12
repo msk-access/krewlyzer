@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -2897,16 +2897,47 @@
 </tr>
 <tr>
 <td><code>--output_format</code></td>
-<td><code>tsv</code></td>
-<td>Feature output format: <code>tsv</code>, <code>parquet</code>, or <code>both</code>. <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> outputs are always Parquet regardless of this setting.</td>
+<td><code>parquet</code></td>
+<td>Feature output format: <code>tsv</code>, <code>parquet</code>, or <code>both</code>. <strong>Default changed from <code>tsv</code> in 0.9.0.</strong> <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> outputs are always Parquet regardless of this setting.</td>
 </tr>
 <tr>
 <td><code>--compress_tsv</code></td>
 <td><code>false</code></td>
 <td>Gzip-compress all <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> outputs (<code>.tsv.gz</code>). Applies only when <code>output_format</code> is <code>tsv</code> or <code>both</code>. Maps to the <code>--compress</code> flag in the Python CLI.</td>
 </tr>
+<tr>
+<td><code>--strict_validation</code></td>
+<td><code>false</code></td>
+<td>Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run.</td>
+</tr>
+<tr>
+<td><code>--validate_min_samples</code></td>
+<td><code>3</code></td>
+<td>Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS.</td>
+</tr>
+<tr>
+<td><code>--gc_correct</code></td>
+<td><code>true</code></td>
+<td>Apply <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction during extraction.</td>
+</tr>
+<tr>
+<td><code>--queue_size</code></td>
+<td><code>100</code></td>
+<td>Maximum concurrent executor jobs; also derives <code>FILTER_MAF</code> maxForks.</td>
+</tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title">Selecting <code>tsv</code> produces a cohort the downstream consumer cannot read</p>
+<p>kreview reads <strong>Parquet only</strong>. A tsv-only run additionally <strong>skips output
+validation</strong>, because the contract describes the Parquet surface.</p>
+<p>Both failures are silent: every reader downstream swallows exceptions and
+yields an empty feature dict, so a cohort produced with the default simply
+does not appear — no error, no warning, no missing-file complaint.</p>
+<p>This is why the default changed to <code>parquet</code> in 0.9.0. Set <code>tsv</code> or
+<code>both</code> only when you need the text tables; the pipeline logs a warning at
+start whenever the selection excludes Parquet.</p>
+</div>
 <h2 id="see-also">See Also</h2>
 <ul>
 <li><a href="../samplesheet/">Samplesheet Format</a></li>
@@ -2937,7 +2968,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 3, 2026 03:32:45 UTC"><span class="timeago" datetime="2026-03-03T03:32:45+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 3, 2026 03:32:45 UTC">2026-03-03</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 18:52:33 UTC"><span class="timeago" datetime="2026-07-31T18:52:33+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 18:52:33 UTC">2026-07-31</span>
   </span>
 
     

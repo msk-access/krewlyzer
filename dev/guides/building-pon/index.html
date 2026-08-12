@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -896,6 +896,46 @@
 </ul>
 </nav>
 </li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#rebuilding-the-bundled-pons">
+<span class="md-ellipsis">
+      
+        Rebuilding the bundled PONs
+      
+    </span>
+</a>
+<nav aria-label="Rebuilding the bundled PONs" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-to-watch-in-the-log">
+<span class="md-ellipsis">
+      
+        What to watch in the log
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#why-keep-sample-outputs">
+<span class="md-ellipsis">
+      
+        Why --keep-sample-outputs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#after-the-build">
+<span class="md-ellipsis">
+      
+        After the build
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
 </ul>
 </nav>
 </li>
@@ -1333,6 +1373,46 @@
 <span class="md-ellipsis">
       
         Key krewlyzer Parameters
+      
+    </span>
+</a>
+</li>
+</ul>
+</nav>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#rebuilding-the-bundled-pons">
+<span class="md-ellipsis">
+      
+        Rebuilding the bundled PONs
+      
+    </span>
+</a>
+<nav aria-label="Rebuilding the bundled PONs" class="md-nav">
+<ul class="md-nav__list">
+<li class="md-nav__item">
+<a class="md-nav__link" href="#what-to-watch-in-the-log">
+<span class="md-ellipsis">
+      
+        What to watch in the log
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#why-keep-sample-outputs">
+<span class="md-ellipsis">
+      
+        Why --keep-sample-outputs
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
+<a class="md-nav__link" href="#after-the-build">
+<span class="md-ellipsis">
+      
+        After the build
       
     </span>
 </a>
@@ -1968,6 +2048,87 @@ after aggregation completes. The final output (<code>*.pon.parquet</code>) is al
 <p class="admonition-title">Warning</p>
 <p>If jobs are OOM-killed, reduce <code>-P</code> or increase <code>--mem</code>. The new memory monitoring will log usage at each processing stage.</p>
 </div>
+<hr>
+<h2 id="rebuilding-the-bundled-pons">Rebuilding the bundled PONs</h2>
+<p><code>scripts/build_pon.sh</code> takes the two things that differ between the four
+models as arguments:</p>
+<div class="admonition danger">
+<p class="admonition-title">Check the environment first — and don't use the version string</p>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-8-1" id="__codelineno-8-1" name="__codelineno-8-1"></a>micromamba<span class="w"> </span>activate<span class="w"> </span>krewlyzer
+<a href="#__codelineno-8-2" id="__codelineno-8-2" name="__codelineno-8-2"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>--help<span class="w"> </span>&gt;/dev/null<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"has the PON work"</span>
+</code></pre></div>
+<p><strong><code>krewlyzer --version</code> will not tell you.</strong> It reports <code>0.8.3</code> on current
+<code>develop</code> and will keep doing so until the release bump, so a version
+comparison rejects exactly the build you want. The presence of
+<code>validate-pon</code> is the honest test: it answers "does this code have the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
+fixes", which is the actual question.</p>
+<p>It matters because the failure is silent. A <code>build-pon</code> without these fixes
+exits 0 on a model whose <code>wps_background</code> is a hardcoded <code>167.0/5.0</code> —
+which is how four of them shipped. The first attempt at this rebuild ran 18
+minutes on such a build before the banner was noticed.</p>
+<p>The script refuses in that case, but check anyway.</p>
+</div>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-9-1" id="__codelineno-9-1" name="__codelineno-9-1"></a><span class="nv">SAMPLE_LIST</span><span class="o">=</span>&lt;list&gt;<span class="w"> </span><span class="nv">OUTPUT_DIR</span><span class="o">=</span>&lt;dir&gt;<span class="w"> </span>sbatch<span class="w"> </span>scripts/build_pon.sh<span class="w"> </span>&lt;assay&gt;<span class="w"> </span>&lt;variant&gt;
+</code></pre></div>
+<p><code>SAMPLE_LIST</code> is required and never derived. <strong>The variant comes from the
+sample list, not a flag</strong> — <code>build-pon</code> has none, and <code>all_unique</code> and <code>duplex</code>
+differ only in which BAMs the list points at. So each variant needs its own
+list, and only you know which is which; a script that guessed the filename
+would build the wrong variant under the right name.</p>
+<p>Overridable by environment variable: <code>SAMPLE_LIST</code>, <code>REFERENCE</code>, <code>OUTPUT_DIR</code>,
+<code>KEEP_DIR</code>, <code>COHORT_LABEL</code>, <code>KREWLYZER_ENV</code>.</p>
+<p>Each run ends by calling <code>krewlyzer validate-pon</code> on what it produced. <strong>A
+build that produces a model the gate rejects has not succeeded</strong>, whatever
+<code>build-pon</code>'s exit code said — that check is why four models carrying a
+fabricated baseline shipped for months.</p>
+<h3 id="what-to-watch-in-the-log">What to watch in the log</h3>
+<table>
+<thead>
+<tr>
+<th>Line</th>
+<th>What it means if it looks wrong</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>WPS background baseline: N/28 group_ids with a measured spread</code></td>
+<td>Anything below 28/28 on a real cohort means the source columns are not what the builder expects</td>
+</tr>
+<tr>
+<td><code>WPS baseline skipped N of M anchors</code></td>
+<td>Expected to be large for <strong>duplex</strong> (~36–38%), small for all_unique (~4.5%). Large for all_unique is worth stopping for</td>
+</tr>
+<tr>
+<td><code>Region MDS exon baseline: N/M exons</code></td>
+<td>Should be all of them; exon coverage is dense, not sparse</td>
+</tr>
+<tr>
+<td><code>... every {key} has the identical std</code></td>
+<td>The fabricated-baseline signature. Stop</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-keep-sample-outputs">Why <code>--keep-sample-outputs</code></h3>
+<p>Per-sample features used to be extracted to a temp directory and deleted on
+success, so every rebuild re-ran extraction over every <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> — hours — and
+leave-one-out calibration would have cost <em>n</em> of those. The script keeps them,
+and they survive a failed build so a rerun skips what finished.</p>
+<h3 id="after-the-build">After the build</h3>
+<ol>
+<li><code>krewlyzer validate-pon</code> on all four (the script does one; check the set).</li>
+<li>Diff each new model against the one it replaces, per block, and keep it as
+   the acceptance record.</li>
+<li><code>git lfs push --all</code> <strong>before</strong> pushing the branch, or the pointers land
+   without the objects.</li>
+</ol>
+<div class="admonition warning">
+<p class="admonition-title">Expect the numbers to move</p>
+<p>0.9.0 changes what several features mean — reverse-strand fragment
+placement moves ~half of all fragments, <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> bands were realigned, E1 comes
+from GENCODE flags, and NRL is data-dependent for the first time. Do not
+compare a 0.9.0 <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> against an older one value-by-value; the old values
+were measuring something else.</p>
+</div>
 <!-- Abbreviation definitions for Krewlyzer documentation -->
 <!-- These provide hover tooltips for technical acronyms -->
 <aside class="md-source-file">
@@ -1975,7 +2136,7 @@ after aggregation completes. The final output (<code>*.pon.parquet</code>) is al
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 3, 2026 03:20:28 UTC"><span class="timeago" datetime="2026-03-03T03:20:28+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 3, 2026 03:20:28 UTC">2026-03-03</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 4, 2026 03:24:29 UTC"><span class="timeago" datetime="2026-08-04T03:24:29+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 4, 2026 03:24:29 UTC">2026-08-04</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

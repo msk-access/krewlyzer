@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -816,6 +816,28 @@
     <span class="md-ellipsis">
       
         UXM Methylation Outputs (with meth_bam in samplesheet)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-artifacts-parquet-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation Artifacts (Parquet runs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-changes-in-090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Changes in 0.9.0
       
     </span>
   </a>
@@ -2491,6 +2513,28 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#validation-artifacts-parquet-runs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Validation Artifacts (Parquet runs)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#output-changes-in-090" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Changes in 0.9.0
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#available-modules" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2644,6 +2688,86 @@
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>results/
 <a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>└── {sample}.UXM.tsv                        # Fragment-level methylation
 </code></pre></div>
+<h2 id="validation-artifacts-parquet-runs">Validation Artifacts (Parquet runs)</h2>
+<p>Written per sample by <code>run-all</code>, and gathered once per cohort:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Scope</th>
+<th>Contents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{sample}.validation.json</code></td>
+<td>sample</td>
+<td>Contract findings for that sample</td>
+</tr>
+<tr>
+<td><code>{sample}.fingerprint.json</code></td>
+<td>sample</td>
+<td>~20 KB summary — a hash and two counts per column</td>
+</tr>
+<tr>
+<td><code>cohort.validation.json</code></td>
+<td>cohort</td>
+<td>Cross-sample degeneracy findings</td>
+</tr>
+</tbody>
+</table>
+<p>The split exists because <strong>degeneracy is inherently cross-sample</strong>: every sample
+can pass on its own while a metric is constant across all of them. A sample
+directory is ~1.5 GB, so the gather step compares fingerprints rather than
+re-reading tables.</p>
+<p>Skipped entirely for tsv-only runs — see <code>--output_format</code> in
+<a href="../parameters/#output-parameters">Parameters</a>.</p>
+<div class="admonition note">
+<p class="admonition-title">Tool-level mode</p>
+<p><code>--use_runall false</code> produces no fingerprints, so cohort validation is
+skipped rather than run on a partial set, which would report degeneracy
+findings that are artefacts of the missing samples.</p>
+</div>
+<hr>
+<h2 id="output-changes-in-090">Output Changes in 0.9.0</h2>
+<p>Six output families changed value semantics. Values are <strong>not comparable</strong>
+across this boundary, and <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> baselines built on uncollapsed input should be
+rebuilt.</p>
+<table>
+<thead>
+<tr>
+<th>Output</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Every positional family — <code>WPS</code>, <code>OCF</code>, <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>, <code>MDS.exon/gene</code>, <code>FSC.gene/regions</code></td>
+<td>Fragment coordinates corrected when R1 is the rightmost mate (~48% of reads on uncollapsed input)</td>
+</tr>
+<tr>
+<td><code>FSC.gene.*</code>, <code>FSC.regions.*</code></td>
+<td>Size bands aligned to the genome-bin bands; new <code>ultra_long</code> and <code>ultra_long_ratio</code></td>
+</tr>
+<tr>
+<td><code>FSC.regions.*</code></td>
+<td>New <code>strand</code>, <code>is_e1</code>, <code>is_alt_e1</code> columns</td>
+</tr>
+<tr>
+<td><code>FSC.regions.e1only.*</code></td>
+<td>Selects on the E1 flags; genes with no annotated first exon are omitted rather than represented by an internal exon</td>
+</tr>
+<tr>
+<td><code>MDS.gene.mds_e1</code>, <code>mds_e1_z</code></td>
+<td>Strand-aware on panel data for the first time; <code>NaN</code> where the gene has no E1, instead of a fabricated <code>0.0</code></td>
+</tr>
+<tr>
+<td><code>WPS_background.*</code></td>
+<td>NRL family is data-dependent; new <code>nrl_at_band_limit</code> marks a right-censored estimate</td>
+</tr>
+</tbody>
+</table>
+<hr>
 <h2 id="available-modules">Available Modules</h2>
 <table>
 <thead>
@@ -2731,7 +2855,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 3, 2026 03:20:28 UTC"><span class="timeago" datetime="2026-03-03T03:20:28+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 3, 2026 03:20:28 UTC">2026-03-03</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 18:52:33 UTC"><span class="timeago" datetime="2026-07-31T18:52:33+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 18:52:33 UTC">2026-07-31</span>
   </span>
 
     

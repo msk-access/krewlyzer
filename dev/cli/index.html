@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -2367,6 +2367,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#inspection-and-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Inspection and Validation
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Inspection and Validation">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#describe-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        describe-output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#report" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        report
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate-output
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#validate-cohort" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate-cohort
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#see-also" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2374,6 +2446,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="See Also">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#validate-pon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        validate-pon
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stamp-pon" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        stamp-pon
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2514,11 +2614,312 @@
 </tr>
 </tbody>
 </table>
+<h2 id="inspection-and-validation">Inspection and Validation</h2>
+<p>These inspect inputs or a finished output directory rather than producing
+features.</p>
+<div class="admonition warning">
+<p class="admonition-title"><code>validate</code> and <code>validate-output</code> are different commands</p>
+<p><code>validate</code> checks the <strong>assets going in</strong> — is this <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> well-formed, does
+it have the columns the Rust core expects. <code>validate-output</code> checks the
+<strong>results coming out</strong> against the downstream contract. One hyphen apart
+and neither substitutes for the other.</p>
+</div>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#validate"><code>validate</code></a></td>
+<td>Check input <strong>assets</strong> before a run — BEDs, anchors, <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factors</td>
+</tr>
+<tr>
+<td><a href="#describe-output"><code>describe-output</code></a></td>
+<td>What is in each output file — shape, columns, ranges</td>
+</tr>
+<tr>
+<td><a href="#report"><code>report</code></a></td>
+<td>Single-sample HTML report: verdict, charts, interpretation</td>
+</tr>
+<tr>
+<td><a href="#validate-output"><code>validate-output</code></a></td>
+<td>Check one sample against the output contract</td>
+</tr>
+<tr>
+<td><a href="#validate-cohort"><code>validate-cohort</code></a></td>
+<td>Cross-sample degeneracy checks over fingerprints</td>
+</tr>
+<tr>
+<td><a href="#validate-pon"><code>validate-pon</code></a></td>
+<td>Check a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> <strong>before</strong> anything is scored against it</td>
+</tr>
+<tr>
+<td><a href="#stamp-pon"><code>stamp-pon</code></a></td>
+<td>Record the release a built <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> ships with</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3 id="validate"><code>validate</code></h3>
+<p>Checks the reference assets a run depends on, before the run rather than after
+it. A malformed <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> does not usually crash — it produces a table with fewer
+rows than it should, which looks exactly like a quiet sample.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19<span class="w">                    </span><span class="c1"># every bundled asset</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19<span class="w"> </span>--assay<span class="w"> </span>xs2<span class="w">        </span><span class="c1"># ...plus assay-specific</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--gene-bed<span class="w"> </span>my_genes.bed<span class="w">          </span><span class="c1"># one custom file</span>
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--genome</code> / <code>-G</code></td>
+<td>All bundled assets for <code>hg19</code> or <code>hg38</code></td>
+</tr>
+<tr>
+<td><code>--assay</code> / <code>-A</code></td>
+<td>Assay-specific assets too (requires <code>--genome</code>)</td>
+</tr>
+<tr>
+<td><code>--gene-bed</code></td>
+<td>Gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>: chrom, start, end, gene, [name]</td>
+</tr>
+<tr>
+<td><code>--targets-bed</code></td>
+<td>Panel target regions</td>
+</tr>
+<tr>
+<td><code>--arms-bed</code></td>
+<td>Chromosome arms: chrom, start, end, arm</td>
+</tr>
+<tr>
+<td><code>--wps-anchors</code></td>
+<td><abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors, BED6</td>
+</tr>
+<tr>
+<td><code>--ocr-file</code></td>
+<td><abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> open-chromatin regions</td>
+</tr>
+<tr>
+<td><code>--gc-factors</code></td>
+<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></td>
+</tr>
+<tr>
+<td><code>--bin-file</code></td>
+<td>Genomic bins, BED3</td>
+</tr>
+</tbody>
+</table>
+<p>Use <code>-G</code> before reporting a bundled-asset problem: a partial <code>git lfs pull</code>
+leaves pointer files in place of the real assets, and this is what says so.</p>
+<hr>
+<h3 id="describe-output"><code>describe-output</code></h3>
+<p>Answers the question people ask before "is this correct?" — what are these
+files and what is in them.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>krewlyzer<span class="w"> </span>describe-output<span class="w"> </span>RESULTS/<span class="o">{</span>sample_id<span class="o">}</span>/<span class="w">            </span><span class="c1"># Markdown to stdout</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>krewlyzer<span class="w"> </span>describe-output<span class="w"> </span>RESULTS/<span class="o">{</span>sample_id<span class="o">}</span>/<span class="w"> </span>-o<span class="w"> </span>out.md<span class="w">  </span><span class="c1"># or to a file</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>krewlyzer<span class="w"> </span>describe-output<span class="w"> </span>RESULTS/<span class="o">{</span>sample_id<span class="o">}</span>/<span class="w"> </span>-o<span class="w"> </span>out.html
+</code></pre></div>
+<p>Per table: rows, columns, size, and whether it is gated by the contract. Per
+column: dtype, numeric range or example value, distinct count, null count.</p>
+<p>Everything is measured from the file or read from the output contract, so a
+table that gains a column changes the description automatically.</p>
+<div class="admonition note">
+<p class="admonition-title">Identifier columns are redacted</p>
+<p>Sample directories are named for the patient and several tables carry the
+sample id as a <em>column value</em>. Knowing a column holds an identifier is the
+useful fact; which identifier is not. Everything else is the sample's real
+data — treat the output accordingly.</p>
+</div>
+<hr>
+<h3 id="report"><code>report</code></h3>
+<p>A single-sample HTML report: cross-axis verdict, 16 charts, and each table's
+data with its interpretation beside it.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">'krewlyzer[report]'</span><span class="w">          </span><span class="c1"># plotly, needed for charts</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>krewlyzer<span class="w"> </span>report<span class="w"> </span>RESULTS/<span class="o">{</span>sample_id<span class="o">}</span>/<span class="w"> </span>-o<span class="w"> </span>report.html
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>krewlyzer<span class="w"> </span>report<span class="w"> </span>RESULTS/<span class="o">{</span>sample_id<span class="o">}</span>/<span class="w"> </span>-o<span class="w"> </span>report.html<span class="w"> </span>--z-threshold<span class="w"> </span><span class="m">2</span>.5
+</code></pre></div>
+<table>
+<thead>
+<tr>
+<th>Option</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--output</code> / <code>-o</code></td>
+<td><code>report.html</code></td>
+<td>Where to write</td>
+</tr>
+<tr>
+<td><code>--sample-id</code></td>
+<td>directory name</td>
+<td>Override the sample id</td>
+</tr>
+<tr>
+<td><code>--z-threshold</code></td>
+<td><code>2.0</code></td>
+<td>|z| at which a verdict axis is flagged</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Verdict.</strong> Four independent axes — fragment size, nuclease cutting, tissue
+shedding, chromatin accessibility — reported as <em>"N of M assessable axes
+agree"</em>, never a single composite score. Direction differs per axis, and an
+axis with no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-score is <em>not assessable</em> rather than counted as
+disagreement.</p>
+<p><strong>Organised by table.</strong> Each section carries one output's chart, its why / how
+/ what, and its columns together.</p>
+<div class="admonition warning">
+<p class="admonition-title">Internal use</p>
+<p>The report contains one patient's measurements. It is generated on demand
+and is not published, committed, or shipped with the documentation. Use
+<code>describe-output</code> for anything structural that needs to leave the machine.</p>
+</div>
+<div class="admonition info">
+<p class="admonition-title">Without a panel of normals</p>
+<p>Every z-score and <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> log-ratio is absent, which is most of the
+interpretable surface — three of the four verdict axes cannot be assessed.
+The report leads with a banner saying so and marks each affected column.
+Re-run the <em>feature extraction</em> with <code>run-all --pon-model ...</code> and
+report the new output; <code>report</code> has no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> option of its own, because
+it reads what is already on disk and never recomputes a feature.</p>
+</div>
+<p><code>--z-threshold</code> is a <strong>convention, not a clinical cut-off</strong>, and the report
+says so. No chart draws a threshold as a cut-off; reference lines appear only
+where the value is a labelled literature anchor.</p>
+<hr>
+<h3 id="validate-output"><code>validate-output</code></h3>
+<p>Checks a finished directory against the contract its consumers rely on.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>krewlyzer<span class="w"> </span>validate-output<span class="w"> </span>RESULTS/<span class="w">                       </span><span class="c1"># a cohort directory</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>krewlyzer<span class="w"> </span>validate-output<span class="w"> </span>RESULTS/<span class="w"> </span>--json-report<span class="w"> </span>out.json
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>krewlyzer<span class="w"> </span>validate-output<span class="w"> </span>RESULTS/<span class="o">{</span>sample<span class="o">}</span>/<span class="w"> </span>--fingerprint-out<span class="w"> </span>fp.json
+</code></pre></div>
+<p>Three layers: every consumed table present and shaped correctly; domain
+invariants; and <strong>anti-degeneracy</strong> — a metric identical across every sample is
+an error, not a pass.</p>
+<table>
+<thead>
+<tr>
+<th>Exit</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Contract satisfied</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Contract violation</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Structural failure — missing directory, unreadable Parquet</td>
+</tr>
+</tbody>
+</table>
+<p>A workflow should retry on <code>2</code> and escalate on <code>1</code>.</p>
+<hr>
+<h3 id="validate-cohort"><code>validate-cohort</code></h3>
+<p>The gather half. Degeneracy is inherently cross-sample: every sample can pass
+alone while a metric is constant across all of them.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>krewlyzer<span class="w"> </span>validate-cohort<span class="w"> </span>FINGERPRINTS/<span class="w"> </span>--min-samples<span class="w"> </span><span class="m">3</span>
+</code></pre></div>
+<p>Reads the ~20 KB fingerprints written by <code>validate-output --fingerprint-out</code>,
+never the outputs themselves, so a large cohort reduces from megabytes rather
+than terabytes. Below <code>--min-samples</code> the check reports SKIP, never PASS.</p>
 <h2 id="see-also">See Also</h2>
 <ul>
 <li><a href="../nextflow/">Nextflow Pipeline</a> - Batch processing</li>
 <li><a href="../features/">Features</a> - Feature documentation</li>
 </ul>
+<hr>
+<h3 id="validate-pon"><code>validate-pon</code></h3>
+<p><code>validate-output</code> gates the results of a run. This gates the <strong>reference those
+results are measured against</strong>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>model.pon.parquet
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w"> </span>--json-report<span class="w"> </span>pon.json
+</code></pre></div>
+<p>Same exit codes as <code>validate-output</code>: <code>0</code> satisfied, <code>1</code> violation, <code>2</code>
+structural.</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>σ is not one value repeated</strong></td>
+<td>A baseline that cannot vary with its cohort was not fitted to one</td>
+</tr>
+<tr>
+<td>σ is positive and finite</td>
+<td>A z divided by zero is infinite, not conservative</td>
+</tr>
+<tr>
+<td><code>krewlyzer_version</code> recorded</td>
+<td>0.9.0 changes what every feature <em>means</em></td>
+</tr>
+<tr>
+<td><code>cohort_digest</code> recorded</td>
+<td>Otherwise the model cannot be reproduced or compared</td>
+</tr>
+<tr>
+<td>entries backed by ≥ 3 samples</td>
+<td>Below that a baseline entry is an anecdote</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title">Every <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> shipped before 0.9.0 fails this</p>
+<p>They carry a <code>wps_background</code> block hardcoded to <code>167.0 / 5.0 / 0.0 / 1.0</code>
+— identical across all 28 groups and all four models, from cohorts of 21
+and 47 samples — and no provenance at all. That is not a false positive;
+it is the reason the command exists. Rebuild with <code>build-pon</code>.</p>
+</div>
+<p><strong>Provenance contains no identifiers.</strong> The cohort is recorded as a salted,
+non-reversible digest of the sample IDs, plus an optional free-text
+<code>--cohort-label</code>. Two builds from the same cohort produce the same digest; the
+digest reveals nothing about who is in it. A <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> ships in this repository, in
+the Docker image and on PyPI, so it is the last place a patient identifier may
+appear.</p>
+<hr>
+<h3 id="stamp-pon"><code>stamp-pon</code></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>krewlyzer<span class="w"> </span>stamp-pon<span class="w"> </span>model.pon.parquet<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.9.0
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>krewlyzer<span class="w"> </span>stamp-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w"> </span>--version<span class="w"> </span><span class="m">0</span>.9.0<span class="w"> </span>--dry-run
+</code></pre></div>
+<p>A <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> is built from <code>develop</code>, where <code>pyproject.toml</code> still reads the previous
+release — so the model records that version however new the code is. Rather
+than bump before a four-hour build, set it here when cutting the release.</p>
+<p><strong>This changes what the field means.</strong> Afterwards <code>krewlyzer_version</code> is <em>the
+release this model is published with</em>, not the code that produced it. That is
+the definition a compatibility guard needs. <code>build_date</code> is untouched, so the
+two together still say when it was actually built.</p>
+<div class="admonition warning">
+<p class="admonition-title">A stamp is an assertion, so it has to be earned</p>
+<p><code>stamp-pon</code> runs <code>validate-pon</code> first and <strong>refuses on failure</strong>. Without
+that it would be the shortest path to laundering: run it on one of the
+models carrying the fabricated <code>167.0 / 5.0</code> baseline and it would claim
+exactly the compatibility the guard exists to deny.</p>
+<p><code>PON.NO_VERSION</code> alone does not block — that is the condition being fixed.
+<code>--force</code> exists for re-stamping a model that already passed, and says so.</p>
+</div>
+<p>Only the metadata row changes; every baseline is copied through unchanged and
+the cohort digest is unaffected. <strong>Re-run <code>validate-pon</code> afterwards</strong> — the
+file that ships should be the file that was checked.</p>
 <!-- Abbreviation definitions for Krewlyzer documentation -->
 <!-- These provide hover tooltips for technical acronyms -->
 
@@ -2543,7 +2944,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 1, 2026 00:01:10 UTC"><span class="timeago" datetime="2026-03-01T00:01:10+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 1, 2026 00:01:10 UTC">2026-03-01</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 4, 2026 02:35:24 UTC"><span class="timeago" datetime="2026-08-04T02:35:24+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 4, 2026 02:35:24 UTC">2026-08-04</span>
   </span>
 
     
