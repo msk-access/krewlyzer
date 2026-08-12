@@ -425,10 +425,107 @@ def evaluate_cohort(
     return findings
 
 
+def reconcile_expected(
+    results_dir: Path,
+    expected: Sequence[str],
+    discovered: Sequence[str],
+) -> List[Finding]:
+    """Compare the samples you meant to run against the ones that exist.
+
+    Everything else in this module validates the samples it *finds*. Nothing
+    can find a sample that produced nothing, and there are two ways for that to
+    happen -- both of which leave a cohort quietly smaller than intended:
+
+    * the job never ran, or died before creating its directory;
+    * the directory exists but holds no Parquet, so ``discover_samples`` skips
+      it. A job killed between mkdir and the first write looks exactly like a
+      sample that was never submitted.
+
+    Only the third case -- Parquet present, completion marker absent -- is
+    caught today, by ``check_sample``. At a handful of samples the other two are
+    obvious. At 16,000 they are invisible, and the consumer reads a short cohort
+    without ever knowing it was short.
+
+    The two are reported separately because the remedies differ: an empty
+    directory means the job started and its logs exist, while no directory
+    usually means it was never submitted.
+
+    ``UNEXPECTED`` is a WARN rather than an ERROR because the usual cause is an
+    identifier that does not round-trip -- a suffix in the sheet that the
+    pipeline strips, say. That corrupts nothing, but it makes every other count
+    here wrong, so it must be visible.
+    """
+    findings: List[Finding] = []
+    want = list(dict.fromkeys(expected))  # de-duplicated, order preserved
+    have = set(discovered)
+
+    missing: List[str] = []
+    empty: List[str] = []
+    for sample in want:
+        if sample in have:
+            continue
+        d = results_dir / sample
+        (empty if d.is_dir() else missing).append(sample)
+
+    if missing:
+        findings.append(
+            Finding(
+                id="EXPECTED.NO_OUTPUT_DIRECTORY",
+                severity=Severity.ERROR,
+                category=Category.COMPLETION,
+                message=(
+                    f"{len(missing)} of {len(want)} expected sample(s) have no "
+                    "output directory at all. The job never ran or died before "
+                    "writing anything, and nothing downstream can tell the "
+                    "cohort is short"
+                ),
+                samples=missing,
+                evidence={"expected": len(want), "missing": len(missing)},
+            )
+        )
+
+    if empty:
+        findings.append(
+            Finding(
+                id="EXPECTED.DIRECTORY_HAS_NO_TABLES",
+                severity=Severity.ERROR,
+                category=Category.COMPLETION,
+                message=(
+                    f"{len(empty)} expected sample(s) have a directory but no "
+                    "Parquet in it, so sample discovery skips them entirely -- "
+                    "indistinguishable from never having been submitted"
+                ),
+                samples=empty,
+                evidence={"expected": len(want), "empty": len(empty)},
+            )
+        )
+
+    unexpected = sorted(have - set(want))
+    if unexpected:
+        findings.append(
+            Finding(
+                id="EXPECTED.UNEXPECTED_SAMPLE",
+                severity=Severity.WARN,
+                category=Category.COMPLETION,
+                message=(
+                    f"{len(unexpected)} sample(s) produced output but are not in "
+                    "the expected list. Usually an identifier that does not "
+                    "round-trip between the samplesheet and the pipeline, which "
+                    "makes the missing count above unreliable"
+                ),
+                samples=unexpected,
+                evidence={"unexpected": len(unexpected)},
+            )
+        )
+
+    return findings
+
+
 def run(
     results_dir: Path,
     min_samples: int = 3,
     only_samples: Optional[Sequence[str]] = None,
+    expected_samples: Optional[Sequence[str]] = None,
 ) -> Result:
     """Both stages on one machine. Nextflow calls the halves separately."""
     result = Result()
@@ -445,6 +542,17 @@ def run(
         return result
 
     samples = discover_samples(results_dir)
+
+    # Before any filtering, and before the empty-cohort exit below: "expected
+    # 16,552, found 0" is precisely the case this reconciliation exists for, and
+    # returning early on INPUT.NO_SAMPLES would report the least useful half of
+    # it. Reconciled against everything discovered, not against --sample-id,
+    # which narrows what is checked rather than what was meant to run.
+    if expected_samples is not None:
+        result.findings.extend(
+            reconcile_expected(results_dir, expected_samples, [s for s, _ in samples])
+        )
+
     if only_samples:
         wanted = set(only_samples)
         samples = [(s, p) for s, p in samples if s in wanted]
