@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3133,6 +3133,48 @@
 </li>
 </ul>
 <h3 id="added">Added</h3>
+<ul>
+<li><strong><code>validate-output --expect</code></strong> — reconcile the samples you meant to run
+  against the ones that exist. Everything else in the gate validates the
+  samples it <em>finds</em>, and two failure modes leave nothing to find:</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>before</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No output directory at all</td>
+<td>invisible</td>
+</tr>
+<tr>
+<td>Directory exists, no Parquet written</td>
+<td><strong>invisible</strong> — <code>discover_samples</code> skips it</td>
+</tr>
+<tr>
+<td>Parquet present, no completion marker</td>
+<td>ERROR ✓</td>
+</tr>
+</tbody>
+</table>
+<p>A job killed between <code>mkdir</code> and its first write was indistinguishable from
+  one never submitted. At a handful of samples that is obvious; across a
+  16,000-sample cohort it is not, and the consumer reads a short cohort without
+  knowing it was short.</p>
+<p>Takes a Nextflow samplesheet (using its <code>sample</code> column) or a plain list. The
+  two absences are reported separately, because an empty directory means the
+  job ran and its logs exist while a missing one usually means it was never
+  submitted. An unexpected sample is a WARN, not an ERROR — it corrupts
+  nothing, but it usually means an identifier that does not round-trip, which
+  makes every other count unreliable. A CSV without a <code>sample</code> column is an
+  error rather than a guess at the first column: reconciling against the wrong
+  field reports every sample missing, which reads as a catastrophic run failure
+  instead of a malformed input.</p>
+<p>The summary table shows counts; the <code>--json-report</code> names every affected
+  sample, which is the split that keeps it readable at cohort scale.</p>
 <ul>
 <li><strong>A check that a release actually published.</strong> Every other gate verifies the
   repository; nothing asked the registries whether the release landed. 0.9.0
