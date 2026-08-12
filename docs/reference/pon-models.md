@@ -182,6 +182,33 @@ See [build-pon CLI](../guides/building-pon.md) for detailed options.
 - Same assay/panel as samples to be processed
 - Same reference genome
 
+### Rebuilding without re-reading the BAMs (`--from-outputs`)
+
+A from-scratch build re-extracts every fragment and takes roughly 15 hours for
+a 47-donor cohort. Most rebuilds do not need that: **aggregation** is what
+changed, not the per-sample features. `--from-outputs` re-aggregates a
+directory of existing `run-all` outputs in minutes per model.
+
+```bash
+krewlyzer build-pon --from-outputs /path/to/runall_dirs \
+    --assay xs1 --genome hg19 -o xs1.all_unique.pon.parquet
+krewlyzer validate-pon xs1.all_unique.pon.parquet
+```
+
+This is how all four bundled models were rebuilt for 0.9.0 when the σ floor and
+the BreakPointMotif baseline changed — both aggregation-stage fixes.
+
+Use it when the **builder** changed. Use a full build when anything upstream of
+it did: the fragment filters, the GC model, or the feature code itself. The
+per-sample directories must still exist and must contain every table the model
+needs, so confirm before relying on it — a cohort cleaned up after its last
+build forces the full path.
+
+> [!NOTE]
+> The cohort digest is computed from the sample list, so re-aggregating the same
+> cohort must leave it **unchanged**. A digest that moves means the inputs moved,
+> not the aggregation — investigate before shipping the model.
+
 ## Using PON in Processing
 
 When `--pon-model` is provided to `run-all`:
