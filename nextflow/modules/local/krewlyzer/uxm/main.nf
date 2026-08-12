@@ -10,7 +10,7 @@
 process KREWLYZER_UXM {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     tuple val(meta), path(bam), path(bai)

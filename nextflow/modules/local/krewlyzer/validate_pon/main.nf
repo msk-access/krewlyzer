@@ -22,7 +22,7 @@
 process KREWLYZER_VALIDATE_PON {
     tag "${pon_model.name}"
     label 'process_single'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     path pon_model

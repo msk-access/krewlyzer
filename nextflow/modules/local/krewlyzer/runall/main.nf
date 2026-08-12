@@ -15,7 +15,7 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
 

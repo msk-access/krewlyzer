@@ -33,11 +33,13 @@
 #   this array, 12 concurrent               ~5.9 h
 #   this array, unthrottled                 ~1.5 h
 #
-# Nextflow would do the same fan-out, but every module pins
-# `krewlyzer:0.8.3` and the SLURM profile enables singularity -- so a run today
-# would silently execute 0.8.3 and reproduce the defects 0.9.0 removes. That
-# needs a 0.9.0 container, which needs the release, which needs this PON.
-# An sbatch array needs no container and no new infrastructure.
+# Nextflow would do the same fan-out. The modules now pin `krewlyzer:0.9.0`,
+# so once that container is published this script has no advantage left except
+# needing no container at all -- which is still the reason it exists, for a
+# rebuild that has to happen before the image does.
+#
+# The pin mattered: while the modules said `0.8.3`, a Nextflow run would have
+# silently executed 0.8.3 and reproduced every defect 0.9.0 removes.
 #
 # `--from-outputs` will accept Nextflow's output unchanged once it exists; it
 # is the same per-sample layout.

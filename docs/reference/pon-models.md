@@ -71,22 +71,79 @@ The `--pon-variant` flag:
 
 ## PON Components
 
-| Component | Description | Used By |
-|-----------|-------------|---------|
-| **GC Bias Model** | Expected coverage by GC content per fragment type | FSC, FSR, WPS |
-| **FSD Baseline** | Size distribution per chromosome arm | FSD |
-| **WPS Baseline** | WPS mean/std per transcript region | WPS |
-| **OCF Baseline** | Open chromatin scores per region | OCF |
-| **MDS Baseline** | k-mer frequencies and motif diversity | Motif |
-| **TFBS Baseline** | Per-TF entropy mean/std | Region Entropy |
-| **ATAC Baseline** | Per-cancer-type entropy mean/std | Region Entropy |
-| **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
-| **FSC Gene Baseline** | Per-gene normalized depth mean/std | FSC Gene |
-| **FSC Region Baseline** | Per-exon normalized depth mean/std | FSC Region |
-| **FSD On-Target** | On-target size distribution (panel mode) | FSD |
-| **MDS On-Target** | On-target motif diversity baseline (panel mode) | Motif |
-| **OCF On-Target** | On-target OCF scores (panel mode) | OCF |
-| **OCF Off-Target** | Off-target OCF scores (panel mode) | OCF |
+A PON is a single long-format Parquet with a `table` column; each block below is
+one value of it. All 24 are present in the shipped GRCh37 models.
+
+| Block | Description | Used by |
+|---|---|---|
+| `metadata` | Assay, cohort size, build date, and the provenance fields below | every reader |
+| `gc_bias` | Expected coverage by GC content per fragment type | FSC, FSR, WPS |
+| `fsd_baseline` | Size distribution per chromosome arm | FSD |
+| `wps_baseline` | 200-position mean and σ profiles per anchor | WPS |
+| `wps_baseline_panel` | As `wps_baseline`, over the assay's panel anchors | WPS panel |
+| `wps_shape_baseline` | Per-anchor baselines for the derived shape statistics | WPS |
+| `wps_background` | NRL and periodicity per Alu group | WPS background |
+| `ocf_baseline` | Open-chromatin scores per tissue | OCF |
+| `mds_baseline` | End-motif k-mer frequencies and motif diversity | EndMotif, MDS |
+| `breakpoint_motif_baseline` | **Breakpoint** k-mer frequencies | BreakPointMotif |
+| `tfbs_baseline` | Per-TF entropy mean/σ | Region entropy |
+| `atac_baseline` | Per-cancer-type entropy mean/σ | Region entropy |
+| `region_mds` | Per-gene MDS mean/σ | Region MDS |
+| `region_mds_exon` | Per-exon MDS mean/σ | Region MDS |
+| `fsc_gene_baseline` | Per-gene normalised depth mean/σ | FSC gene |
+| `fsc_region_baseline` | Per-exon normalised depth mean/σ | FSC region |
+
+!!! note "Breakpoint motifs are not end motifs"
+    An end motif is the 4-mer at the fragment's 5′ terminus — what the nuclease
+    left. A breakpoint motif spans the cut site and includes reference bases
+    *not present in the fragment*. The two frequency vectors correlate only
+    **0.696** on the same sample, so they need separate baselines. Before 0.9.0
+    `BreakPointMotif` was scored against `mds_baseline` and its `frequency_z`
+    measured the offset between two definitions rather than any departure from
+    healthy.
+
+### What a PON records about itself
+
+`metadata` carries provenance, so a model can be identified after the fact:
+
+| Field | Meaning |
+|---|---|
+| `krewlyzer_version` | The release the model **ships with**, set by `stamp-pon` — not the version of the code that happened to build it |
+| `cohort_digest` | A salted, non-reversible fingerprint of the donor set. Two builds from the same cohort match; it reveals nothing about who is in it |
+| `cohort_label` | Optional free-text name |
+| `input_kind` | `bam`, `bed`, `mixed` or `outputs` — what the cohort was made of, so the gate can tell a block that was never asked for from one that failed |
+| `n_samples`, `build_date`, `assay`, `panel_mode` | As named |
+
+### Version compatibility
+
+**A PON older than 0.9.0 is refused.** That release changed what several
+features *mean* — a fabricated `wps_background`, floored σ, a region-MDS fitted
+over a different fragment range — so an older model is not merely stale, it is
+measuring something else, and every z-score against it is wrong in a way no
+schema check can see.
+
+The floor is a compatibility floor, not the package version: it stays at 0.9.0
+in later releases, because what changed happened once.
+
+```bash
+# Deliberately score against an older model anyway
+KREWLYZER_ALLOW_OLD_PON=1 krewlyzer run-all ...
+```
+
+The escape hatch exists on purpose. Without a documented way out, someone who
+genuinely wants an old model for comparison edits the Parquet instead, and then
+the version stops meaning anything.
+
+### σ that is not a measurement
+
+Where a baseline could not measure a spread — every donor identical, or no donor
+covering that position — the model stores **NaN**, and the scorers emit no
+z-score rather than dividing by a placeholder.
+
+This is enforced at both ends. Values below `1e-9` are treated as floating-point
+residue rather than a spread: WPS is a difference of GC-weighted counts, so a
+true zero computes as ~1e-17 instead of `0.0`, and dividing by that produced
+z-scores up to 6.1 × 10¹⁸ before 0.9.0.
 
 ## Panel Mode
 
@@ -108,7 +165,9 @@ Panel mode generates these additional baselines:
 |---|---|
 | `gc_bias_ontarget` | GC correction from on-target reads |
 | `fsd_baseline_ontarget` | Size distribution from on-target fragments |
-| `mds_baseline_ontarget` | Motif diversity from on-target fragments |
+| `mds_baseline_ontarget` | End-motif diversity from on-target fragments |
+| `breakpoint_motif_baseline_ontarget` | Breakpoint motifs from on-target fragments |
+| `wps_baseline_panel` | WPS profiles over the assay's panel anchors |
 | `ocf_baseline_ontarget` | OCF scores from on-target reads |
 | `ocf_baseline_offtarget` | OCF scores from off-target reads |
 | `tfbs_baseline_ontarget` | TFBS entropy from on-target reads |

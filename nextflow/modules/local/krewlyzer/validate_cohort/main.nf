@@ -19,7 +19,7 @@
 process KREWLYZER_VALIDATE_COHORT {
     tag "cohort"
     label 'process_single'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     path fingerprints, stageAs: "fingerprints/*"
