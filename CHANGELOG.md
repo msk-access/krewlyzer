@@ -133,6 +133,31 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **FILTER_MAF no longer runs once per sample when the MAF is shared.** It
+  scanned the entire cohort MAF, line by line in Python, to extract one
+  sample's rows — so a 16,552-sample run performed 16,552 full scans of the
+  same file, each as its own SLURM job whose scheduling overhead exceeded the
+  work it did. `maxForks queue_size.intdiv(2)` then reserved **250 of 500
+  slots** for it, upstream of RUNALL, so the opening wave of a run was nothing
+  but MAF filtering and no real work could start. This was the observed queue
+  clog on the 0.8.3 cohort.
+
+  The new `SPLIT_MAF` does one pass per distinct MAF: **1 job instead of
+  16,552**, and the whole queue freed for RUNALL.
+
+  Batching keys on **(maf, single_sample)**, not the MAF alone — grouping a
+  pass-through sample with a filtered one would apply a single mode to both and
+  silently corrupt one. A sheet with per-sample MAFs yields one task each and
+  behaves exactly as before; samples with no MAF keep FILTER_MAF and its
+  header-only placeholder.
+
+  Every requested sample gets a file, including those with zero matching
+  variants, and `SPLIT_MAF` exits non-zero if it wrote a short set. A sample
+  with no file would be dropped by the caller's re-pairing and RUNALL would
+  never run for it — silent cohort loss reintroduced one stage earlier than
+  `--expect` can see it. The metas ride through the process so re-pairing is a
+  `map`, preserving the join-free streaming this workflow is built around.
+
 - **`check_phi_guard.sh` runs in 2.3s instead of ~100s.** `git archive` applies
   the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
   parquet, gzipped BED and FASTA (75s), and assertion 5 grepped the same
