@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The Nextflow pipeline reported itself as 0.8.3.** `manifest.version` sat at
+  the previous release through all of 0.9.0. Nothing functional depended on it,
+  which is why it drifted — but Nextflow writes it into every execution report,
+  trace file and Tower entry, so a 16,000-sample cohort would have been labelled
+  0.8.3 in its own provenance while running 0.9.0 containers.
+
+  The Phase 2 version bump is a `sed` over container tags in the modules and
+  never matched this line. The release guide compounded it by listing
+  `nextflow.config` under "container tag" — there is no container pin in that
+  file at all. Both corrected, and `tests/unit/test_nextflow_version.py` now
+  pins `manifest.version` and every module container tag to `__version__`.
+
+  The container half matters more than the manifest: a stale pin there does not
+  mislabel a run, it executes the previous release's defects under this
+  version's name.
+
 - **The documentation site stopped publishing on 2026-07-31 and nobody noticed
   for a whole release.** `ba13fd4` (#32) replaced the docs workflow with the
   aggregate check alone, dropping the `mike` deploys and the strict build with

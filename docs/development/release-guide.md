@@ -62,7 +62,7 @@ worse than no pointer, because it invites editing the wrong line.
 | **Python** | `pyproject.toml` | packaging metadata |
 | **Rust** | `rust/Cargo.toml` | crate version |
 | **Rust** | `rust/Cargo.lock` | auto-updated by `cargo check` |
-| **Nextflow** | `nextflow/nextflow.config` | container tag |
+| **Nextflow** | `nextflow/nextflow.config` | `manifest.version` — **not** a container tag; there is no container pin in this file, and the `sed` over container tags never matches it. 0.9.0 shipped with this still reading 0.8.3. Pinned by `tests/unit/test_nextflow_version.py` |
 | **Nextflow** | `nextflow/main.nf` | container tag |
 | **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module (container + `versions.yml`) |
 
