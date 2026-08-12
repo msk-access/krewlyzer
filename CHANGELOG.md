@@ -2,6 +2,86 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Git LFS had silently disabled the PHI guard.** `git lfs install` writes its
+  hooks into `core.hooksPath` — `.githooks/` here — and only declines when it
+  recognises the hook already present. Checking out a commit predating
+  `.githooks/` removes the hooks, and the next LFS command installs a three-line
+  `pre-push` stub in their place. That happened during the 0.9.0 release:
+  `pre-commit` was gone and `pre-push` was the stub, so nothing scanned staged
+  content for patient identifiers, and nothing reported it.
+
+  `pre-push` now reads the ref list once and delegates to `git lfs pre-push`
+  after its own checks pass, so LFS never needs to install anything and the two
+  cannot clobber each other. The three LFS hooks are tracked for the same
+  reason. A side effect: `git push` uploads LFS objects by itself again, rather
+  than needing a separate `git lfs push --all`.
+
+- **The version guard hardcoded `0.9.0`** in one of its two messages instead of
+  formatting `MIN_PON_VERSION`, so raising the floor would have left that branch
+  naming the old one.
+
+- **Three documentation links pointed at anchors that never existed**, including
+  one whose target is an `!!! note` admonition, which generates no anchor at all.
+
+### Added
+
+- **`check_phi_guard.sh` assertion 6** — every tracked hook exists, matches the
+  staged version, and `pre-push` still delegates to git-lfs. Compared against
+  the index rather than `HEAD`, so a deliberate edit passes while an
+  out-of-band overwrite fails.
+
+- **A stale-extension warning at pytest session start.** Python imports whatever
+  `maturin develop` built last, so after a `rust/src/` change the suite tests the
+  previous binary — passing, and proving nothing. In `conftest.py` rather than a
+  per-tool hook so it fires for a human, for CI, and for any agent. A warning
+  and never a failure: the comparison is mtime-based and `git checkout` rewrites
+  mtimes, so a branch switch can trip it.
+
+- **`release.yml` now creates the GitHub Release**, using the CHANGELOG section
+  for the tag as the body. Until now the Releases page was hand-maintained,
+  which is why 0.9.0's tag went green with nothing on it. A missing section
+  fails the step; a section over 60,000 characters is cut at a heading boundary
+  and linked (0.9.0's was 103,376 against GitHub's 125,000 limit).
+
+- **`MIN_PON_VERSION` and `KREWLYZER_ALLOW_OLD_PON` pinned in the claims
+  registry**, now that three documents quote them.
+
+### Changed
+
+- **`check_phi_guard.sh` runs in 2.3s instead of ~100s.** `git archive` applies
+  the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
+  parquet, gzipped BED and FASTA (75s), and assertion 5 grepped the same
+  binaries for `/Users/` (13s). `GIT_LFS_SKIP_SMUDGE` exports the 132-byte
+  pointers instead, and assertion 5 skips LFS paths. This gives up scanning
+  inside LFS payloads: accepted, because they are machine-built compressed
+  reference data where a plaintext regex could never have matched.
+
+- **Release guide Phase 5 merges `main` into `develop`**, not the release branch.
+  The old form left each branch holding a merge commit the other lacked, so
+  `main` sat permanently one ahead; merging `main` makes it an ancestor and
+  `git merge-base --is-ancestor main develop` becomes a valid post-release check.
+
+- **The gates table in `AGENTS.md` has a "Read first" column.** `.agents/rules/`
+  was described as read "on demand" with nothing creating demand, so those files
+  went unopened for a whole release.
+
+### Documentation
+
+- **The PON version guard is in the README.** 0.9.0 refuses any PON built below
+  the floor — the first thing an upgrading user with a self-built model meets —
+  and neither the refusal nor its escape hatch was documented there.
+
+- **`build-pon --from-outputs` is in the README and `pon-models.md`**, not just
+  the developer guide. It turns a ~15h build into minutes and is how all four
+  bundled models were rebuilt for 0.9.0. Both examples previously shown for it
+  used a `--pon-variant` flag that `build-pon` does not have.
+
+- **`BreakPointMotif`** added to the README feature table.
+
 ## [0.9.0] - 2026-08-11
 
 ### Added
