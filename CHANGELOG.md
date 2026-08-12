@@ -6,6 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The documentation site stopped publishing on 2026-07-31 and nobody noticed
+  for a whole release.** `ba13fd4` (#32) replaced the docs workflow with the
+  aggregate check alone, dropping the `mike` deploys and the strict build with
+  it. Nothing has published since: `stable` still served **0.8.3** — the
+  documentation for the release whose defects 0.9.0 exists to fix — and `dev`
+  froze at the same date. Tagging 0.9.0 did not help, because the old workflow
+  only deployed on pushes to `main`/`develop`, never on tags.
+
+  Restored, with three changes. **A tag publishes `stable`**, not a push to
+  `main`: the tag is the authoritative "released" signal, and hanging it on a
+  `main` push is what let PyPI and the container ship while the site sat still.
+  **No `paths` filter on push**, because GitHub requires the ref filter and the
+  path filter to both match, so `tags: ['*']` beside `paths:` would drop any tag
+  whose commits missed `docs/`. And **`workflow_dispatch` takes a version**, so
+  0.9.0 can be backfilled without re-tagging.
+
+  `mkdocs build --strict` returns as a PR check. Its absence is why three links
+  to non-existent anchors survived into the release.
+
 - **Git LFS had silently disabled the PHI guard.** `git lfs install` writes its
   hooks into `core.hooksPath` — `.githooks/` here — and only declines when it
   recognises the hook already present. Checking out a commit predating
