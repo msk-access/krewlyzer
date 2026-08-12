@@ -651,6 +651,178 @@ All notable changes to this project will be documented in this file.
   The eleven per-tool Nextflow modules now pass `params.output_format` and
   `params.compress_tsv` through as well; previously only `runall` did.
 
+### Changed
+
+- **WPS PON scoring moved from Python to Rust** (`rust/src/wps.rs::apply_pon_zscore`).
+  It was the last PON z-score still computed in Python, and it was the largest:
+  89k anchors, a ±30 lag search each, about 5.4M correlations.
+  `.agents/rules/architecture.md` puts "PON z-score", "loops over >1000 rows"
+  and "row-level computation" on the Rust side; this was all three.
+
+  Measured on a real 76,595-anchor output against a shipped PON: **9.5 s
+  against ~17 min**, roughly 107×.
+
+  Written in Python first on purpose, and that is not an apology — three of its
+  decisions changed under measurement and would not have survived being written
+  in the faster language first: the `log1p` amplitude (raw range correlates
+  +0.512 with depth), the Fisher transform (bounded *r* left 302 of 400 anchors
+  unable to reach +2), and the deliberate absence of a phase-shift baseline
+  (intraclass correlation 0.479). The port is **bug-for-bug**, including a tie
+  in the lag search resolving to the most negative lag — measured incidence 0
+  in 317 anchors, and correcting it would have destroyed the oracle's ability
+  to tell a porting slip from an intended change.
+
+  The Python reference is frozen as that oracle in
+  `tests/unit/test_rust_python_equivalence.py`. Nothing imports it outside
+  tests; the shipping module is now a ~40-line call. Tolerance was fixed at
+  `1e-6` relative *before* the first comparison; measured worst case **2.2e-13**
+  on synthetic anchors and **9.0e-14** against real data.
+
+  `apply_wps_pon` now takes the PON **path** rather than a loaded model, and
+  `baseline_attr` is renamed `baseline_table` — the argument names a table in
+  the parquet, not an attribute on an object.
+
+- **Two silent-read traps found while porting**, both of the "present,
+  plausible, returns nothing" class that this release is mostly about:
+
+  Every shipped PON stores `table` and `region_id` as Arrow `large_string`,
+  never `string`. A reader that downcasts to `StringArray` gets `None` and
+  yields an *empty* baseline — a legitimate state that degrades silently
+  instead of raising. `pon_model.rs::PonModel::load` does exactly that and is
+  blind to every PON this project has ever shipped. It survived because it has
+  **no callers**: each reader loads what it needs, and `pub` items are exempt
+  from dead-code warnings. Recorded in `architecture.md` rather than deleted,
+  pending an explicit decision on scope.
+
+  Vector columns are `list<double>` from the Python builder and `list<float>`
+  from the Rust one. The new reader accepts both and logs the type it could not
+  read, rather than reporting no anchors.
+
+- **Four `eprintln!("DEBUG: …")` calls in `wps.rs` now go through the logger.**
+  They wrote to stderr on every WPS run, below no level and past every filter.
+
+- **The two PON blocks that were built, stored, and read by nothing are now
+  applied.** Found by tracing all 21 baseline blocks from build → parquet →
+  read → apply; 19 were reaching scoring code and two were not.
+
+  `wps_baseline_panel` (326 anchors in the xs2 model) — `apply_wps_pon` ran
+  only on the genome-wide WPS, so `{sample}.WPS.panel.parquet` shipped raw.
+  The anchors closest to the targeted regions were the one WPS output with no
+  comparison to a healthy cohort. They now carry the same derived and z-scored
+  columns as the genome-wide file. The shape statistics borrow the genome-wide
+  `wps_shape_baseline`: a few hundred panel anchors is too few to fit a second
+  one, and they overlap the genome-wide set.
+
+  `gc_bias_ontarget` (25 bins) — `PonModel.get_mean` and `get_variance` read
+  `self.gc_bias` only, so on-target FSC and FSR normalised against the
+  genome-wide GC curves. Capture enrichment shifts the GC profile, which is the
+  entire reason panel mode fits a second block. `{sample}.FSC.ontarget`
+  `*_log2` and `*_reliability` values change as a result. A PON without the
+  block falls back to the genome-wide curves rather than dropping the column.
+
+- **A scored column is NaN when its baseline is absent, not 0.0.** Six
+  fabrications in the apply path, after `zscore_or_nan` removed nine from the
+  baseline classes:
+
+  | where | when | was | now |
+  |---|---|---|---|
+  | `fsc_processor` | no `gc_bias` | `{ch}_log2 = 0.0` | NaN |
+  | `fsc_processor` | no variance | `{ch}_reliability = 1.0` | NaN |
+  | `fsr_processor` | no long fragments | `ratio = short_count` | NaN |
+  | `fsr_processor` | ratio ≤ 0 | `short_long_log2 = 0.0` | NaN |
+  | `region_entropy.rs` | σ unmeasurable | `z = 0.0` | NaN |
+  | `region_entropy.rs` | σ column absent | σ ← 1.0, mean ← 0.0 | NaN |
+
+  Zero is never the cautious choice. A log2 ratio or z-score of zero says
+  "this sample sits exactly at the healthy baseline" — the most confident
+  statement either column can make, asserted precisely when nothing could be
+  compared. Measured: with `gc_bias` absent, three windows whose raw values
+  differed fourfold all read `0.0`.
+
+  The Rust pair defeated the Python fix until both were done. `entropy_std`
+  defaulted to `1.0` and `entropy_mean` to `0.0` — a standard normal — so a
+  builder storing NaN for a single-donor label produced the raw difference
+  rather than no score. And `position(...).unwrap_or(0)` read *column zero*
+  when a column was not found, which in a PON parquet is `table`.
+
+  `region_entropy_processor` was the fifth site of the `sample_std_or_nan`
+  defect and the only one outside `pon/build.py`.
+
+- **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
+  and variant as arguments. The old script was hardcoded to xs2 and carried a
+  header claiming "47 samples" inherited from the xs1 copy it was made from —
+  while the xs2 model it produced records 21. Four models built from four
+  edited copies of one script is how that happens.
+
+  It also passes `--keep-sample-outputs` and `--cohort-label`, and **ends by
+  running `validate-pon` on what it built**. A build that produces a model the
+  gate rejects has not succeeded, whatever `build-pon`'s exit code said.
+
+  `docs/guides/building-pon.md` gains the rebuild runbook: what to watch in the
+  log, why the sample outputs are kept, and the LFS ordering that has to be
+  right.
+
+- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
+  and FSC region have required it since they were written and WPS acquired it
+  in `4cd634b`; the four now agree by construction rather than by three
+  separate literals happening to match.
+
+- **OCF PON logging distinguishes "absent from the baseline" from "matched but
+  unscoreable".** Both correctly write NaN, but collapsing them reported
+  `0/1 regions matched` for a region that matched perfectly well and simply has
+  no variance in the cohort. That is the difference between "rebuild the PON"
+  and "expected", and only the log can say which.
+
+- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
+  existed** — `version` / `genome` / `sample_count` where real PONs write
+  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
+  `meta.get(key, default)`, it loaded as a completely empty model and the tests
+  asserted only `is not None`. `test_pon_model_loading` had been marked
+  `skip("PON parquet schema requires production format")` — true of the
+  fixture, not the loader. Fixture corrected against the bundled PON, test
+  unskipped, and both now assert real field values.
+
+- **PON scoring was skipped under `--output-format parquet` in three more
+  places.** Same shape as the FSD defect below: callers name a hardcoded
+  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
+  then False.
+
+  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
+    `depth_zscore`
+  - `apply_fsc_region_pon` and the e1-only filter, identically
+  - `process_region_entropy` skipped the whole step
+
+  All four now resolve with `resolve_table_path`. Measured before and after on
+  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
+
+- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
+  not a neutral placeholder — it is the most confident claim the column can
+  make ("this sample sits exactly at the healthy baseline"), asserted on the
+  strength of having no baseline at all, and indistinguishable from a measured
+  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
+  both when no `--pon-model` was given and when the PON lacks the table.
+
+### Removed
+
+- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
+  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
+  parquet imports that existed only to serve them. The crate now builds with
+  zero warnings.
+
+  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
+  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
+  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
+  not positive. It was also unreachable: the call was gated on
+  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
+  schema-obsolete, fabricating, and implementing the statistic measurement
+  refuted.
+
+- **`PonModel.save`** — a second serializer that wrote only the metadata block,
+  producing a PON with no baselines at all, while `build-pon` used
+  `_save_pon_model`. Nothing in production called it. Removed rather than
+  completed: a second writer is a second thing to keep in step with every new
+  block.
+
 ### Fixed
 
 - **`pon_stability` was an unnormalised inverse variance and collapsed to zero.**
@@ -931,179 +1103,6 @@ All notable changes to this project will be documented in this file.
   unreadable `size_bin` or `arm` are now skipped and counted in a warning
   rather than silently collapsing onto bin 0 or an empty key.
 
-### Changed
-
-- **WPS PON scoring moved from Python to Rust** (`rust/src/wps.rs::apply_pon_zscore`).
-  It was the last PON z-score still computed in Python, and it was the largest:
-  89k anchors, a ±30 lag search each, about 5.4M correlations.
-  `.agents/rules/architecture.md` puts "PON z-score", "loops over >1000 rows"
-  and "row-level computation" on the Rust side; this was all three.
-
-  Measured on a real 76,595-anchor output against a shipped PON: **9.5 s
-  against ~17 min**, roughly 107×.
-
-  Written in Python first on purpose, and that is not an apology — three of its
-  decisions changed under measurement and would not have survived being written
-  in the faster language first: the `log1p` amplitude (raw range correlates
-  +0.512 with depth), the Fisher transform (bounded *r* left 302 of 400 anchors
-  unable to reach +2), and the deliberate absence of a phase-shift baseline
-  (intraclass correlation 0.479). The port is **bug-for-bug**, including a tie
-  in the lag search resolving to the most negative lag — measured incidence 0
-  in 317 anchors, and correcting it would have destroyed the oracle's ability
-  to tell a porting slip from an intended change.
-
-  The Python reference is frozen as that oracle in
-  `tests/unit/test_rust_python_equivalence.py`. Nothing imports it outside
-  tests; the shipping module is now a ~40-line call. Tolerance was fixed at
-  `1e-6` relative *before* the first comparison; measured worst case **2.2e-13**
-  on synthetic anchors and **9.0e-14** against real data.
-
-  `apply_wps_pon` now takes the PON **path** rather than a loaded model, and
-  `baseline_attr` is renamed `baseline_table` — the argument names a table in
-  the parquet, not an attribute on an object.
-
-- **Two silent-read traps found while porting**, both of the "present,
-  plausible, returns nothing" class that this release is mostly about:
-
-  Every shipped PON stores `table` and `region_id` as Arrow `large_string`,
-  never `string`. A reader that downcasts to `StringArray` gets `None` and
-  yields an *empty* baseline — a legitimate state that degrades silently
-  instead of raising. `pon_model.rs::PonModel::load` does exactly that and is
-  blind to every PON this project has ever shipped. It survived because it has
-  **no callers**: each reader loads what it needs, and `pub` items are exempt
-  from dead-code warnings. Recorded in `architecture.md` rather than deleted,
-  pending an explicit decision on scope.
-
-  Vector columns are `list<double>` from the Python builder and `list<float>`
-  from the Rust one. The new reader accepts both and logs the type it could not
-  read, rather than reporting no anchors.
-
-- **Four `eprintln!("DEBUG: …")` calls in `wps.rs` now go through the logger.**
-  They wrote to stderr on every WPS run, below no level and past every filter.
-
-- **The two PON blocks that were built, stored, and read by nothing are now
-  applied.** Found by tracing all 21 baseline blocks from build → parquet →
-  read → apply; 19 were reaching scoring code and two were not.
-
-  `wps_baseline_panel` (326 anchors in the xs2 model) — `apply_wps_pon` ran
-  only on the genome-wide WPS, so `{sample}.WPS.panel.parquet` shipped raw.
-  The anchors closest to the targeted regions were the one WPS output with no
-  comparison to a healthy cohort. They now carry the same derived and z-scored
-  columns as the genome-wide file. The shape statistics borrow the genome-wide
-  `wps_shape_baseline`: a few hundred panel anchors is too few to fit a second
-  one, and they overlap the genome-wide set.
-
-  `gc_bias_ontarget` (25 bins) — `PonModel.get_mean` and `get_variance` read
-  `self.gc_bias` only, so on-target FSC and FSR normalised against the
-  genome-wide GC curves. Capture enrichment shifts the GC profile, which is the
-  entire reason panel mode fits a second block. `{sample}.FSC.ontarget`
-  `*_log2` and `*_reliability` values change as a result. A PON without the
-  block falls back to the genome-wide curves rather than dropping the column.
-
-- **A scored column is NaN when its baseline is absent, not 0.0.** Six
-  fabrications in the apply path, after `zscore_or_nan` removed nine from the
-  baseline classes:
-
-  | where | when | was | now |
-  |---|---|---|---|
-  | `fsc_processor` | no `gc_bias` | `{ch}_log2 = 0.0` | NaN |
-  | `fsc_processor` | no variance | `{ch}_reliability = 1.0` | NaN |
-  | `fsr_processor` | no long fragments | `ratio = short_count` | NaN |
-  | `fsr_processor` | ratio ≤ 0 | `short_long_log2 = 0.0` | NaN |
-  | `region_entropy.rs` | σ unmeasurable | `z = 0.0` | NaN |
-  | `region_entropy.rs` | σ column absent | σ ← 1.0, mean ← 0.0 | NaN |
-
-  Zero is never the cautious choice. A log2 ratio or z-score of zero says
-  "this sample sits exactly at the healthy baseline" — the most confident
-  statement either column can make, asserted precisely when nothing could be
-  compared. Measured: with `gc_bias` absent, three windows whose raw values
-  differed fourfold all read `0.0`.
-
-  The Rust pair defeated the Python fix until both were done. `entropy_std`
-  defaulted to `1.0` and `entropy_mean` to `0.0` — a standard normal — so a
-  builder storing NaN for a single-donor label produced the raw difference
-  rather than no score. And `position(...).unwrap_or(0)` read *column zero*
-  when a column was not found, which in a PON parquet is `table`.
-
-  `region_entropy_processor` was the fifth site of the `sample_std_or_nan`
-  defect and the only one outside `pon/build.py`.
-
-- **`scripts/build_pon_unfiltered.sh` → `scripts/build_pon.sh`**, taking assay
-  and variant as arguments. The old script was hardcoded to xs2 and carried a
-  header claiming "47 samples" inherited from the xs1 copy it was made from —
-  while the xs2 model it produced records 21. Four models built from four
-  edited copies of one script is how that happens.
-
-  It also passes `--keep-sample-outputs` and `--cohort-label`, and **ends by
-  running `validate-pon` on what it built**. A build that produces a model the
-  gate rejects has not succeeded, whatever `build-pon`'s exit code said.
-
-  `docs/guides/building-pon.md` gains the rebuild runbook: what to watch in the
-  log, why the sample outputs are kept, and the LFS ordering that has to be
-  right.
-
-- **`MIN_SAMPLES_PER_KEY`** names the ≥3 floor once in `pon/build.py`. FSC gene
-  and FSC region have required it since they were written and WPS acquired it
-  in `4cd634b`; the four now agree by construction rather than by three
-  separate literals happening to match.
-
-- **OCF PON logging distinguishes "absent from the baseline" from "matched but
-  unscoreable".** Both correctly write NaN, but collapsing them reported
-  `0/1 regions matched` for a region that matched perfectly well and simply has
-  no variance in the cohort. That is the difference between "rebuild the PON"
-  and "expected", and only the log can say which.
-
-- **`tests/integration/test_pon.py`'s PON fixture used a schema that has never
-  existed** — `version` / `genome` / `sample_count` where real PONs write
-  `schema_version` / `assay` / `n_samples`. Since `PonModel.load` reads through
-  `meta.get(key, default)`, it loaded as a completely empty model and the tests
-  asserted only `is not None`. `test_pon_model_loading` had been marked
-  `skip("PON parquet schema requires production format")` — true of the
-  fixture, not the loader. Fixture corrected against the bundled PON, test
-  unskipped, and both now assert real field values.
-
-- **PON scoring was skipped under `--output-format parquet` in three more
-  places.** Same shape as the FSD defect below: callers name a hardcoded
-  `.tsv`, the Rust writer honours `--output-format`, and a bare `.exists()` is
-  then False.
-
-  - `apply_fsc_gene_pon` returned `None` with "file not found" and added no
-    `depth_zscore`
-  - `apply_fsc_region_pon` and the e1-only filter, identically
-  - `process_region_entropy` skipped the whole step
-
-  All four now resolve with `resolve_table_path`. Measured before and after on
-  the bundled PON: `depth_zscore` absent → present with 5/5 populated.
-
-- **TFBS and ATAC emitted `z_score = 0.0` when there was no baseline.** Zero is
-  not a neutral placeholder — it is the most confident claim the column can
-  make ("this sample sits exactly at the healthy baseline"), asserted on the
-  strength of having no baseline at all, and indistinguishable from a measured
-  zero. Now `NaN`, with a WARNING naming how many labels are affected. Applies
-  both when no `--pon-model` was given and when the PON lacks the table.
-
-### Removed
-
-- **271 lines of dead Rust.** `_core.wps.apply_pon_zscore` (173 lines) plus
-  `load_wps_baseline_from_parquet`, `phase_shift`, `PHASE_MAX_LAG` and the
-  parquet imports that existed only to serve them. The crate now builds with
-  zero warnings.
-
-  `_core.wps.apply_pon_zscore` in detail: It emitted one scalar z
-  per anchor from `wps_long_std`/`wps_short_std` — v1.0 baseline field names,
-  while every shipped PON is v2.0 vector format — and pushed `0.0` where σ was
-  not positive. It was also unreachable: the call was gated on
-  `pon._source_path`, an attribute nothing in the codebase sets. Dead,
-  schema-obsolete, fabricating, and implementing the statistic measurement
-  refuted.
-
-- **`PonModel.save`** — a second serializer that wrote only the metadata block,
-  producing a PON with no baselines at all, while `build-pon` used
-  `_save_pon_model`. Nothing in production called it. Removed rather than
-  completed: a second writer is a second thing to keep in step with every new
-  block.
-
-### Fixed
 
 - **WPS z-scores were written to a file nobody reads.** `apply_wps_pon`
   honoured `--output-format`, whose default is `tsv`, while the Rust step

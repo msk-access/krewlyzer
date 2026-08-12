@@ -24,7 +24,7 @@ Complete reference for every file Krewlyzer produces — what it contains, what 
 | [`{s}.MDS.tsv`](#mds-motif-diversity-score) | MDS | Global (1 row) | Motif diversity scalar |
 | [`{s}.MDS.exon.tsv`](#mds-exon-level) | Region-MDS | Per exon | Per-exon motif diversity |
 | [`{s}.MDS.gene.tsv`](#mds-gene-level) | Region-MDS | Per gene | Per-gene MDS + E1 |
-| [`{s}.OCF.tsv`](#ocf-orientation-aware-fragmentation) | OCF | Per tissue | Tissue-of-origin score |
+| [`{s}.OCF.tsv`](#ocf-orientation-aware-cfdna-fragmentation) | OCF | Per tissue | Tissue-of-origin score |
 | [`{s}.OCF.sync.tsv`](#ocf-sync) | OCF | Positional | Strand-phased profiles |
 | [`{s}.TFBS.tsv`](#tfbs-transcription-factor-binding-site-entropy) | TFBS | Per TF | TF footprint entropy |
 | [`{s}.TFBS.sync.tsv`](#tfbs-sync) | TFBS | Per TF × size | Size-resolved TF profiles |
@@ -378,7 +378,7 @@ Aggregates FSC across all exons for each panel gene. Rows = genes.
 | `gene` | str | HGNC symbol (e.g. `ATM`, `TP53`) |
 | `n_regions` | int | Number of exons/targets captured |
 | `total_bp` | int | Total base pairs covered |
-| `ultra_short` … `ultra_long` | float | GC-corrected count per size class, same six bands as [FSC genome bins](#fsc-genome-bins) |
+| `ultra_short` … `ultra_long` | float | GC-corrected count per size class, same six bands as [FSC genome bins](#fsc-fragment-size-coverage) |
 | `total` | float | Total GC-corrected count |
 | `ultra_short_ratio` … `ultra_long_ratio` | float | `channel / total` — size composition, sums to 1 |
 | `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |

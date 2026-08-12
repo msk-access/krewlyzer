@@ -280,6 +280,8 @@ df['short_long_ratio'] = (df['ultra_short'] + df['core_short']) / (df['long'] + 
 
 Higher ratio = more short fragments = potential tumor signal
 
+<a id="fsc-ratios-vs-fsr--not-redundant"></a>
+
 !!! note "FSC ratios vs FSR — not redundant"
     The `*_ratio` columns in `FSC.gene.tsv` and `FSC.regions.tsv` are **simple proportions**: `channel / total` per gene or exon. They answer *"what fraction of fragments at this gene are short?"*
 
