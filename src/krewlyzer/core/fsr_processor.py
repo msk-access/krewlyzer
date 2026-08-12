@@ -128,17 +128,26 @@ def process_fsr(
                 s_norm = s
                 l_norm = long_val
 
-            # THEN compute ratio from normalized values
+            # THEN compute ratio from normalized values.
+            #
+            # No long fragments means no short/long ratio -- not a ratio equal
+            # to the short count. Substituting the numerator for a division by
+            # zero invents a number that then flows through log2 as though it
+            # were measured, and a window with 40 short and 0 long reads out as
+            # a ratio of 40 rather than an absent one.
             if l_norm > 0:
                 short_long_ratio = s_norm / l_norm
             else:
-                short_long_ratio = s_norm if s_norm > 0 else 0.0
+                short_long_ratio = float("nan")
 
-            # Log2 ratio for ML
-            if short_long_ratio > 0:
-                short_long_log2 = np.log2(short_long_ratio)
+            # Log2 for ML. NaN, not 0.0: zero here means "ratio of exactly 1",
+            # i.e. short and long in perfect balance -- the most specific claim
+            # the column can make, asserted precisely when nothing was
+            # measurable. Same reasoning as `zscore_or_nan`.
+            if np.isfinite(short_long_ratio) and short_long_ratio > 0:
+                short_long_log2 = float(np.log2(short_long_ratio))
             else:
-                short_long_log2 = 0.0
+                short_long_log2 = float("nan")
 
             # Fractions of total
             short_frac = s / t if t > 0 else 0.0

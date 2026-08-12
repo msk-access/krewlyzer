@@ -104,6 +104,19 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `strand` | Strand (+/-) |
 | `n_fragments` | Fragment count |
 | `mds` | Motif Diversity Score |
+| `mds_z` | Z-score against the PON's per-exon baseline (with `--pon-model`) |
+
+!!! note "`mds_z` needs a PON built by 0.9.0 or later"
+    The per-exon baseline (`region_mds_exon`) is new in 0.9.0. Against an
+    older PON the column is `NaN` and a line is logged saying so — the exon
+    score itself is unaffected.
+
+    `NaN` also appears where the exon is absent from the baseline, which
+    usually means the PON was built for a different panel. Measured on a real
+    cohort, exon coverage is much better than "per-exon" suggests: every exon
+    appears in every sample of its assay, and under 0.25% carry fewer than 10
+    fragments. So a `NaN` here is worth investigating rather than assuming
+    thin coverage.
 
 ### MDS.gene.tsv Columns
 
@@ -124,32 +137,110 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 
 ### Motif Diversity Score (MDS)
 
-MDS quantifies the randomness of 4-mer end motifs using Shannon entropy:
+MDS is the Shannon entropy of the 4-mer end-motif distribution, **normalised by
+the maximum possible entropy** so it lands in `[0, 1]`:
 
 $$
-\text{MDS} = -\sum_{i} p_i \times \log_2(p_i)
+\text{MDS} = \frac{-\sum_{i} p_i \times \log_2(p_i)}{\log_2(256)}
 $$
 
 **Variables:**
 - $p_i$ = frequency of the i-th 4-mer motif (256 possible)
-- Result range: ~6.0 to ~8.0 (higher = more diverse)
+- $\log_2(256) = 8$ — the entropy of a perfectly uniform 4-mer distribution
+- Result range: **0 to 1** (higher = more diverse)
 
 **Interpretation:**
 
 | MDS Value | Meaning |
 |-----------|---------|
-| Higher (~7.5-8.0) | Random/diverse motifs (healthy) |
-| Lower (~6.0-7.0) | Stereotyped motifs (potentially aberrant) |
+| Higher (~0.95–1.0) | Random/diverse motifs (healthy) |
+| Lower (~0.75–0.90) | Stereotyped motifs (potentially aberrant) |
+
+> [!IMPORTANT]
+> This section previously showed the **unnormalised** formula and a "~6.0 to
+> ~8.0" range — the raw entropy in bits, which the tool has never emitted. The
+> clinical table further down this same page quoted ~0.95–1.0, so the page
+> contradicted itself. `motif_utils.rs` divides by 8, and
+> `tests/invariants/test_biological_direction.py` asserts the result stays
+> inside `[0, 1]`.
+>
+> If you built a threshold from the old numbers, it is off by a factor of 8.
 
 ---
 
 ## E1 (First Exon) Significance
 
-The first exon of each gene is identified by genomic position and tracked separately:
+The first exon of each gene is identified by **transcription order** (which
+depends on strand) and tracked separately:
 
 1. **Promoter proximity**: E1 is closest to the promoter region
 2. **Transcription start**: Contains or abuts the TSS
 3. **Cancer sensitivity**: Shows most pronounced MDS changes in cancer
+
+### Strand handling
+
+E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
+
+| Strand | E1 is the exon with the... |
+|--------|----------------------------|
+| `+`    | **lowest** start coordinate |
+| `-`    | **highest** start coordinate |
+
+> [!IMPORTANT]
+> Strand handling depends on which gene BED you feed it, and until 0.9.0 the
+> panel assets carried **no strand column at all** — the parser substituted
+> `+` for every region. So the strand-aware fix applied only to WGS; on
+> `xs1`/`xs2` the lowest coordinate still won, and `mds_e1` reported the
+> **last** exon for every minus-strand gene.
+>
+> The 0.9.0 assets carry strand *and* a precomputed `is_e1`, which
+> `region-mds` now reads directly instead of re-deriving. If you have
+> `MDS.gene.tsv` from an earlier version, minus-strand `mds_e1` / `mds_e1_z`
+> are not comparable — for panels that is **every** minus-strand gene.
+>
+> Feeding a legacy 5-column panel BED still works but now logs a warning
+> saying E1 will not be strand-aware, rather than silently producing a
+> plausible number.
+
+> [!WARNING]
+> **On a targeted panel, "first exon" is ambiguous — genes have several.**
+> Alternative promoters are the norm: a gene carries a median of 13 distinct
+> annotated first exons. The panel captures the *canonical* (MANE) exon 1 for
+> only 25 of 128 `xs1` genes, but another basic protein-coding transcript's
+> first exon for 15 more — so 40 have a genuine transcription start captured,
+> and 88 have none.
+>
+> The bundled gene BEDs record all three cases separately, so a model can weigh
+> them rather than treating every `mds_e1` as promoter signal:
+>
+> | column | meaning |
+> |---|---|
+> | `is_e1` | overlaps the canonical transcript's exon 1 |
+> | `is_alt_e1` | overlaps another basic protein-coding transcript's exon 1 |
+> | `is_first_captured` | most 5′ captured tile; always exists, often internal |
+>
+> Which transcript counts as canonical is configurable — see
+> `--transcript-overrides` in `scripts/build_gene_bed.py` — because a panel
+> designed around specific clinical transcripts should not have MANE imposed
+> on it.
+>
+> WGS is unaffected: every exon of the canonical transcript is present.
+
+> [!NOTE]
+> `mds_e1` has three distinguishable states:
+>
+> | value | meaning |
+> |---|---|
+> | a number | E1 exists and had fragments |
+> | `0.0` | E1 exists but had **no** fragments |
+> | `NaN` | this gene has **no E1 region at all** |
+>
+> The `NaN` case used to collapse into `0.0`, which is the worst available
+> choice — MDS lives in `[0, 1]` and *lower means more abnormal*, so a
+> fabricated `0.0` reads as maximal tumour signal. It is common rather than
+> rare: 88 of 128 `xs1` genes have no tile on any annotated first exon.
+>
+> It never falls through to the next exon with coverage.
 
 !!! tip
     Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
@@ -230,7 +321,7 @@ See [Panel Mode](../../guides/panel-mode.md) for details on panel-specific proce
 
 | Metric | Healthy | Cancer (ctDNA) |
 |--------|---------|----------------|
-| Gene MDS Mean | Higher (~7.5-8.0) | Lower at affected genes |
+| Gene MDS Mean | Higher (~0.95-1.0) | Lower at affected genes |
 | E1 MDS | Similar to mean | **Decreased at oncogenes/TSGs** |
 | Cross-gene std | Low (consistent) | Variable (heterogeneous) |
 

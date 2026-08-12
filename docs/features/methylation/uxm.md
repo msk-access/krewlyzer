@@ -101,6 +101,13 @@ Output: `{sample}.UXM.tsv`
 | **X** | 25-75% | Heterogeneous/mosaic |
 | **M** | ≥75% CpGs methylated | Stably methylated |
 
+> [!NOTE]
+> These thresholds are defined as `METHY_THRESHOLD = 0.75` and
+> `UNMETHY_THRESHOLD = 0.25` in `src/krewlyzer/uxm.py`. They must straddle a
+> gap: if both are set to the same value the backend's `ratio >= methy` test
+> fires first and the **X class becomes unreachable**, silently emitting
+> `X = 0.0` for every region.
+
 ---
 
 ## Clinical Interpretation

@@ -280,6 +280,8 @@ df['short_long_ratio'] = (df['ultra_short'] + df['core_short']) / (df['long'] + 
 
 Higher ratio = more short fragments = potential tumor signal
 
+<a id="fsc-ratios-vs-fsr--not-redundant"></a>
+
 !!! note "FSC ratios vs FSR — not redundant"
     The `*_ratio` columns in `FSC.gene.tsv` and `FSC.regions.tsv` are **simple proportions**: `channel / total` per gene or exon. They answer *"what fraction of fragments at this gene are short?"*
 
@@ -383,13 +385,26 @@ krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
 | `mono_nucl` | float | GC-weighted count (150–220 bp) |
 | `di_nucl` | float | GC-weighted count (221–260 bp) |
 | `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
 | `total` | float | GC-weighted total count |
 | `ultra_short_ratio` | float | `ultra_short / total` |
 | `core_short_ratio` | float | `core_short / total` |
 | `mono_nucl_ratio` | float | `mono_nucl / total` |
 | `di_nucl_ratio` | float | `di_nucl / total` |
 | `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
 | `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
+
+!!! warning "Band boundaries changed in 0.9.0"
+    Before 0.9.0 the gene and region tables used their own size bands, which had
+    drifted from the genome-bin bands documented above: `mono_nucl` covered
+    150–259 bp, `di_nucl` covered 260–399 bp, and `long` covered everything from
+    400 bp up. A column named `di_nucl` therefore held the genome table's `long`
+    range. The bands are now shared with the genome path, and `ultra_long` is
+    emitted as a sixth channel rather than being folded into `long`.
+
+    The six ratios sum to 1. The five that existed before sum to
+    `1 - ultra_long_ratio`. Values from earlier releases are not comparable.
 
 ### Region FSC Output Format (`{sample}.FSC.regions.tsv`)
 
@@ -408,19 +423,52 @@ Per-exon/target output for fine-grained copy number analysis:
 | `mono_nucl` | float | GC-weighted count (150–220 bp) |
 | `di_nucl` | float | GC-weighted count (221–260 bp) |
 | `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
 | `total` | float | GC-weighted total count |
 | `ultra_short_ratio` | float | `ultra_short / total` |
 | `core_short_ratio` | float | `core_short / total` |
 | `mono_nucl_ratio` | float | `mono_nucl / total` |
 | `di_nucl_ratio` | float | `di_nucl / total` |
 | `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
 | `normalized_depth` | float | RPKM-like depth |
+
+The same 0.9.0 band correction applies here — see the warning above.
 
 ### E1-Only FSC Output
 
 **File**: `{sample}.FSC.regions.e1only.tsv`
 
-E1 (first exon) filtering extracts only the first exon per gene by genomic position. Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+
+!!! info "What this table contains, as of 0.9.0"
+    A region qualifies as E1 if it overlaps **either** the canonical
+    transcript's exon 1 (`is_e1`) **or** another basic protein-coding
+    transcript's first exon (`is_alt_e1`). Both are genuine transcription
+    starts, and restricting to the canonical one discards most of a panel:
+
+    | tile overlaps… | xs1 / 128 | xs2 / 146 |
+    |---|---:|---:|
+    | canonical (MANE) exon 1 only | 25 | 33 |
+    | **either flag — what this table uses** | **40** | **48** |
+    | any transcript's exon 1, incl. minor isoforms | 79 | 90 |
+
+    Alternative promoters are the norm — a gene carries a median of 13 distinct
+    annotated first exons. Minor and non-coding isoforms are excluded upstream
+    in `scripts/build_gene_bed.py`, because their annotated starts are not
+    evidence of a live promoter; that exclusion is the gap between 40 and 79.
+
+    **Genes with neither flag are omitted.** Before 0.9.0 this table emitted one
+    row per gene regardless, so a gene whose exon 1 the panel never captured got
+    an arbitrary internal exon labelled E1 — 98 of 146 rows on a real xs2
+    sample. Dropping them makes the table smaller and true.
+
+    Selection no longer depends on coordinate order, so it is correct on the
+    minus strand. `FSC.regions` now carries `strand`, `is_e1` and `is_alt_e1`
+    so a consumer can tell canonical from alternative.
+
+    A gene BED without those columns still works and still produces a table,
+    but falls back to the lowest-start region per gene with a warning saying so.
 
 **Usage**:
 ```bash
@@ -430,9 +478,6 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2
 # Disable E1-only generation
 krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2 --disable-e1-aggregation
 ```
-
-!!! tip
-    E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
 
 ### Normalized Depth (RPKM-like)
 

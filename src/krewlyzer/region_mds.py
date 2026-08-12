@@ -19,8 +19,80 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
-from .core.output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .core.output_utils import (
+    read_exact_table,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 from . import __version__
+
+
+def _apply_exon_zscores(
+    pon,
+    output_exon: Path,
+    output_exon_base: Path,
+    output_format: str,
+    compress: bool,
+) -> bool:
+    """Append `mds_z` to the exon table, keyed on ``(gene, name)``.
+
+    Returns True when it wrote the final output, so the format-conversion
+    block below knows not to run again on a file this already consumed.
+
+    Split out rather than inlined: the gene block above is already deeply
+    nested, and this is the same shape one level down.
+
+    The two absences are counted separately. ``compute_zscore`` returns None
+    for an exon the baseline has never seen -- a panel change, or a PON built
+    for the other assay -- and NaN for one it has seen but could not measure a
+    spread for. Both write NaN, correctly, but only the log distinguishes
+    "rebuild the PON" from "this exon has no variance in the cohort".
+    """
+    import pandas as pd
+
+    frame = read_exact_table(output_exon)
+    if frame is None:
+        logger.warning(f"Could not read exon output for z-score: {output_exon}")
+        return False
+    if "gene" not in frame.columns or "name" not in frame.columns:
+        logger.warning(
+            f"Exon output lacks gene/name columns, cannot z-score: {output_exon}"
+        )
+        return False
+
+    z_scores = []
+    n_absent = 0
+    n_unscoreable = 0
+    for _, row in frame.iterrows():
+        z = pon.region_mds_exon.compute_zscore(
+            str(row["gene"]), str(row["name"]), row.get("mds")
+        )
+        if z is None:
+            n_absent += 1
+            z_scores.append(float("nan"))
+            continue
+        if pd.isna(z):
+            n_unscoreable += 1
+        z_scores.append(z)
+
+    frame["mds_z"] = z_scores
+    write_table(frame, output_exon_base, output_format=output_format, compress=compress)
+    cleanup_intermediate_tsv(output_exon, output_format, compress)
+
+    n_scored = len(frame) - n_absent - n_unscoreable
+    logger.info(f"Added exon z-scores for {n_scored}/{len(frame)} exons")
+    if n_absent:
+        logger.warning(
+            f"MDS.exon: {n_absent}/{len(frame)} exons are absent from the PON's "
+            "region_mds_exon baseline. Check the PON matches this panel."
+        )
+    if n_unscoreable:
+        logger.warning(
+            f"MDS.exon: {n_unscoreable}/{len(frame)} exons matched the baseline "
+            "but it measured no usable spread, so the z-score is NaN rather "
+            "than a value divided by a placeholder."
+        )
+    return True
 
 
 def region_mds(
@@ -240,21 +312,34 @@ def region_mds(
 
     logger.info(f"Region-MDS complete: {n_regions} regions, {n_genes} genes")
 
+    # Set when the exon scorer has already written the final exon output, so
+    # the format-conversion block below does not run a second time on a file
+    # it already consumed.
+    exon_written = False
+
     # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
         try:
-            from krewlyzer.pon.model import PonModel
+            # The guarded loader, as in run-all: it carries the version floor,
+            # and `PonModel.load` does not.
+            from krewlyzer.core.pon_integration import load_pon_model
 
             logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
-            pon = PonModel.load(resolved_pon_path)
+            pon = load_pon_model(resolved_pon_path)
 
-            if pon.region_mds is None:
+            if pon is None:
+                logger.warning(
+                    "No usable PON: per-gene MDS keeps its raw values and gets "
+                    "no z-scores"
+                )
+            elif pon.region_mds is None:
                 logger.warning(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )
             else:
-                # Read gene output with Parquet-first auto-detection
-                df = read_table(output_gene)
+                # Exact, not parquet-first: Rust wrote this file moments ago
+                # and a stale sibling from an earlier run would win (c92ed86).
+                df = read_exact_table(output_gene)
                 if df is None:
                     logger.warning(
                         f"Could not read gene output for z-score: {output_gene}"
@@ -298,16 +383,35 @@ def region_mds(
                     )
                     logger.info(f"Added z-scores for {n_with_z}/{len(df)} genes")
 
+            # Exon-level z-scores, from the baseline added in this release.
+            #
+            # `MDS.exon` is the finest localisation krewlyzer produces and
+            # shipped a raw score with nothing to compare it against. Handled
+            # separately from the gene block above because the two baselines
+            # can be present independently: a PON built before this release
+            # has `region_mds` and no `region_mds_exon`.
+            if pon.region_mds_exon is None:
+                logger.info(
+                    "PON has no region_mds_exon baseline; MDS.exon keeps its raw "
+                    "score and gets no z-score. Rebuild the PON to add one."
+                )
+            else:
+                exon_written = _apply_exon_zscores(
+                    pon, output_exon, output_exon_base, output_format, compress
+                )
+
         except Exception as e:
             logger.warning(f"PON z-score computation failed: {e}")
 
     # Post-process exon output: convert format and/or compress.
     # Rust writes raw TSV; Python converts to Parquet/both/gzip as requested.
-    if output_format != "tsv" or compress:
+    # Skipped when the exon scorer above already wrote the final file.
+    if not exon_written and (output_format != "tsv" or compress):
         logger.debug(
             f"region_mds: converting {output_exon.name} → format={output_format!r}, compress={compress}"
         )
-        df_exon = read_table(output_exon)
+        # Exact: Rust wrote this TSV in this run.
+        df_exon = read_exact_table(output_exon)
         if df_exon is not None:
             write_table(
                 df_exon,
@@ -326,13 +430,15 @@ def region_mds(
     # When PON z-scores are added (above), write_table already handles format
     # conversion. This block ensures conversion also happens when no PON is
     # provided, PON load fails, or PON lacks region_mds baseline.
-    # Re-converting an already-converted file is safe (read_table/write_table
-    # is idempotent).
+    # Re-converting an already-converted file is safe, but only when the read
+    # targets the file this run wrote: the z-score step above writes into
+    # `output_gene`, and a resolving read would prefer a `.parquet` sibling
+    # left by an earlier run and silently drop those z-scores.
     if output_format != "tsv" or compress:
         logger.debug(
             f"region_mds: converting {output_gene.name} → format={output_format!r}, compress={compress}"
         )
-        df_gene = read_table(output_gene)
+        df_gene = read_exact_table(output_gene)
         if df_gene is not None:
             write_table(
                 df_gene,

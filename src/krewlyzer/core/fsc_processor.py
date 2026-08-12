@@ -15,7 +15,12 @@ import pandas as pd
 import numpy as np
 import logging
 
-from .output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .output_utils import (
+    read_table,
+    resolve_table_path,
+    write_table,
+    cleanup_intermediate_tsv,
+)
 
 logger = logging.getLogger("core.fsc_processor")
 
@@ -159,6 +164,55 @@ def _get_gc_weight(frag_len: int, gc_frac: float, correction_factors: dict) -> f
     return correction_factors.get((len_bin, gc_pct), 1.0)
 
 
+def add_pon_channel_columns(
+    frame: "pd.DataFrame", pon, ontarget: bool = False
+) -> "pd.DataFrame":
+    """Add ``{channel}_log2`` and ``{channel}_reliability`` in place.
+
+    Split out of ``process_fsc`` so it can be tested without a fragment BED.
+    A branch only reachable through a full pipeline run is a branch nothing
+    checks, and this one silently fabricated a value for years.
+
+    Both fall back to NaN, never to a literal:
+
+    ``log2 = 0.0`` says "this sample sits exactly at the healthy baseline" --
+    the most confident statement the column can make, asserted precisely when
+    there is no baseline to compare against. Measured with ``gc_bias`` absent:
+    three windows whose raw values differed fourfold all read 0.0.
+
+    ``reliability = 1.0`` is not neutral either. With ``RELIABILITY_K`` at
+    0.01 it is what a PON variance of 0.99 would produce -- a specific and
+    unremarkable reading, indistinguishable from a measured one.
+
+    The PON's ``gc_bias`` block reaches here through ``PonModel.get_mean``, so
+    a model missing that block used to produce a confident zero in every window
+    of every sample rather than a visibly absent column.
+
+    ``ontarget`` selects ``gc_bias_ontarget``. Capture enrichment gives
+    on-target fragments a different GC profile, which is why panel mode fits a
+    separate block -- one that was built and stored by every panel PON and read
+    by nothing, so on-target FSC normalised against the genome-wide curves.
+    """
+    for ch in CHANNELS:
+        mean = pon.get_mean(ch, ontarget=ontarget) if hasattr(pon, "get_mean") else None
+        var = (
+            pon.get_variance(ch, ontarget=ontarget)
+            if hasattr(pon, "get_variance")
+            else None
+        )
+
+        if mean and mean > 0:
+            frame[f"{ch}_log2"] = np.log2(frame[ch] / mean + 1e-9)
+        else:
+            frame[f"{ch}_log2"] = np.nan
+
+        if var is not None:
+            frame[f"{ch}_reliability"] = 1.0 / (var + RELIABILITY_K)
+        else:
+            frame[f"{ch}_reliability"] = np.nan
+    return frame
+
+
 def process_fsc(
     counts_df: pd.DataFrame,
     output_path: Path,
@@ -167,6 +221,7 @@ def process_fsc(
     pon=None,
     output_format: str = "tsv",
     compress: bool = False,
+    ontarget: bool = False,
 ) -> Path:
     """
     Process GC-weighted fragment counts into FSC ML features.
@@ -247,21 +302,7 @@ def process_fsc(
     # Compute PoN log2 ratios and reliability if model provided
     if pon is not None:
         logger.info("Computing PoN log2 ratios...")
-        for ch in CHANNELS:
-            mean = pon.get_mean(ch) if hasattr(pon, "get_mean") else None
-            var = pon.get_variance(ch) if hasattr(pon, "get_variance") else None
-
-            if mean and mean > 0:
-                # log2(channel / PoN_mean)
-                final_df[f"{ch}_log2"] = np.log2(final_df[ch] / mean + 1e-9)
-            else:
-                final_df[f"{ch}_log2"] = 0.0
-
-            if var is not None:
-                # reliability = 1 / (PoN_variance + k)
-                final_df[f"{ch}_reliability"] = 1.0 / (var + RELIABILITY_K)
-            else:
-                final_df[f"{ch}_reliability"] = 1.0
+        add_pon_channel_columns(final_df, pon, ontarget=ontarget)
 
     # Write output
     _write_fsc_output(
@@ -360,13 +401,27 @@ def aggregate_by_gene(
     if gene_bed_path and Path(gene_bed_path).exists():
         use_gene_bed = Path(gene_bed_path)
     else:
-        # Write genes dict to temp BED for Rust
+        # Write genes dict to temp BED for Rust.
+        #
+        # Eight columns, not five. The extra three carry strand and the two E1
+        # flags through to the Rust aggregator; a 5-column file dropped them
+        # here, which is why FSC could not do strand-aware E1 no matter what
+        # the asset contained. `.` marks unknown -- a legacy gene BED or a
+        # target BED parsed on the fly has no flags, and that must stay
+        # distinguishable from a genuine "false".
+        def _flag(value: Optional[bool]) -> str:
+            return "." if value is None else ("1" if value else "0")
+
         with tempfile.NamedTemporaryFile(mode="w", suffix=".bed", delete=False) as f:
             for gene, regions in genes.items():
                 for region in regions:
                     name = getattr(region, "name", gene)
+                    strand = getattr(region, "strand", None) or "."
                     f.write(
-                        f"{region.chrom}\t{region.start}\t{region.end}\t{gene}\t{name}\n"
+                        f"{region.chrom}\t{region.start}\t{region.end}\t{gene}\t"
+                        f"{name}\t{strand}\t"
+                        f"{_flag(getattr(region, 'is_e1', None))}\t"
+                        f"{_flag(getattr(region, 'is_alt_e1', None))}\n"
                     )
             use_gene_bed = Path(f.name)
 
@@ -410,9 +465,19 @@ def aggregate_by_gene(
 
     # Post-Rust format conversion: read TSV, write in selected format
     base_path = Path(str(output_path).removesuffix(".tsv"))
+    converted = False
     if output_format != "tsv" or compress:
         df = read_table(tsv_path)
-        if df is not None:
+        if df is None:
+            # Do not fall through quietly: the caller would then be handed a
+            # path for a format that was never produced. Keep the .tsv Rust
+            # wrote and say so.
+            logger.warning(
+                f"FSC {aggregate_by}: could not read {tsv_path.name} back for "
+                f"conversion to format={output_format}, compress={compress}; "
+                f"leaving the uncompressed TSV in place"
+            )
+        else:
             write_table(
                 df,
                 base_path,
@@ -422,11 +487,24 @@ def aggregate_by_gene(
             )
             # Clean up original Rust TSV now that write_table() produced target format
             cleanup_intermediate_tsv(tsv_path, output_format, compress)
+            converted = True
             logger.debug(
                 f"FSC {aggregate_by}: converted to format={output_format}, compress={compress}"
             )
 
-    return tsv_path
+    # Return what was actually written. Returning the pre-conversion .tsv meant
+    # callers guarding on .exists() saw a file cleanup_intermediate_tsv had just
+    # deleted, so E1 generation and FSC PON z-scoring were skipped on every
+    # compressed or Parquet run. parent/(name+ext) rather than with_suffix(),
+    # which would eat the compound extension.
+    if not converted:
+        return tsv_path
+    written_ext = (
+        ".parquet"
+        if output_format == "parquet"
+        else (".tsv.gz" if compress else ".tsv")
+    )
+    return base_path.parent / (base_path.name + written_ext)
 
 
 def apply_fsc_gene_pon(
@@ -461,8 +539,14 @@ def apply_fsc_gene_pon(
     if output_path is None:
         output_path = fsc_gene_path
 
-    if not Path(fsc_gene_path).exists():
-        logger.warning(f"FSC gene file not found: {fsc_gene_path}")
+    # Callers name the `.tsv`, but the Rust writer honours --output-format and
+    # may have written only `.parquet`. A bare `.exists()` was False there, so
+    # this returned None and no `depth_zscore` column was ever added under
+    # `--output-format parquet` -- the format 0.9.0 makes the Nextflow default.
+    if resolve_table_path(fsc_gene_path) is None:
+        logger.warning(
+            f"FSC gene file not found: {fsc_gene_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     if not pon or not pon.fsc_gene_baseline:
@@ -530,8 +614,12 @@ def apply_fsc_region_pon(
     if output_path is None:
         output_path = fsc_region_path
 
-    if not Path(fsc_region_path).exists():
-        logger.warning(f"FSC region file not found: {fsc_region_path}")
+    # Same as apply_fsc_gene_pon above: the caller names the `.tsv` and the
+    # writer may have produced only `.parquet`.
+    if resolve_table_path(fsc_region_path) is None:
+        logger.warning(
+            f"FSC region file not found: {fsc_region_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     if not pon or not pon.fsc_region_baseline:
@@ -624,14 +712,22 @@ def filter_fsc_to_e1(
     """
     fsc_regions_path = Path(fsc_regions_path)
 
-    if not fsc_regions_path.exists():
-        logger.warning(f"FSC regions file not found: {fsc_regions_path}")
+    # Same again: resolve across formats rather than assuming the `.tsv`.
+    if resolve_table_path(fsc_regions_path) is None:
+        logger.warning(
+            f"FSC regions file not found: {fsc_regions_path} (nor .tsv.gz / .parquet)"
+        )
         return None
 
     # Default output base path: strip suffix so write_table appends the right one
     if output_path is None:
-        stem = fsc_regions_path.stem
-        # Strip existing extension (e.g., .tsv, .parquet) from stem
+        # NB: Path.stem strips only the LAST dot-segment, so for
+        # 'S1.FSC.regions.tsv.gz' it yields 'S1.FSC.regions.tsv' and the
+        # '.regions' test below misses -- producing the mangled name
+        # 'S1.FSC.regions.tsv.e1only.tsv.gz'. Strip compound extensions.
+        from .output_utils import strip_table_extension
+
+        stem = strip_table_extension(fsc_regions_path.name)
         if stem.endswith(".regions"):
             stem = stem.replace(".regions", ".regions.e1only")
         else:
@@ -663,8 +759,63 @@ def filter_fsc_to_e1(
     n_input = len(df)
     n_genes = df["gene"].nunique()
 
-    # Sort by gene + genomic position, take first per gene (E1 = lowest start)
-    df_sorted = df.sort_values(["gene", "chrom", "start"])
+    # E1 selection: prefer the precomputed flags, fall back to coordinates.
+    #
+    # A region qualifies if it overlaps the canonical transcript's exon 1
+    # (`is_e1`) **or** another basic protein-coding transcript's first exon
+    # (`is_alt_e1`). Both are genuine transcription starts, and on a targeted
+    # panel restricting to the canonical one throws most of the signal away:
+    # for xs1, 25 of 128 genes have a canonical-E1 tile while 40 have a tile on
+    # some basic protein-coding first exon. Alternative promoters are the norm
+    # -- genes carry a median of 13 distinct annotated first exons.
+    #
+    # Minor and non-coding isoforms are deliberately excluded upstream, in
+    # `scripts/build_gene_bed.py`: their annotated starts are not evidence of a
+    # live promoter, and counting them would inflate the set to 79 of 128 with
+    # regions that are not promoter-proximal in any real sense.
+    #
+    # Genes with neither flag are **dropped**, not back-filled with their most
+    # 5' region. That region is usually an internal exon, and labelling it E1
+    # asserts promoter proximity that is not there -- the defect this replaces.
+    flag_cols = [c for c in ("is_e1", "is_alt_e1") if c in df.columns]
+    flagged = (
+        df[df[flag_cols].isin(["1", 1, True]).any(axis=1)]
+        if flag_cols
+        else df.iloc[0:0]
+    )
+
+    if not flagged.empty:
+        source = flagged
+        n_kept = flagged["gene"].nunique()
+        logger.info(
+            "E1 filter: %d of %d gene(s) have a region on an annotated first "
+            "exon; %d gene(s) have none and are omitted rather than back-filled "
+            "with an internal exon",
+            n_kept,
+            n_genes,
+            n_genes - n_kept,
+        )
+    else:
+        # Fallback: lowest start per gene. Retained so a legacy or custom gene
+        # BED still produces a table, but it is a positional guess, not an E1.
+        source = df
+        if flag_cols:
+            logger.warning(
+                "E1 filter: %s carries E1 flags but no region is marked. "
+                "Falling back to the lowest-start region per gene, which "
+                "ignores strand and is wrong for minus-strand genes.",
+                fsc_regions_path.name,
+            )
+        else:
+            logger.warning(
+                "E1 filter: no is_e1/is_alt_e1 columns in %s, so E1 is the "
+                "lowest-start region per gene. That ignores strand and picks "
+                "the LAST exon of every minus-strand gene. Regenerate the gene "
+                "BED with scripts/build_gene_bed.py to fix this.",
+                fsc_regions_path.name,
+            )
+
+    df_sorted = source.sort_values(["gene", "chrom", "start"])
     e1_df = df_sorted.groupby("gene", as_index=False).first()
 
     # Preserve original column order, write output
@@ -684,8 +835,16 @@ def filter_fsc_to_e1(
     )
     result_path = output_base.parent / (output_base.name + ext)
 
+    # `n_genes` is the count *before* filtering; reporting it beside the output
+    # row count reads as though every gene survived, which is now usually false.
     logger.info(
-        f"FSC E1-only filter: {n_input} regions → {len(e1_df)} E1 regions ({n_genes} genes) → {result_path.name}"
+        "FSC E1-only filter: %d regions across %d genes → %d E1 region(s) "
+        "across %d gene(s) → %s",
+        n_input,
+        n_genes,
+        len(e1_df),
+        e1_df["gene"].nunique(),
+        result_path.name,
     )
 
     return result_path

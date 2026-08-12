@@ -1,11 +1,13 @@
+<!--
+GENERATED FILE -- DO NOT EDIT.
 
----
+Concatenation of every Markdown file under docs/, produced by
+scripts/build_all_docs.py. Edit the source document instead, then run:
 
-# FILE: docs/changelog.md
+    python scripts/build_all_docs.py
 
-# Changelog
-
---8<-- "CHANGELOG.md"
+tests/unit/test_all_docs_generated.py fails if this file is out of date.
+-->
 
 ---
 
@@ -39,11 +41,238 @@ See [run-all](run-all.md) for the unified command that runs all features.
 | `mfsd` | Mutant Fragment Size Distribution |
 | `uxm` | Fragment-level Methylation |
 | `build-pon` | Build Panel of Normals |
+| `build-gc-reference` | Build GC reference assets |
+
+## Inspection and Validation
+
+These inspect inputs or a finished output directory rather than producing
+features.
+
+!!! warning "`validate` and `validate-output` are different commands"
+    `validate` checks the **assets going in** — is this BED well-formed, does
+    it have the columns the Rust core expects. `validate-output` checks the
+    **results coming out** against the downstream contract. One hyphen apart
+    and neither substitutes for the other.
+
+| Command | Purpose |
+|---------|---------|
+| [`validate`](#validate) | Check input **assets** before a run — BEDs, anchors, GC factors |
+| [`describe-output`](#describe-output) | What is in each output file — shape, columns, ranges |
+| [`report`](#report) | Single-sample HTML report: verdict, charts, interpretation |
+| [`validate-output`](#validate-output) | Check one sample against the output contract |
+| [`validate-cohort`](#validate-cohort) | Cross-sample degeneracy checks over fingerprints |
+| [`validate-pon`](#validate-pon) | Check a PON **before** anything is scored against it |
+| [`stamp-pon`](#stamp-pon) | Record the release a built PON ships with |
+
+---
+
+### `validate` {#validate}
+
+Checks the reference assets a run depends on, before the run rather than after
+it. A malformed BED does not usually crash — it produces a table with fewer
+rows than it should, which looks exactly like a quiet sample.
+
+```bash
+krewlyzer validate --genome hg19                    # every bundled asset
+krewlyzer validate --genome hg19 --assay xs2        # ...plus assay-specific
+krewlyzer validate --gene-bed my_genes.bed          # one custom file
+```
+
+| Option | Checks |
+|--------|--------|
+| `--genome` / `-G` | All bundled assets for `hg19` or `hg38` |
+| `--assay` / `-A` | Assay-specific assets too (requires `--genome`) |
+| `--gene-bed` | Gene BED: chrom, start, end, gene, \[name\] |
+| `--targets-bed` | Panel target regions |
+| `--arms-bed` | Chromosome arms: chrom, start, end, arm |
+| `--wps-anchors` | WPS anchors, BED6 |
+| `--ocr-file` | OCF open-chromatin regions |
+| `--gc-factors` | GC correction factors TSV |
+| `--bin-file` | Genomic bins, BED3 |
+
+Use `-G` before reporting a bundled-asset problem: a partial `git lfs pull`
+leaves pointer files in place of the real assets, and this is what says so.
+
+---
+
+### `describe-output` {#describe-output}
+
+Answers the question people ask before "is this correct?" — what are these
+files and what is in them.
+
+```bash
+krewlyzer describe-output RESULTS/{sample_id}/            # Markdown to stdout
+krewlyzer describe-output RESULTS/{sample_id}/ -o out.md  # or to a file
+krewlyzer describe-output RESULTS/{sample_id}/ -o out.html
+```
+
+Per table: rows, columns, size, and whether it is gated by the contract. Per
+column: dtype, numeric range or example value, distinct count, null count.
+
+Everything is measured from the file or read from the output contract, so a
+table that gains a column changes the description automatically.
+
+!!! note "Identifier columns are redacted"
+    Sample directories are named for the patient and several tables carry the
+    sample id as a *column value*. Knowing a column holds an identifier is the
+    useful fact; which identifier is not. Everything else is the sample's real
+    data — treat the output accordingly.
+
+---
+
+### `report` {#report}
+
+A single-sample HTML report: cross-axis verdict, 16 charts, and each table's
+data with its interpretation beside it.
+
+```bash
+pip install 'krewlyzer[report]'          # plotly, needed for charts
+krewlyzer report RESULTS/{sample_id}/ -o report.html
+krewlyzer report RESULTS/{sample_id}/ -o report.html --z-threshold 2.5
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output` / `-o` | `report.html` | Where to write |
+| `--sample-id` | directory name | Override the sample id |
+| `--z-threshold` | `2.0` | \|z\| at which a verdict axis is flagged |
+
+**Verdict.** Four independent axes — fragment size, nuclease cutting, tissue
+shedding, chromatin accessibility — reported as *"N of M assessable axes
+agree"*, never a single composite score. Direction differs per axis, and an
+axis with no PON z-score is *not assessable* rather than counted as
+disagreement.
+
+**Organised by table.** Each section carries one output's chart, its why / how
+/ what, and its columns together.
+
+!!! warning "Internal use"
+    The report contains one patient's measurements. It is generated on demand
+    and is not published, committed, or shipped with the documentation. Use
+    `describe-output` for anything structural that needs to leave the machine.
+
+!!! info "Without a panel of normals"
+    Every z-score and PON log-ratio is absent, which is most of the
+    interpretable surface — three of the four verdict axes cannot be assessed.
+    The report leads with a banner saying so and marks each affected column.
+    Re-run the *feature extraction* with `run-all --pon-model ...` and
+    report the new output; `report` has no PON option of its own, because
+    it reads what is already on disk and never recomputes a feature.
+
+`--z-threshold` is a **convention, not a clinical cut-off**, and the report
+says so. No chart draws a threshold as a cut-off; reference lines appear only
+where the value is a labelled literature anchor.
+
+---
+
+### `validate-output` {#validate-output}
+
+Checks a finished directory against the contract its consumers rely on.
+
+```bash
+krewlyzer validate-output RESULTS/                       # a cohort directory
+krewlyzer validate-output RESULTS/ --json-report out.json
+krewlyzer validate-output RESULTS/{sample}/ --fingerprint-out fp.json
+```
+
+Three layers: every consumed table present and shaped correctly; domain
+invariants; and **anti-degeneracy** — a metric identical across every sample is
+an error, not a pass.
+
+| Exit | Meaning |
+|------|---------|
+| `0` | Contract satisfied |
+| `1` | Contract violation |
+| `2` | Structural failure — missing directory, unreadable Parquet |
+
+A workflow should retry on `2` and escalate on `1`.
+
+---
+
+### `validate-cohort` {#validate-cohort}
+
+The gather half. Degeneracy is inherently cross-sample: every sample can pass
+alone while a metric is constant across all of them.
+
+```bash
+krewlyzer validate-cohort FINGERPRINTS/ --min-samples 3
+```
+
+Reads the ~20 KB fingerprints written by `validate-output --fingerprint-out`,
+never the outputs themselves, so a large cohort reduces from megabytes rather
+than terabytes. Below `--min-samples` the check reports SKIP, never PASS.
 
 ## See Also
 
 - [Nextflow Pipeline](../nextflow/index.md) - Batch processing
 - [Features](../features/index.md) - Feature documentation
+
+---
+
+### `validate-pon` {#validate-pon}
+
+`validate-output` gates the results of a run. This gates the **reference those
+results are measured against**.
+
+```bash
+krewlyzer validate-pon model.pon.parquet
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --json-report pon.json
+```
+
+Same exit codes as `validate-output`: `0` satisfied, `1` violation, `2`
+structural.
+
+| Check | Why |
+|---|---|
+| **σ is not one value repeated** | A baseline that cannot vary with its cohort was not fitted to one |
+| σ is positive and finite | A z divided by zero is infinite, not conservative |
+| `krewlyzer_version` recorded | 0.9.0 changes what every feature *means* |
+| `cohort_digest` recorded | Otherwise the model cannot be reproduced or compared |
+| entries backed by ≥ 3 samples | Below that a baseline entry is an anecdote |
+
+!!! warning "Every PON shipped before 0.9.0 fails this"
+    They carry a `wps_background` block hardcoded to `167.0 / 5.0 / 0.0 / 1.0`
+    — identical across all 28 groups and all four models, from cohorts of 21
+    and 47 samples — and no provenance at all. That is not a false positive;
+    it is the reason the command exists. Rebuild with `build-pon`.
+
+**Provenance contains no identifiers.** The cohort is recorded as a salted,
+non-reversible digest of the sample IDs, plus an optional free-text
+`--cohort-label`. Two builds from the same cohort produce the same digest; the
+digest reveals nothing about who is in it. A PON ships in this repository, in
+the Docker image and on PyPI, so it is the last place a patient identifier may
+appear.
+
+---
+
+### `stamp-pon` {#stamp-pon}
+
+```bash
+krewlyzer stamp-pon model.pon.parquet --version 0.9.0
+krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version 0.9.0 --dry-run
+```
+
+A PON is built from `develop`, where `pyproject.toml` still reads the previous
+release — so the model records that version however new the code is. Rather
+than bump before a four-hour build, set it here when cutting the release.
+
+**This changes what the field means.** Afterwards `krewlyzer_version` is *the
+release this model is published with*, not the code that produced it. That is
+the definition a compatibility guard needs. `build_date` is untouched, so the
+two together still say when it was actually built.
+
+!!! warning "A stamp is an assertion, so it has to be earned"
+    `stamp-pon` runs `validate-pon` first and **refuses on failure**. Without
+    that it would be the shortest path to laundering: run it on one of the
+    models carrying the fabricated `167.0 / 5.0` baseline and it would claim
+    exactly the compatibility the guard exists to deny.
+
+    `PON.NO_VERSION` alone does not block — that is the condition being fixed.
+    `--force` exists for re-stamping a model that already passed, and says so.
+
+Only the metadata row changes; every baseline is copied through unchanged and
+the cohort digest is unaffected. **Re-run `validate-pon` afterwards** — the
+file that ships should be the file that was checked.
 
 ---
 
@@ -59,7 +288,7 @@ See [run-all](run-all.md) for the unified command that runs all features.
 | `fsc`     | Fragment size coverage (`.FSC.tsv`)          |
 | `fsr`     | Fragment size ratio (`.FSR.tsv`)             |
 | `fsd`     | Fragment size distribution (`.FSD.tsv`)      |
-| `wps`     | Windowed protection score (`.WPS.tsv.gz`)    |
+| `wps`     | Windowed protection score (`.WPS.parquet`)    |
 | `ocf`     | Orientation-aware fragmentation (`.OCF.tsv`) |
 | `uxm`     | Fragment-level methylation (`.UXM.tsv`)      |
 | `mfsd`    | Mutant fragment size distribution (`.mFSD.tsv`)|
@@ -87,8 +316,15 @@ flowchart TB
     PIPELINE --> WPS["WPS.parquet"]
     PIPELINE --> OCF["OCF.tsv"]
     
+    BED --> ENTROPY["TFBS/ATAC Entropy"]
+    ENTROPY --> TFBS["TFBS.tsv"]
+    ENTROPY --> ATAC["ATAC.tsv"]
+    
+    EXTRACT --> META["metadata.tsv"]
+    
     subgraph "With --variants"
         BAM --> MFSD["mFSD.tsv"]
+        MFSD_BAM["--mfsd-bam (optional)"] -.-> MFSD
         VCF["variants.vcf/maf"] --> MFSD
     end
     
@@ -168,7 +404,6 @@ Alternatively, you can run tools individually. Note that most tools require a fr
 krewlyzer extract -i sample.bam -r hg19.fa -o output_dir
 
 # 2. Run feature tools using the BED file
-# 2. Run feature tools using the BED file
 krewlyzer fsc -i output_dir/sample.bed.gz --output output_dir/
 krewlyzer wps -i output_dir/sample.bed.gz --output output_dir/
 # ... (fsd, ocf, etc.)
@@ -187,12 +422,12 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ \
   --bin-input /path/to/MSK-ACCESS-v2_canonicaltargets.bed
 
 # Or run FSC/FSR individually with target regions
-# Or run FSC/FSR individually with target regions
 krewlyzer fsc -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 krewlyzer fsr -i motif_out/sample.bed.gz -b targets.bed -w 1 -c 1 --output out_dir/
 ```
 
-> **Note:** Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
+!!! note
+    Without `--bin-input`, FSC/FSR will produce zeros for targeted panels since data only covers specific gene regions, not genome-wide bins. The `--output` argument for individual tools specifies the **output directory**, not a filename.
 
 ## PON and Z-Score Normalization
 
@@ -215,7 +450,8 @@ krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
 krewlyzer fsd -i sample.bed.gz -o out/ --skip-pon
 ```
 
-> **Warning:** `-P/--pon-model` and `--skip-pon` are mutually exclusive.
+!!! warning
+    `-P/--pon-model` and `--skip-pon` are mutually exclusive.
 
 ### PON Variant Selection (`--pon-variant`)
 
@@ -229,7 +465,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
 ```
 
-> **Note:** `--pon-variant` controls PON file selection, while `--duplex` (mFSD only) enables cD tag weighting.
+!!! note
+    `--pon-variant` controls PON file selection, while `--duplex` (mFSD only) enables cD tag weighting.
 
 ## Output Formats
 
@@ -243,18 +480,24 @@ krewlyzer run-all sample.bam --reference hg19.fa --output out/ --generate-json
 # Output: out/sample.features.json (contains FSD, FSR, WPS, Motif, OCF, etc.)
 ```
 
-### Format Override
+!!! note "Output format"
+    The `--output-format` flag controls output format for tabular features: `tsv` (default),
+    `parquet`, or `both`. Use `--compress` to gzip-compress TSV outputs.
 
-```bash
-# Global format for all outputs
-krewlyzer run-all ... --output-format parquet
+    **WPS exception:** `*.WPS.parquet`, `*.WPS_background.parquet`, and `*.WPS.panel.parquet`
+    are **always Parquet** regardless of `--output-format`. WPS vectors are high-dimensional
+    (thousands of 200-point profiles) and impractical as TSV.
 
-# Per-tool format override
-krewlyzer fsd -i sample.bed.gz -o out/ --format json
-```
+    Use `--generate-json` to also produce a unified `{sample}.features.json` for ML pipelines.
+    JSON output is compatible with any `--output-format` setting.
 
 See [JSON Output](../features/output/json-output.md) for full documentation.
 
+---
+
+# FILE: docs/development/changelog.md
+
+--8<-- "CHANGELOG.md"
 
 ---
 
@@ -432,8 +675,6 @@ git lfs pull --include="src/krewlyzer/data/gc/**"
 
 # FILE: docs/development/contributing.md
 
-# Contributing
-
 --8<-- "CONTRIBUTING.md"
 
 ---
@@ -450,31 +691,59 @@ This guide covers the Krewlyzer codebase architecture for contributors.
 krewlyzer/
 ├── src/krewlyzer/          # Python package
 │   ├── cli.py              # Typer CLI entry point
-│   ├── wrapper.py          # run-all orchestration (750 lines)
+│   ├── wrapper.py          # run-all orchestration
 │   ├── assets.py           # AssetManager for bundled data
 │   ├── extract.py          # BAM → BED extraction
-│   ├── fsc.py, fsd.py, ... # Standalone tools
+│   ├── fsc.py              # Fragment size coverage
+│   ├── fsd.py              # Fragment size distribution
+│   ├── fsr.py              # Fragment size ratio
+│   ├── wps.py              # Windowed protection score
+│   ├── ocf.py              # Orientation-aware fragmentation
+│   ├── motif.py            # End motif analysis
+│   ├── mfsd.py             # Mutant fragment size distribution
+│   ├── region_entropy.py   # TFBS/ATAC region entropy
+│   ├── region_mds.py       # Per-gene MDS
+│   ├── uxm.py              # Fragment-level methylation
+│   ├── build_gc_reference.py # GC reference generation
 │   ├── core/               # Shared processors
 │   │   ├── asset_resolution.py  # Target/PON resolution logic
-│   │   ├── logging.py      # Startup banner and logging
-│   │   ├── gc_assets.py    # GC resolution helper
-│   │   ├── fsc_processor.py
-│   │   ├── wps_processor.py
-│   │   └── feature_serializer.py  # JSON output
+│   │   ├── asset_validation.py  # Asset validation checks
+│   │   ├── bam_utils.py         # BAM utilities
+│   │   ├── feature_serializer.py # JSON output
+│   │   ├── fsc_processor.py     # FSC post-processing
+│   │   ├── fsd_processor.py     # FSD post-processing
+│   │   ├── fsr_processor.py     # FSR post-processing
+│   │   ├── gc_assets.py         # GC resolution helper
+│   │   ├── gene_bed.py          # Gene BED parsing
+│   │   ├── logging.py           # Startup banner and logging
+│   │   ├── motif_processor.py   # Motif post-processing
+│   │   ├── ocf_processor.py     # OCF post-processing
+│   │   ├── pon_integration.py   # PON post-processing
+│   │   ├── region_entropy_processor.py # TFBS/ATAC processor
+│   │   ├── sample_processor.py  # Per-sample orchestration
+│   │   ├── unified_processor.py # Unified pipeline Python layer
+│   │   ├── wps_processor.py     # WPS post-processing
+│   │   └── utils.py, resource_utils.py
 │   ├── pon/                # PON model code
 │   │   ├── model.py        # PonModel dataclass
 │   │   └── build.py        # PON building logic
-│   └── data/               # Bundled assets
-├── rust/                   # Rust backend
+│   └── data/               # Bundled assets (Git LFS)
+├── rust/                   # Rust backend (19 modules)
 │   ├── Cargo.toml
 │   └── src/
 │       ├── lib.rs          # PyO3 module exports
 │       ├── pipeline.rs     # Unified pipeline entry
-│       ├── fsc.rs, wps.rs  # Feature modules
-│       └── gc_correction.rs
-├── tests/                  # Test suite
+│       ├── engine.rs       # Core engine utilities
+│       ├── bed.rs          # BGZF/gzip BED reader
+│       ├── filters.rs      # Fragment filtering logic
+│       └── (feature modules: see table below)
+├── tests/                  # Test suite (244 tests, 4 skipped)
 ├── docs/                   # MkDocs documentation
 └── nextflow/               # Nextflow pipeline
+    ├── main.nf
+    ├── nextflow.config
+    ├── modules/local/       # Per-tool NF modules
+    └── subworkflows/local/  # Subworkflows
 ```
 
 ---
@@ -493,17 +762,27 @@ lib.rs
 
 ### Key Rust Modules
 
-| Module | Lines | Purpose |
-|--------|------:|---------|\n| `wps.rs` | 2000+ | Dual-stream WPS, FFT, smoothing |
-| `gc_correction.rs` | 590 | LOESS GC bias correction |
-| `gc_reference.rs` | 658 | Asset generation (once per genome) |
-| `fsc.rs` | 500+ | 5-bin fragment counting |
-| `fsd.rs` | 600+ | Per-arm size distribution |
-| `pipeline.rs` | 400+ | Unified pipeline coordination |
-| `extract_motif.rs` | 1200+ | BAM reading, motif extraction |
-| `motif_utils.rs` | 176 | Shared 4-mer encoding, MDS, GC utils |
-| `region_mds.rs` | 800+ | Per-gene MDS at exon boundaries |
-| `region_entropy.rs` | 600+ | TFBS/ATAC size entropy |
+| Module | Purpose |
+|--------|---------||
+| `lib.rs` | PyO3 module exports and thread config |
+| `pipeline.rs` | Unified pipeline coordination |
+| `engine.rs` | Core engine utilities |
+| `bed.rs` | BGZF/gzip BED reader |
+| `extract_motif.rs` | BAM parsing, fragment + motif extraction |
+| `motif_utils.rs` | Shared 4-mer encoding, MDS, GC utils |
+| `fsc.rs` | Fragment size coverage + gene aggregation |
+| `fsd.rs` | Per-arm size distribution + PON log-ratio |
+| `wps.rs` | Dual-stream WPS, FFT, smoothing |
+| `ocf.rs` | Orientation-aware fragmentation + PON z-score |
+| `mfsd.rs` | Mutant fragment size distribution |
+| `region_entropy.rs` | TFBS/ATAC entropy + PON z-score |
+| `region_mds.rs` | Per-gene MDS at exon boundaries |
+| `uxm.rs` | Fragment-level methylation (UXM) |
+| `gc_correction.rs` | LOESS GC bias correction |
+| `gc_reference.rs` | Pre-computed GC reference generation |
+| `pon_model.rs` | PON model loading and hybrid correction |
+| `pon_builder.rs` | PON model construction |
+| `filters.rs` | Fragment filtering logic |
 
 
 ### Unified Pipeline
@@ -512,24 +791,31 @@ All feature computation goes through `run_unified_pipeline`:
 
 ```rust
 pub fn run_unified_pipeline(
-    bedgz_path: &str,
-    gc_ref_path: Option<&str>,
-    valid_regions_path: Option<&str>,
-    gc_factors_out: Option<&str>,
-    gc_factors_in: Option<&str>,
-    fsc_bins_path: Option<&str>,
-    fsc_out_path: Option<&str>,
-    wps_anchors_path: Option<&str>,
-    wps_out_path: Option<&str>,
-    wps_bg_path: Option<&str>,
-    wps_bg_out_path: Option<&str>,
-    include_empty: bool,
-    fsd_arms_path: Option<&str>,
-    fsd_out_path: Option<&str>,
-    ocf_regions_path: Option<&str>,
-    ocf_out_path: Option<&str>,
-    target_regions_path: Option<&str>,
-    bait_padding: u32,
+    _py: Python,
+    bed_path: PathBuf,
+    // GC Correction
+    gc_ref_path: Option<PathBuf>,
+    valid_regions_path: Option<PathBuf>,
+    correction_out_path: Option<PathBuf>,
+    correction_input_path: Option<PathBuf>,
+    // FSC
+    fsc_bins: Option<PathBuf>, fsc_output: Option<PathBuf>,
+    // WPS Foreground (TSS/CTCF anchors)
+    wps_regions: Option<PathBuf>, wps_output: Option<PathBuf>,
+    // WPS Background (Alu stacking)
+    wps_background_regions: Option<PathBuf>, wps_background_output: Option<PathBuf>,
+    wps_empty: bool,
+    // FSD
+    fsd_arms: Option<PathBuf>, fsd_output: Option<PathBuf>,
+    // OCF
+    ocf_regions: Option<PathBuf>, ocf_output: Option<PathBuf>,
+    // Target regions for on/off-target split (panel mode)
+    target_regions_path: Option<PathBuf>,
+    bait_padding: u64,
+    // Output format: "tsv", "parquet", or "both"
+    output_format: &str,
+    // Gzip-compress TSV outputs
+    compress: bool,
     silent: bool,
 ) -> PyResult<()>
 ```
@@ -597,22 +883,30 @@ assets.get_pon("xs2")          # Bundled PON
 Collects all features into unified JSON:
 
 ```python
-serializer = FeatureSerializer(sample_id)
+serializer = FeatureSerializer(sample_id, version="X.Y.Z")
 serializer.add_fsc(fsc_df)
+serializer.add_fsc_e1(fsc_e1_df)
 serializer.add_wps(wps_df)
-serializer.add_motif(edm_dict, bpm_dict, mds)
-# ...
-serializer.save(output_file)
+serializer.add_motif(edm_df, bpm_df, mds, mds_z)
+serializer.add_ocf(ocf_df)
+serializer.add_mfsd(mfsd_df)
+serializer.add_uxm(uxm_df)
+serializer.add_qc("total_fragments", 1234567)
+serializer.save(output_dir)
 
 # Or load from existing outputs
-serializer = FeatureSerializer.from_outputs(output_dir, sample_id)
+serializer = FeatureSerializer.from_outputs(
+    sample_id=sample_id,
+    output_dir=output_dir,
+    version="X.Y.Z"
+)
 ```
 
 ---
 
 ## Testing
 
-Krewlyzer has **239 tests** across unit, integration, and e2e categories.
+Krewlyzer has **244 tests** (4 skipped) across unit, integration, and e2e categories.
 
 **→ [Testing Guide](testing-guide.md)** for complete documentation including:
 - Feature → test file mapping
@@ -635,8 +929,8 @@ pytest tests/unit/test_fsc.py
 pytest tests/ --cov=krewlyzer --cov-report=html
 ```
 
-> [!TIP]
-> **Modifying a feature?** Check the [Feature → Test Map](testing-guide.md#feature--test-map) to find which test file to update.
+!!! tip
+    **Modifying a feature?** Check the [Feature → Test Map](testing-guide.md#feature--test-map) to find which test file to update.
 
 ---
 
@@ -644,14 +938,21 @@ pytest tests/ --cov=krewlyzer --cov-report=html
 
 ### Building
 
-```bash
-cd rust
+!!! warning "Always build from **project root**, not `rust/`"
+    Running `maturin develop` from `rust/` builds a `krewlyzer_core` wheel that
+    does NOT update the `.so` at `src/krewlyzer/_core.cpython-*.so`.
+    Running from the project root builds the `krewlyzer` wheel which correctly
+    installs the extension module.
 
+```bash
 # Debug build (fast compile, slow run)
 maturin develop
 
 # Release build (slow compile, fast run)
 maturin develop --release
+
+# Verify the installed build timestamp
+python -c "import krewlyzer._core as c; import os, datetime; print(datetime.datetime.fromtimestamp(os.path.getmtime(c.__file__)))"
 ```
 
 ### Testing Rust
@@ -661,7 +962,7 @@ maturin develop --release
 cargo test
 
 # Check before committing
-cargo clippy
+cargo clippy -- -D warnings
 cargo fmt --check
 ```
 
@@ -700,13 +1001,123 @@ from krewlyzer import _core
 
 ---
 
+## Known Gotchas
+
+### `Path.with_suffix()` and Compound Extensions
+
+!!! danger "NEVER use `Path.with_suffix()` on paths with compound dot-separated names"
+
+Krewlyzer output files use compound names like `sample.MDS.exon`, `sample.EndMotif.ontarget`,
+`sample.FSC.regions.e1only`. Python's `Path.with_suffix()` replaces only the **last** dot-segment,
+which silently corrupts these paths:
+
+| Expression | Expected | Actual |
+|---|---|---|
+| `Path("P-XXX.MDS.exon").with_suffix(".tsv")` | `P-XXX.MDS.exon.tsv` | `P-XXX.MDS.tsv` ❌ |
+| `Path("P-XXX.MDS.ontarget").with_suffix(".tsv")` | `P-XXX.MDS.ontarget.tsv` | `P-XXX.MDS.tsv` ❌ |
+| `Path("P-XXX.EndMotif").with_suffix(".tsv")` | `P-XXX.EndMotif.tsv` | `P-XXX.tsv` ❌ |
+
+**Safe pattern — always use string concatenation:**
+
+```python
+# ✅ CORRECT: preserves all dot-segments
+output_path = base.parent / (base.name + ".tsv")
+
+# ❌ WRONG: replaces last dot-segment
+output_path = base.with_suffix(".tsv")
+```
+
+**Compound names in krewlyzer** (all vulnerable to `with_suffix()`):
+`MDS.exon`, `MDS.gene`, `MDS.ontarget`, `EndMotif`, `EndMotif.ontarget`,
+`BreakPointMotif`, `EndMotif1mer`, `FSC.gene`, `FSC.regions`,
+`FSC.regions.e1only`, `OCF.sync`, `TFBS.sync`, `ATAC.sync`.
+
+This gotcha caused a silent data loss bug in v0.8.0 where `MDS.exon.tsv` and
+`MDS.gene.tsv` were never generated. Test coverage: `tests/unit/test_compound_extension.py`.
+
+---
+
+### PyO3 + Rayon: Always Release the GIL Before `par_iter`
+
+When calling Rayon `par_iter()` from a `#[pyfunction]`, the GIL must be
+released first. Otherwise, `pyo3-log` (our global logger) tries to acquire
+the GIL from worker threads while the main thread holds it — **deadlock**.
+
+```rust
+// ✅ CORRECT: release GIL before parallel work
+fn my_function(py: Python, ...) -> PyResult<...> {
+    let results = py.allow_threads(|| {
+        items.par_iter().map(|item| {
+            info!("Processing {}", item);  // safe — GIL is released
+            process(item)
+        }).collect()
+    });
+    Ok(results)
+}
+
+// ❌ WRONG: GIL held during par_iter
+fn my_function(...) -> PyResult<...> {
+    let results = items.par_iter().map(|item| {
+        info!("Log from worker");  // DEADLOCK — pyo3-log needs GIL
+        process(item)
+    }).collect();
+    Ok(results)
+}
+```
+
+**Affected modules** (all patched in v0.8.3):
+`mfsd.rs`, `uxm.rs`, `extract_motif.rs`, `region_mds.rs`.
+
+**Rule**: Any `#[pyfunction]` using `rayon::par_iter()` MUST accept `py: Python`
+and wrap the parallel block in `py.allow_threads(|| { ... })`.
+
+This gotcha caused 16-hour wall-time hangs on the IRIS HPC cluster in v0.8.2.
+
+---
+
+### `_core.pyi` — Rust Extension Stub Maintenance
+
+`src/krewlyzer/_core.pyi` is a **type stub** for the compiled Rust/PyO3 extension
+(`krewlyzer._core`). It tells mypy what functions and submodules exist without
+inspecting the binary `.so` — following the same pattern as
+[py-gbcms `_rs.pyi`](https://github.com/msk-access/py-gbcms/blob/main/src/gbcms/_rs.pyi).
+
+**Update this file whenever you:**
+
+- Add a new `#[pyfunction]` to any `rust/src/*.rs` file
+- Add a new sub-PyModule registered in `rust/src/lib.rs`
+- Change the signature (parameters or return type) of an existing exported function
+
+```bash
+# After updating rust/src/*.rs, update the stub and verify:
+python -m mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
+# Must exit 0 with no output. Commit .rs and .pyi changes together.
+```
+
+!!! warning "Stub drift causes CI failures"
+    If `_core.pyi` is out of sync, mypy will report `attr-defined` errors in
+    Python files that call the Rust functions, even if the code runs correctly at runtime.
+
+---
+
 ## Contributing Checklist
 
 - [ ] Code follows existing patterns
 - [ ] Added/updated tests
 - [ ] Updated documentation
-- [ ] Ran `pytest tests/`
-- [ ] Ran `cargo fmt && cargo clippy`
+- [ ] Ran `pytest tests/` — 357 pass, 4 skipped
+- [ ] If Rust functions changed: updated `src/krewlyzer/_core.pyi` stub
+- [ ] Ran Python lint (matches CI lint job):
+    ```bash
+    ruff check src/krewlyzer/
+    black --check src/krewlyzer/
+    python -m mypy src/krewlyzer/
+    python scripts/check_output_format.py
+    ```
+- [ ] Ran Rust lint:
+    ```bash
+    cargo fmt && cargo clippy -- -D warnings
+    ```
 - [ ] Updated CHANGELOG.md
 
 See [CONTRIBUTING.md](contributing.md) for full guidelines.
@@ -727,6 +1138,9 @@ This guide documents the process for releasing new versions of Krewlyzer followi
 - Access to push to `origin`
 - All tests passing on develop branch
 
+!!! important
+    **Version Format**: Use `0.5.2` (no `v` prefix) everywhere - code, filenames, and git tags.
+
 ---
 
 ## Git Flow Overview
@@ -738,7 +1152,7 @@ gitGraph
     commit id: "bump version"
     commit id: "update CHANGELOG"
     checkout main
-    merge release/X.Y.Z tag: "vX.Y.Z"
+    merge release/X.Y.Z tag: "X.Y.Z"
     checkout develop
     merge release/X.Y.Z
 ```
@@ -763,31 +1177,40 @@ git branch --show-current
 
 ## Phase 2: Update Version Files
 
-### Version Locations (37 total)
+### Version Locations
 
-| Category | File | Line(s) |
-|----------|------|---------|
-| **Python** | `src/krewlyzer/__init__.py` | 3 |
-| **Python** | `pyproject.toml` | 3 |
-| **Python** | `src/krewlyzer/wrapper.py` | 674 |
-| **Python** | `src/krewlyzer/core/feature_serializer.py` | 54, 291 |
-| **Rust** | `rust/Cargo.toml` | 3 |
-| **Rust** | `rust/Cargo.lock` | Auto-updated |
-| **Nextflow** | `nextflow/nextflow.config` | 171 |
-| **Nextflow** | `nextflow/main.nf` | 36 |
-| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module |
+Line numbers are deliberately omitted: the previous table pointed at
+`wrapper.py:674` and `feature_serializer.py:54,291`, none of which held a
+version by the time anyone read it. A stale pointer in a release checklist is
+worse than no pointer, because it invites editing the wrong line.
+
+| Category | File | Notes |
+|----------|------|-------|
+| **Python** | `src/krewlyzer/__init__.py` | `__version__` — the single source of truth |
+| **Python** | `pyproject.toml` | packaging metadata |
+| **Rust** | `rust/Cargo.toml` | crate version |
+| **Rust** | `rust/Cargo.lock` | auto-updated by `cargo check` |
+| **Nextflow** | `nextflow/nextflow.config` | container tag |
+| **Nextflow** | `nextflow/main.nf` | container tag |
+| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module (container + `versions.yml`) |
+
+Everything on the Python side other than `__init__.py` imports `__version__`.
+`wrapper.py` and `core/feature_serializer.py` used to keep their own copies;
+`tests/unit/test_version_stamp.py` fails if one reappears.
 
 ### Quick Update Script
 
 ```bash
 VERSION="X.Y.Z"
-OLD_VERSION="0.3.2"  # Current version
+OLD_VERSION="A.B.C"  # Current version before bump
 
 # Python
+# src/krewlyzer/__init__.py is the single source of truth for the Python side.
+# wrapper.py and core/feature_serializer.py used to carry their own copies and
+# needed their own sed lines; they now import __version__, so there is nothing
+# to substitute. tests/unit/test_version_stamp.py fails if a copy reappears.
 sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/g" src/krewlyzer/__init__.py
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" pyproject.toml
-sed -i '' "s/version=\"${OLD_VERSION}\"/version=\"${VERSION}\"/g" src/krewlyzer/wrapper.py
-sed -i '' "s/\"${OLD_VERSION}\"/\"${VERSION}\"/g" src/krewlyzer/core/feature_serializer.py
 
 # Rust
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" rust/Cargo.toml
@@ -799,7 +1222,120 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/main.nf
 find nextflow/modules -name "main.nf" -exec sed -i '' "s/${OLD_VERSION}/${VERSION}/g" {} \;
 ```
 
+!!! warning "Verify the bump landed"
+    Every command above depends on `OLD_VERSION` being exactly right, and
+    nothing in `sed` reports a pattern that matched nothing. Run this
+    afterwards — it fails if `__init__.py`, `pyproject.toml` and
+    `rust/Cargo.toml` disagree, or if any module has reintroduced a version
+    literal of its own:
+
+    ```bash
+    pytest tests/unit/test_version_stamp.py -q
+    ```
+
+    Then confirm nothing is left behind:
+
+    ```bash
+    git grep -n "${OLD_VERSION}" -- . ':!CHANGELOG.md' ':!docs'
+    ```
+
+    Remaining hits in `CHANGELOG.md` and `docs/` are expected: those are
+    historical references to how an older release behaved, and rewriting them
+    would falsify the record.
+
 ---
+
+## Phase 2.5: Update Documentation Versions
+
+Docker image versions are referenced in documentation files:
+
+| File | Version Location |
+|------|------------------|
+| `docs/getting-started/installation.md` | Docker/Singularity pull commands |
+| `docs/getting-started/quickstart.md` | Docker pull example |
+| `docs/nextflow/examples.md` | Container image references |
+
+### Update Script
+
+```bash
+OLD_VERSION="0.5.1"
+VERSION="X.Y.Z"
+
+# Update installation docs
+sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/installation.md
+sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/quickstart.md
+
+# Verify no :latest tags remain (we don't publish :latest)
+grep -r ":latest" docs/ && echo "WARNING: :latest tags found!" || echo "✓ No :latest tags"
+
+# Verify changes
+grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
+```
+
+!!! warning "No :latest Tag"
+    We do NOT publish a `:latest` tag. Always use explicit version tags (e.g., `:0.5.3`).
+    Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
+
+---
+
+## Phase 2.6: Regenerate the aggregated documentation
+
+`krewlyzer_all_docs.md` is a single-file concatenation of `docs/`, generated
+rather than hand-maintained. Any doc edit in the release — including the
+version bumps in Phase 2.5 — leaves it stale.
+
+```bash
+python scripts/build_all_docs.py
+```
+
+CI runs `--check` and fails if it is out of date, so this cannot be skipped
+silently.
+
+---
+
+## Phase 2.7: Stamp the bundled PONs
+
+The version-update script in Phase 2 uses `sed`, and a PON is a Parquet file —
+so the models are the one place a version literal does **not** get updated by
+it. They record the version of whatever built them, which is a `develop`
+checkout still reporting the previous release.
+
+```bash
+krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version X.Y.Z
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet
+```
+
+`stamp-pon` refuses to stamp a model that fails `validate-pon`, so a broken
+model cannot be blessed by this step. Re-run `validate-pon` afterwards anyway:
+the file that ships should be the file that was checked.
+
+Commit the restamped models with `git lfs push --all` **before** pushing the
+branch, or the pointers land without the objects.
+
+## Phase 2.8: Does this release change what a PON means?
+
+Almost always **no**, and then there is nothing to do here.
+
+`MIN_PON_VERSION` in `src/krewlyzer/pon/provenance.py` is a compatibility
+floor, not the package version. It is a tuple — `(0, 9, 0)` — precisely so the
+`sed` in Phase 2 cannot move it, and so a PON stamped 0.9.0 keeps working at
+krewlyzer 1.0 and beyond. Ordinary releases leave it alone.
+
+Raise it **only** when this release changes what an existing feature *means*,
+such that a PON built before it would score samples against a different
+quantity. The 0.9.0 examples:
+
+- `wps_background` held a hardcoded `167.0 / 5.0` for every group
+- six σ floors turned "no spread measured" into a divisor
+- region-MDS was fitted over 65–400 bp while samples are measured over
+  65–1000 bp — a median bias of +1.15 σ in every gene
+
+Adding a *new* feature or block is not that: an older PON simply lacks it, and
+`validate-pon`'s packing-list check reports the absence.
+
+If you do raise it, every bundled PON must be rebuilt — not merely re-stamped.
+Stamping a model that predates the change would launder exactly the
+incompatibility the floor exists to catch.
 
 ## Phase 3: Update CHANGELOG
 
@@ -853,14 +1389,14 @@ After review and approval:
 # Merge to main
 git checkout main
 git pull origin main
-git merge --no-ff release/X.Y.Z -m "Release vX.Y.Z"
+git merge --no-ff release/X.Y.Z -m "Release X.Y.Z"
 
 # Create annotated tag
-git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git tag -a X.Y.Z -m "Release X.Y.Z"
 
 # Push main and tag (triggers CI release)
 git push origin main
-git push origin vX.Y.Z
+git push origin X.Y.Z
 
 # Merge back to develop
 git checkout develop
@@ -921,7 +1457,7 @@ Each module has 2 version references:
 
 ## Overview
 
-Krewlyzer has **245 tests** covering all features via pytest.
+Krewlyzer has **248 tests** covering all features via pytest.
 
 | Category | Tests | Speed | Location |
 |----------|:-----:|-------|----------|
@@ -931,8 +1467,8 @@ Krewlyzer has **245 tests** covering all features via pytest.
 | **E2E** | 3 | 30-60s | `tests/e2e/` |
 | **Asset Resolution** | 19 | <1s | `tests/test_asset_resolution.py` |
 
-> [!NOTE]
-> **Rust code is tested via Python.** The `test_rust_python_equivalence.py` suite verifies Rust output matches Python implementations.
+!!! note
+    **Rust code is tested via Python.** The `test_rust_python_equivalence.py` suite verifies Rust output matches Python implementations.
 
 ---
 
@@ -1002,6 +1538,59 @@ pytest -m "not slow"     # Skip slow tests
 
 ---
 
+## Data Availability
+
+!!! important
+    The **entire `src/krewlyzer/data/` folder is EXCLUDED from PyPI wheels** to keep size <100MB.
+    Tests that require bundled data files are **automatically skipped** in CI/PyPI installs.
+
+### Data by Install Method
+
+| Install Method | Data Files | Test Coverage |
+|----------------|:----------:|:-------------:|
+| `pip install krewlyzer` (PyPI) | ❌ None | ~85% (skips asset tests) |
+| `pip install -e .` (git clone) | ✅ All | 100% |
+| Docker image | ✅ All | 100% |
+
+### How It Works
+
+Tests that verify bundled assets use the `@requires_data` decorator from `conftest.py`:
+
+```python
+from conftest import requires_data
+
+@requires_data
+class TestAssetManager:
+    def test_gene_bed_exists(self):
+        # Skipped if data not available
+        ...
+```
+
+### Running Full Tests Locally
+
+```bash
+# Clone the repository (includes data/)
+git clone https://github.com/msk-access/krewlyzer.git
+cd krewlyzer
+
+# Development install (uses source data directly)
+pip install -e ".[test]"
+
+# Run all tests - data-dependent tests will pass
+pytest tests/ -v
+```
+
+### External Data Directory
+
+For PyPI installs, you can provide data via environment variable:
+
+```bash
+export KREWLYZER_DATA_DIR=/path/to/krewlyzer/src/krewlyzer/data
+pytest tests/ -v
+```
+
+---
+
 ## Fixtures
 
 Key fixtures from `tests/conftest.py`:
@@ -1057,6 +1646,17 @@ def test_fsc_cli_produces_output(temp_bedgz, temp_bins, tmp_path):
     assert (tmp_path / "test.FSC.tsv").exists()
 ```
 
+### Example Data-Dependent Test
+```python
+from conftest import requires_data
+
+@requires_data
+def test_bundled_gene_bed_loads(manager):
+    """Test bundled gene BED (only runs with source data)."""
+    path = manager.get_gene_bed("xs1")
+    assert path.exists()
+```
+
 ---
 
 ## See Also
@@ -1072,10 +1672,11 @@ def test_fsc_cli_produces_output(temp_bedgz, temp_bins, tmp_path):
 
 **Command**: `krewlyzer extract`
 
-> **Plain English**: Extract converts your BAM file into cfDNA fragments with quality information.
-> It's the first step for most analyses—think of it as "preprocessing" your sequencing data.
->
-> **Key output**: `.bed.gz` file containing fragment coordinates and GC correction factors.
+!!! info "Plain English"
+    Extract converts your BAM file into cfDNA fragments with quality information.
+    It's the first step for most analyses—think of it as "preprocessing" your sequencing data.
+
+    **Key output**: `.bed.gz` file containing fragment coordinates and GC correction factors.
 
 ---
 
@@ -1093,8 +1694,8 @@ flowchart LR
     GC_REF[GC Reference] --> RUST
     
     RUST --> BED["sample.bed.gz"]
-    RUST --> META["metadata.json"]
-    RUST --> FACTORS["correction_factors.csv"]
+    RUST --> META["metadata.tsv"]
+    RUST --> FACTORS["correction_factors.tsv"]
     
     subgraph "With --target-regions"
         TARGETS[Target BED] --> RUST
@@ -1145,17 +1746,19 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 |------|-------------|
 | `{sample}.bed.gz` | Block-gzipped BED with fragment coordinates + GC |
 | `{sample}.bed.gz.tbi` | Tabix index for random access |
-| `{sample}.metadata.json` | Run statistics and configuration |
-| `{sample}.correction_factors.csv` | GC correction factors (with --gc-correct) |
+| `{sample}.metadata.tsv`  | Run statistics and configuration (tabular) |
+| `{sample}.correction_factors.tsv` | GC correction factors (with --gc-correct) |
 
 ### GC Correction Factors Format
 
 | Column | Description |
 |--------|-------------|
-| gc_bin | GC content bin (0.00-1.00) |
-| short_factor | Correction for short fragments (65-149bp) |
-| intermediate_factor | Correction for intermediate (150-220bp) |
-| long_factor | Correction for long fragments (221-400bp) |
+| `len_bin` | Fragment length bin (0-16) |
+| `gc_bin` | GC content (0.00-1.00) |
+| `factor` | Correction multiplier |
+| `observed` | Raw fragment count |
+| `expected` | LOESS-predicted count |
+| `n_fragments` | Number of fragments in bin |
 
 ---
 
@@ -1196,14 +1799,14 @@ flowchart TB
 | Output | Description |
 |--------|-------------|
 | `correction_factors.tsv` | GC factors from **off-target only** (unbiased) |
-| `correction_factors.ontarget.csv` | GC factors from **on-target only** (for mFSD) |
+| `correction_factors.ontarget.tsv` | GC factors from **on-target only** (for mFSD) |
 | `sample.bed.gz` | All fragments (on + off-target) |
 
-> [!TIP]
-> Use `.correction_factors.ontarget.csv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
+!!! tip
+    Use `.correction_factors.ontarget.tsv` with `krewlyzer mfsd --correction-factors` for panel variant calling—it's trained on the same capture regions as your variants.
 
-> [!IMPORTANT]
-> The BED file contains all fragments. Target filtering happens **per-tool** using the same `--target-regions` flag in FSC, FSD, WPS, etc.
+!!! important
+    The BED file contains all fragments. Target filtering happens **per-tool** using the same `--target-regions` flag in FSC, FSD, WPS, etc.
 
 ---
 
@@ -1245,10 +1848,11 @@ The `run-all` command automatically detects BAM compatibility issues and suggest
 
 **Command**: `krewlyzer fsc`
 
-> **Plain English**: FSC counts how many DNA fragments of each size fall into each genomic region.
-> Think of it as a "heatmap" of fragment sizes across the genome.
->
-> **Use case**: Copy number detection - regions with more short fragments suggest tumor amplification.
+!!! info "Plain English"
+    FSC counts how many DNA fragments of each size fall into each genomic region.
+    Think of it as a "heatmap" of fragment sizes across the genome.
+
+    **Use case**: Copy number detection - regions with more short fragments suggest tumor amplification.
 
 ---
 
@@ -1288,7 +1892,8 @@ FSC partitions fragments into **non-overlapping** channels optimized for ML:
 | **long** | 261-400bp | Multi-nucleosomal | Necrosis-associated |
 | **ultra_long** | 401-1000bp | Extended fragments | Necrosis, fetal cfDNA, late apoptosis |
 
-> **Non-overlapping**: Each fragment is counted in exactly one channel. This prevents multicollinearity in ML models.
+!!! note "Non-overlapping"
+    Each fragment is counted in exactly one channel. This prevents multicollinearity in ML models.
 
 ---
 
@@ -1351,7 +1956,8 @@ flowchart TB
 
 ### Aggregation Strategy
 
-> **Critical**: Aggregation should match your analysis goal.
+!!! warning "Critical"
+    Aggregation should match your analysis goal.
 
 | Data Type | Bin Input | Aggregation | Use Case |
 |-----------|-----------|-------------|----------|
@@ -1359,7 +1965,8 @@ flowchart TB
 | **WGS focal** | 100kb genome tiles | **No aggregation** | Focal amps (EGFR, MYC) |
 | **Panel** | Exon/Gene targets | **No aggregation** | Gene-level resolution |
 
-> **Auto-detection**: When `--target-regions` is provided in `run-all`, aggregation is **automatically disabled** to preserve gene-level resolution for panel data.
+!!! tip "Auto-detection"
+    When `--target-regions` is provided in `run-all`, aggregation is **automatically disabled** to preserve gene-level resolution for panel data.
 
 **Why this matters:**
 - 5Mb aggregation is great for detecting **arm-level** events (e.g., 1p/19q co-deletion)
@@ -1447,12 +2054,14 @@ Output: `{sample}.FSC.tsv`
 | `chrom` | str | Chromosome |
 | `start` | int | Window start (0-based) |
 | `end` | int | Window end |
-| `ultra_short` | float | GC-weighted count (65-100bp) |
-| `core_short` | float | GC-weighted count (101-149bp) |
-| `mono_nucl` | float | GC-weighted count (150-220bp) |
-| `di_nucl` | float | GC-weighted count (221-260bp) |
-| `long` | float | GC-weighted count (261-400bp) |
-| `total` | float | GC-weighted total (65-400bp) |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
+| `total` | float | GC-weighted total (65–1000 bp) |
+| `mean_gc` | float | Mean GC fraction of fragments in this window |
 
 ### PoN Columns (when `--pon-model` provided)
 
@@ -1461,7 +2070,8 @@ Output: `{sample}.FSC.tsv`
 | `*_log2` | float | log2(channel / PoN_mean) |
 | `*_reliability` | float | 1 / (PoN_variance + k) |
 
-> **Note**: Log2 ratios are signed: positive = above PoN mean, negative = below.
+!!! note
+    Log2 ratios are signed: positive = above PoN mean, negative = below.
 
 ---
 
@@ -1516,6 +2126,25 @@ df['short_long_ratio'] = (df['ultra_short'] + df['core_short']) / (df['long'] + 
 
 Higher ratio = more short fragments = potential tumor signal
 
+<a id="fsc-ratios-vs-fsr--not-redundant"></a>
+
+!!! note "FSC ratios vs FSR — not redundant"
+    The `*_ratio` columns in `FSC.gene.tsv` and `FSC.regions.tsv` are **simple proportions**: `channel / total` per gene or exon. They answer *"what fraction of fragments at this gene are short?"*
+
+    [FSR](fsr.md) is different in two key ways:
+    
+    1. **PON-normalized BEFORE ratio**: `normalize(short) / normalize(long)` — removes batch effects and library size before dividing, so cross-sample comparisons are valid
+    2. **Window-level** (5 Mb genome tiles), not gene-level
+
+    **When to use which:**
+    
+    | Use case | Use |
+    |----------|-----|
+    | Gene-level copy-number composition | `FSC.gene.tsv` `*_ratio` columns |
+    | Tumor fraction / genome-wide cancer signal | `FSR.tsv` `short_long_ratio` (PON-normalized) |
+    | ML features for per-gene models | FSC gene ratios |
+    | ML features for pan-cancer models | FSR `short_long_log2` |
+
 ---
 
 ## Normalization Order
@@ -1524,7 +2153,8 @@ Higher ratio = more short fragments = potential tumor signal
 2. **Window aggregation** (Python): 50 bins → 5Mb windows
 3. **PoN log-ratio** (Python): log2(sample / PoN mean) when PoN model provided
 
-> **Important**: GC correction is applied **first** in Rust, not after. This ensures all downstream features are GC-unbiased.
+!!! important
+    GC correction is applied **first** in Rust, not after. This ensures all downstream features are GC-unbiased.
 
 ---
 
@@ -1558,9 +2188,9 @@ flowchart TB
 | `{sample}.FSC.tsv` | **Off-target** fragments | Unbiased global signal (primary) |
 | `{sample}.FSC.ontarget.tsv` | **On-target** fragments | Gene-level local signal |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
-> **On-target = capture-biased** – reflects library prep + target selection.
+!!! important
+    **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
+    **On-target = capture-biased** – reflects library prep + target selection.
 
 ### When to Use On-Target FSC
 
@@ -1589,29 +2219,102 @@ krewlyzer fsc -i sample.bed.gz -o output/ --assay xs2
 | `{sample}.FSC.gene.tsv` | Gene-level FSC | 146 (xs2) |
 | `{sample}.FSC.regions.tsv` | Per-exon/target FSC | ~1,000 |
 
-### Gene FSC Output Format
+### Gene FSC Output Format (`{sample}.FSC.gene.tsv`)
 
-```
-gene    n_regions  total_bp  ultra_short  core_short  mono_nucl  di_nucl  long  total  *_ratio  normalized_depth
-ATM     62         8432      1234         5678        9012       3456     789   20169  ...      1245.67
-BRCA2   42         5689      ...
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `gene` | str | HGNC gene symbol |
+| `n_regions` | int | Number of exons/targets for this gene |
+| `total_bp` | int | Total covered base pairs |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
+| `total` | float | GC-weighted total count |
+| `ultra_short_ratio` | float | `ultra_short / total` |
+| `core_short_ratio` | float | `core_short / total` |
+| `mono_nucl_ratio` | float | `mono_nucl / total` |
+| `di_nucl_ratio` | float | `di_nucl / total` |
+| `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
+| `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
 
-### Region FSC Output Format (NEW)
+!!! warning "Band boundaries changed in 0.9.0"
+    Before 0.9.0 the gene and region tables used their own size bands, which had
+    drifted from the genome-bin bands documented above: `mono_nucl` covered
+    150–259 bp, `di_nucl` covered 260–399 bp, and `long` covered everything from
+    400 bp up. A column named `di_nucl` therefore held the genome table's `long`
+    range. The bands are now shared with the genome path, and `ultra_long` is
+    emitted as a sixth channel rather than being folded into `long`.
+
+    The six ratios sum to 1. The five that existed before sum to
+    `1 - ultra_long_ratio`. Values from earlier releases are not comparable.
+
+### Region FSC Output Format (`{sample}.FSC.regions.tsv`)
 
 Per-exon/target output for fine-grained copy number analysis:
 
-```
-chrom  start      end      gene  region_name     region_bp  ultra_short  ...  normalized_depth
-1      11168235  11168345  MTOR  MTOR_target_02  110        8.0          ...  1272.71
-1      11169344  11169429  MTOR  MTOR_target_03  85         6.0          ...  1553.68
-```
+| Column | Type | Description |
+|--------|------|-------------|
+| `chrom` | str | Chromosome |
+| `start` | int | Region start (0-based) |
+| `end` | int | Region end |
+| `gene` | str | Gene symbol |
+| `region_name` | str | Exon/target identifier |
+| `region_bp` | int | Region length in bp |
+| `ultra_short` | float | GC-weighted count (65–100 bp) |
+| `core_short` | float | GC-weighted count (101–149 bp) |
+| `mono_nucl` | float | GC-weighted count (150–220 bp) |
+| `di_nucl` | float | GC-weighted count (221–260 bp) |
+| `long` | float | GC-weighted count (261–400 bp) |
+| `ultra_long` | float | GC-weighted count (401–1000 bp) |
+| `total` | float | GC-weighted total count |
+| `ultra_short_ratio` | float | `ultra_short / total` |
+| `core_short_ratio` | float | `core_short / total` |
+| `mono_nucl_ratio` | float | `mono_nucl / total` |
+| `di_nucl_ratio` | float | `di_nucl / total` |
+| `long_ratio` | float | `long / total` |
+| `ultra_long_ratio` | float | `ultra_long / total` |
+| `normalized_depth` | float | RPKM-like depth |
 
-### E1-Only FSC Output (NEW)
+The same 0.9.0 band correction applies here — see the warning above.
+
+### E1-Only FSC Output
 
 **File**: `{sample}.FSC.regions.e1only.tsv`
 
-E1 (first exon) filtering extracts only the first exon per gene by genomic position. Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+Per Helzer et al. (2025), promoter-proximal regions (E1) are Nucleosome Depleted Regions (NDRs) with distinct fragmentation patterns, often showing stronger cancer signal than whole-gene averages.
+
+!!! info "What this table contains, as of 0.9.0"
+    A region qualifies as E1 if it overlaps **either** the canonical
+    transcript's exon 1 (`is_e1`) **or** another basic protein-coding
+    transcript's first exon (`is_alt_e1`). Both are genuine transcription
+    starts, and restricting to the canonical one discards most of a panel:
+
+    | tile overlaps… | xs1 / 128 | xs2 / 146 |
+    |---|---:|---:|
+    | canonical (MANE) exon 1 only | 25 | 33 |
+    | **either flag — what this table uses** | **40** | **48** |
+    | any transcript's exon 1, incl. minor isoforms | 79 | 90 |
+
+    Alternative promoters are the norm — a gene carries a median of 13 distinct
+    annotated first exons. Minor and non-coding isoforms are excluded upstream
+    in `scripts/build_gene_bed.py`, because their annotated starts are not
+    evidence of a live promoter; that exclusion is the gap between 40 and 79.
+
+    **Genes with neither flag are omitted.** Before 0.9.0 this table emitted one
+    row per gene regardless, so a gene whose exon 1 the panel never captured got
+    an arbitrary internal exon labelled E1 — 98 of 146 rows on a real xs2
+    sample. Dropping them makes the table smaller and true.
+
+    Selection no longer depends on coordinate order, so it is correct on the
+    minus strand. `FSC.regions` now carries `strand`, `is_e1` and `is_alt_e1`
+    so a consumer can tell canonical from alternative.
+
+    A gene BED without those columns still works and still produces a table,
+    but falls back to the lowest-start region per gene with a warning saying so.
 
 **Usage**:
 ```bash
@@ -1622,15 +2325,12 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2
 krewlyzer run-all -i sample.bam -r ref.fa -o out/ -A xs2 --disable-e1-aggregation
 ```
 
-> [!TIP]
-> E1-only FSC is particularly useful for **early cancer detection** where promoter fragmentation changes are an early marker.
-
 ### Normalized Depth (RPKM-like)
 
 Both gene and region outputs include `normalized_depth`:
 
 $$
-\text{normalized\_depth} = \frac{\text{count} \times 10^9}{\text{region\_bp} \times \text{total\_fragments}}
+\text{normalized_depth} = \frac{\text{count} \times 10^9}{\text{region_bp} \times \text{total_fragments}}
 $$
 
 This enables cross-sample depth comparisons independent of library size and region size.
@@ -1642,12 +2342,12 @@ This enables cross-sample depth comparisons independent of library size and regi
 | MSK-ACCESS v1 | `--assay xs1` | 128 |
 | MSK-ACCESS v2 | `--assay xs2` | 146 |
 
-> [!TIP]
-> Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
+!!! tip
+    Gene-level FSC is useful for **gene-specific amplification** detection and **integration with variant calling** pipelines.
 
 ### GC Correction for Gene FSC
 
-In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.csv`) for accurate copy number estimates.
+In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.tsv`) for accurate copy number estimates.
 
 **Why this matters:**
 - Different genes have different GC content
@@ -1668,8 +2368,8 @@ Processed 2.4M fragments, 2.4M assigned to genes
   GC correction: avg_weight=1.898, missing_gc=0
 ```
 
-> [!NOTE]
-> On-target factors are automatically used when available. If not found, raw counting is used with a debug log message.
+!!! note
+    On-target factors are automatically used when available. If not found, raw counting is used with a debug log message.
 
 ---
 
@@ -1685,10 +2385,10 @@ Processed 2.4M fragments, 2.4M assigned to genes
 
 ## References
 
-> Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
+!!! quote "References"
+    Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
 
-> Cristiano et al. (2019). Genome-wide cell-free DNA fragmentation in patients with cancer. *Nature*, 570(7761), 385-389.
-
+    Cristiano et al. (2019). Genome-wide cell-free DNA fragmentation in patients with cancer. *Nature*, 570(7761), 385-389.
 
 ---
 
@@ -1698,10 +2398,11 @@ Processed 2.4M fragments, 2.4M assigned to genes
 
 **Command**: `krewlyzer fsd`
 
-> **Plain English**: FSD creates a "histogram" of fragment sizes for each chromosome arm.
-> Healthy samples have a peak at ~166bp. Cancer samples show a left-shifted peak (~145bp).
->
-> **Use case**: Detect aneuploidy and copy number changes by comparing arm-level size distributions.
+!!! info "Plain English"
+    FSD creates a "histogram" of fragment sizes for each chromosome arm.
+    Healthy samples have a peak at ~166bp. Cancer samples show a left-shifted peak (~145bp).
+
+    **Use case**: Detect aneuploidy and copy number changes by comparing arm-level size distributions.
 
 ---
 
@@ -1773,7 +2474,8 @@ cfDNA fragment sizes reflect nucleosome positioning and chromatin state in sourc
 | 10bp periodicity | Clear | Often disrupted |
 | Arm-level variation | Minimal | Increased (correlates with CNAs) |
 
-> **Why arm-level?** Chromosome arms have distinct chromatin environments. Tumor-derived cfDNA shows arm-specific fragmentation shifts that correlate with copy number alterations.
+!!! note "Why arm-level?"
+    Chromosome arms have distinct chromatin environments. Tumor-derived cfDNA shows arm-specific fragmentation shifts that correlate with copy number alterations.
 
 ---
 
@@ -1831,9 +2533,9 @@ krewlyzer run-all -i sample.bam -r ref.fa -o out/ \
 
 Same schema as above, but for fragments overlapping target regions.
 
-> [!IMPORTANT]
-> **Off-target = unbiased** (preferred for biomarkers)  
-> **On-target = capture-biased** (use cautiously for local analysis only)
+!!! important
+    **Off-target = unbiased** (preferred for biomarkers)  
+    **On-target = capture-biased** (use cautiously for local analysis only)
 
 ---
 
@@ -1852,7 +2554,8 @@ Normalization Order:
 | Enabled | Corrects for PCR/capture GC bias |
 | Disabled (`--no-gc-correct`) | Raw counts (faster, biased) |
 
-> See [GC Correction Details](../../guides/gc-correction.md) for the LOESS algorithm.
+!!! tip
+    See [GC Correction Details](../../guides/gc-correction.md) for the LOESS algorithm.
 
 ---
 
@@ -1870,7 +2573,7 @@ With `--pon-model`, FSD outputs include log-ratio normalization:
 **Log-Ratio:**
 
 $$
-\text{logR} = \log_2 \left( \frac{\text{sample\_count} + 1}{\text{PoN\_expected} + 1} \right)
+\text{logR} = \log_2 \left( \frac{\text{sample_count} + 1}{\text{PoN_expected} + 1} \right)
 $$
 
 **PON Stability:**
@@ -1884,7 +2587,8 @@ $$
 2. Compute log-ratio with pseudocount (+1) for zero-handling
 3. Calculate stability from PoN variance (inverse weighting)
 
-> See [PON Models](../../reference/pon-models.md) for model structure and building.
+!!! tip
+    See [PON Models](../../reference/pon-models.md) for model structure and building.
 
 ---
 
@@ -1920,7 +2624,8 @@ $$
 | 51-86 | 320-499bp | Multi-nucleosomal |
 | 87-186 | 500-999bp | Extended range |
 
-> **Note**: The pipeline uses 5bp bins from 65bp to 999bp, yielding 187 columns. This extended range (up to 1000bp) captures multi-nucleosomal fragments for comprehensive FSD analysis.
+!!! note
+    The pipeline uses 5bp bins from 65bp to 999bp, yielding 187 columns. This extended range (up to 1000bp) captures multi-nucleosomal fragments for comprehensive FSD analysis.
 
 ---
 
@@ -1938,8 +2643,8 @@ krewlyzer fsd -i sample.bed.gz -o output/ \
 | `.FSD.tsv` | Off-target fragments | Unbiased arm-level biomarkers |
 | `.FSD.ontarget.tsv` | On-target fragments | Local context (capture-biased) |
 
-> [!WARNING]
-> On-target FSD has capture bias and should not be used for global fragmentomics.
+!!! warning
+    On-target FSD has capture bias and should not be used for global fragmentomics.
 
 ---
 
@@ -1959,10 +2664,11 @@ krewlyzer fsd -i sample.bed.gz -o output/ \
 
 **Command**: `krewlyzer fsr`
 
-> **Plain English**: FSR measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
-> A higher `core_short_long_ratio` means more tumor-derived DNA in your sample.
->
-> **Example**: `core_short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
+!!! info "Plain English"
+    FSR measures the ratio of short (tumor-enriched) to long (healthy) DNA fragments.
+    A higher `short_long_ratio` means more tumor-derived DNA in your sample.
+
+    **Example**: `short_long_ratio = 1.5` suggests ~30% tumor burden (vs. ~0.9 in healthy plasma).
 
 ---
 
@@ -1987,10 +2693,6 @@ flowchart LR
     end
     
     RATIO --> FSR["FSR.tsv"]
-    
-    subgraph "With --target-regions"
-        RUST --> FSR_ON["FSR.ontarget.tsv"]
-    end
 ```
 
 ### Python/Rust Architecture
@@ -2023,12 +2725,13 @@ The ratio of short to long fragments is a key indicator of tumor burden in cfDNA
 
 | Fragment Type | Size Range | Biological Source |
 |---------------|------------|-------------------|
+| **ultra_short** | 65-99bp | TF footprints, highly tumor-specific |
 | **core_short** | 100-149bp | Tumor DNA (sub-nucleosomal, ~145bp peak) |
 | **mono_nucl** | 150-259bp | Standard mono-nucleosomal cfDNA |
 | **di_nucl** | 260-399bp | Di-nucleosomal (healthy chromatin) |
 | **long** | 400+bp | Very long fragments |
 
-**Key Biomarker**: `core_short_long_ratio` – Higher ratio = higher probability of tumor DNA
+**Key Biomarker**: `short_long_ratio` — where "short" = ultra_short + core_short (65–149 bp) and "long" = di_nucl + long (221–400+ bp). Higher ratio = higher probability of tumor DNA.
 
 ### Why Short Fragments = Tumor?
 
@@ -2081,11 +2784,26 @@ FSR uses the Rust backend's 5-channel size bins:
 
 | Bin Name | Size Range | Biological Meaning |
 |----------|------------|-------------------|
-| `ultra_short` | 65-99bp | TF footprints, highly tumor-specific |
-| `core_short` | 100-149bp | **Primary tumor biomarker** |
-| `mono_nucl` | 150-259bp | Standard mono-nucleosomal |
-| `di_nucl` | 260-399bp | Di-nucleosomal, healthy-enriched |
-| `long` | 400+bp | Multi-nucleosomal (rare) |
+| `ultra_short` | 65-100bp | TF footprints, highly tumor-specific |
+| `core_short` | 101-149bp | **Primary tumor biomarker** |
+| `mono_nucl` | 150-220bp | Standard mono-nucleosomal |
+| `di_nucl` | 221-260bp | Di-nucleosomal |
+| `long` | 261-400bp | Multi-nucleosomal |
+
+> [!IMPORTANT]
+> FSR and FSC share **one** counter (`count_fragments_by_bins` in
+> `rust/src/fsc.rs`), so these are the same boundaries documented for
+> [FSC](fsc.md). Earlier revisions of this page listed a different set
+> (65-99 / 100-149 / 150-259 / 260-399 / 400+) that the code has never used.
+
+> [!WARNING]
+> **`total` is not the sum of the channels.** `total` counts every fragment
+> from 65-1000bp, but only five channels are returned, so fragments of
+> 401-1000bp inflate `total` while belonging to no channel. On a realistic
+> library with a long-fragment tail this can be >10% of the total, and the
+> shortfall varies per sample with its necrotic content. For ML features
+> prefer `channel / sum(channels)` over `channel / total`, or subtract the
+> long tail explicitly.
 
 ---
 
@@ -2093,14 +2811,16 @@ FSR uses the Rust backend's 5-channel size bins:
 
 ### Normalization Order (Critical)
 
-> [!IMPORTANT]
-> FSR normalizes counts to PoN **BEFORE** computing ratios.
+!!! important
+    FSR normalizes counts to PoN **BEFORE** computing ratios.
 
 **Step 1 - Normalize short:**
 
 $$
-\text{core\_short\_norm} = \frac{\text{core\_short\_count}}{\text{PoN\_core\_short\_mean}}
+\text{short\_norm} = \frac{\text{short\_count}}{\text{PoN\_short\_mean}}
 $$
+
+where `short_count = ultra_short + core_short` (65–149 bp)
 
 **Step 2 - Normalize long:**
 
@@ -2108,18 +2828,20 @@ $$
 \text{long\_norm} = \frac{\text{long\_count}}{\text{PoN\_long\_mean}}
 $$
 
+where `long_count = di_nucl + long` (221–400+ bp)
+
 **Step 3 - Compute ratio:**
 
 $$
-\text{core\_short\_long\_ratio} = \frac{\text{core\_short\_norm}}{\text{long\_norm}}
+\text{short\_long\_ratio} = \frac{\text{short\_norm}}{\text{long\_norm}}
 $$
 
 This removes batch effects **before** ratio calculation, ensuring accurate cross-sample comparison.
 
-**Step 4 - Log2 ratio (optional):**
+**Step 4 - Log2 ratio (ML-ready):**
 
 $$
-\text{short\_long\_log2} = \log_2(\text{core\_short\_long\_ratio})
+\text{short\_long\_log2} = \log_2(\text{short\_long\_ratio})
 $$
 
 | log2 Value | Meaning |
@@ -2132,23 +2854,20 @@ $$
 
 ## Output Format
 
-Output: `{sample}.FSR.tsv`
+Output: `{sample}.FSR.tsv` / `{sample}.FSR.ontarget.tsv` (panel mode)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `region` | str | Genomic region (chr:start-end) |
-| `ultra_short_count` | int | Ultra-short fragments (65-99bp) |
-| `core_short_count` | int | Core short fragments (100-149bp) |
-| `mono_nucl_count` | int | Mono-nucleosomal fragments (150-259bp) |
-| `di_nucl_count` | int | Di-nucleosomal fragments (260-399bp) |
-| `long_count` | int | Long fragments (400+bp) |
-| `total_count` | int | Total fragments |
-| `ultra_short_ratio` | float | ultra_short / total |
-| `core_short_ratio` | float | core_short / total |
-| `mono_nucl_ratio` | float | mono_nucl / total |
-| `di_nucl_ratio` | float | di_nucl / total |
-| `long_ratio` | float | long / total |
-| `core_short_long_ratio` | float | **core_short / long** (primary biomarker) |
+| `region` | str | Genomic region, e.g. `chr1:0-5000000` (WGS) or `chr1:0-100000` (panel) |
+| `short_count` | int | Short fragments: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Long fragments: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragments in window |
+| `short_norm` | float | `short_count / PON_short_mean` — PON-normalized short |
+| `long_norm` | float | `long_count / PON_long_mean` — PON-normalized long |
+| `short_long_ratio` | float | `short_norm / long_norm` — **primary biomarker** |
+| `short_long_log2` | float | `log2(short_long_ratio)` — ML-ready signed metric |
+| `short_frac` | float | `short_count / total_count` — raw proportion |
+| `long_frac` | float | `long_count / total_count` — raw proportion |
 
 ---
 
@@ -2165,12 +2884,11 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 
 | File | Contents | Use Case |
 |------|----------|----------|
-| `{sample}.FSR.tsv` | **Off-target** fragments | Unbiased ratio (primary) |
-| `{sample}.FSR.ontarget.tsv` | **On-target** fragments | Gene-level ratio |
+| `{sample}.FSR.tsv` | **Off-target** fragment ratios (100kb windows) | Unbiased ratio (primary biomarker) |
+| `{sample}.FSR.ontarget.tsv` | **On-target** fragment ratios (100kb windows) | Capture-region analysis |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for tumor detection.  
-> **On-target = capture-biased** – reflects panel design, not true biology.
+!!! warning "Do not mix off-target and on-target in the same model"
+    `FSR.tsv` and `FSR.ontarget.tsv` are not on the same scale — the on-target pool has different GC bias and fragment size distributions. Always use the same variant consistently across all samples in a cohort.
 
 ---
 
@@ -2179,21 +2897,22 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | Metric | Healthy Plasma | Cancer (ctDNA) |
 |--------|----------------|----------------|
 | Modal fragment size | ~166bp | Left-shifted (~145bp) |
-| `core_short_long_ratio` | ~0.8-1.0 (baseline) | **>1.2 elevated** |
+| `short_long_ratio` | ~0.8-1.0 (baseline) | **>1.2 elevated** |
 | Interpretation | Normal profile | Elevated tumor burden |
 
 ### Decision Flowchart
 
 ```mermaid
 flowchart TD
-    FSR[FSR Results] --> Q1{core_short_long_ratio > 1.3?}
+    FSR[FSR Results] --> Q1{"short_long_ratio > 1.3?"}
     Q1 -->|Yes| HIGH[High tumor burden]
-    Q1 -->|No| Q2{core_short_long_ratio > 1.1?}
+    Q1 -->|No| Q2{"short_long_ratio > 1.1?"}
     Q2 -->|Yes| MOD[Moderate tumor signal]
     Q2 -->|No| LOW[Low/no detectable tumor]
 ```
 
-> **Note**: Thresholds depend on your cohort and should be validated against known samples.
+!!! note
+    Thresholds depend on your cohort and should be validated against known samples.
 
 ---
 
@@ -2213,11 +2932,12 @@ flowchart TD
 
 **Command**: `krewlyzer wps`
 
-> **Plain English**: WPS measures how well nucleosomes protect DNA from cutting.
-> Healthy cfDNA shows a regular ~190bp spacing pattern.
-> Cancer disrupts this pattern - **lower `nrl_quality` = more tumor burden**.
->
-> **Quick metric**: `nrl_quality > 0.7` = healthy, `< 0.5` = potentially abnormal
+!!! info "Plain English"
+    WPS measures how well nucleosomes protect DNA from cutting.
+    Healthy cfDNA shows a regular ~190bp spacing pattern.
+    Cancer disrupts this pattern - **lower `nrl_quality` = more tumor burden**.
+
+    **Quick metric**: `nrl_quality > 0.7` = healthy, `< 0.5` = potentially abnormal
 
 ---
 
@@ -2282,7 +3002,8 @@ flowchart TB
     end
 ```
 
-> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of anchor regions.
+!!! tip "Performance"
+    Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of anchor regions.
 
 ---
 
@@ -2311,6 +3032,11 @@ WPS generates **two complementary outputs** that capture different biological sc
 ### Background (`sample.WPS_background.parquet`)
 
 **What it is**: Stacked WPS profiles from ~770,000 Alu elements across the genome.
+
+Each Alu contributes a **2000bp** window — the ~300bp Alu body plus 850bp of
+flank on each side. The flank matters: the nucleosome repeat length being
+measured is ~190bp, so a profile covering only the Alu body spans ~1.5 repeats
+and cannot resolve that period at all. The 2000bp window spans ~10 repeats.
 
 **Why Alu elements?**
 
@@ -2356,7 +3082,7 @@ WPS generates **two complementary outputs** that capture different biological sc
 1. **Detrend**: Remove linear trends from stacked profile
 2. **Normalize**: Z-score to make amplitude comparable across samples
 3. **Window**: Apply Hann window to reduce spectral leakage
-4. **FFT**: Find dominant frequency in 150-250bp range
+4. **FFT**: Zero-pad (8x) and find the dominant frequency in the 140-250bp band
 5. **SNR**: Compare peak amplitude to background
 
 | Column | Description |
@@ -2501,10 +3227,12 @@ Per-region profiles centered on TSS/CTCF anchors (±1kb, 200 bins × 10bp).
 | `capture_mask` | uint8[200] | Panel mask (1=reliable, 0=edge/off-target) |
 | `local_depth` | float32 | Local fragment coverage |
 
-> **Strand Correction**: All profiles are strand-corrected.
-> - Genes on `+` strand are stored 5' → 3'
-> - Genes on `-` strand are **reversed** so they are also 5' → 3'
-> - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
+!!! note "Strand Correction"
+    All profiles are strand-corrected.
+
+    - Genes on `+` strand are stored 5' → 3'
+    - Genes on `-` strand are **reversed** so they are also 5' → 3'
+    - **Result**: Bin 100 is always the TSS, and Bin 110 is always "+100bp downstream", regardless of gene orientation.
 
 #### PON-Normalized Columns (v2.0)
 
@@ -2516,11 +3244,23 @@ When using a v2.0 vector PON, these additional columns are computed:
 | `shape_score` | float32 | Pearson correlation with healthy shape [-1, 1] |
 | `z_amplitude` | float32 | Mean of abs(z_vector) for backward compat |
 
-> [!TIP]
-> **Shape Score Interpretation:**
-> - **0.9-1.0**: Healthy nucleosome positioning
-> - **0.5-0.9**: Mild chromatin disorganization
-> - **<0.5**: Significant disruption (cancer signal)
+> [!WARNING]
+> **Not currently emitted.** `compute_shape_score()` and `compute_z_vector()`
+> exist in `src/krewlyzer/pon/model.py` but no pipeline code calls them, so
+> these three columns do not appear in `{sample}.WPS.parquet`.
+>
+> Separately, `wps.apply_pon_zscore()` resolves the sample column to
+> `wps_nuc`, which is written as `List<Float32>`, and then downcasts it to
+> `Float64Array`. The downcast fails and the fallback yields `0.0`, so the
+> emitted z-scores are `(0 - mean) / std` for every region while the function
+> still reports success. Do not use WPS PON z-scores until this is fixed;
+> plot the raw `wps_nuc_smooth` / `wps_tf_smooth` profiles instead.
+
+!!! tip
+    **Shape Score Interpretation:**
+    - **0.9-1.0**: Healthy nucleosome positioning
+    - **0.5-0.9**: Mild chromatin disorganization
+    - **<0.5**: Significant disruption (cancer signal)
 
 See [PON v2.0](../../reference/pon-models.md#wps-baseline-wps_baseline) for baseline details.
 
@@ -2540,11 +3280,12 @@ Hierarchical stacking of ~770K Alu elements into 29 groups.
 | `periodicity_score` | float32 | Raw SNR-based quality score (0-1) |
 | `adjusted_score` | float32 | **NEW**: periodicity_score × deviation_penalty |
 
-> **NRL Deviation Scoring**: The `adjusted_score` penalizes samples with abnormal NRL values.
-> A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
+!!! note "NRL Deviation Scoring"
+    The `adjusted_score` penalizes samples with abnormal NRL values.
+    A sample with strong periodicity but wrong NRL (e.g., 170bp instead of 190bp) will have lower `adjusted_score`.
 
 $$
-\text{adjusted\_score} = \text{periodicity\_score} \times \max\left(0, 1 - \frac{|\text{nrl\_bp} - 190|}{50}\right)
+\text{adjusted_score} = \text{periodicity_score} \times \max\left(0, 1 - \frac{|\text{nrl_bp} - 190|}{50}\right)
 $$
 
 ---
@@ -2578,7 +3319,8 @@ $$
 
 ## References
 
-> Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
+!!! quote "Reference"
+    Snyder et al. (2016). Cell-free DNA comprises an in vivo nucleosome footprint that informs its tissues-of-origin. *Cell*, 164(1-2), 57-68.
 
 ## See Also
 
@@ -2598,16 +3340,16 @@ Krewlyzer provides 11 standalone feature extraction commands plus a unified `run
 
 | Command | Input | Output | Primary Use Case |
 |---------|-------|--------|------------------|
-| [`extract`](core/extract.md) | BAM | `.bed.gz`, `.metadata.json` | Fragment extraction & GC factors |
+| [`extract`](core/extract.md) | BAM | `.bed.gz`, `.metadata.tsv` | Fragment extraction & GC factors |
 | [`motif`](regulatory/motif.md) | BAM | `.EndMotif.tsv`, `.MDS.tsv` | Fragmentation patterns |
 | [`fsc`](core/fsc.md) | BED.gz | `.FSC.tsv` | Copy number detection |
 | [`fsr`](core/fsr.md) | BED.gz | `.FSR.tsv` | Tumor fraction estimation |
 | [`fsd`](core/fsd.md) | BED.gz | `.FSD.tsv` | Size distribution analysis |
-| [`wps`](core/wps.md) | BED.gz | `.WPS.tsv.gz` | Nucleosome positioning |
+| [`wps`](core/wps.md) | BED.gz | `.WPS.parquet` | Nucleosome positioning |
 | [`ocf`](regulatory/ocf.md) | BED.gz | `.OCF.tsv` | Tissue of origin |
 | [`region-entropy`](regulatory/region-entropy.md) | BED.gz | `.TFBS.tsv`, `.ATAC.tsv` | Regulatory region analysis |
 | [`uxm`](methylation/uxm.md) | Bisulfite BAM | `.UXM.tsv` | Methylation deconvolution |
-| [`mfsd`](core/fsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
+| [`mfsd`](variant/mfsd.md) | BAM + VCF/MAF | `.mFSD.tsv` | Mutant vs wild-type sizes |
 | `run-all` | BAM | All outputs | Complete analysis |
 
 ---
@@ -2635,7 +3377,7 @@ flowchart LR
         fsc --> FSC[.FSC.tsv]
         fsr --> FSR[.FSR.tsv]
         fsd --> FSD[.FSD.tsv]
-        wps --> WPS[.WPS.tsv.gz]
+        wps --> WPS[.WPS.parquet]
         ocf --> OCF[.OCF.tsv]
         motif --> MOTIF[.EndMotif.tsv]
         mfsd --> MFSD[.mFSD.tsv]
@@ -2643,7 +3385,9 @@ flowchart LR
     end
     
     BED --> tfbs[region-entropy]
+    BAM --> rmds[region-mds]
     tfbs --> TFBS[.TFBS.tsv / .ATAC.tsv]
+    rmds --> RMDS2[.MDS.exon.tsv / .MDS.gene.tsv]
 ```
 
 ---
@@ -2716,7 +3460,6 @@ All feature commands share these core options:
 | `-G, --genome` | Genome build: hg19/hg38 |
 | `-t, --threads` | Thread count (0=all) |
 | `-v, --verbose` | Enable verbose logging |
-| `-f, --format` | Output format: tsv, parquet, json |
 
 See individual feature pages for command-specific options, or [JSON Output](output/json-output.md) for format details.
 
@@ -2835,6 +3578,13 @@ Output: `{sample}.UXM.tsv`
 | **X** | 25-75% | Heterogeneous/mosaic |
 | **M** | ≥75% CpGs methylated | Stably methylated |
 
+> [!NOTE]
+> These thresholds are defined as `METHY_THRESHOLD = 0.75` and
+> `UNMETHY_THRESHOLD = 0.25` in `src/krewlyzer/uxm.py`. They must straddle a
+> gap: if both are set to the same value the backend's `ratio >= methy` test
+> fires first and the **X class becomes unreachable**, silently emitting
+> `X = 0.0` for every region.
+
 ---
 
 ## Clinical Interpretation
@@ -2871,45 +3621,55 @@ Based on the Human Methylation Atlas:
 
 # FILE: docs/features/output/json-output.md
 
-# Unified JSON Output
+# JSON Feature Output
 
 The `--generate-json` flag produces a single JSON file containing all features for ML integration.
 
-## Enabling JSON Output
-
 ```bash
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
+    --assay xs2 \
     --generate-json
 ```
 
 This generates `{sample}.features.json` alongside the standard TSV/Parquet outputs.
 
-## Output Structure
+---
+
+## Top-Level Structure
 
 ```json
 {
+  "schema_version": "1.0",
   "sample_id": "sample_001",
+  "krewlyzer_version": "0.6.0",
+  "timestamp": "2026-02-28T19:00:00",
   "metadata": {
     "genome": "hg19",
     "assay": "xs2",
     "panel_mode": true,
-    "on_target_rate": 0.45,
-    "timestamp": "2024-01-20T00:00:00"
+    "on_target_rate": 0.45
   },
-  "fsc": { ... },
-  "fsc_gene": { ... },
-  "fsc_region": { ... },
-  "fsc_region_e1": { ... },
-  "fsr": { ... },
-  "fsd": { ... },
-  "wps": { ... },
-  "wps_panel": { ... },
-  "wps_background": { ... },
-  "motif": { ... },
-  "ocf": { ... },
-  "tfbs": { ... },
-  "atac": { ... },
-  "gc_factors": { ... }
+  "features": {
+    "fsc": { ... },
+    "fsc_gene": [ ... ],
+    "fsc_region": [ ... ],
+    "fsc_region_e1": [ ... ],
+    "fsc_counts": [ ... ],
+    "fsr": { ... },
+    "fsd": { ... },
+    "wps": { ... },
+    "wps_panel": { ... },
+    "wps_background": { ... },
+    "motif": { ... },
+    "ocf": { ... },
+    "tfbs": { ... },
+    "atac": { ... },
+    "gc_factors": { ... },
+    "mfsd": { ... },
+    "region_mds": { ... },
+    "uxm": { ... }
+  },
+  "qc": { ... }
 }
 ```
 
@@ -2919,12 +3679,11 @@ This generates `{sample}.features.json` alongside the standard TSV/Parquet outpu
 
 ### FSC (Fragment Size Coverage)
 
-Window-based fragment size counts with z-scores.
+Window-based fragment size counts. Split into `off_target` (genome-wide) and `on_target` (panel capture regions).
 
 ```json
 "fsc": {
-  "n_windows": 2534,
-  "data": [
+  "off_target": [
     {
       "region": "chr1:0-500000",
       "ultra_short": 123,
@@ -2934,22 +3693,22 @@ Window-based fragment size counts with z-scores.
       "long": 678,
       "total": 16614,
       "log_ratio_core_short": -0.15,
-      "log_ratio_mono_nucl": 0.02,
       "zscore_core_short": -1.23
     }
-  ]
+  ],
+  "on_target": [ ... ]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `region` | string | Genomic window coordinates |
-| `ultra_short` | int | Fragments 65-99bp |
-| `core_short` | int | Fragments 100-149bp |
-| `mono_nucl` | int | Fragments 150-259bp |
-| `di_nucl` | int | Fragments 260-399bp |
-| `long` | int | Fragments 400+bp |
-| `log_ratio_*` | float | Log2(observed/expected) vs PON |
+| `ultra_short` | int | Fragments 65–99 bp |
+| `core_short` | int | Fragments 100–149 bp |
+| `mono_nucl` | int | Fragments 150–259 bp |
+| `di_nucl` | int | Fragments 260–399 bp |
+| `long` | int | Fragments 400+ bp |
+| `log_ratio_*` | float | Log₂(observed/expected) vs PON |
 | `zscore_*` | float | Z-score vs PON (if PON provided) |
 
 ---
@@ -2999,16 +3758,11 @@ Per-exon/target fragment size data. More granular than gene-level.
 ]
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `region_name` | string | Unique exon/target identifier |
-| `normalized_depth` | float | RPKM-like depth: (count × 10⁹) / (bp × total_frags) |
-
 ---
 
 ### FSC Region E1 (Panel Mode Only)
 
-First exon (E1) per gene, filtered from `fsc_region`. E1 serves as a promoter-proximal proxy with stronger cancer signal (Helzer et al. 2025).
+First exon (E1) per gene. E1 = promoter-proximal region with stronger cancer signal (Helzer et al. 2025).
 
 ```json
 "fsc_region_e1": [
@@ -3027,101 +3781,157 @@ First exon (E1) per gene, filtered from `fsc_region`. E1 serves as a promoter-pr
 ]
 ```
 
-> [!TIP]
-> Use `fsc_region_e1` for **early cancer detection** models where promoter fragmentation changes are a primary signal.
+!!! tip
+    Use `fsc_region_e1` for **early cancer detection** models where promoter fragmentation changes are a primary signal.
+
+---
+
+### FSC Counts (Raw GC-Binned Counts)
+
+Raw per-GC-bin, per-size-class fragment counts. Source: `{sample}.fsc_counts.tsv`.
+
+```json
+"fsc_counts": [
+  {
+    "gc_bin": 0.40,
+    "len_bin": 150,
+    "count": 1234,
+    "expected": 1012.5,
+    "correction_factor": 1.218
+  }
+]
+```
+
+!!! note
+    `fsc_counts` contains pre-correction data. The GC bias correction is already applied to `fsc`, `fsr`, and `fsd` values.
+
+---
 
 ### FSR (Fragment Size Ratios)
 
-Biomarker ratios for tumor detection.
+PON-normalized short/long ratios for tumor detection. Split into `off_target` and `on_target`.
 
 ```json
 "fsr": {
-  "n_windows": 2534,
-  "data": [
+  "off_target": [
     {
-      "region": "chr1:0-500000",
-      "ultra_short_ratio": 0.0074,
-      "core_short_ratio": 0.275,
-      "mono_nucl_ratio": 0.536,
-      "di_nucl_ratio": 0.141,
-      "long_ratio": 0.041,
-      "core_short_long_ratio": 6.73
+      "region": "chr1:0-5000000",
+      "short_count": 12450,
+      "long_count": 8200,
+      "total_count": 28614,
+      "short_norm": 1.23,
+      "long_norm": 0.98,
+      "short_long_ratio": 1.26,
+      "short_long_log2": 0.33,
+      "short_frac": 0.435,
+      "long_frac": 0.287
     }
-  ]
+  ],
+  "on_target": [ ... ]
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `*_ratio` | float | Fraction of total fragments |
-| `core_short_long_ratio` | float | Primary cancer biomarker (higher = more tumor) |
+| `region` | string | Genomic window (`chr:start-end`) |
+| `short_count` | int | Short fragments: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Long fragments: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragment count |
+| `short_norm` | float | `short_count / PON_short_mean` |
+| `long_norm` | float | `long_count / PON_long_mean` |
+| `short_long_ratio` | float | `short_norm / long_norm` — primary cancer biomarker |
+| `short_long_log2` | float | `log2(short_long_ratio)` — ML-ready signed metric |
+| `short_frac` | float | `short_count / total_count` |
+| `long_frac` | float | `long_count / total_count` |
 
 ---
 
 ### FSD (Fragment Size Distribution)
 
-Per-arm size distribution profiles.
+Per-arm size distribution profiles. Split into `off_target` and `on_target`.
 
 ```json
 "fsd": {
-  "arms": ["1p", "1q", "2p", ...],
-  "size_bins": [65, 70, 75, ..., 395, 400],
-  "data": {
-    "1p": {
-      "counts": [123, 456, 789, ...],
-      "proportions": [0.001, 0.004, 0.007, ...]
-    }
-  }
-}
-```
-
----
-
-### WPS (Windowed Protection Score)
-
-Nucleosome positioning profiles around gene TSS/CTCF sites.
-
-```json
-"wps": {
-  "n_anchors": 15234,
-  "columns": ["region_id", "chrom", "start", "end", 
-              "wps_nuc_mean", "wps_tf_mean", "prot_frac_nuc", "prot_frac_tf",
-              "wps_nuc_z", "wps_tf_z", "ndr_depth"],
-  "data": [
-    {
-      "region_id": "ENSG00000142611_TSS",
-      "chrom": "chr1",
-      "start": 11166102,
-      "end": 11166502,
-      "wps_nuc_mean": 24.5,
-      "wps_tf_mean": -3.2,
-      "prot_frac_nuc": 0.62,
-      "prot_frac_tf": 0.41,
-      "wps_nuc_z": 1.2,
-      "ndr_depth": 15.3
-    }
-  ]
+  "off_target": {
+    "arms": ["1p", "1q", "2p", "..."],
+    "size_bins": ["65-69", "70-74", "...", "395-399"],
+    "counts": [[123, 456, ...], [...]],
+    "total": [12345, 13456, ...]
+  },
+  "on_target": { ... }
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `wps_nuc_mean` | float | Mean nucleosomal WPS (120-180bp fragments) |
-| `wps_tf_mean` | float | Mean TF footprint WPS (35-80bp fragments) |
-| `prot_frac_*` | float | Protected fraction (values > 0) |
-| `wps_*_z` | float | Z-score vs PON |
-| `ndr_depth` | float | Nucleosome-depleted region depth |
+| `arms` | string[] | Chromosomal arm labels |
+| `size_bins` | string[] | Fragment size range labels (bp) |
+| `counts` | int[][] | Count matrix: arms × size bins |
+| `total` | int[] | Total fragment count per arm |
+
+---
+
+### WPS (Windowed Protection Score)
+
+Nucleosome positioning profiles. Stored as **columnar arrays** (one value per region), not row records.
+
+```json
+"wps": {
+  "regions": ["ENSG00000142611_TSS", "ENSG00000157764_TSS", "..."],
+  "chrom": ["1", "7", "..."],
+  "center": [11166302, 140453136, "..."],
+  "wps_nuc": [24.5, 18.2, "..."],
+  "wps_tf": [-3.2, -1.8, "..."],
+  "wps_nuc_smooth": [23.1, 17.9, "..."],
+  "wps_tf_smooth": [-3.0, -1.7, "..."],
+  "wps_nuc_mean": [22.8, 17.5, "..."],
+  "wps_tf_mean": [-2.9, -1.6, "..."],
+  "wps_nuc_z": [1.2, 0.8, "..."],
+  "wps_tf_z": [-0.4, -0.2, "..."],
+  "prot_frac_nuc": [0.62, 0.55, "..."],
+  "prot_frac_tf": [0.41, 0.38, "..."]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `regions` | string[] | Region IDs (one entry per anchor) |
+| `wps_nuc` | float[] | Nucleosomal WPS (120–180 bp fragments) |
+| `wps_tf` | float[] | TF footprint WPS (35–80 bp fragments) |
+| `wps_*_smooth` | float[] | Savitzky-Golay smoothed profiles |
+| `wps_*_z` | float[] | Z-scores vs PON baseline |
+| `prot_frac_*` | float[] | Protected fraction (values > 0) |
+
+!!! tip "Reconstructing a DataFrame"
+    ```python
+    import pandas as pd
+    wps = features["wps"]
+    df = pd.DataFrame({"region_id": wps["regions"], "wps_nuc": wps["wps_nuc"], ...})
+    ```
 
 ---
 
 ### WPS Panel (Panel Mode Only)
 
-Same schema as `wps`, but filtered to panel gene anchors.
+Same schema as standard TSV/Parquet WPS output, but stored as row records and filtered to panel gene anchors.
 
 ```json
 "wps_panel": {
   "n_anchors": 1820,
-  "data": [ ... ]
+  "data": [
+    {
+      "region_id": "ATM_TSS",
+      "chrom": "11",
+      "center": 108093559,
+      "strand": "+",
+      "wps_nuc": 22.1,
+      "wps_tf": -2.8,
+      "prot_frac_nuc": 0.59,
+      "prot_frac_tf": 0.38,
+      "wps_nuc_z": 0.9,
+      "wps_tf_z": -0.3
+    }
+  ]
 }
 ```
 
@@ -3129,84 +3939,109 @@ Same schema as `wps`, but filtered to panel gene anchors.
 
 ### WPS Background
 
-Alu element stacking scores for global fragmentation.
+Alu element hierarchical stacking profiles (global, family, per-chromosome groups).
 
 ```json
 "wps_background": {
-  "n_elements": 142567,
+  "n_elements": 27,
   "data": [
     {
-      "region_id": "AluSx_chr1_12345",
-      "stacking_score": 0.78,
-      "coverage": 45.2
+      "group_id": "Global_All",
+      "stacked_wps_nuc": [0.12, 0.08, "..."],
+      "stacked_wps_tf": [-0.03, -0.01, "..."],
+      "alu_count": 142567,
+      "mean_wps_nuc": 0.11,
+      "mean_wps_tf": -0.02,
+      "nrl_bp": 192.4,
+      "nrl_deviation_bp": 2.4,
+      "periodicity_score": 0.78,
+      "adjusted_score": 0.69,
+      "fragment_ratio": 0.31
     }
   ]
 }
 ```
 
+| Field | Type | Description |
+|-------|------|-------------|
+| `group_id` | string | `Global_All`, `Family_AluY/S/J/Other`, `Chr{N}_All` |
+| `stacked_wps_nuc` | float[] | 30-bin binned WPS nucleosomal profile |
+| `nrl_bp` | float | Nucleosome Repeat Length in bp (expected ~190 bp) |
+| `periodicity_score` | float | SNR-based quality 0–1 |
+| `adjusted_score` | float | Periodicity score penalized by NRL deviation |
+
 ---
 
 ### Motif
 
-End motif (EDM) k-mer frequencies and diversity score.
+End motif (EDM) and breakpoint motif (BPM) 4-mer frequencies, plus MDS scores for off-target and on-target.
 
 ```json
 "motif": {
-  "end_motif": {
-    "AAAA": 0.0042,
-    "AAAC": 0.0039,
-    ...
-  },
-  "breakpoint_motif": {
-    "AAAA": 0.0038,
-    ...
-  },
+  "edm": { "AAAA": 0.0042, "AAAC": 0.0039, "...": "..." },
+  "bpm": { "AAAA": 0.0038, "AAAC": 0.0041, "...": "..." },
+  "edm_1mer": { "A": 0.197, "C": 0.345, "G": 0.321, "T": 0.138 },
   "mds": 0.8234,
-  "mds_z": -1.23
+  "mds_z": -1.23,
+  "edm_on_target": { "AAAA": 0.0051, "...": "..." },
+  "bpm_on_target": { "AAAA": 0.0043, "...": "..." },
+  "mds_on_target": 0.7918,
+  "mds_z_on_target": -0.91
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `end_motif` | dict | 256 4-mer frequencies (fragment ends) |
-| `breakpoint_motif` | dict | 256 4-mer frequencies (breakpoints) |
-| `mds` | float | Motif Diversity Score |
-| `mds_z` | float | MDS z-score vs PON (if PON with MDS baseline) |
+| `edm` | dict | 256 4-mer frequencies at fragment **ends** (off-target) |
+| `bpm` | dict | 256 4-mer frequencies at **breakpoints** (off-target) |
+| `edm_1mer` | dict | Single-base composition at fragment ends (A/C/G/T) |
+| `mds` | float | Motif Diversity Score (off-target) |
+| `mds_z` | float | MDS z-score vs PON (only with `--pon-model`) |
+| `edm_on_target` | dict | On-target EDM frequencies (panel mode only) |
+| `bpm_on_target` | dict | On-target BPM frequencies (panel mode only) |
+| `mds_on_target` | float | On-target MDS (panel mode only) |
+| `mds_z_on_target` | float | On-target MDS z-score vs PON (panel + `--pon-model`) |
 
 ---
 
 ### OCF (Orientation-aware cfDNA Fragmentation)
 
-Open chromatin footprint scores by tissue type.
+Open chromatin footprint scores by tissue type. Includes off-target, on-target, and positional sync profiles.
 
 ```json
 "ocf": {
-  "tissues": ["Liver", "Lung", "Colon", "Placenta", ...],
-  "scores": {
-    "Liver": 0.42,
-    "Lung": 0.31,
-    "Colon": 0.28
-  }
+  "off_target": [ { "tissue": "Liver", "score": 0.42, "n_fragments": 12345 } ],
+  "on_target":  [ { "tissue": "Liver", "score": 0.51, "n_fragments": 3421 } ],
+  "offtarget":  [ { "tissue": "Liver", "score": 0.39, "..." } ],
+  "sync":           [ { "pos": -150, "strand_ratio": 0.61, "..." } ],
+  "sync_offtarget": [ { ... } ],
+  "sync_ontarget":  [ { ... } ]
 }
 ```
+
+| Sub-key | When present | Description |
+|---------|-------------|-------------|
+| `off_target` | Always | Genome-wide OCF scores |
+| `on_target` | Panel mode | On-target capture region OCF |
+| `offtarget` | Panel mode | Panel-specific off-target scores |
+| `sync` | Always | Positional strand-specific profiles |
+| `sync_offtarget` | Panel mode | Sync profiles for off-target |
+| `sync_ontarget` | Panel mode | Sync profiles for on-target |
 
 ---
 
 ### TFBS (Transcription Factor Binding Site Entropy)
 
-Fragment size entropy at TFBS regions.
+Fragment size entropy at TFBS regions. Includes sync (per-TF × per-size) profiles.
 
 ```json
 "tfbs": {
   "off_target": [
-    {
-      "region": "CTCF_chr1_12345",
-      "entropy": 3.45,
-      "n_fragments": 234,
-      "mean_size": 167.5
-    }
+    { "region": "CTCF_chr1_12345", "entropy": 3.45, "n_fragments": 234, "mean_size": 167.5 }
   ],
-  "on_target": [ ... ]
+  "on_target": [ ... ],
+  "sync": [ { "tf": "CTCF", "size_bin": 150, "count": 234, "fraction": 0.052 } ],
+  "sync_ontarget": [ ... ]
 }
 ```
 
@@ -3214,19 +4049,16 @@ Fragment size entropy at TFBS regions.
 
 ### ATAC (Chromatin Accessibility Regions)
 
-Fragment size entropy at ATAC-seq accessible regions.
+Fragment size entropy at ATAC-seq accessible regions. Includes sync (per-tissue × per-size) profiles.
 
 ```json
 "atac": {
   "off_target": [
-    {
-      "region": "peak_chr1_23456",
-      "entropy": 3.21,
-      "n_fragments": 189,
-      "mean_size": 145.2
-    }
+    { "region": "peak_chr1_23456", "entropy": 3.21, "n_fragments": 189, "mean_size": 145.2 }
   ],
-  "on_target": [ ... ]
+  "on_target": [ ... ],
+  "sync": [ { "tissue": "BRCA", "size_bin": 150, "count": 189, "fraction": 0.041 } ],
+  "sync_ontarget": [ ... ]
 }
 ```
 
@@ -3236,30 +4068,127 @@ Fragment size entropy at ATAC-seq accessible regions.
 
 GC bias correction factors used internally during processing.
 
-> [!NOTE]
-> **Not recommended for ML features.** These are intermediate diagnostic data, not predictive features.
-> The GC correction is already applied to FSC/FSR/FSD counts. Use those corrected values instead.
+!!! note
+    **Not recommended for ML features.** The GC correction is already applied to FSC/FSR/FSD. Use those corrected values instead. GC factors are useful for QC, batch effect detection, and panel development.
 
 ```json
 "gc_factors": {
   "off_target": [
-    {
-      "len_bin": 100,
-      "gc_pct": 45,
-      "correction_factor": 1.12
-    }
+    { "len_bin": 100, "gc_pct": 45, "correction_factor": 1.12 }
   ],
   "on_target": [ ... ]
 }
 ```
 
-**When to use GC factors:**
-- **QC/Diagnostics**: Visualize library prep bias, capture efficiency
-- **Batch Effect Detection**: Compare correction factors across runs
-- **Panel Development**: Characterize probe GC performance
+---
 
-**When NOT to use:**
-- **ML models**: Skip these—use GC-corrected FSC/FSR/FSD instead
+### mFSD (Mutant Fragment Size Distribution)
+
+Per-variant fragment size distribution metrics. Only present when a MAF file is provided.
+
+```json
+"mfsd": {
+  "enabled": true,
+  "n_variants": 47,
+  "variants": [
+    {
+      "Chrom": "17", "Pos": 7577548, "Ref": "C", "Alt": "T", "VarType": "SNP",
+      "REF_Count": 234, "ALT_Count": 12, "NonREF_Count": 8, "N_Count": 45, "Total_Count": 299,
+      "REF_Weighted": 221.4, "ALT_Weighted": 11.3, "NonREF_Weighted": 7.6, "N_Weighted": 42.8, "VAF_GC_Corrected": 0.048,
+      "ALT_LLR": 3.41, "REF_LLR": -3.41,
+      "REF_MeanSize": 168.3, "ALT_MeanSize": 142.7, "NonREF_MeanSize": 155.1, "N_MeanSize": 171.2,
+      "Delta_ALT_REF": -25.6, "KS_ALT_REF": 0.31, "KS_Pval_ALT_REF": 0.003,
+      "Delta_ALT_NonREF": -12.4, "KS_ALT_NonREF": 0.18, "KS_Pval_ALT_NonREF": 0.041,
+      "Delta_REF_NonREF": 13.2, "KS_REF_NonREF": 0.15, "KS_Pval_REF_NonREF": 0.089,
+      "Delta_ALT_N": -28.5, "KS_ALT_N": 0.34, "KS_Pval_ALT_N": 0.001,
+      "Delta_REF_N": -3.1, "KS_REF_N": 0.08, "KS_Pval_REF_N": 0.621,
+      "Delta_NonREF_N": -16.1, "KS_NonREF_N": 0.19, "KS_Pval_NonREF_N": 0.033,
+      "VAF_Proxy": 0.049, "Error_Rate": 0.027, "N_Rate": 0.150, "Size_Ratio": 0.848, "Quality_Score": 0.731,
+      "ALT_Confidence": "HIGH", "KS_Valid": true
+    }
+  ]
+}
+```
+
+When no MAF is provided: `"mfsd": { "enabled": false }`
+
+| Field Group | Columns | Description |
+|------------|---------|-------------|
+| Variant info | `Chrom`, `Pos`, `Ref`, `Alt`, `VarType` | Variant coordinates and type |
+| Counts | `REF_Count`, `ALT_Count`, `NonREF_Count`, `N_Count`, `Total_Count` | Raw fragment counts per allele class |
+| GC-Weighted | `REF_Weighted`, `ALT_Weighted`, `NonREF_Weighted`, `N_Weighted`, `VAF_GC_Corrected` | GC-bias corrected counts/VAF |
+| Log-Likelihood | `ALT_LLR`, `REF_LLR` | Log-likelihood ratios (duplex/low-N) |
+| Mean Sizes | `REF_MeanSize`, `ALT_MeanSize`, `NonREF_MeanSize`, `N_MeanSize` | Mean fragment size per allele class |
+| KS Tests | `Delta_*/KS_*/KS_Pval_*` | Kolmogorov–Smirnov distance + p-value (6 pairings) |
+| Derived | `VAF_Proxy`, `Error_Rate`, `N_Rate`, `Size_Ratio`, `Quality_Score` | Summary biomarker values |
+| Flags | `ALT_Confidence`, `KS_Valid` | Quality flags |
+
+---
+
+### Region MDS (Per-Exon/Gene Motif Diversity Score)
+
+Per-exon and gene-level MDS from `region-mds` command. Present when `--region-mds` is run.
+
+```json
+"region_mds": {
+  "n_exons": 1820,
+  "mds_exon_mean": 0.512,
+  "mds_exon_std": 0.041,
+  "exon": [
+    {
+      "gene": "ATM",
+      "name": "ATM:exon1",
+      "chrom": "11",
+      "start": 108093558,
+      "end": 108093795,
+      "strand": "+",
+      "n_fragments": 234,
+      "mds": 0.531
+    }
+  ],
+  "n_genes": 146,
+  "mds_e1_mean": 0.504,
+  "gene": [
+    {
+      "gene": "ATM",
+      "n_exons": 23,
+      "n_fragments": 5210,
+      "mds_mean": 0.519,
+      "mds_e1": 0.531,
+      "mds_std": 0.038
+    }
+  ]
+}
+```
+
+| Field | Level | Description |
+|-------|-------|-------------|
+| `exon[]` | Exon | Per-exon records from `{sample}.MDS.exon.tsv` |
+| `exon[].mds` | Exon | MDS for this exon/target region |
+| `exon[].name` | Exon | Exon identifier (`gene:exonN` for WGS, target name for panel) |
+| `mds_exon_mean` | Summary | Mean MDS across all exons |
+| `mds_exon_std` | Summary | Std dev of per-exon MDS |
+| `gene[]` | Gene | Per-gene records from `{sample}.MDS.gene.tsv` |
+| `gene[].mds_mean` | Gene | Mean MDS across all exons of this gene |
+| `gene[].mds_e1` | Gene | MDS of the first exon (E1) — promoter proxy |
+| `mds_e1_mean` | Summary | Mean E1 MDS across all genes |
+
+---
+
+### UXM (Methylation)
+
+CpG methylation features. Only present when methylation BAM input is provided.
+
+```json
+"uxm": {
+  "enabled": true,
+  "data": [
+    { "region": "chr1:0-500000", "U_fraction": 0.82, "X_fraction": 0.05, "M_fraction": 0.13 }
+  ]
+}
+```
+
+When no methylation input: `"uxm": { "enabled": false }`
 
 ---
 
@@ -3269,22 +4198,29 @@ GC bias correction factors used internally during processing.
 import json
 import pandas as pd
 
-# Load features
 with open("sample.features.json") as f:
     features = json.load(f)
 
-# Extract FSC gene-level for panel analysis
-if "fsc_gene" in features:
-    df_genes = pd.DataFrame(features["fsc_gene"])
-    print(f"Gene FSC: {len(df_genes)} genes")
+# FSC off-target (genome-wide)
+df_fsc = pd.DataFrame(features["fsc"]["off_target"])
 
-# Extract WPS for nucleosome signature
-wps_data = pd.DataFrame(features["wps"]["data"])
-print(f"WPS anchors: {len(wps_data)}")
+# WPS — reconstruct DataFrame from columnar arrays
+wps = features["wps"]
+df_wps = pd.DataFrame({"region_id": wps["regions"], "wps_nuc": wps["wps_nuc"], "wps_tf": wps["wps_tf"]})
+print(f"WPS anchors: {len(df_wps)}")
 
-# Use motif MDS z-score as feature
+# Region MDS — per-gene E1 MDS
+df_mds_gene = pd.DataFrame(features["region_mds"]["gene"])
+print(f"Mean E1 MDS: {features['region_mds']['mds_e1_mean']:.3f}")
+
+# mFSD — variant-level fragment size shift
+if features.get("mfsd", {}).get("enabled"):
+    df_mfsd = pd.DataFrame(features["mfsd"]["variants"])
+    print(f"mFSD variants: {features['mfsd']['n_variants']}")
+
+# Motif diversity
 mds_z = features["motif"].get("mds_z", 0)
-print(f"MDS z-score: {mds_z:.2f}")
+print(f"MDS: {features['motif']['mds']:.4f}")
 ```
 
 ---
@@ -3301,10 +4237,13 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
     --generate-json
 ```
 
-This produces JSON with all panel-specific features:
-- `fsc_gene`: 146 genes
+Panel mode adds these additional features to the JSON:
+- `fsc_gene`: 146 genes (gene-level FSC)
+- `fsc_region`: per-exon FSC
+- `fsc_region_e1`: first-exon FSC
 - `wps_panel`: 1,820 anchors
-- `wps_background`: Alu stacking
+- `wps_background`: Alu stacking profiles
+- `ocf.on_target`, `tfbs.on_target`, `atac.on_target`: panel-specific entropy
 - PON z-scores across all features
 
 ---
@@ -3326,6 +4265,7 @@ out/
 ├── sample.FSC.gene.tsv              # Gene-level FSC (with --assay)
 ├── sample.FSC.regions.tsv           # Exon-level FSC (aggregate_by='region')
 ├── sample.FSC.regions.e1only.tsv    # E1-only FSC (first exon per gene)
+├── sample.fsc_counts.tsv            # Raw GC-binned fragment counts (pre-correction)
 └── sample.correction_factors.tsv    # GC correction factors
 ```
 
@@ -3342,11 +4282,19 @@ out/
 
 ```
 out/
-├── sample.EndMotif.tsv              # 4-mer end motif frequencies
-├── sample.MDS.tsv                   # Motif diversity score
+├── sample.EndMotif.tsv              # 4-mer end motif frequencies (off-target)
+├── sample.EndMotif.ontarget.tsv     # 4-mer end motif frequencies (on-target)
+├── sample.EndMotif1mer.tsv          # Single-base end compositions (A/C/G/T)
+├── sample.BreakPointMotif.tsv       # 4-mer breakpoint motif frequencies
+├── sample.BreakPointMotif.ontarget.tsv
+├── sample.MDS.tsv                   # Motif Diversity Score (off-target)
+├── sample.MDS.ontarget.tsv          # Motif Diversity Score (on-target)
+├── sample.MDS.exon.tsv              # Per-exon MDS (region-mds command)
+├── sample.MDS.gene.tsv              # Per-gene aggregated MDS (region-mds command)
 ├── sample.OCF.tsv                   # Orientation-aware fragmentation
 ├── sample.OCF.ontarget.tsv          # Panel mode: on-target OCF
-└── sample.OCF.sync.tsv              # OCF sync scores
+├── sample.OCF.offtarget.tsv         # Panel mode: off-target OCF
+└── sample.OCF.sync.tsv              # Positional strand-specific profiles
 ```
 
 ### Region Entropy (TFBS/ATAC)
@@ -3355,20 +4303,39 @@ out/
 out/
 ├── sample.TFBS.tsv                  # TF binding site entropy (808 factors)
 ├── sample.TFBS.ontarget.tsv         # Panel mode: on-target TFBS
+├── sample.TFBS.sync.tsv             # Per-TF × per-size profiles
+├── sample.TFBS.ontarget.sync.tsv
 ├── sample.ATAC.tsv                  # ATAC-seq peak entropy (23 cancer types)
-└── sample.ATAC.ontarget.tsv         # Panel mode: on-target ATAC
+├── sample.ATAC.ontarget.tsv         # Panel mode: on-target ATAC
+├── sample.ATAC.sync.tsv             # Per-tissue × per-size profiles
+└── sample.ATAC.ontarget.sync.tsv
+```
+
+### Variant (mFSD)
+
+```
+out/
+├── sample.mFSD.tsv                  # Per-variant fragment size metrics (46 columns)
+└── sample.mFSD.distributions.tsv    # Per-variant size histograms (optional)
+```
+
+### Methylation (UXM)
+
+```
+out/
+└── sample.UXM.tsv                   # CpG methylation U/X/M fractions
 ```
 
 ### Unified Output
 
 ```
 out/
-├── sample.metadata.json             # Run metadata and QC metrics
+├── sample.metadata.tsv              # Run metadata and QC metrics (tabular)
 └── sample.features.json             # All features (with --generate-json)
 ```
 
-> [!NOTE]
-> The `--generate-json` flag produces the unified JSON **in addition to** the standard TSV/Parquet outputs.
+!!! note
+    The `--generate-json` flag produces the unified JSON **in addition to** the standard TSV/Parquet outputs.
 
 ---
 
@@ -3378,7 +4345,6 @@ out/
 - [Input File Formats](../../reference/input-formats.md) - Custom input file specifications
 - [Troubleshooting](../../resources/troubleshooting.md) - Common format issues
 
-
 ---
 
 # FILE: docs/features/regulatory/motif.md
@@ -3387,10 +4353,11 @@ out/
 
 **Command**: `krewlyzer motif`
 
-> **Plain English**: Motif analysis looks at the 4-letter DNA sequences at fragment ends.
-> Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
->
-> **Key metric**: MDS (Motif Diversity Score) - **higher MDS = more abnormal cutting = potential tumor signal**
+!!! info "Plain English"
+    Motif analysis looks at the 4-letter DNA sequences at fragment ends.
+    Different enzymes cut DNA at different sequences—tumors have more diverse cutting patterns.
+
+    **Key metric**: MDS (Motif Diversity Score) - **lower MDS = more stereotyped cutting = potential tumor signal**
 
 ---
 
@@ -3458,7 +4425,7 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `{sample}.EndMotif.tsv` | K-mer frequencies at fragment 5' ends |
 | `{sample}.BreakPointMotif.tsv` | K-mer frequencies flanking breakpoints |
 | `{sample}.MDS.tsv` | Motif Diversity Score |
-| `{sample}.EndMotif1mer.tsv` | **NEW** 1-mer frequencies with C-end fraction (Jagged Index) |
+| `{sample}.EndMotif1mer.tsv` | 1-mer frequencies with C-end fraction (Jagged Index) |
 
 ---
 
@@ -3501,9 +4468,9 @@ cfDNA fragmentation by DNASE1L3 produces fragments with single-stranded 5' overh
 - **~87.8% jagged ends** (vs lower in healthy)
 - **Higher C-end fraction** due to preferential C-terminal cutting
 
-> [!TIP]
-> The C-end fraction complements MDS for detecting tumor-derived cfDNA.
-> Use both metrics together for improved sensitivity.
+!!! tip
+    The C-end fraction complements MDS for detecting tumor-derived cfDNA.
+    Use both metrics together for improved sensitivity.
 
 ---
 
@@ -3523,6 +4490,7 @@ $$
 - Result range: $[0, 1]$
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
 | ~1.0 | Random/diverse (healthy-like) |
@@ -3554,8 +4522,8 @@ krewlyzer motif -i sample.bam -r hg19.fa -o output/ \
 | < -2 | **Abnormally low diversity** (possible tumor) |
 | > +2 | Rare (check data quality) |
 
-> [!TIP]
-> Lower MDS (negative z-score) indicates stereotyped cutting patterns often associated with tumor-derived cfDNA.
+!!! tip
+    Lower MDS (negative z-score) indicates stereotyped cutting patterns often associated with tumor-derived cfDNA.
 
 ---
 
@@ -3576,9 +4544,9 @@ krewlyzer motif -i sample.bam -r hg19.fa -o output/ \
 | `{sample}.EndMotif.ontarget.tsv` | **On-target** fragments | Local capture region analysis |
 | `{sample}.MDS.tsv` | Off-target MDS | Primary biomarker |
 
-> [!IMPORTANT]
-> **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
-> **On-target = capture-biased** – use cautiously; reflects library prep artifacts.
+!!! important
+    **Off-target = unbiased** – preferred for fragmentomics biomarkers.  
+    **On-target = capture-biased** – use cautiously; reflects library prep artifacts.
 
 ### Why Split?
 
@@ -3627,10 +4595,11 @@ For panel data (MSK-ACCESS), on-target fragments have capture bias from hybridiz
 
 **Command**: `krewlyzer ocf`
 
-> **Plain English**: OCF detects where cfDNA fragments came from by looking at their "orientation" near regulatory regions.
-> Different tissues cut DNA in different directions—OCF captures this signal for tissue-of-origin detection.
->
-> **Use case**: Identify liver cancer vs. colon cancer based on cfDNA fragmentation patterns.
+!!! info "Plain English"
+    OCF detects where cfDNA fragments came from by looking at their "orientation" near regulatory regions.
+    Different tissues cut DNA in different directions—OCF captures this signal for tissue-of-origin detection.
+
+    **Use case**: Identify liver cancer vs. colon cancer based on cfDNA fragmentation patterns.
 
 ---
 
@@ -3659,8 +4628,8 @@ flowchart LR
     end
 ```
 
-> [!WARNING]
-> OCF regions are **only available for GRCh37/hg19**. For hg38, you must provide a custom OCR file with `-r/--ocr-input`.
+!!! warning
+    OCF regions are **only available for GRCh37/hg19**. For hg38, you must provide a custom OCR file with `-r/--ocr-input`.
 
 ### Python/Rust Architecture
 
@@ -3750,8 +4719,16 @@ Where:
 
 **Calculation Details:**
 1. Fragments are mapped relative to the **center** of the Open Chromatin Region (OCR)
-2. Left/Right ends counted in 10bp bins across ±1000bp window
-3. Counts normalized by total sequencing depth
+2. Left/Right ends counted at **1bp resolution** across a ±1000bp window; the
+   phased and background terms are summed over a ±10bp window (21 positions)
+   centred on ∓60bp
+3. Counts normalized **per 10,000** against per-tissue-label end totals
+   accumulated over OCR overlaps — not against global sequencing depth
+
+> [!NOTE]
+> Positions are measured from the **start** of each OCR interval, so the
+> "±1000bp around the centre" description holds only where OCR intervals are
+> 2000bp wide.
 
 ---
 
@@ -3828,9 +4805,9 @@ Before the ontarget OCF run, the genome-wide OCR atlas (~50,000 regions) is filt
 | `{sample}.OCF.offtarget.tsv` | Off-target only | All ~50K | Off-target baseline |
 | `{sample}.OCF.offtarget.sync.tsv` | Off-target only | All ~50K | Off-target detail |
 
-> [!NOTE]
-> The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).
-> For OCF, ontarget means **both** on-target fragments **AND** panel-filtered OCR regions.
+!!! note
+    The `ontarget` naming is consistent with other features (FSD.ontarget, FSC.ontarget).
+    For OCF, ontarget means **both** on-target fragments **AND** panel-filtered OCR regions.
 
 ### Why Both Filters?
 
@@ -3863,9 +4840,9 @@ On-target fragments and panel OCR regions both focus on the same genomic space (
 | Placenta | -25.1 | -51.6 |
 | T-cell | 8.9 | 86.7 |
 
-> [!TIP]
-> **Genome-wide OCF** provides the unbiased baseline for tissue-of-origin analysis.
-> **Panel OCF** provides a focused view specific to your assay's target regions.
+!!! tip
+    **Genome-wide OCF** provides the unbiased baseline for tissue-of-origin analysis.
+    **Panel OCF** provides a focused view specific to your assay's target regions.
 
 ---
 
@@ -3912,13 +4889,14 @@ On-target fragments and panel OCR regions both focus on the same genomic space (
 
 **Command**: `krewlyzer region-entropy`
 
-> **Plain English**: Region Entropy calculates the diversity of fragment sizes at regulatory regions.
-> A high entropy value indicates many different fragment sizes; low entropy indicates uniform sizes.
->
-> **Use case**: Cancer detection and subtyping - tumor cfDNA shows altered nucleosome positioning at specific regulatory elements.
+!!! info "Plain English"
+    Region Entropy calculates the diversity of fragment sizes at regulatory regions.
+    A high entropy value indicates many different fragment sizes; low entropy indicates uniform sizes.
 
-> [!NOTE]
-> This feature is based on **Helzer KT, et al. (2025)** "Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels" published in *Nature Communications*.
+    **Use case**: Cancer detection and subtyping - tumor cfDNA shows altered nucleosome positioning at specific regulatory elements.
+
+!!! note
+    This feature is based on **Helzer KT, et al. (2025)** "Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels" published in *Nature Communications*.
 
 ---
 
@@ -3985,7 +4963,8 @@ flowchart LR
     TSV --> PON["PON Z-score"]
 ```
 
-> **Performance**: Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of TFBS/ATAC regions.
+!!! tip "Performance"
+    Region-level parallelization via Rayon `par_iter()` enables efficient multi-core processing of TFBS/ATAC regions.
 
 ---
 
@@ -4136,8 +5115,9 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
 | `{sample}.ATAC.tsv` | All 23 cancer types | Off-target GC model |
 | `{sample}.ATAC.ontarget.tsv` | Cancer types in panel | **On-target GC model** |
 
-> **Note**: On-target outputs use on-target GC correction factors when available,
-> providing better accuracy for capture-biased data.
+!!! note
+    On-target outputs use on-target GC correction factors when available,
+    providing better accuracy for capture-biased data.
 
 ---
 
@@ -4182,20 +5162,20 @@ FOXA1   892     165.8       4.98      -0.32
 | Column | Type | Description |
 |--------|------|-------------|
 | `label` | TEXT | Transcription factor name (e.g., CTCF, FOXA1) |
-| `count` | INT | Number of fragments overlapping TF regions |
+| `count` | FLOAT | GC-weighted fragment count overlapping TF regions |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON) |
+| `z_score` | FLOAT | PON-normalized z-score. **`NaN` when no PON was supplied, or when the label is absent from the baseline** — never 0, which would be indistinguishable from a measured "exactly at baseline" |
 
 ### ATAC Output: `{sample}.ATAC.tsv`
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `label` | TEXT | Cancer type (e.g., BRCA, LUAD, COAD) |
-| `count` | INT | Number of fragments overlapping cancer peaks |
+| `count` | FLOAT | GC-weighted fragment count overlapping cancer peaks |
 | `mean_size` | FLOAT | Mean fragment size at these regions |
 | `entropy` | FLOAT | Shannon entropy of size distribution (bits) |
-| `z_score` | FLOAT | PON-normalized z-score (0 if no PON) |
+| `z_score` | FLOAT | PON-normalized z-score. **`NaN` when no PON was supplied, or when the label is absent from the baseline** — never 0, which would be indistinguishable from a measured "exactly at baseline" |
 
 ---
 
@@ -4203,13 +5183,18 @@ FOXA1   892     165.8       4.98      -0.32
 
 ### Entropy Values
 
-| Range | Interpretation | Clinical Significance |
-|-------|----------------|----------------------|
-| 0-2 | Very low entropy | Single dominant fragment size |
-| 2-4 | Low entropy | Few distinct sizes |
-| 4-6 | Moderate entropy | Normal healthy range |
-| 6-8 | High entropy | Many distinct sizes |
-| > 8 | Very high entropy | Possible tumor signal |
+> [!WARNING]
+> **Do not use absolute entropy cut-offs.** Earlier revisions of this page gave
+> "4-6 = normal healthy range" and "> 8 = possible tumor signal". Those bands
+> are not anchored to any constant in the code and do not describe real output:
+> a healthy-like fragment-size distribution over a few thousand fragments
+> already measures **~6.9 bits**, and exceeding 8 bits would require ~2^8 = 256
+> near-equally-likely distinct fragment sizes, which nucleosome-peaked cfDNA
+> does not produce.
+>
+> Entropy magnitude also scales with fragment count per label, so it is not
+> comparable across labels or samples on its own. **Interpret the PON
+> `z_score`, not the raw entropy.**
 
 ### Z-Scores
 
@@ -4230,7 +5215,8 @@ Following the methodology from Helzer et al.:
 
 1. **Load regions**: Read BED.gz with label in 4th column
 2. **Intersect fragments**: For each region, collect fragments with minimum 1bp overlap
-3. **Build histograms**: Count fragments per size (20-500bp) per label
+3. **Build histograms**: Count fragments per size (bins 0..1000bp; the effective
+   range is whatever `extract` emitted, by default 65-1000bp)
 4. **Compute entropy**: Shannon entropy from normalized histogram
 5. **Output**: TSV with label, count, mean_size, entropy
 
@@ -4255,7 +5241,8 @@ Following the methodology from Helzer et al.:
 
 If you use this feature, please cite:
 
-> **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). https://doi.org/10.1038/s41467-025-64153-z
+!!! quote "Reference"
+    **Helzer KT, Sharifi MN, Sperger JM, et al.** Analysis of cfDNA fragmentomics metrics and commercial targeted sequencing panels. *Nat Commun* **16**, 9122 (2025). https://doi.org/10.1038/s41467-025-64153-z
 
 **Data source:**
 - GitHub: [Zhao-Lab-UW-DHO/fragmentomics_metrics](https://github.com/Zhao-Lab-UW-DHO/fragmentomics_metrics/)
@@ -4277,10 +5264,11 @@ If you use this feature, please cite:
 
 **Command**: `krewlyzer region-mds`
 
-> **Plain English**: Region MDS calculates motif diversity at each gene's exons individually.
-> This reveals *where* aberrant fragmentation is occurring rather than just *if* it's happening globally.
->
-> **Key metric**: E1 MDS - **lower E1 MDS = aberrant fragmentation at first exon = possible cancer signal**
+!!! info "Plain English"
+    Region MDS calculates motif diversity at each gene's exons individually.
+    This reveals *where* aberrant fragmentation is occurring rather than just *if* it's happening globally.
+
+    **Key metric**: E1 MDS - **lower E1 MDS = aberrant fragmentation at first exon = possible cancer signal**
 
 ---
 
@@ -4342,6 +5330,7 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `bam_input` | | PATH | *required* | Input BAM file (indexed) |
 | `reference` | | PATH | *required* | Reference genome FASTA |
 | `output` | | PATH | *required* | Output directory |
+| `--sample-name` | `-s` | TEXT | | Override sample name (default: derived from BAM filename) |
 | `--gene-bed` | `-g` | PATH | | Custom gene/exon BED file |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--assay` | `-a` | TEXT | | Assay code (xs1, xs2, wgs) for bundled gene BED |
@@ -4377,6 +5366,19 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 | `strand` | Strand (+/-) |
 | `n_fragments` | Fragment count |
 | `mds` | Motif Diversity Score |
+| `mds_z` | Z-score against the PON's per-exon baseline (with `--pon-model`) |
+
+!!! note "`mds_z` needs a PON built by 0.9.0 or later"
+    The per-exon baseline (`region_mds_exon`) is new in 0.9.0. Against an
+    older PON the column is `NaN` and a line is logged saying so — the exon
+    score itself is unaffected.
+
+    `NaN` also appears where the exon is absent from the baseline, which
+    usually means the PON was built for a different panel. Measured on a real
+    cohort, exon coverage is much better than "per-exon" suggests: every exon
+    appears in every sample of its assay, and under 0.25% carry fewer than 10
+    fragments. So a `NaN` here is worth investigating rather than assuming
+    thin coverage.
 
 ### MDS.gene.tsv Columns
 
@@ -4397,34 +5399,113 @@ krewlyzer region-mds sample.bam ref.fa output/ --gene-bed custom.bed
 
 ### Motif Diversity Score (MDS)
 
-MDS quantifies the randomness of 4-mer end motifs using Shannon entropy:
+MDS is the Shannon entropy of the 4-mer end-motif distribution, **normalised by
+the maximum possible entropy** so it lands in `[0, 1]`:
 
 $$
-\text{MDS} = -\sum_{i} p_i \times \log_2(p_i)
+\text{MDS} = \frac{-\sum_{i} p_i \times \log_2(p_i)}{\log_2(256)}
 $$
 
 **Variables:**
 - $p_i$ = frequency of the i-th 4-mer motif (256 possible)
-- Result range: ~6.0 to ~8.0 (higher = more diverse)
+- $\log_2(256) = 8$ — the entropy of a perfectly uniform 4-mer distribution
+- Result range: **0 to 1** (higher = more diverse)
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
-| Higher (~7.5-8.0) | Random/diverse motifs (healthy) |
-| Lower (~6.0-7.0) | Stereotyped motifs (potentially aberrant) |
+| Higher (~0.95–1.0) | Random/diverse motifs (healthy) |
+| Lower (~0.75–0.90) | Stereotyped motifs (potentially aberrant) |
+
+> [!IMPORTANT]
+> This section previously showed the **unnormalised** formula and a "~6.0 to
+> ~8.0" range — the raw entropy in bits, which the tool has never emitted. The
+> clinical table further down this same page quoted ~0.95–1.0, so the page
+> contradicted itself. `motif_utils.rs` divides by 8, and
+> `tests/invariants/test_biological_direction.py` asserts the result stays
+> inside `[0, 1]`.
+>
+> If you built a threshold from the old numbers, it is off by a factor of 8.
 
 ---
 
 ## E1 (First Exon) Significance
 
-The first exon of each gene is identified by genomic position and tracked separately:
+The first exon of each gene is identified by **transcription order** (which
+depends on strand) and tracked separately:
 
 1. **Promoter proximity**: E1 is closest to the promoter region
 2. **Transcription start**: Contains or abuts the TSS
 3. **Cancer sensitivity**: Shows most pronounced MDS changes in cancer
 
-> [!TIP]
-> Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
+### Strand handling
+
+E1 is the transcriptionally first exon, **not** simply the lowest coordinate:
+
+| Strand | E1 is the exon with the... |
+|--------|----------------------------|
+| `+`    | **lowest** start coordinate |
+| `-`    | **highest** start coordinate |
+
+> [!IMPORTANT]
+> Strand handling depends on which gene BED you feed it, and until 0.9.0 the
+> panel assets carried **no strand column at all** — the parser substituted
+> `+` for every region. So the strand-aware fix applied only to WGS; on
+> `xs1`/`xs2` the lowest coordinate still won, and `mds_e1` reported the
+> **last** exon for every minus-strand gene.
+>
+> The 0.9.0 assets carry strand *and* a precomputed `is_e1`, which
+> `region-mds` now reads directly instead of re-deriving. If you have
+> `MDS.gene.tsv` from an earlier version, minus-strand `mds_e1` / `mds_e1_z`
+> are not comparable — for panels that is **every** minus-strand gene.
+>
+> Feeding a legacy 5-column panel BED still works but now logs a warning
+> saying E1 will not be strand-aware, rather than silently producing a
+> plausible number.
+
+> [!WARNING]
+> **On a targeted panel, "first exon" is ambiguous — genes have several.**
+> Alternative promoters are the norm: a gene carries a median of 13 distinct
+> annotated first exons. The panel captures the *canonical* (MANE) exon 1 for
+> only 25 of 128 `xs1` genes, but another basic protein-coding transcript's
+> first exon for 15 more — so 40 have a genuine transcription start captured,
+> and 88 have none.
+>
+> The bundled gene BEDs record all three cases separately, so a model can weigh
+> them rather than treating every `mds_e1` as promoter signal:
+>
+> | column | meaning |
+> |---|---|
+> | `is_e1` | overlaps the canonical transcript's exon 1 |
+> | `is_alt_e1` | overlaps another basic protein-coding transcript's exon 1 |
+> | `is_first_captured` | most 5′ captured tile; always exists, often internal |
+>
+> Which transcript counts as canonical is configurable — see
+> `--transcript-overrides` in `scripts/build_gene_bed.py` — because a panel
+> designed around specific clinical transcripts should not have MANE imposed
+> on it.
+>
+> WGS is unaffected: every exon of the canonical transcript is present.
+
+> [!NOTE]
+> `mds_e1` has three distinguishable states:
+>
+> | value | meaning |
+> |---|---|
+> | a number | E1 exists and had fragments |
+> | `0.0` | E1 exists but had **no** fragments |
+> | `NaN` | this gene has **no E1 region at all** |
+>
+> The `NaN` case used to collapse into `0.0`, which is the worst available
+> choice — MDS lives in `[0, 1]` and *lower means more abnormal*, so a
+> fabricated `0.0` reads as maximal tumour signal. It is common rather than
+> rare: 88 of 128 `xs1` genes have no tile on any annotated first exon.
+>
+> It never falls through to the next exon with coverage.
+
+!!! tip
+    Focus on `mds_e1` in the gene output for maximum sensitivity to promoter-proximal aberrations.
 
 ---
 
@@ -4491,8 +5572,8 @@ krewlyzer region-mds sample.bam ref.fa output/ --assay xs2 --e1-only
 krewlyzer run-all -i sample.bam -r ref.fa -o output/ --assay xs2 --region-mds-e1-only
 ```
 
-> [!TIP]
-> E1-only mode reduces processing time and output size for promoter-centric cancer detection.
+!!! tip
+    E1-only mode reduces processing time and output size for promoter-centric cancer detection.
 
 See [Panel Mode](../../guides/panel-mode.md) for details on panel-specific processing.
 
@@ -4502,7 +5583,7 @@ See [Panel Mode](../../guides/panel-mode.md) for details on panel-specific proce
 
 | Metric | Healthy | Cancer (ctDNA) |
 |--------|---------|----------------|
-| Gene MDS Mean | Higher (~7.5-8.0) | Lower at affected genes |
+| Gene MDS Mean | Higher (~0.95-1.0) | Lower at affected genes |
 | E1 MDS | Similar to mean | **Decreased at oncogenes/TSGs** |
 | Cross-gene std | Low (consistent) | Variable (heterogeneous) |
 
@@ -4599,12 +5680,44 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output_dir/
 
 # With MAF file and GC correction
 krewlyzer mfsd -i sample.bam -V variants.maf -o output/ \
-    -r hg19.fa --correction-factors factors.csv
+    -r hg19.fa --correction-factors factors.tsv
 
 # With per-variant distributions
 krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
     --output-distributions
 ```
+
+---
+
+## Dual BAM Support
+
+For optimal results with duplex sequencing panels (e.g., MSK-ACCESS), use separate BAMs:
+
+| BAM Type | Use Case | Why |
+|----------|----------|-----|
+| `all_unique` | FSC, FSD, WPS, OCF | Maximum coverage for background features |
+| `duplex` | mFSD | Highest accuracy for variant detection |
+
+### Via run-all CLI
+
+```bash
+# Provide dedicated duplex BAM for mFSD
+krewlyzer run-all -i sample.all_unique.bam --mfsd-bam sample.duplex.bam \
+    -r hg19.fa -o out/ --assay xs2 --variants sample.maf
+```
+
+!!! note
+    When `--mfsd-bam` is provided, duplex weighting is **auto-enabled**.
+    If no duplex tags (cD/Marianas) are found, a warning is logged but processing continues with weight=1.0.
+
+### Via Nextflow Samplesheet
+
+```csv
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/variants.maf,true,XS2,,
+```
+
+---
 
 ## CLI Options
 
@@ -4625,6 +5738,12 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -o output/ \
 | `--output-distributions` | `-d` | FLAG | | Output per-variant size distributions |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all) |
+
+---
+
+!!! note "Base Quality Filtering"
+    Base quality filtering (`--min-baseq`) is available when mFSD is invoked via `krewlyzer run-all --min-baseq <N>`.
+    The standalone `krewlyzer mfsd` command does not expose this flag directly.
 
 ---
 
@@ -4675,7 +5794,7 @@ Marianas:UMI1+UMI2:contig:start:posCount:negCount:contig2:start2:pos2:neg2
 When `--duplex` is enabled, each fragment receives a weight based on its duplex family size:
 
 $$
-\text{weight} = \max(\ln(\text{family\_size}), 1.0)
+\text{weight} = \max(\ln(\text{family_size}), 1.0)
 $$
 
 | Family Size | Weight | Interpretation |
@@ -4689,9 +5808,9 @@ $$
 
 ### Interpretation in Duplex Mode
 
-> [!IMPORTANT]
-> When `--duplex` is enabled, `ALT_Weighted` and `REF_Weighted` will exceed raw counts.
-> A ratio of **~1.6x** indicates typical duplex family sizes of 3-5.
+!!! important
+    When `--duplex` is enabled, `ALT_Weighted` and `REF_Weighted` will exceed raw counts.
+    A ratio of **~1.6x** indicates typical duplex family sizes of 3-5.
 
 | Column | Without Duplex | With Duplex |
 |--------|----------------|-------------|
@@ -4720,8 +5839,13 @@ $$
 $$
 
 Using Gaussian models:
-- **Healthy**: μ = 167bp, σ = 35bp (nucleosomal periodicity)
-- **Tumor**: μ = 145bp, σ = 25bp (sub-nucleosomal fragments)
+- **Healthy**: μ = 167bp, σ = 30bp (nucleosomal periodicity)
+- **Tumor**: μ = 145bp, σ = 35bp (sub-nucleosomal fragments)
+
+> [!NOTE]
+> These are the values compiled into `LLRModelParams::human()`
+> (`rust/src/mfsd.rs`). Earlier revisions of this page quoted σ = 35 / σ = 25,
+> which the code has never used.
 
 ### LLR Output Columns
 
@@ -4739,20 +5863,25 @@ Using Gaussian models:
 | **-5 to 0** | Weak healthy signal | Likely healthy, low tumor content |
 | **< -5** | Strong healthy signal | Consistent with healthy cfDNA |
 
-> [!TIP]
-> For low-N variants (ALT_Count < 5), use `ALT_LLR` instead of `KS_Pval_ALT_REF`.
-> The LLR is robust with even 1-2 fragments, while KS tests require ≥5.
+!!! tip
+    For low-N variants, prefer `ALT_LLR` over `KS_Pval_ALT_REF`. The LLR is
+    robust with even 1-2 fragments. `MIN_FOR_KS` is **2**, so the tool will
+    report `KS_Valid = TRUE` from as few as 2 ALT and 2 REF fragments — treat
+    p-values computed from single-digit counts with suspicion even though the
+    tool marks them valid.
 
 ### Clinical Example: MRD Detection
 
 ```
 Variant at TP53:chr17:7577539
-  ALT_Count = 3           # Too few for KS test
-  KS_Valid  = FALSE       # KS test unreliable
+  ALT_Count = 3           # Above MIN_FOR_KS (2), so KS runs
+  KS_Valid  = TRUE        # ...but 3 fragments is thin evidence
   ALT_LLR   = 4.2         # Positive = tumor-like fragments
   REF_LLR   = -89.5       # Negative = healthy-like REF population
-  
-  → Interpretation: ALT fragments show tumor signature despite low count
+
+  → Interpretation: ALT fragments show tumor signature despite low count.
+    Lead on ALT_LLR here; KS_Valid = TRUE does not mean the p-value is
+    well-powered at n = 3.
 ```
 
 ---
@@ -4765,9 +5894,15 @@ The LLR model uses Gaussian distributions for healthy and tumor fragment length 
 
 | Preset | Healthy μ | Healthy σ | Tumor μ | Tumor σ | Use Case |
 |--------|-----------|-----------|---------|---------|----------|
-| **human** (default) | 167bp | 35bp | 145bp | 25bp | Human cfDNA |
-| **canine** | 153bp | 30bp | 135bp | 22bp | Canine cfDNA |
-| **ssdna** | 160bp | 40bp | 140bp | 30bp | Single-stranded library prep |
+| **human** (default) | 167bp | 30bp | 145bp | 35bp | Human cfDNA |
+| **canine** | 153bp | 25bp | 130bp | 30bp | Canine cfDNA |
+| **ssdna** | 157bp | 30bp | 135bp | 35bp | Single-stranded library prep |
+
+> [!WARNING]
+> Only `human()` is reachable today. `calc_log_likelihood_ratio()` hardcodes it
+> and `calculate_mfsd()` exposes no model parameter, so `canine()`, `ssdna()`
+> and `custom()` are currently dead code and the Python snippet below does not
+> affect a run.
 
 ### Biological Rationale
 
@@ -4813,9 +5948,9 @@ custom = LLRModelParams(
 )
 ```
 
-> [!NOTE]
-> CLI support for preset selection is planned for a future release.
-> Currently, the Rust backend defaults to human parameters.
+!!! note
+    CLI support for preset selection is planned for a future release.
+    Currently, the Rust backend defaults to human parameters.
 
 ---
 
@@ -4857,7 +5992,7 @@ Where:
 ### Size Delta
 
 $$
-\Delta_{\text{ALT-REF}} = \text{ALT\_MeanSize} - \text{REF\_MeanSize}
+\Delta_{\text{ALT-REF}} = \text{ALT_MeanSize} - \text{REF_MeanSize}
 $$
 
 **Expected:**
@@ -4867,7 +6002,7 @@ $$
 ### VAF Proxy
 
 $$
-\text{VAF\_Proxy} = \frac{\text{ALT\_Count}}{\text{REF\_Count} + \text{ALT\_Count}}
+\text{VAF_Proxy} = \frac{\text{ALT_Count}}{\text{REF_Count} + \text{ALT_Count}}
 $$
 
 ---
@@ -4878,12 +6013,14 @@ $$
 
 | Column Group | Columns | Description |
 |--------------|---------|-------------|
-| **Variant Info** | Chrom, Pos, Ref, Alt, VarType | Variant details |
-| **Counts** | REF/ALT/NonREF/N_Count | Fragment counts per category |
-| **Mean Sizes** | REF/ALT/NonREF/N_MeanSize | Average fragment size |
-| **KS Tests** | Delta_*, KS_*, KS_Pval_* | Pairwise comparisons |
-| **Derived** | VAF_Proxy, Size_Ratio, Quality_Score | Computed metrics |
-| **Flags** | ALT_Confidence, KS_Valid | Quality indicators |
+| **Variant Info** (5) | `Chrom`, `Pos`, `Ref`, `Alt`, `VarType` | Variant coordinates and type |
+| **Raw Counts** (5) | `REF_Count`, `ALT_Count`, `NonREF_Count`, `N_Count`, `Total_Count` | Fragment counts per allele class |
+| **GC-Weighted Counts** (5) | `REF_Weighted`, `ALT_Weighted`, `NonREF_Weighted`, `N_Weighted`, `VAF_GC_Corrected` | GC-bias corrected counts and VAF |
+| **Log-Likelihood Ratio** (2) | `ALT_LLR`, `REF_LLR` | Log-likelihood ratios (useful for low-N duplex variants where KS unreliable) |
+| **Mean Sizes** (4) | `REF_MeanSize`, `ALT_MeanSize`, `NonREF_MeanSize`, `N_MeanSize` | Mean fragment size per allele class |
+| **KS Tests** (18) | `Delta_*/KS_*/KS_Pval_*` × 6 allele pairings | Kolmogorov–Smirnov distance + p-value for: ALT-REF, ALT-NonREF, REF-NonREF, ALT-N, REF-N, NonREF-N |
+| **Derived** (5) | `VAF_Proxy`, `Error_Rate`, `N_Rate`, `Size_Ratio`, `Quality_Score` | Computed summary biomarkers |
+| **Flags** (2) | `ALT_Confidence`, `KS_Valid` | Quality indicators (`HIGH`/`LOW`/`NONE`; TRUE/FALSE) |
 
 ### Optional: `{sample}.mFSD.distributions.tsv`
 
@@ -5048,13 +6185,13 @@ krewlyzer run-all -i patient_blood.bam -r hg19.fa -o results/
 
 **FSR (Fragment Size Ratio):**
 ```
-region              core_short_count  long_count  core_short_long_ratio
-chr1:0-5000000      12,450           8,200       1.52
-chr1:5000000-10M    11,890           7,950       1.50
+region              short_count  long_count  short_long_ratio
+chr1:0-5000000      12,450       8,200       1.52
+chr1:5000000-10M    11,890       7,950       1.50
 ...
 ```
 
-A `core_short_long_ratio` of **1.5** (vs. ~0.9 in healthy samples) suggests elevated tumor burden.
+A `short_long_ratio` of **1.5** (vs. ~0.9 in healthy samples) suggests elevated tumor burden.
 
 **FSD (Fragment Size Distribution):**
 The size histogram shows a left-shifted peak at ~148bp instead of the healthy ~166bp.
@@ -5130,7 +6267,7 @@ Welcome to Krewlyzer! This section will help you get up and running quickly.
 
 | Method | Best For | Includes Data |
 |--------|----------|---------------|
-| **Docker** | Production & HPC | ✅ All bundled |
+| **Docker/Singularity** | Production & HPC | ✅ All bundled |
 | **Clone + Install** | Development | ✅ Via Git LFS |
 | **pip + Data Clone** | Custom environments | ⚠️ Requires env var |
 
@@ -5141,25 +6278,57 @@ Welcome to Krewlyzer! This section will help you get up and running quickly.
 The easiest way to run Krewlyzer with all dependencies and data:
 
 ```bash
-docker pull ghcr.io/msk-access/krewlyzer:latest
+# Use a specific release tag (no :latest tag is published)
+docker pull ghcr.io/msk-access/krewlyzer:X.Y.Z
 ```
+
+!!! important "Versioned Tags Only"
+    We publish versioned tags only (e.g., `:0.5.3`). There is no `:latest` tag.
+    Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
 
 ### Running with Docker
 
 ```bash
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest \
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:X.Y.Z \
     run-all -i /data/sample.bam \
     --reference /data/hg19.fa \
     --output /data/results/ \
     --assay xs2
 ```
 
-!!! tip "Volume Mounting (Standalone Docker)"
-    Use `-v $PWD:/data` to mount your current directory. All paths in the command should use the `/data/` prefix. **For Nextflow pipelines**, volume mounting is automatic—just use host paths in your samplesheet.
+!!! tip "Volume Mounting"
+    Use `-v $PWD:/data` to mount your current directory. All paths use the `/data/` prefix. For Nextflow pipelines, volume mounting is automatic.
 
 ---
 
-## Option 2: Clone Repository
+## Option 2: Singularity/Apptainer (HPC)
+
+For HPC clusters where Docker isn't available:
+
+```bash
+# Pull and convert to Singularity Image Format (SIF)
+singularity pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:X.Y.Z
+
+# Or using Apptainer (newer name for Singularity)
+apptainer pull krewlyzer.sif docker://ghcr.io/msk-access/krewlyzer:X.Y.Z
+```
+
+### Running with Singularity
+
+```bash
+singularity exec krewlyzer.sif krewlyzer run-all \
+    -i /path/to/sample.bam \
+    --reference /path/to/hg19.fa \
+    --output /path/to/results/ \
+    --assay xs2
+```
+
+!!! tip "HPC Bind Paths"
+    Singularity auto-binds `$HOME`, `/tmp`, and `$PWD`. For other paths, use `-B /scratch:/scratch`.
+
+---
+
+## Option 3: Clone Repository
 
 Full installation with bundled data (for development or when Docker isn't available):
 
@@ -5182,7 +6351,7 @@ krewlyzer --version
 
 ---
 
-## Option 3: pip Install + Data Clone
+## Option 4: pip Install + Data Clone
 
 For environments where you want PyPI code with external data:
 
@@ -5322,7 +6491,7 @@ Get running with Krewlyzer in 5 minutes.
 
 === "Docker (Recommended)"
     ```bash
-    docker pull ghcr.io/msk-access/krewlyzer:latest
+    docker pull ghcr.io/msk-access/krewlyzer:X.Y.Z  # Replace X.Y.Z with latest release version
     ```
 
 === "Clone + Install"
@@ -5339,8 +6508,8 @@ Get running with Krewlyzer in 5 minutes.
     export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data
     ```
 
-> [!NOTE]
-> **pip users**: See [Installation Guide](installation.md) for `KREWLYZER_DATA_DIR` setup.
+!!! note "pip Users"
+    See [Installation Guide](installation.md) for `KREWLYZER_DATA_DIR` setup.
 
 ## Your First Analysis
 
@@ -5356,13 +6525,22 @@ krewlyzer run-all sample.bam \
 
 ```bash
 ls results/
-# sample.bed.gz            # Extracted fragments
-# sample.EndMotif.tsv      # End motif frequencies
-# sample.FSC.tsv           # Fragment size coverage
-# sample.FSR.tsv           # Fragment size ratios
-# sample.FSD.tsv           # Size distribution by arm
-# sample.WPS.tsv.gz        # Windowed protection scores
-# sample.OCF.tsv           # Orientation-aware fragmentation
+# sample.bed.gz                    # Extracted fragments
+# sample.metadata.tsv              # Run metadata and QC metrics (tabular)
+# sample.correction_factors.tsv    # GC correction factors
+# sample.EndMotif.tsv              # End motif frequencies
+# sample.EndMotif1mer.tsv          # 1-mer motifs + Jagged Index
+# sample.BreakPointMotif.tsv       # Breakpoint motif frequencies
+# sample.MDS.tsv                   # Motif Diversity Score
+# sample.FSC.tsv                   # Fragment size coverage
+# sample.FSR.tsv                   # Fragment size ratios
+# sample.FSD.tsv                   # Size distribution by arm
+# sample.WPS.parquet               # Windowed protection scores
+# sample.WPS_background.parquet    # WPS background (Alu)
+# sample.OCF.tsv                   # Orientation-aware fragmentation
+# sample.TFBS.tsv                  # TFBS entropy (808 TFs)
+# sample.ATAC.tsv                  # ATAC entropy (23 cancer types)
+# sample.features.json             # Unified JSON for ML
 ```
 
 ## Common Workflows
@@ -5591,10 +6769,16 @@ Both BAM/CRAM and BED.gz inputs are supported:
 | **BAM/CRAM** | Full | ✓ Included | Slower |
 | **BED.gz** | Skip | ✗ Not available | Faster |
 
-> [!NOTE]
-> **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
+!!! note
+    **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
 
 ## Output
+
+!!! note "Intermediate file format"
+    `build-pon` always uses **TSV format** for per-sample intermediate scratch files written
+    to `--temp-dir`, regardless of any global `--output-format` setting. This is by design:
+    the aggregation loop reads these files with `pd.read_csv(sep="\t")` and they are deleted
+    after aggregation completes. The final output (`*.pon.parquet`) is always Parquet.
 
 The output is a Parquet file containing:
 
@@ -5648,8 +6832,8 @@ The **MDS (Motif Diversity Score)** baseline is computed from k-mer frequencies 
 | `mds_mean` | Mean MDS (Shannon entropy) |
 | `mds_std` | MDS standard deviation |
 
-> [!IMPORTANT]
-> MDS baseline **requires BAM/CRAM input** because it needs fragment end sequences. BED.gz files cannot provide this data.
+!!! important
+    MDS baseline **requires BAM/CRAM input** because it needs fragment end sequences. BED.gz files cannot provide this data.
 
 Z-score interpretation:
 
@@ -5671,8 +6855,8 @@ For running `build-pon` on HPC clusters with SLURM, use one of these approaches:
 | 4 | 100 GB | 32 | ~24 hours |
 | 6 | 150 GB | 48 | ~12 hours |
 
-> [!TIP]
-> High-coverage panel data (e.g., MSK-ACCESS) typically uses **15-20 GB per sample** during peak extraction. WGS data may use less. Start conservative and adjust based on memory logs.
+!!! tip
+    High-coverage panel data (e.g., MSK-ACCESS) typically uses **15-20 GB per sample** during peak extraction. WGS data may use less. Start conservative and adjust based on memory logs.
 
 ### sbatch Script (Recommended)
 
@@ -5752,8 +6936,83 @@ mkdir -p ./pon_temp && srun \
 | `--temp-dir` | ./pon_temp | Local scratch directory |
 | `--allow-failures` | - | Continue if a sample fails |
 
-> [!WARNING]
-> If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
+!!! warning
+    If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
+
+---
+
+## Rebuilding the bundled PONs
+
+`scripts/build_pon.sh` takes the two things that differ between the four
+models as arguments:
+
+!!! danger "Check the environment first — and don't use the version string"
+    ```bash
+    micromamba activate krewlyzer
+    krewlyzer validate-pon --help >/dev/null && echo "has the PON work"
+    ```
+
+    **`krewlyzer --version` will not tell you.** It reports `0.8.3` on current
+    `develop` and will keep doing so until the release bump, so a version
+    comparison rejects exactly the build you want. The presence of
+    `validate-pon` is the honest test: it answers "does this code have the PON
+    fixes", which is the actual question.
+
+    It matters because the failure is silent. A `build-pon` without these fixes
+    exits 0 on a model whose `wps_background` is a hardcoded `167.0/5.0` —
+    which is how four of them shipped. The first attempt at this rebuild ran 18
+    minutes on such a build before the banner was noticed.
+
+    The script refuses in that case, but check anyway.
+
+```bash
+SAMPLE_LIST=<list> OUTPUT_DIR=<dir> sbatch scripts/build_pon.sh <assay> <variant>
+```
+
+`SAMPLE_LIST` is required and never derived. **The variant comes from the
+sample list, not a flag** — `build-pon` has none, and `all_unique` and `duplex`
+differ only in which BAMs the list points at. So each variant needs its own
+list, and only you know which is which; a script that guessed the filename
+would build the wrong variant under the right name.
+
+Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
+`KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.
+
+Each run ends by calling `krewlyzer validate-pon` on what it produced. **A
+build that produces a model the gate rejects has not succeeded**, whatever
+`build-pon`'s exit code said — that check is why four models carrying a
+fabricated baseline shipped for months.
+
+### What to watch in the log
+
+| Line | What it means if it looks wrong |
+|------|--------------------------------|
+| `WPS background baseline: N/28 group_ids with a measured spread` | Anything below 28/28 on a real cohort means the source columns are not what the builder expects |
+| `WPS baseline skipped N of M anchors` | Expected to be large for **duplex** (~36–38%), small for all_unique (~4.5%). Large for all_unique is worth stopping for |
+| `Region MDS exon baseline: N/M exons` | Should be all of them; exon coverage is dense, not sparse |
+| `... every {key} has the identical std` | The fabricated-baseline signature. Stop |
+
+### Why `--keep-sample-outputs`
+
+Per-sample features used to be extracted to a temp directory and deleted on
+success, so every rebuild re-ran extraction over every BAM — hours — and
+leave-one-out calibration would have cost *n* of those. The script keeps them,
+and they survive a failed build so a rerun skips what finished.
+
+### After the build
+
+1. `krewlyzer validate-pon` on all four (the script does one; check the set).
+2. Diff each new model against the one it replaces, per block, and keep it as
+   the acceptance record.
+3. `git lfs push --all` **before** pushing the branch, or the pointers land
+   without the objects.
+
+!!! warning "Expect the numbers to move"
+    0.9.0 changes what several features mean — reverse-strand fragment
+    placement moves ~half of all fragments, FSC bands were realigned, E1 comes
+    from GENCODE flags, and NRL is data-dependent for the first time. Do not
+    compare a 0.9.0 PON against an older one value-by-value; the old values
+    were measuring something else.
 
 ---
 
@@ -5821,7 +7080,7 @@ GC correction is **enabled by default** for most tools:
 
 ```bash
 krewlyzer extract -i sample.bam -r hg19.fa -o output/
-# Generates: sample.correction_factors.csv
+# Generates: sample.correction_factors.tsv
 ```
 
 ### Disable GC Correction
@@ -5835,7 +7094,7 @@ krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ```bash
 # mFSD can use factors from extract
 krewlyzer mfsd -i sample.bam -V variants.vcf \
-    --correction-factors output/sample.correction_factors.csv \
+    --correction-factors output/sample.correction_factors.tsv \
     -o output/
 ```
 
@@ -5845,12 +7104,14 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 
 | Tool | GC Option | Source | Notes |
 |------|-----------|--------|-------|
-| **extract** | `--gc-correct` | Computes factors | Generates `.correction_factors.csv` |
+| **extract** | `--gc-correct` | Computes factors | Generates `.correction_factors.tsv` |
 | **FSC** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **FSR** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
+| **Region Entropy** | `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
 | **UXM** | N/A | N/A | No GC correction |
@@ -5860,7 +7121,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 When `--target-regions` is provided to `extract`:
 - GC model is built from **off-target** fragments only
 - Avoids capture bias contamination
-- Generates both `.correction_factors.csv` (off-target) and `.correction_factors.ontarget.csv` (on-target)
+- Generates both `.correction_factors.tsv` (off-target) and `.correction_factors.ontarget.tsv` (on-target)
 
 ---
 
@@ -5897,23 +7158,23 @@ krewlyzer build-gc-reference hg19.fa -o data/gc/ -T msk_targets.bed
 
 ## Correction Factors File
 
-The `extract` command generates `{sample}.correction_factors.csv`:
+The `extract` command generates `{sample}.correction_factors.tsv` (or `.tsv.gz` with `--compress`):
 
-```csv
-len_bin,gc_bin,factor,observed,expected,n_fragments
-0,0.30,1.23,1234,1003,50000
-0,0.31,1.21,1256,1038,51234
+```tsv
+length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
+75	80	36	53	1281884	1.0000
+75	80	39	56	1259020	1.0000
 ...
 ```
 
 | Column | Description |
 |--------|-------------|
-| `len_bin` | Fragment length bin (0-16) |
-| `gc_bin` | GC content (0.00-1.00) |
-| `factor` | Correction multiplier |
+| `length_bin_min` | Fragment length bin lower bound (bp) |
+| `length_bin_max` | Fragment length bin upper bound (bp) |
+| `gc_percent` | GC content percentage (0–100) |
 | `observed` | Raw fragment count |
-| `expected` | LOESS-predicted count |
-| `n_fragments` | Number of fragments in bin |
+| `expected` | Expected count from LOESS model |
+| `correction_factor` | `expected / observed` — multiply raw counts by this |
 
 ---
 
@@ -5970,7 +7231,9 @@ from krewlyzer import _core
 _core.gc.compute_and_write_gc_factors(
     bed_path="sample.bed.gz",
     gc_reference_path="gc_reference.parquet",
-    output_path="correction_factors.csv"
+    output_path="correction_factors.tsv",
+    output_format="both",   # "tsv", "parquet", or "both"
+    compress=True,           # gzip-compress TSV output
 )
 ```
 
@@ -6319,8 +7582,8 @@ This is useful when:
 - Running validation without on/off-target splitting
 - Processing samples where target regions don't apply
 
-> [!NOTE]
-> `--skip-target-regions` only disables target region loading. The PON model is still loaded from `--assay` unless you also add `--skip-pon`.
+!!! note
+    `--skip-target-regions` only disables target region loading. The PON model is still loaded from `--assay` unless you also add `--skip-pon`.
 
 ### Flag Priority
 
@@ -6352,8 +7615,8 @@ In panel mode, `krewlyzer extract` generates TWO correction factor files:
 
 | File | Source | Used For |
 |------|--------|----------|
-| `{sample}.correction_factors.csv` | Off-target fragments | Primary biomarker analysis |
-| `{sample}.correction_factors.ontarget.csv` | On-target fragments | Copy number, variant calling |
+| `{sample}.correction_factors.tsv` | Off-target fragments | Primary biomarker analysis |
+| `{sample}.correction_factors.ontarget.tsv` | On-target fragments | Copy number, variant calling |
 
 ### Feature Splitting
 
@@ -6367,10 +7630,12 @@ In panel mode, each feature outputs two files:
 | OCF | `.OCF.tsv` | `.OCF.ontarget.tsv` |
 | TFBS | `.TFBS.tsv` (genome-wide) | `.TFBS.ontarget.tsv` (panel regions) |
 | ATAC | `.ATAC.tsv` (genome-wide) | `.ATAC.ontarget.tsv` (panel regions) |
+| Motif | `.EndMotif.tsv` | `.EndMotif.ontarget.tsv` |
+| MDS | `.MDS.tsv` | `.MDS.ontarget.tsv` |
 
-> [!NOTE]
-> On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
-> when available, providing better accuracy for capture-biased data.
+!!! note
+    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
+    when available, providing better accuracy for capture-biased data.
 
 **Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/regulatory/ocf.md#panel-mode) for details.
 
@@ -6461,8 +7726,8 @@ krewlyzer wps -i sample.bed.gz -o out/ \
 - **TSS anchors**: Transcription start sites for panel genes
 - **CTCF anchors**: CTCF binding sites within 100kb of panel TSS sites
 
-> [!TIP] 
-> Using panel-specific anchors reduces noise from irrelevant genome-wide signals and focuses WPS analysis on oncologically relevant regions.
+!!! tip
+    Using panel-specific anchors reduces noise from irrelevant genome-wide signals and focuses WPS analysis on oncologically relevant regions.
 
 
 ## PON Compatibility
@@ -6478,6 +7743,37 @@ print(f"Target file: {pon.target_regions_file}")
 ```
 
 For best results, use a PON built with the same `--target-regions` as sample processing.
+
+---
+
+# FILE: docs/includes/abbreviations.md
+
+<!-- Abbreviation definitions for Krewlyzer documentation -->
+<!-- These provide hover tooltips for technical acronyms -->
+
+*[FSD]: Fragment Size Distribution - Distribution of fragment lengths across chromosome arms
+*[FSC]: Fragment Size Coverage - Coverage depth by fragment size across genomic bins
+*[FSR]: Fragment Size Ratio - Ratio of short to long fragments
+*[WPS]: Windowed Protection Score - Nucleosome positioning signal around regulatory sites
+*[OCF]: Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin
+*[MDS]: Motif Diversity Score - Entropy/diversity of end motif patterns
+*[EDM]: End Dinucleotide Matrix - 16x16 matrix of terminal dinucleotide frequencies
+*[BPM]: Breakpoint Motif - 4-mer motif frequencies at fragment breakpoints
+*[PON]: Panel of Normals - Reference model from healthy plasma samples
+*[UXM]: Fragment-level Methylation - Methylation state of individual fragments
+*[mFSD]: Mutant Fragment Size Distribution - Size distribution around somatic mutations
+*[cfDNA]: Cell-free DNA - Circulating DNA fragments in blood plasma
+*[ctDNA]: Circulating tumor DNA - Tumor-derived cfDNA fragments
+*[BAM]: Binary Alignment Map - Compressed sequence alignment file format
+*[BED]: Browser Extensible Data - Genomic interval file format
+*[TSV]: Tab-Separated Values - Plain text tabular data format
+*[GC]: Guanine-Cytosine content - Percentage of G and C nucleotides
+*[TFBS]: Transcription Factor Binding Sites - DNA sequences bound by TFs
+*[ATAC]: Assay for Transposase-Accessible Chromatin - Open chromatin assay
+*[TSS]: Transcription Start Site - Gene transcription initiation position
+*[CTCF]: CCCTC-binding factor - Chromatin architecture protein
+*[HPC]: High-Performance Computing - Cluster computing environment
+*[SIF]: Singularity Image Format - Container image format for HPC
 
 ---
 
@@ -6509,6 +7805,7 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 ```
 
 > **New to cfDNA?** Start with [What is Cell-Free DNA?](getting-started/concepts.md)  
+> **Visual learner?** See the [Overview PDF](resources/overview.md)  
 > **Need terminology help?** See the [Glossary](reference/glossary.md)
 
 ---
@@ -6533,9 +7830,9 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
 ### With Docker (Recommended)
 ```bash
-docker pull ghcr.io/msk-access/krewlyzer:latest
+docker pull ghcr.io/msk-access/krewlyzer:0.9.0
 # Example usage:
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:latest run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.9.0 run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
 ```
 
 ### With uv / pip
@@ -6580,9 +7877,9 @@ nextflow run msk-access/krewlyzer \
 
 With samplesheet:
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
-ACCESS_001,/data/sample1.bam,,,,,false,XS2,,
-ACCESS_002,/data/sample2.bam,,,,,false,XS2,,
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+ACCESS_001,/data/sample1.bam,,,,,,false,XS2,,
+ACCESS_002,/data/sample2.bam,,,,,,false,XS2,,
 ```
 
 ## With Variant Analysis
@@ -6596,9 +7893,9 @@ nextflow run msk-access/krewlyzer \
 
 With samplesheet:
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
-SAMPLE_001,/data/sample1.bam,,,/data/variants.vcf,,,XS2,,
-SAMPLE_002,/data/sample2.bam,,,,/data/cohort.maf,false,XS2,,
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+SAMPLE_001,/data/sample1.bam,,,/data/variants.vcf,,,,XS2,,
+SAMPLE_002,/data/sample2.bam,,,,,,/data/cohort.maf,false,XS2,,
 ```
 
 ## Using Docker
@@ -6619,6 +7916,35 @@ nextflow run msk-access/krewlyzer \
     --samplesheet samples.csv \
     --ref /path/to/hg19.fa \
     --outdir results/
+```
+
+## IRIS HPC (MSK)
+
+For running on MSKCC's IRIS cluster, use the [nf-core/configs](https://github.com/nf-core/configs) institutional profile:
+
+```bash
+nextflow run msk-access/krewlyzer \
+    -profile iris \
+    --samplesheet samples.csv \
+    --ref /data1/ref/hg19/hg19.fa \
+    --outdir /scratch/$GROUP/results/
+```
+
+!!! tip
+    The `iris` profile automatically configures:
+    - SLURM executor with proper queue settings
+    - Singularity with pre-cached images at `/data1/core006/resources/singularity_image_library`
+    - Scratch paths and work directories
+
+For preemptable (faster) queue:
+
+```bash
+nextflow run msk-access/krewlyzer \
+    -profile iris \
+    --preemptable true \
+    --samplesheet samples.csv \
+    --ref /data1/ref/hg19/hg19.fa \
+    --outdir /scratch/$GROUP/results/
 ```
 
 ## Resume Failed Run
@@ -6659,13 +7985,13 @@ flowchart TB
     
     BED --> MOTIF["KREWLYZER_MOTIF"]
     BED --> FSC["KREWLYZER_FSC"]
+    BED --> FSR["KREWLYZER_FSR"]
     BED --> FSD["KREWLYZER_FSD"]
     BED --> WPS["KREWLYZER_WPS"]
     BED --> OCF["KREWLYZER_OCF"]
     BED --> ENTROPY["KREWLYZER_REGION_ENTROPY"]
-    BED --> RMDS["KREWLYZER_REGION_MDS"]
     
-    FSC --> FSR["KREWLYZER_FSR"]
+    BAM --> RMDS["KREWLYZER_REGION_MDS"]
     
     subgraph "Parallel Paths"
         METH_BAM["meth.bam"] --> UXM["KREWLYZER_UXM"]
@@ -6689,11 +8015,24 @@ flowchart TB
 - **Container support** - Docker/Singularity
 - **Cloud ready** - AWS, Google Cloud, Azure
 
+## Performance Benchmarks
+
+Real-world performance from MSK-ACCESS v1/v2 duplex plasma samples:
+
+| Sample Type | Duration | CPU Usage | Peak Memory |
+|-------------|----------|-----------|-------------|
+| Healthy control | 2-5 min | 90-140% | 1.7-1.9 GB |
+| ctDNA plasma | 4-6 min | 190-300% | 2.8-3.2 GB |
+
+!!! note "Tested Configuration"
+    - Docker with amd64 emulation on Apple Silicon
+    - 8 CPUs, 32 GB memory
+    - Panel mode with `--skip-pon` and `--duplex` enabled
+
 ## See Also
 
 - [CLI Reference](../cli/index.md) - Command-line usage
 - [Panel Mode](../guides/panel-mode.md) - MSK-ACCESS workflows
-
 
 ---
 
@@ -6701,50 +8040,135 @@ flowchart TB
 
 # Nextflow Outputs
 
-Output files produced by the Nextflow pipeline.
+Output files produced by the Krewlyzer Nextflow pipeline.
 
-## Output Directory Structure
+## WGS Output Directory
 
 ```
 results/
-├── extract/
-│   ├── {sample}.bed.gz
-│   └── {sample}.bed.gz.tbi
-├── motif/
-│   ├── {sample}.EndMotif.tsv
-│   └── {sample}.MDS.tsv
-├── fsc/
-│   ├── {sample}.FSC.tsv
-│   └── {sample}.FSC.gene.tsv
-├── fsd/
-│   └── {sample}.FSD.tsv
-├── fsr/
-│   └── {sample}.FSR.tsv
-├── wps/
-│   ├── {sample}.WPS.parquet
-│   └── {sample}.WPS_background.parquet
-├── ocf/
-│   └── {sample}.OCF.tsv
-├── region_entropy/
-│   ├── {sample}.TFBS.tsv
-│   └── {sample}.ATAC.tsv
-├── region_mds/
-│   ├── {sample}.MDS.exon.tsv
-│   └── {sample}.MDS.gene.tsv
-├── mfsd/
-│   └── {sample}.mFSD.tsv
-└── uxm/
-    └── {sample}.UXM.tsv
+├── {sample}.bed.gz                         # Extracted fragments
+├── {sample}.bed.gz.tbi                     # Tabix index
+├── {sample}.metadata.tsv                   # Run metadata and QC metrics (tabular)
+├── {sample}.correction_factors.tsv         # GC correction factors
+├── {sample}.EndMotif.tsv                   # 4-mer end motif frequencies
+├── {sample}.EndMotif1mer.tsv               # 1-mer end motif + Jagged Index
+├── {sample}.BreakPointMotif.tsv            # Breakpoint motif frequencies
+├── {sample}.MDS.tsv                        # Motif Diversity Score
+├── {sample}.FSC.tsv                        # Fragment size coverage (off-target)
+├── {sample}.FSR.tsv                        # Fragment size ratio
+├── {sample}.FSD.tsv                        # Fragment size distribution (per arm)
+├── {sample}.WPS.parquet                    # WPS nucleosome profiles (foreground)
+├── {sample}.WPS_background.parquet         # WPS Alu stacking (background)
+├── {sample}.OCF.tsv                        # OCF tissue-of-origin scores
+├── {sample}.OCF.sync.tsv                   # OCF sync scores (detail)
+├── {sample}.TFBS.tsv                       # TFBS entropy (808 TFs)
+├── {sample}.ATAC.tsv                       # ATAC entropy (23 cancer types)
+└── {sample}.features.json                  # Unified ML features (--generate_json)
 ```
 
-## Panel Mode Outputs
+## Panel Mode Outputs (with `--assay` or `--targets`)
 
-When `--targets` is provided, outputs are split:
+When assay or targets are provided, additional on-target and panel-specific files are generated:
 
-| File | Content |
-|------|---------|
-| `{sample}.FSC.tsv` | Off-target features |
-| `{sample}.FSC.ontarget.tsv` | On-target features |
+```
+results/
+├── ... (all WGS outputs above) ...
+│
+│── # GC Correction
+├── {sample}.correction_factors.ontarget.tsv    # On-target GC factors
+│
+│── # Motif (on-target split)
+├── {sample}.EndMotif.ontarget.tsv
+├── {sample}.BreakPointMotif.ontarget.tsv
+├── {sample}.MDS.ontarget.tsv
+│
+│── # FSC (gene-centric + regions)
+├── {sample}.FSC.ontarget.tsv                   # On-target FSC
+├── {sample}.FSC.gene.tsv                       # Gene-level FSC (e.g., 146 genes for xs2)
+├── {sample}.FSC.regions.tsv                    # Per-exon/target FSC
+├── {sample}.FSC.regions.e1only.tsv             # E1-only FSC (first exon per gene)
+│
+│── # FSD (on-target split)
+├── {sample}.FSD.ontarget.tsv
+│
+│── # WPS (panel-specific anchors)
+├── {sample}.WPS.panel.parquet                  # Panel gene WPS profiles
+│
+│── # OCF (on/off-target + panel-filtered OCRs)
+├── {sample}.OCF.ontarget.tsv
+├── {sample}.OCF.ontarget.sync.tsv
+├── {sample}.OCF.offtarget.tsv
+├── {sample}.OCF.offtarget.sync.tsv
+│
+│── # TFBS/ATAC (on-target + sync)
+├── {sample}.TFBS.ontarget.tsv
+├── {sample}.TFBS.sync.tsv
+├── {sample}.TFBS.ontarget.sync.tsv
+├── {sample}.ATAC.ontarget.tsv
+├── {sample}.ATAC.sync.tsv
+├── {sample}.ATAC.ontarget.sync.tsv
+│
+│── # Region MDS (per-gene/exon)
+├── {sample}.MDS.exon.tsv                       # Per-exon MDS scores
+└── {sample}.MDS.gene.tsv                       # Gene-level aggregated MDS
+```
+
+## mFSD Variant Outputs (with VCF/MAF in samplesheet)
+
+```
+results/
+├── {sample}.mFSD.tsv                       # Per-variant mFSD summary
+└── {sample}.mFSD.distributions.tsv         # Per-variant size distributions (optional)
+```
+
+## UXM Methylation Outputs (with `meth_bam` in samplesheet)
+
+```
+results/
+└── {sample}.UXM.tsv                        # Fragment-level methylation
+```
+
+## Validation Artifacts (Parquet runs)
+
+Written per sample by `run-all`, and gathered once per cohort:
+
+| File | Scope | Contents |
+|------|-------|----------|
+| `{sample}.validation.json` | sample | Contract findings for that sample |
+| `{sample}.fingerprint.json` | sample | ~20 KB summary — a hash and two counts per column |
+| `cohort.validation.json` | cohort | Cross-sample degeneracy findings |
+
+The split exists because **degeneracy is inherently cross-sample**: every sample
+can pass on its own while a metric is constant across all of them. A sample
+directory is ~1.5 GB, so the gather step compares fingerprints rather than
+re-reading tables.
+
+Skipped entirely for tsv-only runs — see `--output_format` in
+[Parameters](parameters.md#output-parameters).
+
+!!! note "Tool-level mode"
+    `--use_runall false` produces no fingerprints, so cohort validation is
+    skipped rather than run on a partial set, which would report degeneracy
+    findings that are artefacts of the missing samples.
+
+---
+
+## Output Changes in 0.9.0
+
+Six output families changed value semantics. Values are **not comparable**
+across this boundary, and PON baselines built on uncollapsed input should be
+rebuilt.
+
+| Output | Change |
+|--------|--------|
+| Every positional family — `WPS`, `OCF`, TFBS/ATAC, `MDS.exon/gene`, `FSC.gene/regions` | Fragment coordinates corrected when R1 is the rightmost mate (~48% of reads on uncollapsed input) |
+| `FSC.gene.*`, `FSC.regions.*` | Size bands aligned to the genome-bin bands; new `ultra_long` and `ultra_long_ratio` |
+| `FSC.regions.*` | New `strand`, `is_e1`, `is_alt_e1` columns |
+| `FSC.regions.e1only.*` | Selects on the E1 flags; genes with no annotated first exon are omitted rather than represented by an internal exon |
+| `MDS.gene.mds_e1`, `mds_e1_z` | Strand-aware on panel data for the first time; `NaN` where the gene has no E1, instead of a fabricated `0.0` |
+| `WPS_background.*` | NRL family is data-dependent; new `nrl_at_band_limit` marks a right-censored estimate |
+
+---
 
 ## Available Modules
 
@@ -6770,14 +8194,14 @@ When `--targets` is provided, outputs are split:
 
 # Nextflow Parameters
 
-All parameters for the Krewlyzer Nextflow pipeline.
+All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for defaults.
 
 ## Required Parameters
 
 | Parameter | Description |
 |-----------|-------------|
-| `--samplesheet` | CSV with sample information |
-| `--ref` | Reference genome FASTA |
+| `--samplesheet` | CSV with sample information ([format](samplesheet.md)) |
+| `--ref` | Reference genome FASTA (indexed) |
 
 ## General Parameters
 
@@ -6785,32 +8209,85 @@ All parameters for the Krewlyzer Nextflow pipeline.
 |-----------|---------|-------------|
 | `--outdir` | `./results` | Output directory |
 | `--asset_dir` | | Base directory for PON/targets (enables assay resolution) |
-| `--targets` | | Global target BED (fallback) |
-| `--genome` | `hg19` | Genome build (hg19 or hg38) |
+| `--targets` | | Global target BED (fallback if not in samplesheet) |
+| `--genome` | `hg19` | Genome build (`hg19` or `hg38`) |
 | `--threads` | `8` | Threads per process |
 | `--verbose` | `false` | Enable verbose logging |
+
+## Mode Selection
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow |
 
 ## PON Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--pon_model` | | Global PON model (fallback) |
+| `--pon_model` | | Global PON model path (fallback) |
 | `--pon_variant` | `all_unique` | PON variant: `all_unique` or `duplex` |
 | `--skip_pon` | `false` | Skip PON z-score normalization |
 
-## Feature Parameters
+## Panel & WPS Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--bait_padding` | `50` | Bait edge padding for WPS |
+| `--bait_padding` | `50` | Bait edge padding for WPS (bp) |
+| `--wps_anchors` | | Custom WPS anchors BED (auto-loaded from assay if not set) |
+| `--wps_background` | | Custom WPS background Alu BED (auto-loaded if not set) |
+
+## Filter & Algorithm Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--mapq` | `20` | Minimum mapping quality |
+| `--minlen` | `65` | Minimum fragment length |
 | `--maxlen` | `1000` | Maximum fragment length |
+| `--min_baseq` | `20` | Minimum base quality for mFSD variant calling |
+| `--duplex` | `true` | Enable duplex weighting for mFSD (graceful fallback) |
+| `--skip_duplicates` | `true` | Skip duplicate reads |
+| `--require_proper_pair` | `false` | Require proper pairs (disable for duplex BAMs) |
+| `--exclude_regions` | | BED file of regions to exclude |
+
+## Feature Toggles
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
 | `--no_tfbs` | `false` | Disable TFBS region entropy |
 | `--no_atac` | `false` | Disable ATAC region entropy |
+| `--skip_target_regions` | `false` | Force WGS mode (ignore bundled targets) |
+| `--disable_e1_aggregation` | `false` | Skip E1-only FSC aggregation |
+| `--region_mds_e1_only` | `false` | Run region-MDS on E1 (first exon) only |
+
+## Output Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `--generate_json` | `true` | Generate unified `features.json` for ML pipelines |
+| `--output_format` | `parquet` | Feature output format: `tsv`, `parquet`, or `both`. **Default changed from `tsv` in 0.9.0.** WPS outputs are always Parquet regardless of this setting. |
+| `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
+| `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
+| `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
+| `--gc_correct` | `true` | Apply GC bias correction during extraction. |
+| `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
+
+!!! warning "Selecting `tsv` produces a cohort the downstream consumer cannot read"
+    kreview reads **Parquet only**. A tsv-only run additionally **skips output
+    validation**, because the contract describes the Parquet surface.
+
+    Both failures are silent: every reader downstream swallows exceptions and
+    yields an empty feature dict, so a cohort produced with the default simply
+    does not appear — no error, no warning, no missing-file complaint.
+
+    This is why the default changed to `parquet` in 0.9.0. Set `tsv` or
+    `both` only when you need the text tables; the pipeline logs a warning at
+    start whenever the selection excludes Parquet.
 
 ## See Also
 
 - [Samplesheet Format](samplesheet.md)
 - [CLI Parameters](../cli/run-all.md)
+- [Pipeline Outputs](outputs.md)
 
 ---
 
@@ -6823,13 +8300,14 @@ The Nextflow pipeline accepts a CSV samplesheet with the following columns:
 ## Columns
 
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 ```
 
 | Column | Type | Required | Description |
 |--------|------|----------|-------------|
 | `sample` | TEXT | ✓ | Sample identifier |
-| `bam` | PATH | ✓ | WGS/Panel BAM file |
+| `bam` | PATH | ✓ | WGS/Panel BAM file (all_unique for panels) |
+| `mfsd_bam` | PATH | | Duplex BAM for mFSD (falls back to `bam` if empty) |
 | `meth_bam` | PATH | | Bisulfite BAM for UXM |
 | `vcf` | PATH | | VCF for mFSD |
 | `bed` | PATH | | Pre-extracted .bed.gz |
@@ -6845,6 +8323,7 @@ sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 |-------------------|----------|
 | `bam` only | Full run-all (extract → features) |
 | `bam` + `vcf`/`maf` | run-all + mFSD |
+| `bam` + `mfsd_bam` + `maf` | run-all with dual BAM support |
 | `meth_bam` only | UXM methylation |
 | `bed` only | FSC, FSR, FSD, WPS, OCF (no extract) |
 
@@ -6861,16 +8340,19 @@ When `assay` is set and `--asset_dir` is provided:
 ## Example
 
 ```csv
-sample,bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
-# MSK-ACCESS samples (auto-resolve PON/targets)
-ACCESS_001,/data/sample1.bam,,,,,false,XS1,,
-ACCESS_002,/data/sample2.bam,,,,/data/cohort.maf,false,XS2,,
+sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
+# MSK-ACCESS V1 samples (auto-resolve PON/targets)
+ACCESS_001,/data/sample1.bam,,,,,,,XS1,,
+ACCESS_002,/data/sample2.bam,,,,,,/data/cohort.maf,false,XS2,,
+
+# MSK-ACCESS V2 with duplex BAM for mFSD
+ACCESS_V2,/data/sample.all_unique.bam,/data/sample.duplex.bam,,,,,maf.tsv,true,XS2,,
 
 # WGS (no targets)
-WGS_001,/data/wgs.bam,,/data/wgs.vcf,,,,WGS,,
+WGS_001,/data/wgs.bam,,,/data/wgs.vcf,,,,,WGS,,
 
 # Custom PON/targets
-CUSTOM,/data/custom.bam,,,,,,,/data/custom.pon.parquet,/data/custom.bed
+CUSTOM,/data/custom.bam,,,,,,,,,/data/custom.pon.parquet,/data/custom.bed
 ```
 
 ---
@@ -6943,6 +8425,9 @@ The performance-critical functions are implemented in Rust and exposed to Python
 | `gc_correction.rs` | 20KB | LOESS-based GC bias correction |
 | `pon_model.rs` | 7KB | PON model loading and hybrid correction |
 | `gc_reference.rs` | 20KB | Pre-computed GC reference generation |
+| `filters.rs` | 3KB | Fragment filtering logic |
+| `pon_builder.rs` | 15KB | PON model construction |
+| `uxm.rs` | 12KB | Fragment-level methylation (UXM) |
 
 ### BGZF-First File Reader (`bed.rs`)
 
@@ -7007,11 +8492,14 @@ _core.extract_motif.process_bam_parallel(
 
 # Unified pipeline
 _core.run_unified_pipeline(
-    bed_path, gc_ref, valid_regions, gc_factors_out,
-    gc_factors_in, bin_file, fsc_out, wps_anchors, wps_out,
-    wps_bg_anchors, wps_bg_out, wps_bg_flip,
-    arms_file, fsd_out, ocr_file, ocf_out_dir,
-    target_regions, bait_padding, silent
+    bed_path, gc_ref_path, valid_regions_path,
+    correction_out_path, correction_input_path,
+    fsc_bins, fsc_output,
+    wps_regions, wps_output,
+    wps_background_regions, wps_background_output, wps_empty,
+    fsd_arms, fsd_output,
+    ocf_regions, ocf_output,
+    target_regions_path, bait_padding, silent
 )
 
 # GC correction
@@ -7022,24 +8510,24 @@ _core.gc.compute_and_write_gc_factors(...)
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `bed_path` | str | Input .bed.gz file path |
-| `gc_ref` | str/None | GC reference parquet for computing factors |
-| `valid_regions` | str/None | Valid regions BED for GC |
-| `gc_factors_out` | str/None | Output path for computed GC factors |
-| `gc_factors_in` | str/None | Pre-computed GC factors CSV |
-| `bin_file` | str/None | FSC/FSR bins BED |
-| `fsc_out` | str/None | FSC output TSV path |
-| `wps_anchors` | str/None | WPS foreground anchors BED |
-| `wps_out` | str/None | WPS foreground output parquet |
-| `wps_bg_anchors` | str/None | WPS background (Alu) BED |
-| `wps_bg_out` | str/None | WPS background output parquet |
-| `wps_bg_flip` | bool | Flip WPS vectors for strand awareness |
-| `arms_file` | str/None | Chromosome arms BED for FSD |
-| `fsd_out` | str/None | FSD output TSV path |
-| `ocr_file` | str/None | Open chromatin regions for OCF |
-| `ocf_out_dir` | str/None | OCF output directory |
-| `target_regions` | str/None | Panel target BED (on/off split) |
-| `bait_padding` | int | Bait edge padding in bp (default: 50) |
+| `bed_path` | PathBuf | Input .bed.gz file path |
+| `gc_ref_path` | Option<PathBuf> | GC reference parquet for computing factors |
+| `valid_regions_path` | Option<PathBuf> | Valid regions BED for GC |
+| `correction_out_path` | Option<PathBuf> | Output path for computed GC factors |
+| `correction_input_path` | Option<PathBuf> | Pre-computed GC factors TSV |
+| `fsc_bins` | Option<PathBuf> | FSC/FSR bins BED |
+| `fsc_output` | Option<PathBuf> | FSC output TSV path |
+| `wps_regions` | Option<PathBuf> | WPS foreground anchors BED |
+| `wps_output` | Option<PathBuf> | WPS foreground output parquet |
+| `wps_background_regions` | Option<PathBuf> | WPS background (Alu) BED |
+| `wps_background_output` | Option<PathBuf> | WPS background output parquet |
+| `wps_empty` | bool | Include empty WPS regions |
+| `fsd_arms` | Option<PathBuf> | Chromosome arms BED for FSD |
+| `fsd_output` | Option<PathBuf> | FSD output TSV path |
+| `ocf_regions` | Option<PathBuf> | Open chromatin regions for OCF |
+| `ocf_output` | Option<PathBuf> | OCF output directory |
+| `target_regions_path` | Option<PathBuf> | Panel target BED (on/off split) |
+| `bait_padding` | u64 | Bait edge padding in bp (default: 50) |
 | `silent` | bool | Suppress progress output |
 
 ---
@@ -7558,6 +9046,7 @@ This page documents the expected formats for custom input files used as override
 | [Sample List](#sample-list) | paths | `build-pon` | `/path/to/sample.bam` |
 | [BED3](#bed3) | chrom, start, end | `--bin-input`, `--target-regions` | `chr1\t0\t100000` |
 | [Gene BED](#gene-bed) | chrom, start, end, gene, [name] | `--gene-bed` | `chr1\t100\t5000\tTP53\texon1` |
+| [Transcript Overrides](#transcript-overrides) | gene, transcript_id | `build_gene_bed.py --transcript-overrides` | `TP53\tENST00000269305` |
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
@@ -7654,9 +9143,105 @@ chr17	7676707	7676863	TP53	exon2
 chr7	140719327	140724764	BRAF	exon15
 ```
 
+### Bundled assets carry four extra columns
+
+The gene BEDs shipped in `src/krewlyzer/data/genes/` are generated from a
+GENCODE GTF by `scripts/build_gene_bed.py` and extend the format:
+
+```
+chrom  start  end  gene  name  transcript_id  exon_number  strand  is_e1  is_first_captured
+```
+
+| Column | Description |
+|--------|-------------|
+| `transcript_id` | Canonical transcript: MANE Select → Ensembl canonical → longest CDS |
+| `exon_number` | **Transcription** order from the GTF, not coordinate order |
+| `strand` | `+` / `-`; absent from the panel assets before 0.9.0 |
+| `is_e1` | Row overlaps the canonical transcript's exon 1 |
+| `is_alt_e1` | Row overlaps *another* basic protein-coding transcript's exon 1 |
+| `is_first_captured` | Most 5′ row for this gene, in transcription order |
+
+The first five columns are unchanged, so a custom 4- or 5-column file still
+works and readers indexing `gene`/`name` are unaffected.
+
+!!! note "The three `first` columns are not interchangeable"
+    Genes have several annotated first exons — a median of 13 — because
+    alternative promoters are common. On `xs1`, 25 of 128 genes have a tile on
+    the canonical exon 1, 15 more on another basic protein-coding transcript's
+    first exon, and 88 on neither. `is_first_captured` always exists but is
+    frequently an internal exon, which is not a promoter proxy.
+
+    Use `is_e1` when the promoter-proximal interpretation matters, `is_alt_e1`
+    to include alternative promoters, and `is_first_captured` only as a
+    positional anchor.
+
+    The canonical transcript is configurable per gene via
+    `--transcript-overrides`, so a panel built around specific clinical
+    transcripts can say so rather than inherit MANE.
+
+    `exon_number` deserves the same caution when reading *older* assets: the
+    pre-0.9.0 WGS BED numbered exons by coordinate, so its `exon_num 0` was the
+    last exon for every minus-strand gene.
+
 ### Used By
 
 - Custom gene files for panel FSC
+
+---
+
+## Transcript Overrides {#transcript-overrides}
+
+Two-column TSV naming the transcript to treat as canonical for specific genes,
+consumed at **build time** by `scripts/build_gene_bed.py`. Not a runtime input:
+its effect is baked into the generated gene BED.
+
+### Format
+
+```
+gene    transcript_id
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| gene | string | Gene symbol, matching the panel BED (`TP53`) |
+| transcript_id | string | Ensembl/GENCODE id, with or without version |
+
+Blank lines and `#` comments are ignored.
+
+### Example
+
+```tsv
+# Panel was designed around these transcripts, not MANE Select
+TP53	ENST00000269305
+MTOR	ENST00000361445
+H3F3A	ENST00000366813
+```
+
+### Why it exists
+
+A capture panel is designed around particular transcripts. Imposing MANE Select
+on it annotates a gene structure the assay was not built for — which decides
+where `is_e1` lands, and therefore what any promoter-proximal feature measures.
+
+An override takes precedence over every other tier of the
+[canonical-transcript policy](../features/core/fsc.md).
+
+### Errors
+
+These are fatal by design. A silent fall back to MANE would produce an asset
+that disagrees with the file you wrote, with nothing to indicate it:
+
+| Condition | Result |
+|-----------|--------|
+| Transcript absent from the GTF | Error; the message lists what *is* present for that gene |
+| Transcript belongs to a different gene | Error |
+| Malformed line, or a gene listed twice with different transcripts | Error |
+| A gene listed twice with the *same* transcript | Accepted |
+| Gene absent from this build | Warning — one file may serve several assays |
+
+Version suffixes are optional: `ENST00000269305` matches
+`ENST00000269305.9_9`, so a file need not track GENCODE releases. An
+unversioned id matching two transcripts is an error rather than a guess.
 
 ---
 
@@ -7838,6 +9423,1241 @@ See [Troubleshooting > Asset Validation](../resources/troubleshooting.md#asset-v
 
 ---
 
+# FILE: docs/reference/output-files.md
+
+# Output Files Reference
+
+Complete reference for every file Krewlyzer produces — what it contains, what each column means, when to use it, and how to apply it in ML models.
+
+---
+
+## Quick Reference
+
+| File | Feature | Resolution | ML Signal |
+|------|---------|-----------|-----------|
+| [`{s}.FSD.tsv`](#fsd-fragment-size-distribution) | FSD | Per chr arm | Arm-level fragmentation shift |
+| [`{s}.FSR.tsv`](#fsr-fragment-size-ratio) | FSR | 5 Mb / 100kb | PON-normalized short/long ratio |
+| [`{s}.FSC.tsv`](#fsc-fragment-size-coverage) | FSC | 5 Mb window | Multi-channel size coverage |
+| [`{s}.FSC.gene.tsv`](#fsc-gene-level) | FSC | Per gene | Gene fragmentation composition |
+| [`{s}.FSC.regions.tsv`](#fsc-region-level) | FSC | Per exon/target | Exon fragmentation composition |
+| [`{s}.FSC.regions.e1only.tsv`](#fsc-e1-only) | FSC-E1 | Per gene (E1) | Promoter-proximal signal |
+| [`{s}.fsc_counts.tsv`](#fsc-counts-pre-correction) | FSC-raw | Per GC bin | GC correction diagnostics |
+| [`{s}.WPS.parquet`](#wps-windowed-protection-score) | WPS | Per anchor | Nucleosome positioning |
+| [`{s}.WPS.panel.parquet`](#wps-panel) | WPS | Panel anchors | Gene-level nucleosome |
+| [`{s}.WPS_background.parquet`](#wps-background) | WPS-bg | Alu stacks | Global chromatin state |
+| [`{s}.EndMotif.tsv`](#endmotif) | Motif | Global (1 row) | 256 4-mer end frequencies |
+| [`{s}.EndMotif1mer.tsv`](#endmotif-1-mer) | Motif | Global (4 rows) | Base composition at ends |
+| [`{s}.BreakPointMotif.tsv`](#breakpointmotif) | Motif | Global (1 row) | 256 4-mer break frequencies |
+| [`{s}.MDS.tsv`](#mds-motif-diversity-score) | MDS | Global (1 row) | Motif diversity scalar |
+| [`{s}.MDS.exon.tsv`](#mds-exon-level) | Region-MDS | Per exon | Per-exon motif diversity |
+| [`{s}.MDS.gene.tsv`](#mds-gene-level) | Region-MDS | Per gene | Per-gene MDS + E1 |
+| [`{s}.OCF.tsv`](#ocf-orientation-aware-cfdna-fragmentation) | OCF | Per tissue | Tissue-of-origin score |
+| [`{s}.OCF.sync.tsv`](#ocf-sync) | OCF | Positional | Strand-phased profiles |
+| [`{s}.TFBS.tsv`](#tfbs-transcription-factor-binding-site-entropy) | TFBS | Per TF | TF footprint entropy |
+| [`{s}.TFBS.sync.tsv`](#tfbs-sync) | TFBS | Per TF × size | Size-resolved TF profiles |
+| [`{s}.ATAC.tsv`](#atac-chromatin-accessibility-entropy) | ATAC | Per tissue | ATAC region entropy |
+| [`{s}.ATAC.sync.tsv`](#atac-sync) | ATAC | Per tissue × size | Size-resolved ATAC profiles |
+| [`{s}.mFSD.tsv`](#mfsd-mutant-fragment-size-distribution) | mFSD | Per variant | Variant fragment size metrics |
+| [`{s}.mFSD.distributions.tsv`](#mfsd-distributions) | mFSD | Per variant × size | Raw size histograms |
+| [`{s}.UXM.tsv`](#uxm-methylation) | UXM | Per region | U/X/M methylation fractions |
+| [`{s}.correction_factors.tsv`](#gc-correction-factors) | GC | Per (len, GC) bin | GC bias weights |
+| [`{s}.metadata.tsv`](#metadata-tsv) | Meta | Global | Run parameters + QC |
+| [`{s}.features.json`](#features-json) | All | All | Unified ML feature export |
+
+> `{s}` = sample name.
+
+---
+
+## Output Format Options
+
+All tabular outputs support three formats controlled by `--output-format`:
+
+| Flag | Files produced | How to read |
+|------|---------------|-------------|
+| `--output-format tsv` **(default)** | `{s}.FSD.tsv`, `{s}.FSC.tsv`, etc. | `pd.read_csv(path, sep="\t")` |
+| `--output-format parquet` | `{s}.FSD.parquet`, `{s}.FSC.parquet`, etc. | `pd.read_parquet(path)` |
+| `--output-format both` | Both `.tsv` **and** `.parquet` for every tabular file | Either reader |
+
+The file **content** (columns, rows, values) is identical across formats — only the encoding changes.
+
+### TSV Compression (`--compress`)
+
+When `--compress` is set alongside `tsv` or `both` output format, every TSV file is
+gzip-compressed and given a `.tsv.gz` extension:
+
+```
+{s}.FSD.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+{s}.FSC.tsv.gz    →  pd.read_csv(path, sep="\t", compression="gzip")
+```
+
+### WPS — Always Parquet
+
+`*.WPS.parquet`, `*.WPS_background.parquet`, and `*.WPS.panel.parquet` are **always Parquet**
+regardless of `--output-format`. WPS stores thousands of 200-point per-anchor profiles — TSV
+at that scale would be hundreds of MB and functionally unusable. Use `pd.read_parquet()` for
+all WPS files.
+
+### Unified JSON (`--generate-json`)
+
+The `--generate-json` flag produces `{s}.features.json` **in addition to** the standard
+TSV/Parquet outputs. It aggregates every feature above into a single file for ML pipelines.
+JSON generation is independent of `--output-format` — you can use both together.
+
+```bash
+# Example: Parquet outputs + unified JSON
+krewlyzer run-all sample.bam -r hg19.fa -o out/ \
+    --output-format parquet \
+    --generate-json
+# Produces: *.FSD.parquet, *.FSC.parquet ... AND sample.features.json
+```
+
+See [JSON Export Reference](../features/output/json-output.md) for the complete JSON schema.
+
+---
+
+## On-Target vs Off-Target Files
+
+Most fragmentomics features generate **two parallel outputs** in panel mode: a standard file (off-target reads) and an `.ontarget.tsv` variant (on-target reads). Understanding the difference is critical for choosing the right input to any ML model.
+
+### What "On-Target" and "Off-Target" Mean
+
+In panel sequencing (e.g. MSK-ACCESS), reads fall into two categories:
+
+| Category | Reads | Depth | GC bias |
+|----------|-------|-------|---------|
+| **Off-target** | Do NOT overlap capture bait regions | Low (~1–5×) but genome-wide | Unbiased — not affected by probe GC |
+| **On-target** | Overlap the capture bait regions | High (~500–2000×) but only at panel genes | Biased — capture efficiency varies by probe GC content |
+
+### Why the Split Matters
+
+```
+          All cfDNA fragments in BAM
+                    │
+         ┌──────────┴──────────┐
+    Off-target             On-target
+  (genome-wide)         (panel genes only)
+         │                    │
+   FSC.tsv, FSR.tsv      FSC.ontarget.tsv
+   MDS.tsv, OCF.tsv      FSR.ontarget.tsv
+   FSD.tsv, ...          FSD.ontarget.tsv
+```
+
+**The off-target pool** is sampled uniformly across the genome, unaffected by probe GC, making it the **gold standard for fragmentation features** (FSR, FSC, FSD, MDS, OCF). The GC correction model is also trained exclusively on off-target fragments.
+
+**The on-target pool** has high depth at panel loci but is confounded by capture efficiency — probes with higher GC content capture more efficiently, making fragment size distributions at those loci appear artificially different. On-target reads are primarily useful for gene-level copy number and region-specific analysis, not genome-wide fragmentation.
+
+### Which to Use
+
+| Task | Use | Reason |
+|------|-----|--------|
+| Pan-cancer ML features (FSR, FSC, FSD, MDS, OCF) | **Off-target** (`.tsv`) | Unbiased, genome-wide, GC-corrected with unbiased model |
+| Gene-level copy number (FSC.gene.tsv) | **On-target** internally | Gene FSC already uses on-target correction factors |
+| Gene fragmentation composition (FSC.regions, E1) | On-target reads, but captured in gene/region TSVs | Not the raw `.ontarget.tsv` — use FSC.gene / FSC.regions |
+| Motif features for tissue-of-origin (MDS, EDM, BPM) | **Off-target** (`.tsv`) | On-target motifs are biased by probe sequence |
+| MDS on-target (when off-target too sparse) | `.ontarget.tsv` | Lower depth but gene-anchored signal |
+| OCF tissue-of-origin | **`OCF.tsv`** (WGS) or **`OCF.offtarget.tsv`** (panel) | `OCF.tsv` = all reads (WGS has no target split); in panel mode `OCF.offtarget.tsv` is the unbiased off-target score — use that instead of `OCF.tsv` to avoid contamination from capture-biased on-target reads |
+| Building a PON | **Off-target** only | Must match what the sample uses |
+
+!!! warning "Do not mix off-target and on-target in the same model"
+    Features from `FSR.tsv` (off-target) and `FSR.ontarget.tsv` (on-target) are not on the same scale. The on-target pool has different GC bias, different fragment size distributions, and different effective depth. Always use the same variant consistently across all samples in a cohort.
+
+### Complete On-Target / Off-Target File Inventory
+
+| Base file | On-target variant | Off-target variant |
+|-----------|------------------|-------------------|
+| `{s}.FSD.tsv` | `{s}.FSD.ontarget.tsv` | — (base is off-target) |
+| `{s}.FSR.tsv` | `{s}.FSR.ontarget.tsv` | — |
+| `{s}.FSC.tsv` | `{s}.FSC.ontarget.tsv` | — |
+| `{s}.EndMotif.tsv` | `{s}.EndMotif.ontarget.tsv` | — |
+| `{s}.BreakPointMotif.tsv` | `{s}.BreakPointMotif.ontarget.tsv` | — |
+| `{s}.MDS.tsv` | `{s}.MDS.ontarget.tsv` | — |
+| `{s}.OCF.tsv` | `{s}.OCF.ontarget.tsv` | `{s}.OCF.offtarget.tsv` ⚠️ |
+| `{s}.OCF.sync.tsv` | `{s}.OCF.ontarget.sync.tsv` | `{s}.OCF.offtarget.sync.tsv` |
+| `{s}.TFBS.tsv` | `{s}.TFBS.ontarget.tsv` | — |
+| `{s}.TFBS.sync.tsv` | `{s}.TFBS.ontarget.sync.tsv` | — |
+| `{s}.ATAC.tsv` | `{s}.ATAC.ontarget.tsv` | — |
+| `{s}.ATAC.sync.tsv` | `{s}.ATAC.ontarget.sync.tsv` | — |
+| `{s}.correction_factors.tsv` | `{s}.correction_factors.ontarget.tsv` | — |
+
+> ⚠️ **OCF is a special case** — it always computes **three** output variants:
+>
+> | File | Contains | When generated |
+> |------|----------|----------------|
+> | `{s}.OCF.tsv` | **All reads** (on + off combined) | Always |
+> | `{s}.OCF.ontarget.tsv` | On-target reads only | Panel mode |
+> | `{s}.OCF.offtarget.tsv` | Off-target reads only | Panel mode |
+>
+> In WGS mode, `OCF.tsv` = all reads ≈ off-target (no target split exists). In panel mode,
+> `OCF.tsv` mixes on-target (capture-biased) and off-target reads — for unbiased tissue-of-origin
+> signal, use `OCF.offtarget.tsv` instead.
+
+### GC Correction and On-Target
+
+GC correction is trained on **off-target reads only**, then applied to both pools:
+
+```
+Off-target reads → GC model training → correction_factors.tsv
+On-target reads  → correction_factors.ontarget.tsv (separate model)
+```
+
+The on-target GC model accounts for probe-specific capture bias. It is used internally when generating `FSC.gene.tsv` and `FSC.regions.tsv` — you do not need to apply it manually.
+
+---
+
+## Core Fragmentomics
+
+### FSD (Fragment Size Distribution)
+
+**File:** `{sample}.FSD.tsv` / `{sample}.FSD.ontarget.tsv`
+
+FSD measures how many fragments of each size (65–400 bp, 5 bp bins) come from each chromosomal arm. Each row is one arm.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `region` | str | Arm coordinate range, e.g. `chr1:10001-121535433`, `chr17:25263006-81195210` |
+| `65-69`, `70-74`, … `395-399` | float | GC-corrected fragment count in that 5 bp size bin (67 bins) |
+| `total` | float | Total GC-corrected fragment count for this arm |
+
+!!! note "`total` is not the whole fragment set"
+    The length *filter* admits 65–1000 bp, but FSD bins only `[65, 400)`. Fragments
+    of 400 bp and above are counted in neither the bins nor `total`, so a
+    long-fragment fraction computed against `total` has a denominator that excludes
+    them. For the 401–1000 bp mass, use FSC's `ultra_long`.
+
+**With `--pon-model`, one log-ratio per bin plus a stability score.**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `{bin}_logR` | float | log₂ of the sample count over the healthy expectation **for that bin** — e.g. `65-69_logR`. NaN where the arm is absent from the PON or the baseline measured nothing. |
+| `pon_stability` | float | How tightly the healthy cohort agreed across the arm's bins: `1 / (1 + mean(CV²))` with CV = σ/expected, so it runs in **(0, 1]**. 1.0 is exact agreement; lower means the baseline itself is uncertain there, so read that arm's log-ratios with less confidence. NaN when no σ was measurable at all. Identical for every sample scored against the same PON — it is a property of the model, not the sample. |
+
+!!! warning "Fixed in 0.9.0 — re-run any sample normalised by an earlier build"
+    Before 0.9.0 every `_logR` column was computed against the **last** size bin's
+    expectation rather than its own, because `size_bin` is stored as a double and the
+    reader called `get_int`, which errors on a Double. Measured on a shipped PON:
+    41/41 arms matched the last-bin baseline exactly. The correction is large — a
+    median log₂ shift of −1.05 and a maximum |Δ| of 5.10. `pon_stability` was
+    separately computed from one bin's σ for the whole arm, wrong by a median of
+    4709%, **and its scale changed in 0.9.0**: it was an unnormalised inverse
+    variance that underflowed to `0.000000` on every arm once each bin got its
+    own σ, and is now the bounded agreement score described above. Old and new
+    values are not comparable. The PONs are unaffected; only samples need
+    re-running.
+
+#### Purpose & Use Cases
+
+- **ARM-LEVEL fragmentation fingerprint**: Each arm's histogram reflects the chromatin state of that chromosomal region
+- **Aneuploidy / CNV detection**: Arms with deletions or amplifications show altered absolute counts in `total`
+- **Tumor-specific size shift**: Cancer plasma shows a systematic shift toward shorter fragments genome-wide
+
+#### ML Use Case
+
+```python
+import pandas as pd
+import numpy as np
+
+df = pd.read_csv("sample.FSD.tsv", sep="\t", index_col="region")
+size_cols = [c for c in df.columns if c != "total"]
+
+# Feature vector: proportion of each size class per arm
+props = df[size_cols].div(df["total"] + 1e-9, axis=0)
+
+# Reduce to 3-class: short (65-149), mono (150-259), long (260-400)
+props["short_frac"] = props[[c for c in size_cols if int(c.split("-")[0]) < 150]].sum(axis=1)
+props["mono_frac"]  = props[[c for c in size_cols if 150 <= int(c.split("-")[0]) < 260]].sum(axis=1)
+props["long_frac"]  = props[[c for c in size_cols if int(c.split("-")[0]) >= 260]].sum(axis=1)
+```
+
+**Best for**: Arm-level `short_frac` as 46-feature input (2 arms × 23 chromosomes) per sample for pan-cancer models.
+
+!!! note "On-target variant"
+    `FSD.ontarget.tsv` uses only reads overlapping target capture regions. Useful for panel-specific copy number analysis, but capture-biased — prefer off-target for fragmentation ML features.
+
+---
+
+### FSR (Fragment Size Ratio)
+
+**File:** `{sample}.FSR.tsv` / `{sample}.FSR.ontarget.tsv`
+
+FSR computes the **PON-normalized short-to-long ratio** per window (5 Mb in WGS mode, 100kb in panel mode). This is the primary genome-wide tumor fraction biomarker.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `region` | str | Window region, e.g. `chr1:0-5000000` (WGS) or `chr1:0-100000` (panel) |
+| `short_count` | int | Count of short frags: ultra_short + core_short (65–149 bp) |
+| `long_count` | int | Count of long frags: di_nucl + long (221–400+ bp) |
+| `total_count` | int | Total fragment count in window |
+| `short_norm` | float | `short_count / PON_short_mean` — PON-normalized short |
+| `long_norm` | float | `long_count / PON_long_mean` — PON-normalized long |
+| `short_long_ratio` | float | `short_norm / long_norm` — primary biomarker |
+| `short_long_log2` | float | `log2(short_long_ratio)` — ML-ready signed metric |
+| `short_frac` | float | `short_count / total_count` — raw proportion |
+| `long_frac` | float | `long_count / total_count` — raw proportion |
+
+#### Purpose & Use Cases
+
+- **Tumor fraction estimation**: `short_long_ratio` increases proportionally with ctDNA fraction
+- **Genome-wide cancer screen**: Profile of 500+ windows per sample captures focal and arm-level alterations
+- **PON comparison**: PON normalization (`short_norm`, `long_norm`) removes batch effects before ratio — critical for cross-batch comparison
+
+!!! important "Why not just use `short_frac` from FSC?"
+    `short_frac` is a raw proportion — it conflates true biology with library prep and GC bias. `short_long_ratio` divides PON-normalized values, canceling technical noise. Use FSR for any cross-sample comparison.
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.FSR.tsv", sep="\t")
+
+# Primary feature vector: ~500 windows × 1 scalar
+feature_vec = df["short_long_log2"].values  # signed, mean ~0 in healthy
+
+# Genome-wide statistics as compact features
+features = {
+    "fsr_mean":   df["short_long_log2"].mean(),
+    "fsr_std":    df["short_long_log2"].std(),
+    "fsr_q90":    df["short_long_log2"].quantile(0.9),
+    "fsr_n_elevated": (df["short_long_log2"] > 0.3).sum(),
+}
+```
+
+**Typical range**: healthy ~0.0 ± 0.15; high ctDNA > +0.4 (more short frags than PON)
+
+---
+
+### FSC (Fragment Size Coverage)
+
+**File:** `{sample}.FSC.tsv` / `{sample}.FSC.ontarget.tsv`
+
+> **Changed in 0.9.0.** `FSC.ontarget` normalises against the PON's
+> `gc_bias_ontarget` curves; it previously used the genome-wide ones, so its
+> `*_log2` and `*_reliability` values shift. Capture enrichment gives
+> on-target fragments a different GC profile, which is why panel mode fits a
+> separate block — one that was stored by every panel PON and read by nothing.
+> A PON without that block falls back to the genome-wide curves.
+>
+> Also in 0.9.0: `*_log2` and `*_reliability` are **NaN** when the PON has no
+> GC-bias block, where they were previously `0.0` and `1.0`. Zero is not a
+> neutral log-ratio — it asserts the sample sits exactly at the healthy
+> baseline.
+
+FSC counts fragments in 6 non-overlapping size channels across 5 Mb windows — the foundational multi-channel coverage feature.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `chrom` | str | Chromosome |
+| `start` | int | Window start (0-based) |
+| `end` | int | Window end |
+| `ultra_short` | float | GC-corrected count, 65–100 bp |
+| `core_short` | float | GC-corrected count, 101–149 bp |
+| `mono_nucl` | float | GC-corrected count, 150–220 bp |
+| `di_nucl` | float | GC-corrected count, 221–260 bp |
+| `long` | float | GC-corrected count, 261–400 bp |
+| `ultra_long` | float | GC-corrected count, 401–1000 bp |
+| `total` | float | GC-corrected total, 65–1000 bp |
+| `mean_gc` | float | Mean GC fraction of fragments in window |
+| `*_log2` | float | log₂(channel / PON_mean), with `--pon-model` |
+| `*_reliability` | float | 1/(PON_variance + k) — weight for PON columns |
+
+#### Purpose & Use Cases
+
+- **Multi-channel fragmentation profile**: Each channel represents fragments sharing a biological origin (nucleosomal, sub-nucleosomal, apoptotic)
+- **CNV proxy**: `total` counts per arm reflect coverage depth — useful for detecting large-scale copy number events
+- **PON log2 ratios**: `core_short_log2`, `mono_nucl_log2` etc. are analogous to CNV log-ratio tracks
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.FSC.tsv", sep="\t")
+
+# 6-channel feature matrix: windows × channels
+channels = ["ultra_short", "core_short", "mono_nucl", "di_nucl", "long", "ultra_long"]
+X = df[channels].values  # shape: (n_windows, 6)
+
+# Normalize to proportions (remove depth variation)
+X_prop = X / (df["total"].values[:, None] + 1e-9)
+
+# With PON: use log2 ratios directly (already depth-normalized)
+log2_cols = [c + "_log2" for c in channels if c + "_log2" in df.columns]
+X_pon = df[log2_cols].values  # shape: (n_windows, 6) — centered near 0 in healthy
+```
+
+**Best for**: Input to CNV callers, genome-wide fragmentation classifiers, and tumor fraction regression.
+
+---
+
+### FSC Gene-Level
+
+**File:** `{sample}.FSC.gene.tsv`  
+**Requires:** `--assay xs2` (or other assay code) / `run-all`
+
+Aggregates FSC across all exons for each panel gene. Rows = genes.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `gene` | str | HGNC symbol (e.g. `ATM`, `TP53`) |
+| `n_regions` | int | Number of exons/targets captured |
+| `total_bp` | int | Total base pairs covered |
+| `ultra_short` … `ultra_long` | float | GC-corrected count per size class, same six bands as [FSC genome bins](#fsc-fragment-size-coverage) |
+| `total` | float | Total GC-corrected count |
+| `ultra_short_ratio` … `ultra_long_ratio` | float | `channel / total` — size composition, sums to 1 |
+| `normalized_depth` | float | RPKM-like: `(total × 10⁹) / (total_bp × total_frags)` |
+
+!!! warning "Band boundaries changed in 0.9.0"
+    Earlier releases used different size bands here than in the genome-bin
+    table, and emitted five channels instead of six. Values are not comparable
+    across the 0.9.0 boundary. See [FSC feature docs](../features/core/fsc.md)
+    for the old bands.
+
+#### Purpose & Use Cases
+
+- **Gene-level copy number**: `normalized_depth` enables comparing coverage across genes in the same sample
+- **Gene fragmentation composition**: `*_ratio` columns show whether a gene's reads are enriched for short (tumor) or long (normal) fragments
+- **Panel-level feature matrix**: 146 genes × 6 channels = 876 features per sample
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.FSC.gene.tsv", sep="\t").set_index("gene")
+
+# Gene-level short enrichment
+df["tumor_signal"] = df["ultra_short_ratio"] + df["core_short_ratio"]
+
+# Full channel composition feature matrix: 146 genes × 6 ratios
+ratio_cols = ["ultra_short_ratio", "core_short_ratio", "mono_nucl_ratio",
+              "di_nucl_ratio", "long_ratio", "ultra_long_ratio"]
+X = df[ratio_cols].values  # shape: (146, 6) per sample
+
+# Normalized depth for CNV
+cnv_proxy = df["normalized_depth"]  # pivot across samples → CNV log-ratio
+```
+
+**Best for**: Gene-specific models, tissue-of-origin (which genes show altered fragmentation), copy number inference.
+
+---
+
+### FSC Region-Level
+
+**File:** `{sample}.FSC.regions.tsv`  
+**Requires:** `--assay` or `run-all`
+
+Per-exon/target fragment size coverage. Most granular FSC output.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `chrom` | str | Chromosome |
+| `start` / `end` | int | Exon/target coordinates |
+| `gene` | str | Gene symbol |
+| `region_name` | str | Unique exon/target identifier |
+| `region_bp` | int | Region size in bp |
+| `ultra_short` … `ultra_long` | float | GC-corrected counts, same six bands as the genome-bin table |
+| `total` | float | Total count |
+| `ultra_short_ratio` … `ultra_long_ratio` | float | `channel / total`, sums to 1 |
+| `normalized_depth` | float | RPKM-like depth |
+
+The same 0.9.0 band correction applies here.
+
+#### Purpose & Use Cases
+
+- **Exon-level resolution**: Useful when only specific exons (e.g., hotspot exons in `TP53`) show altered fragmentation
+- **Fine-grained CNV**: Detect focal amplifications or deletions at single-exon scale
+- **Input for PON building**: Use to compute exon-level expected depth profiles
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.FSC.regions.tsv", sep="\t")
+
+# Pivot: regions × channels, one row per region
+pivot = df.pivot_table(index="region_name", values=["core_short_ratio", "mono_nucl_ratio"])
+
+# Filter to well-covered regions
+well_covered = df[df["total"] > 50]["region_name"]
+df_filtered = df[df["region_name"].isin(well_covered)]
+```
+
+---
+
+### FSC E1-Only
+
+**File:** `{sample}.FSC.regions.e1only.tsv`  
+**Requires:** `--assay` or `run-all` (disable with `--disable-e1-aggregation`)
+
+First exon (E1) per gene only. Same columns as `FSC.regions.tsv`.
+
+#### Purpose & Use Cases
+
+- **Promoter-proximal fragmentation**: E1 = first exon = nucleosome-depleted region (NDR) near TSS. NDRs have the most cancer-specific fragmentation patterns (Helzer et al. 2025)
+- **Highest cancer signal**: E1 consistently outperforms whole-gene FSC in early cancer detection tasks
+- **Compact feature set**: 146 genes × 1 exon = compact, interpretable vector
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.FSC.regions.e1only.tsv", sep="\t").set_index("gene")
+
+# Primary cancer signal: promoter short enrichment
+df["promoter_short"] = df["ultra_short_ratio"] + df["core_short_ratio"]
+
+# 146-gene feature vector — best single FSC feature for early detection
+X = df["promoter_short"].values
+```
+
+!!! tip "Use E1 over gene-level for early detection models"
+    `e1only` routinely achieves lower AUC for early-stage cancer vs `FSC.gene.tsv` because E1 captures NDR-specific fragmentation that is washed out by whole-gene averaging.
+
+---
+
+### FSC Counts (Pre-Correction)
+
+**File:** `{sample}.fsc_counts.tsv` / `{sample}.correction_factors.ontarget.tsv`
+
+Raw bin-level fragment counts before GC correction — used internally for GC model training.
+
+#### Purpose & Use Cases
+
+- **GC bias diagnostics**: Compare observed vs expected counts per (length, GC) bin
+- **Batch QC**: Libraries with systematic GC bias show large correction factors in specific bins
+- **Not for ML features**: GC-corrected values in `FSC.tsv` are the right input; `fsc_counts` is pre-correction
+
+---
+
+## Nucleosome Positioning
+
+### WPS (Windowed Protection Score)
+
+**File:** `{sample}.WPS.parquet`
+
+!!! note "WPS is always Parquet"
+    WPS outputs (`*.WPS.parquet`, `*.WPS_background.parquet`, `*.WPS.panel.parquet`) are
+    **always written as Parquet**, regardless of the `--output-format` flag. WPS vectors are
+    thousands of 200-point profiles — TSV at that scale would be hundreds of MB and
+    functionally unusable. Use `pd.read_parquet()` to load WPS files.
+
+Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene TSS or CTCF site). WPS captures how protected (nucleosome-covered) a region is to fragments of two sizes.
+
+#### Columns (Parquet)
+
+!!! warning "The profile columns are 200-element lists, not scalars"
+    `wps_nuc`, `wps_tf`, `prot_frac_nuc`, `prot_frac_tf` and `wps_nuc_z` each hold
+    **one value per position** across the anchor window. This table documented them
+    as `float` until 0.9.0, alongside four columns that were never written
+    (`wps_nuc_smooth`, `wps_tf_smooth`, `wps_nuc_mean`, `wps_tf_mean`) — so the
+    example below indexed columns that do not exist and raised `KeyError`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `region_id` | str | Anchor identifier (e.g. `ENSG00000142611_TSS`) |
+| `chrom` | str | Chromosome |
+| `center` | int32 | Anchor midpoint |
+| `strand` | str | `+` / `-` |
+| `region_type` | str | `TSS`, `CTCF`, etc. |
+| `wps_nuc` | list[float] | Nucleosomal WPS per position (120–180 bp fragments) |
+| `wps_tf` | list[float] | TF-footprint WPS per position (35–80 bp fragments) |
+| `capture_mask` | list[int8] | Per-position flag for panel capture overlap |
+| `prot_frac_nuc` | list[float] | Per-position protected fraction, nucleosomal |
+| `prot_frac_tf` | list[float] | Per-position protected fraction, TF |
+| `local_depth` | float | Mean coverage at the anchor |
+
+**With `--pon-model`, seven more.** Absent from a `--skip-pon` run, and absent
+per anchor when that anchor is not in the PON — `null` rather than `0.0`, since
+a z of zero is a claim of perfect agreement.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `wps_nuc_z` | list[double] | Per-position `(x − mean) / σ` against the baseline profile. NaN at positions where σ was not measurable. |
+| `wps_log_amplitude` | double | `log1p` of the profile's peak-to-trough range. Logged because the raw range correlates +0.512 with sequencing depth. |
+| `wps_log_amplitude_z` | double | Its z against the PON's `wps_shape_baseline`. |
+| `wps_shape_corr` | double | Pearson *r* between the sample profile and the baseline mean profile. |
+| `wps_shape_corr_z` | double | Its z, computed on the Fisher (`arctanh`) scale — a bounded *r* left 302 of 400 anchors unable to reach +2. |
+| `wps_phase_shift_bp` | double | Displacement against the baseline, in positions. **Deliberately not z-scored**: per anchor its intraclass correlation is 0.479, so roughly half of any lag is noise. |
+| `wps_phase_at_search_limit` | bool | The ±30 search ended on its own edge, so `wps_phase_shift_bp` is a boundary, not a measurement (invariant #3). Check this before believing a large shift. |
+
+!!! danger "Do not average `wps_nuc_z` across positions"
+    Adjacent WPS positions have lag-1 autocorrelation **0.986** — a fragment spans
+    ~167 bp and contributes to many positions at once. A mean of z over 200
+    positions has nothing like `σ/√200` precision, and a max of |z| has an expected
+    value of 2.97 under pure noise. Use the derived shape columns above, each of
+    which is z-scored against a baseline of itself.
+
+    `wps_tf` is not PON-scored: scoring runs once per table, over `wps_nuc`.
+
+#### Purpose & Use Cases
+
+- **Nucleosome positioning**: `wps_nuc_smooth` detects nucleosome phasing at TSS/CTCF anchors
+- **TF accessibility**: `wps_tf` / `prot_frac_tf` reflects accessible chromatin at TF binding sites
+- **Cancer signal**: Tumor DNA shows flattened/disrupted WPS profiles at TSS of active genes
+- **NRL (Nucleosome Repeat Length)**: Computed in `WPS_background.parquet` from Alu stacking
+
+#### ML Use Case
+
+```python
+import pandas as pd
+
+df = pd.read_parquet("sample.WPS.parquet")
+
+# Feature vector per sample: mean WPS across all anchors.
+# The profile columns are 200-element lists, so stack before reducing.
+import numpy as np
+
+nuc = np.vstack(df["wps_nuc"].to_numpy())          # (n_anchors, 200)
+features = {
+    "wps_nuc_global_mean": float(np.nanmean(nuc)),
+    "wps_nuc_global_std":  float(np.nanstd(nuc)),
+    "prot_frac_nuc_mean":  df["prot_frac_nuc"].mean(),
+    "prot_frac_tf_mean":   df["prot_frac_tf"].mean(),
+}
+
+# Per-anchor feature matrix for gene-level models.
+# The profile columns are lists, so reduce them explicitly rather than
+# indexing scalar columns that do not exist.
+import numpy as np
+
+X = np.column_stack([
+    np.vstack(df["wps_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["wps_tf"].to_numpy()).mean(axis=1),
+    df["wps_log_amplitude"].to_numpy(),      # with --pon-model
+    df["wps_shape_corr"].to_numpy(),
+])
+# shape: (n_anchors, 4) — one row per TSS/CTCF
+```
+
+**Best for**: Deep learning input (WPS profiles as 1D signals), nucleosome periodicity score, TSS accessibility classifier.
+
+---
+
+### WPS Panel
+
+**File:** `{sample}.WPS.panel.parquet`  
+**Requires:** `--assay`
+
+Same columns as `WPS.parquet`, filtered to panel gene anchors (~1,820 for xs2). Rows are panel-gene TSS and CTCF sites.
+
+**Since 0.9.0 these anchors are PON-scored.** They carry the same derived
+columns as `WPS.parquet` — `wps_nuc_z`, `wps_log_amplitude`,
+`wps_shape_corr`, `wps_phase_shift_bp` and their z-scores — computed against
+the PON's `wps_baseline_panel` block. Before 0.9.0 that block was built and
+stored by every panel-mode PON and read by nothing, so the anchors closest to
+the targeted regions were the only WPS output with no healthy comparison. The
+shape statistics borrow the genome-wide `wps_shape_baseline`: a few hundred
+panel anchors is too few to fit a second one, and they overlap the
+genome-wide set.
+
+#### ML Use Case
+
+```python
+df = pd.read_parquet("sample.WPS.panel.parquet")
+
+# Compact panel feature: one row per anchor, reduced from the profiles.
+import numpy as np
+
+X = np.column_stack([
+    np.vstack(df["wps_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["wps_tf"].to_numpy()).mean(axis=1),
+    np.vstack(df["prot_frac_nuc"].to_numpy()).mean(axis=1),
+    np.vstack(df["prot_frac_tf"].to_numpy()).mean(axis=1),
+])
+
+# Gene-indexed lookup — the profile itself, not a scalar
+df_gene = df.set_index("region_id")
+tp53_profile = np.asarray(df_gene.loc["TP53_TSS", "wps_nuc"])   # 200 values
+```
+
+---
+
+### WPS Background
+
+**File:** `{sample}.WPS_background.parquet`
+
+Hierarchical Alu element stacking analysis capturing **global chromatin state and nucleosome repeat length (NRL)**.
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `group_id` | str | `Global_All`, `Family_AluY/S/J/Other`, `Chr{N}_All` |
+| `stacked_wps_nuc` | float[] | 30-position binned stacked WPS (nucleosomal) |
+| `stacked_wps_tf` | float[] | 30-position binned stacked WPS (TF) |
+| `alu_count` | int | Number of Alu elements in this group |
+| `mean_wps_nuc` | float | Mean WPS amplitude |
+| `nrl_bp` | float | Estimated Nucleosome Repeat Length in bp (~190 in healthy) |
+| `nrl_deviation_bp` | float | Deviation from expected 190 bp NRL |
+| `periodicity_score` | float | Signal-to-noise ratio of periodicity (0–1) |
+| `adjusted_score` | float | Periodicity score penalized by NRL deviation |
+| `fragment_ratio` | float | Ratio of short/long fragments at Alu sites |
+
+#### Purpose & Use Cases
+
+- **Global chromatin compaction**: `nrl_bp` shortens in cancer (chromatin opens globally)
+- **NRL as tumor biomarker**: Healthy plasma NRL ~190 bp; cancer < 185 bp
+- **Background correction**: Used to compute "global_pon" baseline for WPS z-scores
+
+#### ML Use Case
+
+```python
+df = pd.read_parquet("sample.WPS_background.parquet")
+global_row = df[df["group_id"] == "Global_All"].iloc[0]
+
+features = {
+    "nrl_bp": global_row["nrl_bp"],
+    "periodicity_score": global_row["periodicity_score"],
+    "adjusted_score": global_row["adjusted_score"],
+    "fragment_ratio_bg": global_row["fragment_ratio"],
+}
+```
+
+**Best for**: Global chromatin state features, cancer screening, NRL as continuous tumor fraction predictor.
+
+---
+
+## Motif & Tissue-of-Origin
+
+### EndMotif
+
+**File:** `{sample}.EndMotif.tsv` / `{sample}.EndMotif.ontarget.tsv`
+
+4-mer frequencies at fragment 5′ ends. One row per sample, 256 columns (one per AAAA→TTTT 4-mer).
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `AAAA` … `TTTT` | Frequency of that 4-mer at fragment ends (sums to 1.0) |
+
+#### Purpose & Use Cases
+
+- **Tissue-of-origin**: Different tissues have distinct end-motif preferences based on DNASE1L3 activity
+- **Cancer detection**: DNASE1L3 is suppressed in cancer, producing a flattened, less-specific motif profile
+- **MDS input**: Raw material for Motif Diversity Score calculation
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.EndMotif.tsv", sep="\t")
+# Single row: 256 4-mer frequencies
+X = df.iloc[0].values  # 256-dimensional feature vector
+
+# Reduce by GC content group (64 → 5 groups)
+gc_groups = {"AT-rich": [k for k in df.columns if k.count("A") + k.count("T") >= 3], ...}
+```
+
+---
+
+### EndMotif 1-mer
+
+**File:** `{sample}.EndMotif1mer.tsv`
+
+Single-base (A/C/G/T) composition at fragment ends.
+
+#### Columns: `base`, `fraction`
+
+#### Purpose & Use Cases
+
+- **GC bias QC**: Should be roughly balanced; extreme GC skew indicates library quality issues
+- **DNASE1L3 proxy**: Healthy cfDNA has distinct strand-asymmetric base preferences
+
+---
+
+### BreakPointMotif
+
+**File:** `{sample}.BreakPointMotif.tsv` / `{sample}.BreakPointMotif.ontarget.tsv`
+
+4-mer frequencies at internal fragment **breakpoints** (rather than ends). Same 256-column format as EndMotif.
+
+#### Purpose vs EndMotif
+
+| | EndMotif | BreakPointMotif |
+|---|---------|-----------------|
+| **Measures** | DNASE1L3 cutting preference | Mechanical fragmentation patterns |
+| **Cancer signal** | DNASE1L3 suppression | Chromatin compaction / MNase-like cleavage |
+| **Correlation** | r ~ 0.6 with BPM | Complementary signal |
+
+**Best for**: Combining both in multimodal ML models — they capture distinct biological processes.
+
+---
+
+### MDS (Motif Diversity Score)
+
+**File:** `{sample}.MDS.tsv` / `{sample}.MDS.ontarget.tsv`
+
+Single-number summary of end-motif randomness (Shannon entropy of 256 4-mers).
+
+#### Columns
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `Sample` | str | Sample name |
+| `MDS` | float | Motif Diversity Score (Shannon entropy of 256 4-mers) |
+| `mds_z` | float | Z-score vs PON on-target baseline (`.ontarget` variant only, with `--pon-model`) |
+
+**Range**: Healthy plasma ~0.80–0.85; cancer (DNASE1L3 suppressed) < 0.75
+
+#### ML Use Case
+
+```python
+mds = float(pd.read_csv("sample.MDS.tsv", sep="\t")["MDS"].iloc[0])
+# Single scalar — highly interpretable cancer feature
+```
+
+---
+
+### MDS Exon-Level
+
+**File:** `{sample}.MDS.exon.tsv`  
+**Requires:** `region-mds` command or `run-all`
+
+MDS calculated per exon/target from BAM reads overlapping that region.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `gene` | Gene symbol |
+| `name` | Exon identifier (`gene:exonN` for WGS; target name for panel) |
+| `chrom` | Chromosome |
+| `start` / `end` | Exon coordinates |
+| `strand` | Strand |
+| `n_fragments` | Fragments overlapping this exon |
+| `mds` | Motif Diversity Score for this exon |
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.MDS.exon.tsv", sep="\t")
+
+# Filter low-coverage exons
+df_high = df[df["n_fragments"] >= 20]
+
+# Per-exon MDS as feature matrix (rows = exons)
+X = df_high[["mds"]].values  # or pivot into gene × exon matrix
+```
+
+---
+
+### MDS Gene-Level
+
+**File:** `{sample}.MDS.gene.tsv`  
+**Requires:** `region-mds` command or `run-all`
+
+Gene-level aggregation of per-exon MDS, plus E1 (first exon) MDS as the promoter-proximal signal.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `gene` | Gene symbol |
+| `n_exons` | Number of exons with data |
+| `n_fragments` | Total fragments across all exons |
+| `mds_mean` | Mean MDS across all exons |
+| `mds_e1` | MDS of E1 (first exon) only |
+| `mds_std` | Standard deviation of per-exon MDS |
+| `mds_z` | Z-score vs PON (with `--pon-model`) |
+| `mds_e1_z` | E1 MDS z-score vs PON |
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.MDS.gene.tsv", sep="\t").set_index("gene")
+
+# E1 MDS is highest-signal feature (promoter-proximal NDR)
+X_e1 = df["mds_e1"].values           # 146 features for panel
+X_z  = df["mds_e1_z"].fillna(0).values  # PON-normalized — zero-centered in healthy
+```
+
+**Best for**: Gene-level cancer classifiers, promoter aberration detection, combining with FSC-E1.
+
+---
+
+### OCF (Orientation-aware cfDNA Fragmentation)
+
+**File:** `{sample}.OCF.tsv` / `{sample}.OCF.ontarget.tsv` / `{sample}.OCF.offtarget.tsv`
+
+!!! note "Three OCF variants"
+    OCF always produces three output files:
+
+    - **`OCF.tsv`** — **All reads** (on + off combined). In WGS mode this is the only file and
+      equals the off-target signal. In panel mode it mixes capture-biased on-target reads with
+      off-target reads — use `OCF.offtarget.tsv` for unbiased tissue-of-origin in panel mode.
+    - **`OCF.ontarget.tsv`** — On-target reads only (panel mode). Useful for gene-anchored OCF
+      but biased by capture efficiency at tissue-specific loci.
+    - **`OCF.offtarget.tsv`** — Off-target reads only (panel mode). Preferred for ML features
+      as it is unbiased by capture probe GC content.
+
+Tissue-of-origin scores based on strand asymmetry of fragment ends at tissue-specific open chromatin regions.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `tissue` | Tissue type (Liver, Lung, Colon, Placenta, etc.) |
+| `OCF` | Raw score = `(U - D) / (U + D)` — upstream/downstream asymmetry |
+| `ocf_z` | OCF z-score vs PON (with `--pon-model`) |
+
+#### Purpose & Use Cases
+
+- **Tissue-of-origin**: Which tissue contributed most cfDNA — useful for cancer site-of-origin
+- **Multi-tissue mixture deconvolution**: Multiple elevated `ocf_z` values suggest multi-tissue contribution
+- **ctDNA fraction proxy**: Overall OCF magnitude correlates with cfDNA purity
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.OCF.tsv", sep="\t").set_index("tissue")
+
+# OCF score vector across tissues (e.g. 10 tissues = 10 features)
+X_ocf = df["OCF"].values
+X_z   = df["ocf_z"].fillna(0).values  # zero-centered in healthy
+
+# Tissue with max signal
+top_tissue = df["ocf_z"].idxmax()
+```
+
+**Best for**: Primary tumor site-of-origin classification, multi-class tissue deconvolution.
+
+---
+
+### OCF Sync
+
+**File:** `{sample}.OCF.sync.tsv`
+
+Positional strand-specific protection profiles — detailed positional data underlying the OCF summary score.
+
+#### Columns: `label`, `count`, `mean_size`, `entropy`
+
+**Use**: Raw data for visualizing strand phasing; input to advanced nucleosome positioning models.
+
+---
+
+### TFBS (Transcription Factor Binding Site Entropy)
+
+**File:** `{sample}.TFBS.tsv` / `{sample}.TFBS.ontarget.tsv`
+
+Fragment size entropy at TFBS regions for 808 transcription factors. Reflects chromatin accessibility and TF binding.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `label` | TF name (e.g. `CTCF`, `SP1`, `E2F1`) |
+| `count` | Fragment count |
+| `mean_size` | Mean fragment size at this TF's sites |
+| `entropy` | Shannon entropy of fragment size distribution |
+
+#### Purpose & Use Cases
+
+- **TF accessibility**: Low entropy = dominated by one size class (nucleosomal); high entropy = mixed, accessible
+- **TF-specific cancer signal**: Some TFs (E2F family, SP1) show altered fragmentation in cancer
+- **808-feature vector**: One entropy value per TF = large, rich feature set
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.TFBS.tsv", sep="\t").set_index("label")
+
+# 808 TF entropy values — high-dimensional feature vector
+X_tfbs = df["entropy"].values
+
+# Mean size as complementary feature
+X_size = df["mean_size"].values
+
+# Combine
+X = np.stack([X_tfbs, X_size], axis=1)  # shape: (808, 2)
+```
+
+---
+
+### TFBS Sync
+
+**File:** `{sample}.TFBS.sync.tsv`
+
+Per-TF × per-size distribution — the raw size histogram for each TF.
+
+#### Columns: `label`, `size`, `count`, `proportion`
+
+**Use**: Size-resolved TF footprinting; input for detecting nucleosome-footprint transitions.
+
+---
+
+### ATAC (Chromatin Accessibility Entropy)
+
+**File:** `{sample}.ATAC.tsv` / `{sample}.ATAC.ontarget.tsv`
+
+Fragment size entropy at ATAC-seq accessible regions for 23 cancer-relevant tissue types.
+
+#### Columns
+
+Same as TFBS: `label` (tissue type), `count`, `mean_size`, `entropy`
+
+#### Purpose & Use Cases
+
+- **Tissue-specific accessibility**: Which tissue's ATAC peaks show altered fragmentation
+- **Cancer type inference**: Different cancer types show tissue-specific ATAC entropy patterns
+- **Complementary to OCF**: OCF uses strand asymmetry; ATAC uses size entropy — different signal axis
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.ATAC.tsv", sep="\t").set_index("label")
+
+# 23 tissue entropy values — compact tissue-of-origin feature
+X_atac = df["entropy"].values
+
+# Combine OCF + ATAC tissue vectors for multimodal tissue classifier
+X_combined = np.concatenate([ocf_scores, atac_entropy])
+```
+
+---
+
+### ATAC Sync
+
+**File:** `{sample}.ATAC.sync.tsv`
+
+Per-tissue × per-size fragment distributions.
+
+#### Columns: `label`, `size`, `count`, `proportion`
+
+---
+
+## Variant-Level
+
+### mFSD (Mutant Fragment Size Distribution)
+
+**File:** `{sample}.mFSD.tsv`  
+**Requires:** `--maf` / `run-all` with MAF input
+
+Per-variant fragment size analysis. Compares ALT-bearing fragments vs REF, NonREF, and N (uncertain) allele classes.
+
+#### Column Groups (46 total)
+
+| Group | Columns | Description |
+|-------|---------|-------------|
+| **Variant** (5) | `Chrom`, `Pos`, `Ref`, `Alt`, `VarType` | Variant coordinates and type |
+| **Raw Counts** (5) | `REF_Count`, `ALT_Count`, `NonREF_Count`, `N_Count`, `Total_Count` | Fragments per allele class |
+| **GC-Weighted** (5) | `REF_Weighted`, `ALT_Weighted`, `NonREF_Weighted`, `N_Weighted`, `VAF_GC_Corrected` | GC-corrected counts and VAF |
+| **Log-Likelihood** (2) | `ALT_LLR`, `REF_LLR` | For low-N variants (ALT_Count < 5) |
+| **Mean Sizes** (4) | `REF_MeanSize`, `ALT_MeanSize`, `NonREF_MeanSize`, `N_MeanSize` | Mean fragment size per class |
+| **KS Tests** (18) | `Delta_*/KS_*/KS_Pval_*` × 6 pairings | KS distance + p-value for each allele pair |
+| **Derived** (5) | `VAF_Proxy`, `Error_Rate`, `N_Rate`, `Size_Ratio`, `Quality_Score` | Summary biomarkers |
+| **Flags** (2) | `ALT_Confidence`, `KS_Valid` | Quality indicators |
+
+#### Purpose & Use Cases
+
+- **MRD detection**: `VAF_GC_Corrected` + `KS_Pval_ALT_REF` identify true somatic mutations vs noise
+- **Fragment size as orthogonal evidence**: `Delta_ALT_REF` negative = ALT fragments shorter than REF = tumor-derived ctDNA
+- **Duplex support**: `ALT_LLR` provides statistically valid evidence even at 1–2 fragment counts
+- **Multi-variant aggregation**: Combine evidence across many variants to estimate ctDNA fraction
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.mFSD.tsv", sep="\t")
+
+# Filter to high-quality variants
+df_hq = df[(df["ALT_Confidence"] == "HIGH") & (df["KS_Valid"] == True)]
+
+# Per-variant feature vector
+features = df_hq[["VAF_GC_Corrected", "Delta_ALT_REF", "KS_ALT_REF",
+                   "Size_Ratio", "Quality_Score", "ALT_LLR"]].values
+
+# Sample-level aggregation: weighted average across variants
+sample_vaf = (df_hq["VAF_GC_Corrected"] * df_hq["Quality_Score"]).sum() / df_hq["Quality_Score"].sum()
+```
+
+**Best for**: MRD detection models, ctDNA fraction estimation from targeted panels, variant-level cancer classifiers.
+
+---
+
+### mFSD Distributions
+
+**File:** `{sample}.mFSD.distributions.tsv`  
+**Requires:** `--output-distributions` flag
+
+Per-variant raw size histograms for manual inspection.
+
+#### Columns: `Chrom`, `Pos`, `Ref`, `Alt`, `Category`, `Size`, `Count`
+
+**Use**: Visualizing the ALT vs REF size shift for individual variants; QC and debugging.
+
+---
+
+## Methylation
+
+### UXM (Methylation)
+
+**File:** `{sample}.UXM.tsv`  
+**Requires:** Methylation-enabled BAM input
+
+CpG methylation classification per genomic region. Each fragment is classified as Unmethylated (U), Partially-methylated (X), or fully Methylated (M).
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `region` | Genomic region identifier |
+| `U` | Fraction of unmethylated fragments |
+| `X` | Fraction of partially methylated fragments |
+| `M` | Fraction of fully methylated fragments |
+
+#### Purpose & Use Cases
+
+- **Tumor DNA methylation**: Cancer shows global hypomethylation (↑U) and focal hypermethylation (↑M at TSGs)
+- **Tissue-of-origin**: Tissue-specific methylation patterns enable ctDNA source attribution
+- **Multi-modal fusion**: Combine with FSR and MDS for maximum sensitivity in early detection
+
+#### ML Use Case
+
+```python
+df = pd.read_csv("sample.UXM.tsv", sep="\t").set_index("region")
+
+# 3-class methylation state per region
+X = df[["U", "X", "M"]].values  # shape: (n_regions, 3); rows sum to 1.0
+
+# Sample-level statistics
+features = {
+    "global_U": df["U"].mean(),   # high = hypomethylation (cancer signal)
+    "global_M": df["M"].mean(),   # varies by tissue
+    "U_std": df["U"].std(),       # heterogeneity across regions
+}
+```
+
+---
+
+## Diagnostic / QC Outputs
+
+### GC Correction Factors
+
+**File:** `{sample}.correction_factors.tsv` / `{sample}.correction_factors.ontarget.tsv`
+
+GC-bias correction weights per (fragment length bin, GC content) pair.
+
+#### Columns
+
+| Column | Description |
+|--------|-------------|
+| `length_bin_min` | Fragment length bin lower bound (bp) |
+| `length_bin_max` | Fragment length bin upper bound (bp) |
+| `gc_percent` | GC content percentage (0–100) |
+| `observed` | Observed fragment count |
+| `expected` | Expected count from GC model |
+| `correction_factor` | `expected / observed` — multiply raw counts by this |
+
+#### Purpose & Use Cases
+
+- **Library QC**: Values far from 1.0 indicate GC bias in sequencing/capture
+- **Batch effect debugging**: Compare correction factors across runs to detect systematic issues
+- **Input to GC model PON**: Used to build PON correction factor baselines
+
+!!! note "Not for ML features"
+    GC correction is already applied to FSC, FSR, FSD, and WPS outputs. Use those corrected values. `correction_factors.tsv` is diagnostic data.
+
+---
+
+### Metadata TSV
+
+**File:** `{sample}.metadata.tsv`
+
+Run parameters, QC metrics, and processing provenance — written as a single-row tabular file
+for easy ingestion into PON pipelines and pandas workflows.
+
+!!! warning "This table is the completion marker"
+    The downstream consumer treats `{sample}.metadata.parquet` as the signal that a
+    sample finished. A sample without it is dropped from the cohort **silently** —
+    no warning, no error. Never delete it to "clean up" a directory.
+
+```python
+import pandas as pd
+
+meta = pd.read_parquet("sample.metadata.parquet").iloc[0].to_dict()
+print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `sample_id` | str | Sample identifier |
+| `total_fragments` | int | Total fragments extracted |
+| `genome` | str | Genome build used (`hg19`, `hg38`) |
+| `assay` | str | Assay name (or empty for WGS) |
+| `panel_mode` | bool | Whether target regions were supplied |
+| `target_regions` | str | Path to the target BED, when in panel mode |
+| `extraction_time_seconds` | float | Wall-clock extraction time |
+| `mds_score` | float | Genome-wide motif diversity score |
+| `filters_mapq` | int | Minimum MAPQ applied |
+| `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
+| `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `timestamp` | str | ISO timestamp of the run |
+
+**Provenance, since 0.9.0.** Which build wrote this sample, and what it was
+scored against. Absent from any directory produced by an earlier release — and
+that absence is itself the answer, because 0.9.0 changed what several columns
+mean.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `krewlyzer_version` | str | The build that wrote this sample |
+| `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon`, for no PON, and for a PON the version guard refused — all three are legitimately unscored, and this is what distinguishes them from scoring that failed |
+| `pon_model` | str | The PON, by **basename** — never the full path |
+| `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
+| `pon_krewlyzer_version` | str | The release the PON was stamped with |
+
+**Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
+and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
+produced by one build against one baseline.
+
+---
+
+### Features JSON
+
+**File:** `{sample}.features.json`  
+**Requires:** `--generate-json`
+
+Unified export of all features above in a single JSON file for ML pipelines. See [JSON Output Reference](../features/output/json-output.md) for the complete schema.
+
+```python
+import json
+with open("sample.features.json") as f:
+    features = json.load(f)
+
+# Access any output without reading individual TSVs
+fsr_windows = features["fsr"]["off_target"]
+mds = features["motif"]["mds"]
+region_mds = features["region_mds"]["gene"]
+```
+
+---
+
+## Feature Selection Guide for ML Models
+
+| Model type | Recommended features | File(s) |
+|-----------|---------------------|---------|
+| Pan-cancer screen (WGS) | FSR `short_long_log2`, MDS, WPS `prot_frac_nuc_mean`, FSD `short_frac` | FSR, MDS, WPS_background, FSD |
+| Pan-cancer screen (panel) | FSC-E1 `promoter_short`, MDS-E1, OCF `ocf_z`, WPS panel | FSC.e1only, MDS.gene, OCF, WPS.panel |
+| Tumor fraction regression | FSR `short_long_log2` genome-wide, WPS `nrl_bp` | FSR, WPS_background |
+| Cancer type / site-of-origin | OCF tissue vector, ATAC tissue vector, TFBS vector | OCF, ATAC, TFBS |
+| Gene-level amplification | FSC gene `normalized_depth`, FSD arm `total` | FSC.gene, FSD |
+| MRD (residual disease) | mFSD `VAF_GC_Corrected`, `Quality_Score`, `Delta_ALT_REF` | mFSD |
+| Promoter accessibility | WPS E1 `wps_shape_corr_z`, MDS E1, FSC-E1 ratios | WPS.panel, MDS.gene, FSC.e1only |
+| Methylation-augmented | UXM `U`/`M` + FSR + MDS | UXM, FSR, MDS |
+
+---
+
+## See Also
+
+- [JSON Output Reference](../features/output/json-output.md) — unified JSON schema for all features
+- [FSR vs FSC ratios](../features/core/fsc.md#fsc-ratios-vs-fsr--not-redundant) — why they differ
+- [PON Models](../reference/pon-models.md) — normalization baselines
+- [GC Correction](../guides/gc-correction.md) — correction methodology
+
+---
+
 # FILE: docs/reference/pon-models.md
 
 # Panel of Normals (PON)
@@ -7878,8 +10698,8 @@ For **ML training workflows** where PON samples are used as true negatives, use 
 krewlyzer run-all -i pon_sample.bam -r hg19.fa -o out/ -A xs2 --skip-pon
 ```
 
-> [!WARNING]
-> `-P` and `--skip-pon` are **mutually exclusive**. If you specify an explicit PON model, you want z-scores applied. Use `--skip-pon` only with `-A` (assay) for the ML negatives workflow.
+!!! warning
+    `-P` and `--skip-pon` are **mutually exclusive**. If you specify an explicit PON model, you want z-scores applied. Use `--skip-pon` only with `-A` (assay) for the ML negatives workflow.
 
 The `--skip-pon` flag:
 - Works with `-A/--assay` (auto-loads bundled PON but skips z-scores)
@@ -7903,8 +10723,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -A xs2 --pon-variant duplex
 | `all_unique` | Built from all unique reads | Standard cfDNA (default) |
 | `duplex` | Built from duplex consensus reads | Duplex sequencing workflows |
 
-> [!TIP]
-> The `--pon-variant` flag is independent of the `--duplex` flag for mFSD. Use `--duplex` for mFSD weighting (enables cD tag usage), and `--pon-variant` for PON selection across all tools.
+!!! tip
+    The `--pon-variant` flag is independent of the `--duplex` flag for mFSD. Use `--duplex` for mFSD weighting (enables cD tag usage), and `--pon-variant` for PON selection across all tools.
 
 The `--pon-variant` flag:
 - Defaults to `all_unique` (maximum coverage PON)
@@ -7913,18 +10733,79 @@ The `--pon-variant` flag:
 
 ## PON Components
 
-| Component | Description | Used By |
-|-----------|-------------|---------|
-| **GC Bias Model** | Expected coverage by GC content per fragment type | FSC, FSR, WPS |
-| **FSD Baseline** | Size distribution per chromosome arm | FSD |
-| **WPS Baseline** | WPS mean/std per transcript region | WPS |
-| **OCF Baseline** | Open chromatin scores per region | OCF |
-| **MDS Baseline** | k-mer frequencies and motif diversity | Motif |
-| **TFBS Baseline** | Per-TF entropy mean/std | Region Entropy |
-| **ATAC Baseline** | Per-cancer-type entropy mean/std | Region Entropy |
-| **Region MDS Baseline** | Per-gene MDS mean/std for E1 | Region MDS |
-| **FSC Gene Baseline** | Per-gene normalized depth mean/std | FSC Gene |
-| **FSC Region Baseline** | Per-exon normalized depth mean/std | FSC Region |
+A PON is a single long-format Parquet with a `table` column; each block below is
+one value of it. All 24 are present in the shipped GRCh37 models.
+
+| Block | Description | Used by |
+|---|---|---|
+| `metadata` | Assay, cohort size, build date, and the provenance fields below | every reader |
+| `gc_bias` | Expected coverage by GC content per fragment type | FSC, FSR, WPS |
+| `fsd_baseline` | Size distribution per chromosome arm | FSD |
+| `wps_baseline` | 200-position mean and σ profiles per anchor | WPS |
+| `wps_baseline_panel` | As `wps_baseline`, over the assay's panel anchors | WPS panel |
+| `wps_shape_baseline` | Per-anchor baselines for the derived shape statistics | WPS |
+| `wps_background` | NRL and periodicity per Alu group | WPS background |
+| `ocf_baseline` | Open-chromatin scores per tissue | OCF |
+| `mds_baseline` | End-motif k-mer frequencies and motif diversity | EndMotif, MDS |
+| `breakpoint_motif_baseline` | **Breakpoint** k-mer frequencies | BreakPointMotif |
+| `tfbs_baseline` | Per-TF entropy mean/σ | Region entropy |
+| `atac_baseline` | Per-cancer-type entropy mean/σ | Region entropy |
+| `region_mds` | Per-gene MDS mean/σ | Region MDS |
+| `region_mds_exon` | Per-exon MDS mean/σ | Region MDS |
+| `fsc_gene_baseline` | Per-gene normalised depth mean/σ | FSC gene |
+| `fsc_region_baseline` | Per-exon normalised depth mean/σ | FSC region |
+
+!!! note "Breakpoint motifs are not end motifs"
+    An end motif is the 4-mer at the fragment's 5′ terminus — what the nuclease
+    left. A breakpoint motif spans the cut site and includes reference bases
+    *not present in the fragment*. The two frequency vectors correlate only
+    **0.696** on the same sample, so they need separate baselines. Before 0.9.0
+    `BreakPointMotif` was scored against `mds_baseline` and its `frequency_z`
+    measured the offset between two definitions rather than any departure from
+    healthy.
+
+### What a PON records about itself
+
+`metadata` carries provenance, so a model can be identified after the fact:
+
+| Field | Meaning |
+|---|---|
+| `krewlyzer_version` | The release the model **ships with**, set by `stamp-pon` — not the version of the code that happened to build it |
+| `cohort_digest` | A salted, non-reversible fingerprint of the donor set. Two builds from the same cohort match; it reveals nothing about who is in it |
+| `cohort_label` | Optional free-text name |
+| `input_kind` | `bam`, `bed`, `mixed` or `outputs` — what the cohort was made of, so the gate can tell a block that was never asked for from one that failed |
+| `n_samples`, `build_date`, `assay`, `panel_mode` | As named |
+
+### Version compatibility
+
+**A PON older than 0.9.0 is refused.** That release changed what several
+features *mean* — a fabricated `wps_background`, floored σ, a region-MDS fitted
+over a different fragment range — so an older model is not merely stale, it is
+measuring something else, and every z-score against it is wrong in a way no
+schema check can see.
+
+The floor is a compatibility floor, not the package version: it stays at 0.9.0
+in later releases, because what changed happened once.
+
+```bash
+# Deliberately score against an older model anyway
+KREWLYZER_ALLOW_OLD_PON=1 krewlyzer run-all ...
+```
+
+The escape hatch exists on purpose. Without a documented way out, someone who
+genuinely wants an old model for comparison edits the Parquet instead, and then
+the version stops meaning anything.
+
+### σ that is not a measurement
+
+Where a baseline could not measure a spread — every donor identical, or no donor
+covering that position — the model stores **NaN**, and the scorers emit no
+z-score rather than dividing by a placeholder.
+
+This is enforced at both ends. Values below `1e-9` are treated as floating-point
+residue rather than a spread: WPS is a difference of GC-weighted counts, so a
+true zero computes as ~1e-17 instead of `0.0`, and dividing by that produced
+z-scores up to 6.1 × 10¹⁸ before 0.9.0.
 
 ## Panel Mode
 
@@ -7936,9 +10817,23 @@ krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o po
 
 This enables:
 
-- **GC model trained on off-target only** - Avoids capture bias
-- **Separate on/off-target baselines** - For features that differ in captured regions
-- **Panel mode detection** - Sample processing auto-detects matching PON mode
+- **GC model trained on off-target only** — Avoids capture bias
+- **Separate on/off-target baselines** — FSD, MDS, OCF each get on-target variants
+- **Panel mode detection** — Sample processing auto-detects matching PON mode
+
+Panel mode generates these additional baselines:
+
+| On-Target Baseline | Description |
+|---|---|
+| `gc_bias_ontarget` | GC correction from on-target reads |
+| `fsd_baseline_ontarget` | Size distribution from on-target fragments |
+| `mds_baseline_ontarget` | End-motif diversity from on-target fragments |
+| `breakpoint_motif_baseline_ontarget` | Breakpoint motifs from on-target fragments |
+| `wps_baseline_panel` | WPS profiles over the assay's panel anchors |
+| `ocf_baseline_ontarget` | OCF scores from on-target reads |
+| `ocf_baseline_offtarget` | OCF scores from off-target reads |
+| `tfbs_baseline_ontarget` | TFBS entropy from on-target reads |
+| `atac_baseline_ontarget` | ATAC entropy from on-target reads |
 
 ## Building a PON
 
@@ -8007,11 +10902,13 @@ Stores expected fragment coverage per GC content (0-100%) for each fragment type
 | `wps_long` | 120-180bp | WPS nucleosomal |
 | `wps_short` | 35-80bp | WPS TF footprint |
 
-### FSD Baseline (`fsd_baseline`)
+### FSD Baseline (`fsd_baseline` / `fsd_baseline_ontarget`)
 
 Size distribution per chromosome arm (46 arms):
 - `expected`: Mean proportion at each size bin
 - `std`: Standard deviation across PON samples
+
+In panel mode, `fsd_baseline_ontarget` provides a separate baseline for on-target fragment distributions. This is used automatically when processing `{s}.FSD.ontarget.tsv`.
 
 ### WPS Baseline (`wps_baseline`)
 
@@ -8025,8 +10922,8 @@ Per-region nucleosome positioning metrics.
 - `wps_nuc_mean/std`: 200-element vector (nucleosomal footprint)
 - `wps_tf_mean/std`: 200-element vector (TF footprint)
 
-> [!TIP]
-> v2.0 enables position-specific z-scores and **Shape Correlation Score** for cancer detection.
+!!! tip
+    v2.0 enables position-specific z-scores and **Shape Correlation Score** for cancer detection.
 
 #### Shape Score Interpretation
 
@@ -8038,18 +10935,22 @@ Per-region nucleosome positioning metrics.
 
 See [WPS Features](../features/core/wps.md) for output column details.
 
-### OCF Baseline (`ocf_baseline`)
+### OCF Baseline (`ocf_baseline` / `ocf_baseline_ontarget` / `ocf_baseline_offtarget`)
 
 Per-region open chromatin footprint:
 - `ocf_mean/std`: OCF score baseline
 - `sync_mean/std`: Synchronization score baseline
 
-### MDS Baseline (`mds_baseline`)
+In panel mode, separate `ocf_baseline_ontarget` and `ocf_baseline_offtarget` baselines are built, enabling z-score normalization for `{s}.OCF.ontarget.tsv` and `{s}.OCF.offtarget.tsv` independently.
+
+### MDS Baseline (`mds_baseline` / `mds_baseline_ontarget`)
 
 Motif diversity expectations:
 - `kmer_expected`: 256 4-mer frequencies from healthy samples
 - `kmer_std`: Variability per k-mer
 - `mds_mean/std`: Expected Motif Diversity Score
+
+In panel mode, `mds_baseline_ontarget` provides a separate baseline computed from on-target fragments only. The on-target MDS z-score is written to `{s}.MDS.ontarget.tsv`.
 
 ### TFBS Baseline (`tfbs_baseline`)
 
@@ -8131,17 +11032,8 @@ features = {
 combined_signal = sum(abs(z) for z in features.values())
 ```
 
-> [!TIP]
-> **Combine z-scores across features** - Single extreme values may be noise, but consistent deviations across FSC, WPS, and MDS are highly indicative of ctDNA.
-
-
----
-
-# FILE: docs/resources/changelog.md
-
-# Changelog
-
---8<-- "CHANGELOG.md"
+!!! tip
+    **Combine z-scores across features** - Single extreme values may be noise, but consistent deviations across FSC, WPS, and MDS are highly indicative of ctDNA.
 
 ---
 
@@ -8174,6 +11066,7 @@ Krewlyzer implements or adapts methods from the following foundational papers in
 - **Other tissues:** Near zero
 
 **Cancer Pattern:**
+
 | Cancer Type | OCF Change |
 |-------------|------------|
 | HCC (liver) | ↑ Liver OCF, correlates with tumor fraction (R=0.36) |
@@ -8194,6 +11087,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 ```
 
 **Interpretation:**
+
 | WPS Value | Meaning |
 |-----------|---------|
 | **Positive** | Nucleosome present (DNA protected) |
@@ -8217,12 +11111,14 @@ WPS(k) = N_spanning(k) - N_ends(k)
 **Key Concept:** DELFI (DNA Evaluation of Fragments for earLy Interception) analyzes short/long fragment ratios genome-wide for cancer detection.
 
 **Fragment Classes:**
+
 | Class | Size Range | Origin |
 |-------|------------|--------|
 | Short | 100-150bp | Enriched in tumor cfDNA |
 | Long | 151-220bp | Healthy/mono-nucleosomal |
 
 **Healthy vs Cancer:**
+
 | Metric | Healthy | Cancer |
 |--------|---------|--------|
 | Modal peak | ~166bp | Left-shifted (~145bp) |
@@ -8245,6 +11141,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 - **X:** Between 25-75%
 
 **Healthy cfDNA Composition:**
+
 | Cell Type | Contribution |
 |-----------|--------------|
 | Megakaryocytes | ~31% |
@@ -8269,6 +11166,7 @@ WPS(k) = N_spanning(k) - N_ends(k)
 - End motif diversity reflects fragmentation patterns
 
 **Healthy vs Cancer:**
+
 | Metric | Healthy | Cancer (ctDNA) |
 |--------|---------|----------------|
 | Jaggedness | Lower | **Higher** |
@@ -8338,6 +11236,7 @@ From Helzer et al.: "Shannon entropy was calculated on the frequency of the frag
 - MDS changes correlate with aberrant gene regulation in cancer
 
 **Interpretation:**
+
 | MDS Value | Meaning |
 |-----------|---------|
 | Higher (~7.5-8.0) | Diverse motif usage (healthy) |
@@ -8356,6 +11255,26 @@ Krewlyzer was developed by **Ronak Shah** at Memorial Sloan Kettering Cancer Cen
 
 The fragmentomics methods implemented here build upon foundational work from laboratories worldwide including Dennis Lo (CUHK), Jay Shendure (UW), Victor Velculescu (JHU), and others.
 
+---
+
+# FILE: docs/resources/overview.md
+
+# Fragmentomics Overview
+
+A comprehensive visual guide to Krewlyzer's fragmentomics features and analysis capabilities.
+
+![Krewlyzer Fragmentomics Toolkit](./Krewlyzer_Fragmentomics_Toolkit.pdf){ type=application/pdf style="min-height:75vh;width:100%" }
+
+---
+
+## Learn More
+
+| Topic | Link |
+|-------|------|
+| **Getting Started** | [Quickstart Guide](../getting-started/quickstart.md) |
+| **Key Concepts** | [cfDNA & Fragmentomics](../getting-started/concepts.md) |
+| **Features** | [Feature Documentation](../features/index.md) |
+| **CLI Reference** | [run-all Command](../cli/run-all.md) |
 
 ---
 
@@ -8475,7 +11394,7 @@ If you see this warning, re-run with `--no-require-proper-pair`.
 ### Correction factors look wrong
 **Cause**: Insufficient coverage or extreme GC bias.
 
-**Diagnosis**: Check `correction_factors.csv`:
+**Diagnosis**: Check `correction_factors.tsv`:
 - Factors should be ~0.5-2.0 for most bins
 - Extreme factors (>10 or <0.1) indicate problems
 
@@ -8555,9 +11474,9 @@ krewlyzer build-pon samples.txt -a xs2 -r hg19.fa -o pon.parquet \
     --validate-assets
 ```
 
-> [!TIP]
-> Use `--validate-assets` after krewlyzer updates or when debugging unexpected errors.
-> For routine processing, validation overhead (~100ms) can be skipped.
+!!! tip
+    Use `--validate-assets` after krewlyzer updates or when debugging unexpected errors.
+    For routine processing, validation overhead (~100ms) can be skipped.
 
 ### Common format errors
 

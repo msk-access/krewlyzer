@@ -70,8 +70,24 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `--generate_json` | `true` | Generate unified `features.json` for ML pipelines |
-| `--output_format` | `tsv` | Feature output format: `tsv`, `parquet`, or `both`. WPS outputs are always Parquet regardless of this setting. |
+| `--output_format` | `parquet` | Feature output format: `tsv`, `parquet`, or `both`. **Default changed from `tsv` in 0.9.0.** WPS outputs are always Parquet regardless of this setting. |
 | `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
+| `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
+| `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
+| `--gc_correct` | `true` | Apply GC bias correction during extraction. |
+| `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
+
+!!! warning "Selecting `tsv` produces a cohort the downstream consumer cannot read"
+    kreview reads **Parquet only**. A tsv-only run additionally **skips output
+    validation**, because the contract describes the Parquet surface.
+
+    Both failures are silent: every reader downstream swallows exceptions and
+    yields an empty feature dict, so a cohort produced with the default simply
+    does not appear — no error, no warning, no missing-file complaint.
+
+    This is why the default changed to `parquet` in 0.9.0. Set `tsv` or
+    `both` only when you need the text tables; the pipeline logs a warning at
+    start whenever the selection excludes Parquet.
 
 ## See Also
 

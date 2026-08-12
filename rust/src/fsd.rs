@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{BufRead, Write};
 use std::collections::HashMap;
 use crate::bed;
-use log::{debug, info};
+use log::{debug, info, warn};
 
 
 /// Calculate Fragment Size Distribution (FSD)
@@ -445,7 +445,119 @@ pub fn load_target_regions(path: &Path, chrom_map: &mut ChromosomeMap) -> Result
 // PON Log-Ratio Normalization (High-Performance Rust Implementation)
 // =============================================================================
 
-use crate::pon_model::FsdBaseline;
+/// FSD baseline for a single chromosome arm.
+///
+/// Moved here verbatim when `pon_model.rs` was deleted. That module held one
+/// `PonModel` loader with no callers -- blind to `large_string`, so it would
+/// have read zero rows from any shipped PON had anything called it -- plus
+/// these two structs, which were the only part of it with a consumer. They
+/// live beside that consumer now.
+#[derive(Debug, Clone)]
+pub struct FsdArmBaseline {
+    pub size_bins: Vec<i32>,
+    pub expected: Vec<f64>,
+    pub std: Vec<f64>,
+}
+
+impl FsdArmBaseline {
+    /// Interpolate the expected value for a size.
+    pub fn get_expected(&self, size: i32) -> f64 {
+        if self.size_bins.is_empty() || self.expected.is_empty() {
+            return 0.0;
+        }
+
+        // Linear interpolation
+        if size <= self.size_bins[0] {
+            return self.expected[0];
+        }
+        if size >= *self.size_bins.last().unwrap() {
+            return *self.expected.last().unwrap();
+        }
+
+        for i in 0..self.size_bins.len() - 1 {
+            if size >= self.size_bins[i] && size < self.size_bins[i + 1] {
+                let t = (size - self.size_bins[i]) as f64
+                    / (self.size_bins[i + 1] - self.size_bins[i]) as f64;
+                return self.expected[i] + t * (self.expected[i + 1] - self.expected[i]);
+            }
+        }
+        0.0
+    }
+
+    /// Interpolate the spread at a size, mirroring [`Self::get_expected`].
+    ///
+    /// NaN, not a substituted 1.0, when there is no sigma to report. The
+    /// caller gates on `std > 0.0`, which is false for NaN, so an unmeasurable
+    /// spread drops out of `pon_stability` instead of contributing a
+    /// confident-looking 1.0 -- which with the 0.01 floor would read as a
+    /// stability of 0.990, a specific and entirely fabricated number.
+    pub fn get_std(&self, size: i32) -> f64 {
+        // The loader pushes and sorts all three vectors together, so they are
+        // parallel by construction. Checked anyway: indexing `std[i + 1]` off
+        // a shorter vector would panic inside a per-arm loop, and the cost of
+        // the check is one comparison per lookup.
+        if self.size_bins.is_empty() || self.std.len() != self.size_bins.len() {
+            return f64::NAN;
+        }
+        if size <= self.size_bins[0] {
+            return self.std[0];
+        }
+        if size >= *self.size_bins.last().unwrap() {
+            return *self.std.last().unwrap();
+        }
+        for i in 0..self.size_bins.len() - 1 {
+            if size >= self.size_bins[i] && size < self.size_bins[i + 1] {
+                let t = (size - self.size_bins[i]) as f64
+                    / (self.size_bins[i + 1] - self.size_bins[i]) as f64;
+                return self.std[i] + t * (self.std[i + 1] - self.std[i]);
+            }
+        }
+        f64::NAN
+    }
+}
+
+/// FSD baseline model containing per-arm statistics.
+#[derive(Debug, Clone, Default)]
+pub struct FsdBaseline {
+    pub arms: HashMap<String, FsdArmBaseline>,
+}
+
+impl FsdBaseline {
+    /// Get (expected, std) for an arm at a given size.
+    ///
+    /// Both are interpolated *at that size*. The sigma used to be
+    /// `std.first().copied().unwrap_or(1.0)` -- the first size bin's spread,
+    /// returned for every size asked for, and 1.0 when there was none.
+    ///
+    /// It reaches the output through `pon_stability`, which averages the
+    /// sigmas it is handed. Measured on the shipped xs1 all-unique PON: sigma
+    /// varies 41.6x (median) across the 67 size bins of an arm, up to 56.4x,
+    /// so every arm was handed 67 copies of bin 0's value. `pon_stability`
+    /// came out wrong by a median of 4709% on all 41 arms.
+    ///
+    /// Nothing could have caught it downstream: the column was present,
+    /// finite, and varied by arm, so it passed every schema check and the
+    /// anti-degeneracy assertion alike.
+    pub fn get_stats(&self, arm: &str, size: i32) -> Option<(f64, f64)> {
+        self.arms
+            .get(arm)
+            .map(|baseline| (baseline.get_expected(size), baseline.get_std(size)))
+    }
+}
+
+
+/// Six decimals, or the literal `NaN`.
+///
+/// `format!("{:.6}", f64::NAN)` already yields "NaN", but relying on that is
+/// relying on a formatting detail to carry the release's central distinction
+/// between a measurement and its absence. Written out so it cannot drift.
+fn fmt6(value: f64) -> String {
+    if value.is_finite() {
+        format!("{:.6}", value)
+    } else {
+        "NaN".to_string()
+    }
+}
 
 /// Apply PON log-ratio normalization to FSD TSV file.
 /// 
@@ -507,18 +619,46 @@ pub fn apply_pon_logratio(
     let header_line = &lines[0];
     let headers: Vec<&str> = header_line.split('\t').collect();
     
-    // Find bin columns (format: "65-69", "70-74", etc.)
-    let bin_indices: Vec<(usize, i32)> = headers.iter().enumerate()
-        .filter_map(|(i, h)| {
-            if let Some(dash_pos) = h.find('-') {
-                if let Ok(start) = h[..dash_pos].parse::<i32>() {
-                    return Some((i, start));
-                }
-            }
-            None
+    // Columns this function itself produced on an earlier run.
+    //
+    // Dropped, not carried through, so normalising twice gives the same answer
+    // as normalising once. It previously did not: the bin matcher accepted any
+    // header whose text before the first '-' parsed as an integer, so
+    // "65-69_logR" matched as bin 65 and each run appended a fresh set of
+    // log-ratios *and* log-ratios of the previous log-ratios. Measured on a
+    // real 67-bin sample: 69 columns raw, 137 after one pass, 273 after two,
+    // with every `_logR` name repeated and pandas writing them back out as
+    // `_logR.1` / `_logR.2`. The correct answer was in the file three times
+    // with no way to tell which, and `read_csv` takes the first -- the oldest.
+    //
+    // A log-ratio of a log-ratio is never the intent, so consuming our own
+    // output is always a mistake rather than a mode worth supporting.
+    let is_derived = |h: &str| h.ends_with("_logR") || h == "pon_stability";
+    let carried: Vec<usize> = headers.iter().enumerate()
+        .filter(|(_, h)| !is_derived(h))
+        .map(|(i, _)| i)
+        .collect();
+    let n_dropped = headers.len() - carried.len();
+    if n_dropped > 0 {
+        info!(
+            "FSD PON: input already carries {} derived column(s) from an \
+             earlier run; replacing them rather than appending again",
+            n_dropped
+        );
+    }
+
+    // A size bin is exactly "{start}-{end}", both integers. Matching merely on
+    // "digits before a dash" is what let the derived columns in.
+    let bin_indices: Vec<(usize, i32)> = carried.iter()
+        .filter_map(|&i| {
+            let h = headers[i];
+            let (start, end) = h.split_once('-')?;
+            let start: i32 = start.parse().ok()?;
+            end.parse::<i32>().ok()?;
+            Some((i, start))
         })
         .collect();
-    
+
     info!("FSD PON: Found {} size bin columns", bin_indices.len());
     
     // 3. Process each arm row
@@ -529,8 +669,8 @@ pub fn apply_pon_logratio(
         ))?;
     let mut writer = std::io::BufWriter::new(out_file);
     
-    // Write extended header
-    let mut new_headers = headers.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    // Write extended header, from the carried columns only
+    let mut new_headers = carried.iter().map(|&i| headers[i].to_string()).collect::<Vec<_>>();
     for (_, size) in &bin_indices {
         new_headers.push(format!("{}-{}_logR", size, size + 4));
     }
@@ -548,40 +688,83 @@ pub fn apply_pon_logratio(
         }
         
         let arm = fields[0];
-        let mut new_row = fields.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let mut new_row = carried.iter()
+            .map(|&i| fields.get(i).unwrap_or(&"").to_string())
+            .collect::<Vec<_>>();
         
         // Compute log-ratios for each bin
-        let mut stds: Vec<f64> = Vec::new();
+        //
+        // Coefficients of variation, not raw sigmas -- see the stability score
+        // below for why.
+        let mut cvs: Vec<f64> = Vec::new();
         
         for (col_idx, size) in &bin_indices {
             let sample_val: f64 = fields.get(*col_idx)
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.0);
             
+            // NaN, not 0.0, when there is nothing to compare against.
+            //
+            // A log-ratio of zero says "this sample sits exactly at the healthy
+            // baseline" -- the most confident statement the column can make,
+            // asserted precisely where the arm is absent from the baseline or
+            // the baseline measured nothing. Same fabrication removed from
+            // `zscore_or_nan`, the FSC log2, the FSR ratio and the entropy z.
             let log_ratio = if let Some((expected, std)) = fsd_baseline.get_stats(arm, *size) {
-                if std > 0.0 {
-                    stds.push(std);
+                if std > 0.0 && expected > 0.0 {
+                    cvs.push(std / expected);
                 }
                 if expected > 0.0 {
                     ((sample_val + pseudocount) / (expected + pseudocount)).log2()
                 } else {
-                    0.0
+                    f64::NAN
                 }
             } else {
-                0.0
+                f64::NAN
             };
-            
-            new_row.push(format!("{:.6}", log_ratio));
+
+            new_row.push(fmt6(log_ratio));
         }
         
-        // Compute PON stability score (inverse variance)
-        let stability = if !stds.is_empty() {
-            let avg_var = stds.iter().map(|s| s * s).sum::<f64>() / stds.len() as f64;
-            1.0 / (avg_var + 0.01)
+        // How tightly the healthy cohort agreed on this arm, in (0, 1].
+        //
+        // `1 / (1 + mean(CV^2))` over the arm's size bins, where CV is
+        // sigma/expected. 1.0 means the donors agreed exactly; smaller means
+        // the baseline itself is uncertain there, so read that arm's
+        // log-ratios with less confidence.
+        //
+        // It used to be `1 / (mean(sigma^2) + 0.01)`, an *unnormalised* inverse
+        // variance, and that only ever looked sane because it was fed the wrong
+        // sigma: `get_stats` returned the first size bin's spread for every
+        // size. Once each bin got its own, the true magnitudes showed --
+        // FSD sigma is in fragment counts, 111..4573 on xs1 and 947..35961 on
+        // xs2 -- so mean(sigma^2) reached 1.6e6 and 8.3e7, the reciprocal came
+        // to 6e-7 and 1.2e-8, and at six decimals every arm wrote 0.000000.
+        // The 0.01 floor assumed sigma ~ O(1); it never was. Constant down
+        // every row is invariant #1's failure, and the gate caught it.
+        //
+        // Dividing by `expected` is justified rather than convenient: measured
+        // on both shipped models, d log(sigma) / d log(expected) is 0.83 and
+        // 0.95 -- close to 1, so the spread is between-donor variation rather
+        // than Poisson counting noise (which would give 0.5), and the ratio is
+        // genuinely scale-free. That is what makes the score comparable across
+        // assays: xs1 sits near 0.73, xs2 near 0.92, and the difference says
+        // the 21-donor xs2 cohort agrees more tightly than the 47-donor xs1 one.
+        //
+        // The spread between arms is small -- about 6% -- but it is real, not
+        // estimation noise: splitting an arm's bins into odd and even halves
+        // and scoring each separately gives a split-half correlation of 0.834
+        // (xs1) and 0.997 (xs2), a full-length reliability of 0.91 and 0.999.
+        //
+        // No floor is needed: `1 + mean(CV^2)` is at least 1, so the score
+        // cannot blow up, and NaN still means no sigma was measurable at all.
+        let stability = if !cvs.is_empty() {
+            let mean_cv_sq = cvs.iter().map(|c| c * c).sum::<f64>() / cvs.len() as f64;
+            1.0 / (1.0 + mean_cv_sq)
         } else {
-            1.0
+            f64::NAN
         };
-        new_row.push(format!("{:.6}", stability));
+        new_row.push(fmt6(stability));
         
         writeln!(writer, "{}", new_row.join("\t"))
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
@@ -605,41 +788,91 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     let file = File::open(path)?;
     let reader = SerializedFileReader::new(file)?;
     
-    let mut arms: HashMap<String, crate::pon_model::FsdArmBaseline> = HashMap::new();
+    let mut arms: HashMap<String, FsdArmBaseline> = HashMap::new();
+    let mut n_unreadable_bins = 0usize;
     
     for row_result in reader.get_row_iter(None)? {
         let row = row_result?;
         
         // Check if this row is from fsd_baseline table
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != table_name {
-                continue;
-            }
-        } else {
-            continue;
+        // By name, and skip when absent: `unwrap_or(0)` read column zero,
+        // which in a PON parquet is `table` itself -- so a PON without the
+        // column would have compared every row against its own first value.
+        match row
+            .get_column_iter()
+            .position(|(n, _)| n == "table")
+            .and_then(|i| row.get_string(i).ok())
+        {
+            Some(table) if table == table_name => {}
+            _ => continue,
         }
         
-        // Parse arm, size_bin, expected, std
-        let arm = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "arm").unwrap_or(0)
-        ).map_or("".to_string(), |v| v.to_string());
-        
-        let size_bin = row.get_int(
-            row.get_column_iter().position(|(name, _)| name == "size_bin").unwrap_or(0)
-        ).unwrap_or(0);
-        
-        let expected = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "expected").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
+        // Parse arm, size_bin, expected, std.
+        //
+        // `position(...).unwrap_or(0)` was the quiet defect here, the same one
+        // removed from `region_entropy.rs`: a column that could not be found
+        // read *column zero* instead, which in a PON parquet is `table`. A
+        // renamed `std` column would have been read as the literal string
+        // "fsd_baseline", failed to parse as a double, and fallen through to
+        // the fabricated default below -- two wrongs producing a plausible
+        // number.
+        let column = |name: &str| row.get_column_iter().position(|(n, _)| n == name);
+
+        // Whichever width the column happens to have.
+        //
+        // `size_bin` is an integer in every sense that matters, and it is
+        // stored as a **double**: a PON is one long-format table, so every row
+        // belonging to another block carries a null there, and the union
+        // column comes out float64. `row.get_int()` errors on a Double and
+        // returns Err -- it does not coerce.
+        //
+        // That single Err was the largest defect in this file. Every
+        // `size_bin` fell back to 0, so an arm's `size_bins` was 67 zeros,
+        // `size >= *size_bins.last()` was true for every size, and
+        // `get_expected` returned the **last row's** expectation for all 67
+        // bins. Confirmed against a shipped PON and a real sample: the emitted
+        // `_logR` columns matched the last-bin baseline exactly and the
+        // bin-matched baseline not at all.
+        //
+        // Nothing downstream could see it. The log-ratios still varied across
+        // bins -- the sample numerator varies -- so they were present, finite,
+        // non-degenerate, and wrong.
+        let numeric = |name: &str| -> Option<f64> {
+            let i = column(name)?;
+            row.get_double(i)
+                .or_else(|_| row.get_float(i).map(|v| v as f64))
+                .or_else(|_| row.get_int(i).map(|v| v as f64))
+                .or_else(|_| row.get_long(i).map(|v| v as f64))
+                .ok()
+        };
+
+        let arm = column("arm")
+            .and_then(|i| row.get_string(i).ok())
+            .map_or("".to_string(), |v| v.to_string());
+
+        let size_bin = match numeric("size_bin") {
+            Some(v) if v.is_finite() => v.round() as i32,
+            // Skip, rather than collapse the row onto bin 0 and silently
+            // corrupt every lookup for the arm.
+            _ => {
+                n_unreadable_bins += 1;
+                continue;
+            }
+        };
+
+        let expected = numeric("expected").unwrap_or(f64::NAN);
+
+        // NaN, not 1.0. A sigma of 1.0 is a measurement: with the 0.01 floor
+        // it yields a `pon_stability` of 0.990, which is indistinguishable
+        // from a real reading. The caller gates on `std > 0.0`, false for NaN,
+        // so an unreadable sigma now drops out of the average instead of
+        // dominating it.
+        let std = column("std")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
         // Add to arm baseline
-        let baseline = arms.entry(arm).or_insert_with(|| crate::pon_model::FsdArmBaseline {
+        let baseline = arms.entry(arm).or_insert_with(|| FsdArmBaseline {
             size_bins: Vec::new(),
             expected: Vec::new(),
             std: Vec::new(),
@@ -648,6 +881,27 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
         baseline.size_bins.push(size_bin);
         baseline.expected.push(expected);
         baseline.std.push(std);
+    }
+
+    if n_unreadable_bins > 0 {
+        warn!(
+            "FSD PON: {} rows of '{}' had no readable 'size_bin' and were \
+             skipped. Every lookup for the affected arm would otherwise have \
+             collapsed onto bin 0 and returned the last bin's baseline.",
+            n_unreadable_bins, table_name
+        );
+    }
+
+    // A row of the right table whose arm did not parse landed under the empty
+    // key and was never matched again -- dropped, without a count. Say how
+    // many rather than let a renamed column look like a small baseline.
+    if let Some(orphans) = arms.remove("") {
+        warn!(
+            "FSD PON: {} rows of '{}' had no readable 'arm' and were dropped. \
+             Check that the PON was built by a matching krewlyzer version.",
+            orphans.size_bins.len(),
+            table_name
+        );
     }
     
     // Sort each arm's bins
@@ -669,3 +923,231 @@ fn load_fsd_baseline_from_parquet(path: &Path, table_name: &str) -> Result<FsdBa
     Ok(FsdBaseline { arms })
 }
 
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::*;
+
+    /// An arm whose spread genuinely changes across the size range, as real
+    /// ones do: measured on the shipped xs1 all-unique PON, sigma varies 41.6x
+    /// (median) across the 67 bins of an arm and up to 56.4x.
+    fn arm() -> FsdArmBaseline {
+        FsdArmBaseline {
+            size_bins: vec![100, 150, 200],
+            expected: vec![10.0, 40.0, 20.0],
+            std: vec![1.0, 8.0, 3.0],
+        }
+    }
+
+    #[test]
+    fn the_sigma_depends_on_the_size_asked_for() {
+        // The defect this replaces: `std.first()` returned bin 100's sigma for
+        // every size, so `pon_stability` averaged 67 copies of one bin's
+        // spread and came out wrong by a median of 4709% on all 41 arms of a
+        // shipped PON.
+        //
+        // Anti-degeneracy, invariant #1: two different inputs must give two
+        // different outputs. That single assertion would have caught it.
+        let a = arm();
+        let low = a.get_std(100);
+        let high = a.get_std(150);
+        assert_ne!(
+            low, high,
+            "sigma must vary with size; a constant means `.first()` is back"
+        );
+        assert_eq!(low, 1.0);
+        assert_eq!(high, 8.0);
+    }
+
+    #[test]
+    fn the_sigma_interpolates_like_the_expectation_does() {
+        let a = arm();
+        // Halfway between bins 100 and 150: sigma halfway between 1.0 and 8.0.
+        assert!((a.get_std(125) - 4.5).abs() < 1e-12, "{}", a.get_std(125));
+        // And the expectation it is paired with uses the same scheme.
+        assert!((a.get_expected(125) - 25.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn outside_the_measured_range_it_clamps_rather_than_extrapolates() {
+        let a = arm();
+        assert_eq!(a.get_std(50), 1.0, "below the first bin");
+        assert_eq!(a.get_std(400), 3.0, "above the last bin");
+    }
+
+    #[test]
+    fn an_unmeasured_spread_is_nan_not_one() {
+        // 1.0 was the old default, and it is a *measurement*: with the 0.01
+        // floor it yields a pon_stability of 0.990, indistinguishable from a
+        // real reading.
+        let empty = FsdArmBaseline {
+            size_bins: vec![100, 150],
+            expected: vec![1.0, 2.0],
+            std: vec![],
+        };
+        assert!(empty.get_std(120).is_nan());
+        // And the caller's `std > 0.0` gate is false for NaN, so it drops out
+        // of the stability average rather than dominating it.
+        assert!(!(f64::NAN > 0.0));
+    }
+
+    #[test]
+    fn a_ragged_baseline_does_not_panic() {
+        // The loader keeps the three vectors parallel; this is the guard for
+        // anything that does not.
+        let ragged = FsdArmBaseline {
+            size_bins: vec![100, 150, 200],
+            expected: vec![1.0, 2.0, 3.0],
+            std: vec![1.0],
+        };
+        assert!(ragged.get_std(175).is_nan());
+    }
+
+    #[test]
+    fn a_baseline_whose_bins_all_collapsed_is_visible() {
+        // The shape the loader produced when `size_bin` failed to parse: 67
+        // rows, every one at bin 0. `size >= *size_bins.last()` is then true
+        // for every query, so every size gets the *last* row's value.
+        //
+        // On a shipped PON that is exactly what happened -- `size_bin` is
+        // stored as a double and the reader called `get_int`, which errors --
+        // and every `_logR` column of every sample was scored against the
+        // wrong bin. The values still varied across bins, because the sample
+        // numerator varies, so nothing downstream saw anything wrong.
+        let collapsed = FsdArmBaseline {
+            size_bins: vec![0, 0, 0],
+            expected: vec![10.0, 40.0, 20.0],
+            std: vec![1.0, 8.0, 3.0],
+        };
+        assert_eq!(collapsed.get_expected(65), 20.0, "the last bin, for any size");
+        assert_eq!(collapsed.get_expected(395), 20.0);
+        assert_eq!(
+            collapsed.get_expected(65),
+            collapsed.get_expected(395),
+            "collapsed bins make every size identical -- the signature of the bug"
+        );
+
+        // Against a properly parsed baseline the two must differ.
+        let good = arm();
+        assert_ne!(
+            good.get_expected(100),
+            good.get_expected(200),
+            "a real baseline must distinguish sizes (invariant #1)"
+        );
+    }
+
+    /// The score the log-ratio writer computes, extracted so it can be tested
+    /// without driving a whole file through `apply_pon_logratio`.
+    fn stability_from(cvs: &[f64]) -> f64 {
+        if cvs.is_empty() {
+            return f64::NAN;
+        }
+        let mean_cv_sq = cvs.iter().map(|c| c * c).sum::<f64>() / cvs.len() as f64;
+        1.0 / (1.0 + mean_cv_sq)
+    }
+
+    #[test]
+    fn stability_is_bounded_and_ordered() {
+        // Perfect agreement is 1.0; more relative spread is strictly less.
+        assert_eq!(stability_from(&[0.0, 0.0]), 1.0);
+        let tight = stability_from(&[0.05; 8]);
+        let loose = stability_from(&[0.60; 8]);
+        assert!(tight > loose, "tighter cohorts must score higher");
+        for s in [tight, loose, stability_from(&[5.0; 4])] {
+            assert!(s > 0.0 && s <= 1.0, "out of (0,1]: {s}");
+        }
+    }
+
+    #[test]
+    fn stability_does_not_depend_on_the_unit_of_the_counts() {
+        // The defect this replaces. `1/(mean(sigma^2)+0.01)` collapsed to zero
+        // once each bin got its own sigma, because FSD sigma is in fragment
+        // counts (111..4573 on xs1, 947..35961 on xs2): mean(sigma^2) reached
+        // 1.6e6 and 8.3e7, so the reciprocal wrote 0.000000 at six decimals on
+        // every arm. A ratio of sigma to expected cannot do that -- scaling the
+        // whole arm leaves the score untouched.
+        let expected: Vec<f64> = (1..=20).map(|i| i as f64 * 100.0).collect();
+        let sigma: Vec<f64> = expected.iter().map(|e| e * 0.3).collect();
+        let cvs: Vec<f64> = sigma.iter().zip(&expected).map(|(s, e)| s / e).collect();
+        let base = stability_from(&cvs);
+
+        // Same arm, counts a thousand times larger.
+        let big_cvs: Vec<f64> = sigma
+            .iter()
+            .zip(&expected)
+            .map(|(s, e)| (s * 1000.0) / (e * 1000.0))
+            .collect();
+        assert!(
+            (base - stability_from(&big_cvs)).abs() < 1e-12,
+            "score moved with the unit of the counts"
+        );
+        // And it lands somewhere readable rather than underflowing.
+        assert!(base > 0.9 && base < 0.93, "CV=0.3 should score ~0.917, got {base}");
+    }
+
+    #[test]
+    fn an_arm_with_no_measurable_spread_has_no_stability() {
+        assert!(stability_from(&[]).is_nan());
+    }
+
+    #[test]
+    fn get_stats_pairs_the_two_at_the_same_size() {
+        let mut arms = HashMap::new();
+        arms.insert("1p".to_string(), arm());
+        let baseline = FsdBaseline { arms };
+
+        let (expected, std) = baseline.get_stats("1p", 150).expect("arm present");
+        assert_eq!((expected, std), (40.0, 8.0));
+        assert!(baseline.get_stats("9q", 150).is_none(), "unknown arm");
+    }
+}
+
+#[cfg(test)]
+mod logratio_tests {
+    use super::*;
+
+    /// A size bin is exactly `{int}-{int}`; a derived column is not a bin.
+    ///
+    /// The old matcher accepted anything whose text before the first '-'
+    /// parsed as an integer, so `65-69_logR` came back as bin 65 and every
+    /// re-run normalised its own output. Measured on a real 67-bin sample:
+    /// 69 columns raw, 137 after one pass, 273 after two.
+    #[test]
+    fn only_exact_size_bins_are_treated_as_bins() {
+        let is_bin = |h: &str| -> bool {
+            match h.split_once('-') {
+                Some((a, b)) => a.parse::<i32>().is_ok() && b.parse::<i32>().is_ok(),
+                None => false,
+            }
+        };
+        assert!(is_bin("65-69"));
+        assert!(is_bin("395-399"));
+        assert!(!is_bin("65-69_logR"), "a derived column is not a size bin");
+        assert!(!is_bin("pon_stability"));
+        assert!(!is_bin("region"));
+        assert!(!is_bin("chr1:10001-121535433"), "a locus is not a size bin");
+    }
+
+    /// The columns this function produces, recognised so they can be replaced.
+    #[test]
+    fn derived_columns_are_recognised_for_replacement() {
+        let is_derived = |h: &str| h.ends_with("_logR") || h == "pon_stability";
+        assert!(is_derived("65-69_logR"));
+        assert!(is_derived("pon_stability"));
+        assert!(!is_derived("65-69"));
+        assert!(!is_derived("region"));
+        // The `.1` names pandas writes after a collision are the symptom, not
+        // the cause; a fixed run never produces them, so they are deliberately
+        // not matched here.
+        assert!(!is_derived("65-69_logR.1"));
+    }
+
+    /// An absent measurement formats as NaN, never as a number.
+    #[test]
+    fn non_finite_values_are_written_as_nan() {
+        assert_eq!(fmt6(f64::NAN), "NaN");
+        assert_eq!(fmt6(f64::INFINITY), "NaN");
+        assert_eq!(fmt6(-1.5), "-1.500000");
+        assert_eq!(fmt6(0.0), "0.000000", "a real zero still prints as one");
+    }
+}

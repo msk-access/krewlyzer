@@ -13,7 +13,7 @@
 process KREWLYZER_MFSD {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     tuple val(meta), path(bam), path(bai), path(variants)
@@ -46,6 +46,8 @@ process KREWLYZER_MFSD {
     def proper_pair_arg = params.require_proper_pair == false ? "--no-require-proper-pair" : ""
     def duplex_arg = params.duplex ? "--duplex" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
 
     """
     krewlyzer mfsd \\
@@ -65,6 +67,8 @@ process KREWLYZER_MFSD {
         $proper_pair_arg \\
         $duplex_arg \\
         $verbose_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $args
 
     cat <<-END_VERSIONS > versions.yml

@@ -155,8 +155,18 @@ class TestApplyOcfPythonPon:
         result = pd.read_csv(ocf_file, sep="\t")
         assert pd.isna(result.loc[result["tissue"] == "Unknown", "ocf_z"].iloc[0])
 
-    def test_zero_std_returns_zero_zscore(self, tmp_path):
-        """Zero std in baseline returns 0.0 z-score."""
+    def test_zero_std_yields_nan_not_zero(self, tmp_path):
+        """A baseline with no measurable spread cannot produce a z-score.
+
+        This asserted `ocf_z == 0.0`, which reads as "exactly at the healthy
+        baseline" -- the most confident claim the column can make, made
+        precisely when the baseline measured no spread at all. The tissue is
+        also indistinguishable from one that genuinely scored zero.
+
+        Note the test immediately above already expects NaN for a tissue that
+        is *absent* from the baseline. Present-but-unmeasurable is the same
+        state of knowledge and now reads the same way.
+        """
         from krewlyzer.core.ocf_processor import apply_ocf_python_pon
 
         ocf_file = tmp_path / "sample.OCF.ontarget.tsv"
@@ -184,7 +194,9 @@ class TestApplyOcfPythonPon:
         assert n_matched == 1
 
         result = pd.read_csv(ocf_file, sep="\t")
-        assert result["ocf_z"].iloc[0] == 0.0
+        assert pd.isna(
+            result["ocf_z"].iloc[0]
+        ), f"expected NaN for a zero-std baseline, got {result['ocf_z'].iloc[0]}"
 
 
 # =============================================================================

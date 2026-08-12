@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Optional
 import numpy as np
 import itertools
+import gzip
 import logging
 import pandas as pd
 
@@ -403,8 +404,18 @@ def write_end_motif_1mer(
     if output_format in ("tsv", "both"):
         ext = ".tsv.gz" if compress else ".tsv"
         tsv_path = base.parent / (base.name + ext)
+        # The footer MUST be appended through the same codec the table was
+        # written with. Appending plain text to a gzip file produces a gzip
+        # member followed by raw bytes, which gzip.decompress() and pandas
+        # both reject with BadGzipFile("Not a gzipped file (b'# ')") -- the
+        # whole table becomes unreadable, not just the footer.
+        opener = (
+            (lambda pth: gzip.open(pth, "at", encoding="utf-8"))
+            if compress
+            else (lambda pth: open(pth, "a"))
+        )
         try:
-            with open(tsv_path, "a") as f:
+            with opener(tsv_path) as f:
                 f.write(f"# c_fraction\t{metrics['c_fraction']:.6f}\n")
                 f.write(f"# entropy\t{metrics['entropy']:.6f}\n")
                 f.write(f"# c_bias\t{metrics['c_bias']:.6f}\n")

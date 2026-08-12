@@ -96,6 +96,17 @@ def motif(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
     ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
+    ),
     threads: int = typer.Option(
         0, "--threads", "-t", help="Number of threads (0=all cores)"
     ),
@@ -259,13 +270,19 @@ def motif(
         # Load PON model if resolved and not skipped
         pon = None
         if resolved_pon_path and resolved_pon_path.exists():
-            try:
-                from .pon.model import PonModel
+            # The guarded loader, not `PonModel.load`.
+            #
+            # `load_pon_model` is where the version floor lives. Loading
+            # directly here meant `krewlyzer motif` would happily score
+            # against a pre-0.9.0 model that run-all refuses -- invariant #6,
+            # single-tool and run-all behaving differently.
+            from .core.pon_integration import load_pon_model
 
-                pon = PonModel.load(resolved_pon_path)
-                logger.debug("Loaded PON model for z-score computation")
-            except Exception as e:
-                logger.warning(f"Could not load PON model: {e}")
+            pon = load_pon_model(resolved_pon_path)
+            if pon is None:
+                logger.warning(
+                    "No usable PON: MDS keeps its raw value and gets no z-score"
+                )
 
         # Write motif outputs using shared function
         write_motif_outputs(
@@ -273,6 +290,8 @@ def motif(
             output_dir=output,
             pon=pon,
             include_ontarget=is_panel_mode,
+            output_format=output_format,
+            compress=compress,
         )
 
         # Additional aberrant k-mer analysis if PON provided

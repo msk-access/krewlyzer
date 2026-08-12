@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Optional
 import logging
 
+from krewlyzer.pon.model import GENOME_WIDE_GROUP
+
 logger = logging.getLogger("core.pon_integration")
 
 
@@ -24,25 +26,46 @@ def load_pon_model(pon_path: Path):
     """
     Load a PON model from disk.
 
+    Refuses a model older than `MIN_PON_VERSION`. 0.9.0 changed what the
+    features mean, so an earlier PON is not stale, it is measuring something
+    else -- and every z-score computed against it is wrong in a way no schema
+    check can see. Recording the version was only half of that guard; this is
+    the half that acts on it.
+
+    Refusing rather than warning, because the alternative is the failure this
+    whole release exists to remove: a plausible number nobody questions. A
+    warning in a log nobody reads is not a guard.
+
     Args:
         pon_path: Path to the PON parquet file
 
     Returns:
-        Loaded PonModel instance, or None if loading fails
+        Loaded PonModel instance, or None if loading fails or the model is
+        too old to score against
     """
     from krewlyzer.pon.model import PonModel
+    from krewlyzer.pon.provenance import check_pon_version
 
     try:
         pon = PonModel.load(pon_path)
-        logger.info(f"Loaded PON model: {pon.assay} (n={pon.n_samples})")
-        return pon
     except Exception as e:
         logger.warning(f"Could not load PON model: {e}")
         return None
 
+    complaint = check_pon_version(pon.krewlyzer_version, Path(pon_path).name)
+    if complaint:
+        logger.error(complaint)
+        return None
+
+    logger.info(
+        f"Loaded PON model: {pon.assay} (n={pon.n_samples}, "
+        f"built for {pon.krewlyzer_version or 'unknown'})"
+    )
+    return pon
+
 
 def compute_nrl_zscore(
-    observed_nrl: float, pon, group_id: str = "all"
+    observed_nrl: float, pon, group_id: str = GENOME_WIDE_GROUP
 ) -> Optional[float]:
     """
     Compute NRL (Nucleosome Repeat Length) z-score.
@@ -56,7 +79,7 @@ def compute_nrl_zscore(
     Args:
         observed_nrl: NRL in bp from FFT analysis (nrl_bp column)
         pon: Loaded PonModel with wps_background_baseline
-        group_id: Group identifier (default: "all" for global)
+        group_id: Group identifier (default: the genome-wide group)
 
     Returns:
         Z-score or None if not computable
@@ -68,7 +91,7 @@ def compute_nrl_zscore(
 
 
 def compute_periodicity_zscore(
-    observed_periodicity: float, pon, group_id: str = "all"
+    observed_periodicity: float, pon, group_id: str = GENOME_WIDE_GROUP
 ) -> Optional[float]:
     """
     Compute periodicity z-score.
@@ -79,7 +102,7 @@ def compute_periodicity_zscore(
     Args:
         observed_periodicity: Periodicity score from FFT
         pon: Loaded PonModel with wps_background_baseline
-        group_id: Group identifier (default: "all" for global)
+        group_id: Group identifier (default: the genome-wide group)
 
     Returns:
         Z-score or None if not computable

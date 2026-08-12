@@ -718,29 +718,49 @@ fn load_entropy_baseline_from_parquet(
         let row = row_result.with_context(|| "Failed to read row")?;
         
         // Check if this row belongs to the specified table
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != table_name {
-                continue;
-            }
-        } else {
-            continue;
+        // By name, and skip when absent: `unwrap_or(0)` read column zero,
+        // which in a PON parquet is `table` itself -- so a PON without the
+        // column would have compared every row against its own first value.
+        match row
+            .get_column_iter()
+            .position(|(n, _)| n == "table")
+            .and_then(|i| row.get_string(i).ok())
+        {
+            Some(table) if table == table_name => {}
+            _ => continue,
         }
         
-        // Extract label, entropy_mean, entropy_std
-        let label = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "label").unwrap_or(0)
-        ).map_or("".to_string(), |v| v.to_string());
-        
-        let entropy_mean = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "entropy_mean").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let entropy_std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "entropy_std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
+        // Extract label, entropy_mean, entropy_std.
+        //
+        // Three fabrications lived in this block. `unwrap_or(1.0)` on the
+        // sigma was the worst: paired with a mean it made z the raw
+        // difference, so a PON storing NaN for a single-donor label -- which
+        // the builder now does -- produced 0.14 rather than no score. A mean
+        // defaulting to 0.0 is the same fault, and together they are the
+        // standard normal removed from nine baseline classes as
+        // `zscore_or_nan`.
+        //
+        // `position(...).unwrap_or(0)` was quieter and worse: a column that
+        // could not be found read *column zero* instead, which in a PON
+        // parquet is `table`. A renamed column would have been scored against
+        // the literal string "tfbs_baseline".
+        //
+        // NaN propagates: the z-score branch below treats a non-positive or
+        // non-finite sigma as unusable, and `observed - NaN` is NaN anyway.
+        let column = |name: &str| row.get_column_iter().position(|(n, _)| n == name);
+
+        let label = column("label")
+            .and_then(|i| row.get_string(i).ok())
+            .map_or("".to_string(), |v| v.to_string());
+
+        let entropy_mean = column("entropy_mean")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
+        let entropy_std = column("entropy_std")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
         if !label.is_empty() {
             baseline.insert(label, EntropyBaselineStats { 
                 entropy_mean, 
@@ -828,15 +848,29 @@ pub fn apply_pon_zscore(
         
         n_total += 1;
         let label = cols[label_idx].trim();
-        let entropy_value: f64 = cols[entropy_idx].trim().parse().unwrap_or(0.0);
-        
-        // Compute z-score
+        // NaN, not 0.0. An entropy that would not parse was not measured, and
+        // substituting zero scores it as a large negative deviation rather
+        // than as absent.
+        let entropy_value: f64 = cols[entropy_idx].trim().parse().unwrap_or(f64::NAN);
+
+        // Compute z-score.
+        //
+        // Both kinds of absence give NaN. They used to differ: a label missing
+        // from the baseline gave NaN, but a label present with no measurable
+        // spread gave 0.0 -- and 0.0 is the single most confident statement
+        // this column can make, "exactly at the healthy baseline", asserted
+        // precisely where there was nothing to divide by. The fabricating
+        // branch was also the one that fired more often.
+        //
+        // A NaN sigma from the builder takes this branch too: `NaN > 1e-9` is
+        // false, so a single-donor baseline now yields no z-score instead of a
+        // confident zero for every sample at that label.
         let z_score = if let Some(stats) = baseline.get(label) {
             n_matched += 1;
             if stats.entropy_std > 1e-9 {
                 (entropy_value - stats.entropy_mean) / stats.entropy_std
             } else {
-                0.0
+                f64::NAN
             }
         } else {
             f64::NAN

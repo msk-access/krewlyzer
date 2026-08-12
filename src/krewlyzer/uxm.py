@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .core.output_utils import (
-    read_table,
+    read_exact_table,
     write_table,
 )  # Unified I/O for Parquet support
 
@@ -38,6 +38,22 @@ logger = logging.getLogger("uxm")
 
 # Rust backend is required
 from krewlyzer import _core
+
+# ---------------------------------------------------------------------------
+# Fragment methylation classification thresholds (Loyfer et al., Nature 2022)
+#
+# A fragment is classified by the fraction of its CpGs that are methylated:
+#     ratio >= METHY_THRESHOLD    -> M (methylated)
+#     ratio <= UNMETHY_THRESHOLD  -> U (unmethylated)
+#     otherwise                   -> X (mixed / intermediate)
+#
+# These MUST straddle a gap. Passing an equal value for both (the historical
+# 0.5 / 0.5) makes the X branch unreachable because the Rust backend tests
+# `>= methy` first, so every fragment collapses into M or U and the published
+# X column is identically zero.
+# ---------------------------------------------------------------------------
+METHY_THRESHOLD = 0.75
+UNMETHY_THRESHOLD = 0.25
 
 
 def uxm(
@@ -155,8 +171,8 @@ def uxm(
             str(output_file),
             20,  # map_quality
             1,  # min_cpg
-            0.5,  # methy_threshold
-            0.5,  # unmethy_threshold
+            METHY_THRESHOLD,  # methy_threshold (ratio >= this -> M)
+            UNMETHY_THRESHOLD,  # unmethy_threshold (ratio <= this -> U)
             "SE",  # pe_type (single-end default)
         )
 
@@ -170,7 +186,10 @@ def uxm(
             logger.debug(
                 f"UXM: converting {output_file.name} → format={output_format!r}"
             )
-            df = read_table(output_file)
+            # read_exact_table: Rust wrote this exact TSV. read_table is
+            # parquet-first and would prefer a stale `.parquet` sibling from an
+            # earlier run into the same directory (c92ed86).
+            df = read_exact_table(output_file)
             if df is not None:
                 write_table(
                     df,
@@ -185,7 +204,10 @@ def uxm(
         elif compress:
             # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
             logger.debug(f"UXM: compressing {output_file.name} → .tsv.gz")
-            df = read_table(output_file)
+            # read_exact_table: Rust wrote this exact TSV. read_table is
+            # parquet-first and would prefer a stale `.parquet` sibling from an
+            # earlier run into the same directory (c92ed86).
+            df = read_exact_table(output_file)
             if df is not None:
                 write_table(
                     df, output_file.with_suffix(""), output_format="tsv", compress=True

@@ -6,23 +6,28 @@ This module provides the CLI and logic for building unified PON models.
 
 import typer
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 from datetime import datetime
 import logging
+import tempfile
 
 import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.logging import RichHandler
 
+from .provenance import build_provenance
 from .model import (
     PonModel,
     GcBiasModel,
     FsdBaseline,
     WpsBaseline,
+    WpsShapeBaseline,
+    WPS_SHAPE_STATS,
     OcfBaseline,
     MdsBaseline,
     RegionMdsBaseline,
+    RegionMdsExonBaseline,
     WpsBackgroundBaseline,
     FscGeneBaseline,
     FscRegionBaseline,
@@ -38,10 +43,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger("build-pon")
 
+#: Minimum samples behind a per-key baseline entry.
+#:
+#: FSC gene and FSC region have required this since they were written; WPS
+#: acquired it in 4cd634b. Named here so the four agree by construction
+#: rather than by three separate literals happening to match.
+MIN_SAMPLES_PER_KEY = 3
+
+
+def sample_std_or_nan(values) -> float:
+    """Sample standard deviation, or NaN when there is no spread to measure.
+
+    The one rule, in one place. Both ``pandas.std()`` and ``np.std(ddof=1)``
+    return **0.0** for identical values and NaN only below two observations --
+    and 0.0 is the single worst answer available, because a z-score divided by
+    it is infinite rather than absent.
+
+    Six call sites computed a spread here and only one converted zero to NaN.
+    Three of the other five carried comments claiming they did. The models built
+    from them failed their own gate:
+
+        fsc_region_baseline.depth_std   2 non-positive
+        region_mds_exon.mds_std          2 non-positive
+        wps_background.nrl_std           1-4 non-positive
+
+    ``ddof=1`` throughout: a PON cohort is a sample of healthy donors, not the
+    population, and the population form understates the spread -- by 2.5% at
+    n=21 -- inflating every z built from it.
+
+    Mirrors ``mean_and_sd`` in ``rust/src/pon_builder.rs``, which has been
+    correct all along. That is why the WPS blocks were clean while the Python
+    ones were not.
+    """
+    finite = pd.to_numeric(pd.Series(list(values)), errors="coerce").dropna()
+    if len(finite) < 2:
+        return float("nan")
+
+    # Identity is tested on the values, not on the result.
+    #
+    # `std([0.95, 0.95, 0.95])` is 1.36e-16, not 0.0 -- cancellation in the
+    # variance sum leaves floating-point residue. A `sd <= 0` guard therefore
+    # misses the exact case it exists for, and a z divided by 1.36e-16 is 1e16.
+    # Comparing min to max is exact and needs no invented tolerance: values
+    # that genuinely differ, however slightly, keep whatever spread they have.
+    if float(finite.max()) == float(finite.min()):
+        return float("nan")
+
+    sd = float(finite.std(ddof=1))
+    if not np.isfinite(sd) or sd <= 0.0:
+        return float("nan")
+    return sd
+
+
 # Import core tools for processing samples
 from krewlyzer import _core
 
 # Import unified sample processor
+from krewlyzer import __version__
+from krewlyzer.core.output_utils import read_table
 from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
 
 # Import asset resolution functions
@@ -49,7 +108,6 @@ from krewlyzer.core.asset_resolution import resolve_target_regions
 
 # Import startup banner logging
 from krewlyzer.core.logging import log_startup_banner, ResolvedAsset
-from krewlyzer import __version__
 
 
 def _process_sample_subprocess(
@@ -144,6 +202,14 @@ def _process_sample_subprocess(
         pon_mode=True,  # Skip PON normalization (we're building it)
         output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
         compress=False,  # Temp files only — no compression needed
+        # Makes the kept cache readable by --from-outputs.
+        #
+        # The k-mer counts already reach the model through memory, so this
+        # changes nothing about the PON being built. It changes what the cache
+        # is worth afterwards: without these two tables the directory is short
+        # of the one input --from-outputs cannot reconstruct, so re-aggregating
+        # after an aggregation fix meant re-reading every BAM.
+        write_motif_files=True,
     )
 
     # Log memory and time after sample processing
@@ -169,19 +235,62 @@ def _process_sample_subprocess(
                 e1_only=False,
                 mapq=sample_params.mapq,
                 min_len=sample_params.minlen,
-                max_len=400,  # Standard cfDNA range for motifs
+                # The sample's own cap, not a hardcoded 400.
+                #
+                # `run-all` runs region-mds at maxlen=1000, and `run-all` is
+                # how every sample is measured at scoring time. A baseline
+                # fitted over 65-400bp and a sample measured over 65-1000bp
+                # are not the same quantity: MDS is normalised entropy, so the
+                # wider window sees more fragments and reads higher.
+                #
+                # Measured on the xs2 duplex cohort, same 21 donors both ways:
+                # every one of 146 genes shifted up, +0.0043 +/- 0.0016, which
+                # against the baseline's own sigma of 0.0043 is a median z bias
+                # of +1.15 -- 86 genes past 1 sigma and 11 past 2 -- in every
+                # healthy sample, from the cap alone. Invariant #6.
+                max_len=sample_params.maxlen,
                 silent=True,
             )
-        except Exception:
-            pass  # Non-critical, continue without MDS
+        except Exception as exc:
+            # Not "non-critical": region_mds is the only source of the
+            # region_mds and region_mds_exon baselines, and both are built by
+            # globbing the files this writes. Swallowing the error produces a
+            # PON silently missing two blocks, which is the exact failure mode
+            # the rest of this release exists to remove.
+            #
+            # Warned rather than raised so one bad sample does not lose a
+            # four-hour build; the count is reconciled at aggregation, where a
+            # baseline with no inputs is now an error.
+            logger.warning(
+                f"[{sample_name}] region-mds failed, so this sample "
+                f"contributes to neither the region_mds nor the "
+                f"region_mds_exon baseline: {type(exc).__name__}: {exc}"
+            )
+    elif is_bam_input and not (gene_bed and gene_bed.exists()):
+        logger.warning(
+            f"[{sample_name}] no gene BED resolved for assay {assay!r}; "
+            "region_mds and region_mds_exon baselines will be empty"
+        )
+    elif not is_bam_input:
+        logger.warning(
+            f"[{sample_name}] input is not a BAM/CRAM, so region-mds cannot "
+            "run. The region_mds and region_mds_exon baselines need alignment "
+            "records, not a fragment BED."
+        )
 
     return outputs
 
 
 def build_pon(
-    sample_list: Path = typer.Argument(
-        ...,
-        help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline.",
+    sample_list: Optional[Path] = typer.Argument(
+        None,
+        help="Text file with paths to BAM/CRAM or BED.gz files (one per line). BAM/CRAM required for MDS baseline. Omit when using --from-outputs.",
+    ),
+    from_outputs: Optional[Path] = typer.Option(
+        None,
+        "--from-outputs",
+        help="Aggregate an existing directory of per-sample run-all outputs "
+        "instead of extracting features. No BAM is read.",
     ),
     assay: str = typer.Option(
         ..., "--assay", "-a", help="Assay name (e.g., msk-access-v2)"
@@ -210,8 +319,23 @@ def build_pon(
         "-T",
         help="BED file with target regions (panel mode - builds dual on/off-target baselines)",
     ),
+    cohort_label: str = typer.Option(
+        "",
+        "--cohort-label",
+        help="A name for this cohort, recorded in the PON. Free text, for "
+        "humans -- the machine-readable half is a salted digest of the sample "
+        "IDs, written automatically. No identifier is stored either way.",
+    ),
     temp_dir: Optional[Path] = typer.Option(
         None, "--temp-dir", help="Directory for temporary files (default: system temp)"
+    ),
+    keep_sample_outputs: Optional[Path] = typer.Option(
+        None,
+        "--keep-sample-outputs",
+        help="Write each sample's feature outputs here and keep them. Without "
+        "this they are extracted to a temp directory and deleted, so every "
+        "rebuild re-runs extraction over every BAM from scratch -- hours -- "
+        "and leave-one-out calibration is not affordable at all.",
     ),
     threads: int = typer.Option(
         4, "--threads", "-p", help="Total threads (divided among parallel samples)"
@@ -292,12 +416,31 @@ def build_pon(
         except Exception as e:
             logger.warning(f"Could not configure threads: {e}")
 
-    # Validate inputs
-    if not sample_list.exists():
+    # Validate inputs.
+    #
+    # Exactly one source of samples. Accepting both would leave it ambiguous
+    # which cohort the model was actually built from -- and the cohort digest
+    # would record only one of them.
+    if (sample_list is None) == (from_outputs is None):
+        logger.error(
+            "Give either a SAMPLE_LIST or --from-outputs, not both and not "
+            "neither. SAMPLE_LIST extracts features from BAMs; --from-outputs "
+            "aggregates a directory of per-sample run-all outputs."
+        )
+        raise typer.Exit(2)
+
+    if sample_list is not None and not sample_list.exists():
         logger.error(f"Sample list not found: {sample_list}")
         raise typer.Exit(1)
 
-    if not reference.exists():
+    if from_outputs is not None and not from_outputs.is_dir():
+        logger.error(f"--from-outputs is not a directory: {from_outputs}")
+        raise typer.Exit(1)
+
+    # The reference is read during extraction only. Requiring it for an
+    # aggregation would be asking for a 3 GB file nothing opens -- but its
+    # *name* is still recorded in the model, so it stays a required option.
+    if from_outputs is None and not reference.exists():
         logger.error(f"Reference FASTA not found: {reference}")
         raise typer.Exit(1)
 
@@ -314,18 +457,60 @@ def build_pon(
         logger.debug(f"Validating user-provided target regions: {target_regions}")
         validate_file(target_regions, FileSchema.BED3)
 
-    # Read sample list
-    with open(sample_list) as f:
-        samples = [
-            Path(line.strip())
-            for line in f
-            if line.strip() and not line.startswith("#")
+    # Read the cohort, from whichever source was given.
+    #
+    # `from_output_dirs` is resolved here rather than later so an incomplete
+    # directory fails in seconds, before any setup work.
+    from_output_dirs: List[Path] = []
+    if from_outputs is not None:
+        from krewlyzer.pon import from_outputs as _from_outputs
+
+        candidates = _from_outputs.discover_samples(from_outputs)
+        from_output_dirs = [
+            d for d in candidates if _from_outputs.incomplete_reason(d) is None
         ]
+        refused = [
+            (d, _from_outputs.incomplete_reason(d))
+            for d in candidates
+            if _from_outputs.incomplete_reason(d) is not None
+        ]
+        for directory, reason in refused:
+            logger.warning(f"  skipping {directory.name}: {reason}")
+        if refused and not allow_failures:
+            logger.error(
+                f"{len(refused)} of {len(candidates)} sample directories are "
+                "incomplete (listed above). A half-written directory "
+                "aggregates into a cohort quietly smaller than its own "
+                "metadata claims. Use --allow-failures to build anyway."
+            )
+            raise typer.Exit(1)
+        samples = [Path(d) for d in from_output_dirs]
+    else:
+        assert sample_list is not None  # guarded above
+        with open(sample_list) as f:
+            samples = [
+                Path(line.strip())
+                for line in f
+                if line.strip() and not line.startswith("#")
+            ]
 
     n_samples = len(samples)
     if n_samples < 1:
-        logger.error("No samples found in sample list")
+        source = "output directory" if from_outputs is not None else "sample list"
+        logger.error(f"No samples found in {source}")
         raise typer.Exit(1)
+
+    # What the cohort was made of, recorded in the model.
+    #
+    # Derived here, before `samples` is rewritten to the aggregated sample ids
+    # further down. The gate uses it to decide whether a missing `mds_baseline`
+    # or `region_mds` is legitimate: those need a BAM, so their absence is
+    # expected for a fragment-BED cohort and a defect for a BAM one.
+    if from_outputs is not None:
+        input_kind = "outputs"
+    else:
+        n_bam = sum(1 for s in samples if str(s).endswith((".bam", ".cram")))
+        input_kind = "bam" if n_bam == n_samples else ("bed" if n_bam == 0 else "mixed")
 
     # Initialize AssetManager for bundled asset access
     from krewlyzer.assets import AssetManager
@@ -394,7 +579,14 @@ def build_pon(
     if bin_file is None:
         bin_file = assets.bins_100kb
 
-    if not bin_file.exists():
+    # Only extraction needs it.
+    #
+    # `--from-outputs` reads tables somebody else already computed, so it opens
+    # no BAM, no reference and no bin file. Failing the build for a missing
+    # extraction asset would make the aggregation route depend on a data
+    # package it never touches -- and it did: CI has no LFS payload, so every
+    # `--from-outputs` build died on this line while passing locally.
+    if from_outputs is None and not bin_file.exists():
         logger.error(f"Bin file not found: {bin_file}")
         raise typer.Exit(1)
 
@@ -416,7 +608,6 @@ def build_pon(
             "WPS background file not found - Alu baseline will not be computed"
         )
 
-    import tempfile
     import shutil
     import time
     from concurrent.futures import (
@@ -497,10 +688,17 @@ def build_pon(
         wps_background=wps_bg_file,  # Bundled Alu regions for NRL baseline
     )
 
-    # Use temp directory for sample processing outputs
-    temp_base = str(temp_dir) if temp_dir else None
-    temp_output_dir = tempfile.mkdtemp(prefix="pon_build_", dir=temp_base)
-    logger.info(f"Temporary output directory: {temp_output_dir}")
+    # Where each sample's features land. Kept when asked for: extraction is
+    # the expensive half of a build, and discarding it means a rebuild costs a
+    # full pass over every BAM and leave-one-out costs n of them.
+    if keep_sample_outputs is not None:
+        keep_sample_outputs.mkdir(parents=True, exist_ok=True)
+        temp_output_dir = str(keep_sample_outputs)
+        logger.info(f"Sample outputs (kept): {temp_output_dir}")
+    else:
+        temp_base = str(temp_dir) if temp_dir else None
+        temp_output_dir = tempfile.mkdtemp(prefix="pon_build_", dir=temp_base)
+        logger.info(f"Temporary output directory: {temp_output_dir}")
 
     # Process samples
     all_outputs: List[SampleOutputs] = []
@@ -519,9 +717,17 @@ def build_pon(
             return name
 
         # Build sample info list
-        sample_infos = [
-            (sample_path, get_sample_name(sample_path)) for sample_path in samples
-        ]
+        # Extraction is skipped entirely for --from-outputs: the features
+        # already exist on disk. An empty list means the processing loop below
+        # runs zero times rather than needing to be wrapped in a conditional,
+        # which would re-indent 150 lines of working code for no gain.
+        sample_infos = (
+            []
+            if from_outputs is not None
+            else [
+                (sample_path, get_sample_name(sample_path)) for sample_path in samples
+            ]
+        )
 
         if actual_parallel > 1:
             # ─────────────────────────────────────────────────────────────────
@@ -616,6 +822,9 @@ def build_pon(
                         pon_mode=True,  # Skip PON normalization (we're building it)
                         output_format="tsv",  # MUST be tsv — aggregation loop uses pd.read_csv()
                         compress=False,  # Temp files only — no compression needed
+                        # As in the subprocess path above: the cache is only
+                        # re-aggregatable if it carries the motif tables.
+                        write_motif_files=True,
                     )
 
                     all_outputs.append(outputs)
@@ -638,11 +847,16 @@ def build_pon(
                                 e1_only=False,
                                 mapq=sample_params.mapq,
                                 min_len=sample_params.minlen,
-                                max_len=400,
+                                # As above: match run-all, or the baseline
+                                # measures something the samples do not.
+                                max_len=sample_params.maxlen,
                                 silent=True,
                             )
                         except Exception as e:
-                            logger.debug(f"    Could not run region-mds: {e}")
+                            logger.warning(
+                                f"    region-mds failed for {sample_name}: "
+                                f"{type(e).__name__}: {e}"
+                            )
 
                 except Exception as e:
                     logger.warning(f"  ✗ Failed: {e}")
@@ -661,7 +875,7 @@ def build_pon(
             f"Processing complete: {len(all_outputs)} succeeded, {len(failed_samples)} failed ({processing_elapsed:.1f}s)"
         )
 
-        if len(all_outputs) < 1:
+        if from_outputs is None and len(all_outputs) < 1:
             logger.error("No samples processed successfully")
             raise typer.Exit(1)
 
@@ -684,6 +898,11 @@ def build_pon(
         all_ocf_data_offtarget = []
 
         all_mds_data = []
+        # Breakpoint 4-mers need their own baseline: they span the cut site and
+        # include reference bases the fragment does not, so they are a
+        # different distribution from end motifs (correlation 0.696).
+        all_bpm_data: List[dict] = []
+        all_bpm_data_ontarget: List[dict] = []
         all_tfbs_data = []
         all_atac_data = []
         all_fsd_data_ontarget = []
@@ -706,6 +925,7 @@ def build_pon(
         wps_background_paths = []  # WPS Alu background for NRL baseline
         wps_panel_paths = []  # Panel-specific WPS parquets (panel mode only)
         mds_gene_paths = []  # Region MDS per-gene files
+        mds_exon_paths = []  # Region MDS per-exon files (written alongside)
 
         # FSC gene/region data collectors (panel mode only)
         # Collect normalized_depth from FSC.gene.tsv and FSC.regions.tsv
@@ -877,11 +1097,36 @@ def build_pon(
             if sample_mds_gene.exists():
                 mds_gene_paths.append(str(sample_mds_gene))
 
+            # The exon table is written by the same run_region_mds call, so it
+            # costs nothing extra to baseline -- and it is the finest
+            # localisation krewlyzer produces, which had no baseline at all.
+            sample_mds_exon = (
+                Path(temp_output_dir) / sample_name / f"{sample_name}.MDS.exon.tsv"
+            )
+            if sample_mds_exon.exists():
+                mds_exon_paths.append(str(sample_mds_exon))
+
             # Collect MDS data (from extraction)
             if outputs.mds_counts:
                 all_mds_data.append(
                     {"kmers": outputs.mds_counts, "mds": outputs.mds_score}
                 )
+
+            # Breakpoint motifs, genome-wide and on-target. `mds` is None: MDS
+            # is defined on end motifs, and a number here would be a different
+            # statistic wearing the same name.
+            for counts, bucket in (
+                (getattr(outputs, "bpm_counts", None), all_bpm_data),
+                (getattr(outputs, "bpm_counts_ontarget", None), all_bpm_data_ontarget),
+            ):
+                total = sum(counts.values()) if counts else 0
+                if counts and total > 0:
+                    bucket.append(
+                        {
+                            "kmers": {k: v / total for k, v in counts.items()},
+                            "mds": None,
+                        }
+                    )
 
             # Collect on-target MDS data (panel mode)
             # Uses on-target k-mer frequencies for separate panel-mode baseline
@@ -986,14 +1231,70 @@ def build_pon(
             logger.info(f"  FSC region samples: {len(all_fsc_region_data)}")
 
     except Exception:
-        # On error, cleanup temp directory before re-raising
-        if temp_output_dir and Path(temp_output_dir).exists():
+        # On error, cleanup before re-raising -- but never when the caller
+        # asked to keep the outputs. A failed build is exactly when the
+        # completed samples are worth having: the rerun skips them.
+        if keep_sample_outputs is not None:
+            logger.info(f"Build failed; per-sample outputs kept in {temp_output_dir}")
+        elif temp_output_dir and Path(temp_output_dir).exists():
             shutil.rmtree(temp_output_dir)
             logger.debug(f"Cleaned up temp directory after error: {temp_output_dir}")
         raise
 
+    # ═══════════════════════════════════════════════════════════════════════
+    # --from-outputs: fill the same collectors by reading files
+    # ═══════════════════════════════════════════════════════════════════════
+    #
+    # Everything below this point is shared. The two routes differ only in how
+    # these lists get filled -- one extracts features from BAMs, the other
+    # reads features someone already extracted -- and they converge here so
+    # neither can drift into producing a model the other cannot.
+    if from_outputs is not None:
+        from krewlyzer.pon import from_outputs as _from_outputs
+
+        logger.info("=" * 60)
+        logger.info(f"AGGREGATING {len(from_output_dirs)} run-all output directories")
+        logger.info("=" * 60)
+        collected, skipped = _from_outputs.collect(from_output_dirs)
+        for directory, reason in skipped:
+            logger.warning(f"  skipped {directory.name}: {reason}")
+        logger.info(f"  {_from_outputs.describe(collected)}")
+
+        all_gc_data = collected.gc
+        all_gc_data_ontarget = collected.gc_ontarget
+        all_fsd_data = collected.fsd
+        all_fsd_data_ontarget = collected.fsd_ontarget
+        all_ocf_data = collected.ocf
+        all_ocf_data_ontarget = collected.ocf_ontarget
+        all_ocf_data_offtarget = collected.ocf_offtarget
+        all_mds_data = collected.mds
+        all_mds_data_ontarget = collected.mds_ontarget
+        all_bpm_data = collected.breakpoint_motif
+        all_bpm_data_ontarget = collected.breakpoint_motif_ontarget
+        all_tfbs_data = collected.tfbs
+        all_tfbs_data_ontarget = collected.tfbs_ontarget
+        all_atac_data = collected.atac
+        all_atac_data_ontarget = collected.atac_ontarget
+        all_fsc_gene_data = collected.fsc_gene
+        all_fsc_region_data = collected.fsc_region
+        fsd_paths = collected.fsd_paths
+        fsd_ontarget_paths = collected.fsd_ontarget_paths
+        wps_paths = collected.wps_paths
+        wps_panel_paths = collected.wps_panel_paths
+        wps_background_paths = collected.wps_background_paths
+        mds_gene_paths = collected.mds_gene_paths
+        mds_exon_paths = collected.mds_exon_paths
+
+        # The digest must record what was aggregated, not what was asked for.
+        samples = [Path(stem) for stem in collected.sample_ids]
+
     if len(all_gc_data) < 1:
-        logger.error("No samples processed successfully")
+        source = (
+            "aggregated from the output directories"
+            if from_outputs is not None
+            else "processed successfully"
+        )
+        logger.error(f"No samples {source}")
         raise typer.Exit(1)
 
     logger.info("=" * 60)
@@ -1012,7 +1313,7 @@ def build_pon(
 
     # Build WPS baseline
     logger.info("  Computing WPS baseline...")
-    wps_baseline = _compute_wps_baseline(wps_paths)
+    wps_baseline, wps_shape_baseline = _compute_wps_baseline(wps_paths)
 
     # Build OCF baseline
     ocf_baseline = None
@@ -1049,6 +1350,25 @@ def build_pon(
             f"  Computing on-target MDS baseline ({len(all_mds_data_ontarget)} samples)..."
         )
         mds_baseline_ontarget = _compute_mds_baseline(all_mds_data_ontarget)
+
+    # Breakpoint-motif baselines. Same aggregation, different distribution:
+    # scoring BreakPointMotif against the end-motif baseline gave median |z|
+    # 5.85 (XS1) and 11.25 (XS2) where a fitted baseline gives ~0.67.
+    breakpoint_motif_baseline = None
+    if all_bpm_data:
+        logger.info(
+            f"  Computing breakpoint-motif baseline ({len(all_bpm_data)} samples)..."
+        )
+        breakpoint_motif_baseline = _compute_mds_baseline(all_bpm_data)
+    breakpoint_motif_baseline_ontarget = None
+    if is_panel_mode and all_bpm_data_ontarget:
+        logger.info(
+            f"  Computing on-target breakpoint-motif baseline "
+            f"({len(all_bpm_data_ontarget)} samples)..."
+        )
+        breakpoint_motif_baseline_ontarget = _compute_mds_baseline(
+            all_bpm_data_ontarget
+        )
         if mds_baseline_ontarget:
             logger.debug(
                 f"    On-target MDS: mean={mds_baseline_ontarget.mds_mean:.4f}"
@@ -1118,7 +1438,25 @@ def build_pon(
         logger.info(
             f"  Computing WPS panel baseline ({len(wps_panel_paths)} samples)..."
         )
-        wps_baseline_panel = _compute_wps_baseline(wps_panel_paths)
+        # The panel anchors get their own vector baseline; their shape
+        # statistics are not separately modelled -- 285-326 anchors is too
+        # few to be worth a second block, and they overlap the genome-wide set.
+        wps_baseline_panel, _ = _compute_wps_baseline(wps_panel_paths)
+
+    # A BAM cohort with no MDS files means every region-mds call failed.
+    #
+    # Both baselines are built by globbing files the per-sample step writes, so
+    # "no files" and "no baseline" are the same thing here -- and until now the
+    # build reported success either way. `validate-pon` would catch the missing
+    # blocks afterwards, but four hours later.
+    n_bam_inputs = sum(1 for p, _ in sample_infos if str(p).endswith((".bam", ".cram")))
+    if n_bam_inputs and not mds_gene_paths:
+        logger.error(
+            f"None of the {n_bam_inputs} BAM/CRAM samples produced an "
+            "MDS.gene file, so the region_mds and region_mds_exon baselines "
+            "would be empty. Check the region-mds warnings above -- a PON "
+            "without them is missing gene- and exon-level scoring entirely."
+        )
 
     # Build Region MDS baseline (per-gene MDS statistics)
     region_mds_baseline = None
@@ -1128,6 +1466,15 @@ def build_pon(
             region_mds_baseline = _compute_region_mds_baseline(mds_gene_paths)
         except Exception as e:
             logger.warning(f"  Region MDS baseline failed: {e}")
+
+    # Build Region MDS exon baseline (per-exon / per-capture-tile)
+    region_mds_exon_baseline = None
+    if mds_exon_paths:
+        logger.info("  Computing Region MDS exon baseline...")
+        try:
+            region_mds_exon_baseline = _compute_region_mds_exon_baseline(mds_exon_paths)
+        except Exception as e:
+            logger.warning(f"  Region MDS exon baseline failed: {e}")
 
     # Compute FSC gene/region baselines (panel mode only)
     fsc_gene_baseline = None
@@ -1159,9 +1506,17 @@ def build_pon(
             if is_panel_mode
             else ""
         ),
+        # Provenance, from the sample list actually read at the top of this
+        # function. The four models already in the repo record only n_samples,
+        # so none of them can be reproduced or checked against a rebuild.
+        # `input_kind` lets the gate tell "not asked for" from "went wrong":
+        # mds_baseline and region_mds need a BAM, so their absence is
+        # legitimate for a fragment-BED cohort and a defect for a BAM one.
+        **build_provenance(samples, __version__, cohort_label, input_kind),
         gc_bias=gc_bias,
         fsd_baseline=fsd_baseline,
         wps_baseline=wps_baseline,
+        wps_shape_baseline=wps_shape_baseline,
         wps_background_baseline=wps_background_baseline,
         wps_baseline_panel=wps_baseline_panel,
         ocf_baseline=ocf_baseline,
@@ -1169,7 +1524,10 @@ def build_pon(
         ocf_baseline_offtarget=ocf_baseline_offtarget,
         mds_baseline=mds_baseline,
         mds_baseline_ontarget=mds_baseline_ontarget,
+        breakpoint_motif_baseline=breakpoint_motif_baseline,
+        breakpoint_motif_baseline_ontarget=breakpoint_motif_baseline_ontarget,
         region_mds=region_mds_baseline,
+        region_mds_exon=region_mds_exon_baseline,
         tfbs_baseline=tfbs_baseline,
         atac_baseline=atac_baseline,
         # On-target baselines (panel mode - uses panel-specific regions)
@@ -1268,6 +1626,15 @@ def build_pon(
     )
     logger.info(
         _baseline_status(
+            "region_mds_exon",
+            region_mds_exon_baseline,
+            lambda b: (
+                f"{len(b.exon_baseline)} exons" if hasattr(b, "exon_baseline") else "OK"
+            ),
+        )
+    )
+    logger.info(
+        _baseline_status(
             "tfbs_baseline",
             tfbs_baseline,
             lambda b: f"{len(b.labels)} labels" if hasattr(b, "labels") else "OK",
@@ -1361,8 +1728,18 @@ def build_pon(
     logger.info("=" * 60)
     logger.info(f"✅ PON model built successfully: {output}")
 
-    # Cleanup temp directory after successful completion
-    if temp_output_dir and Path(temp_output_dir).exists():
+    # Cleanup, unless the caller asked to keep the sample outputs.
+    if keep_sample_outputs is not None:
+        # Name the command, because "reuse them" was not actionable and the
+        # cache could not in fact be reused until it started carrying the
+        # motif tables. Re-aggregating is minutes; re-extracting is hours.
+        logger.info(f"Kept per-sample outputs in {temp_output_dir}")
+        logger.info(
+            "  Rebuild from them without re-reading a BAM:\n"
+            f"    krewlyzer build-pon --from-outputs {temp_output_dir} "
+            f"--assay {assay} -r {reference} -o {output}"
+        )
+    elif temp_output_dir and Path(temp_output_dir).exists():
         shutil.rmtree(temp_output_dir)
         logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
 
@@ -1397,6 +1774,46 @@ def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
     )
 
 
+def _as_plain_tsv(paths: List[str], staging: Path) -> Tuple[List[str], List[str]]:
+    """Return every input as a plain TSV, materialising the ones that are not.
+
+    Parquet and gzipped tables are read with ``read_exact_table`` and written
+    out uncompressed into ``staging``. Plain TSVs are passed through untouched,
+    so the common in-process case copies nothing.
+
+    ``read_exact_table``, not ``read_table``: the caller has already resolved
+    which file it wants, and ``read_table`` is parquet-first, so it would
+    happily return a stale sibling instead of the file named here.
+
+    Returns ``(readable, complaints)`` -- nothing is dropped without a reason
+    the caller can print.
+    """
+    from krewlyzer.core.output_utils import read_exact_table
+
+    readable: List[str] = []
+    complaints: List[str] = []
+    for raw in paths:
+        path = Path(raw)
+        if path.suffix == ".tsv":
+            readable.append(raw)
+            continue
+        try:
+            frame = read_exact_table(path)
+        except Exception as exc:
+            # Reported, never dropped. Silently shrinking the cohort is the
+            # failure this function exists to prevent, not an acceptable
+            # response to one bad file.
+            complaints.append(f"{path.name}: {type(exc).__name__}: {exc}")
+            continue
+        if frame is None or frame.empty:
+            complaints.append(f"{path.name}: unreadable or empty")
+            continue
+        materialised = staging / f"{len(readable):04d}.{path.name}.tsv"
+        frame.to_csv(materialised, sep="\t", index=False)
+        readable.append(str(materialised))
+    return readable, complaints
+
+
 def _compute_fsd_baseline(
     all_fsd_data: List[pd.DataFrame], fsd_paths: Optional[List[str]] = None
 ) -> Optional[FsdBaseline]:
@@ -1422,10 +1839,33 @@ def _compute_fsd_baseline(
 
     from krewlyzer import _core
 
-    result = _core.pon_builder.compute_fsd_baseline(fsd_paths)
+    # The Rust reader takes plain TSV -- `BufReader::lines()`, no gzip and no
+    # parquet. `File::open` succeeds on both of those anyway, the header parse
+    # then yields no bin columns, and every sample is skipped: 3 samples in,
+    # 0 arms out, exit 0.
+    #
+    # `run-all` writes `.FSD.parquet` and `.FSD.tsv.gz` and no plain `.tsv`, so
+    # this is the normal case for any output directory rather than an edge one.
+    # Normalising here rather than in each caller keeps the constraint in the
+    # one place that knows about it.
+    with tempfile.TemporaryDirectory(prefix="krewlyzer-fsd-") as staging:
+        readable, unreadable = _as_plain_tsv(fsd_paths, Path(staging))
+        if not readable:
+            raise RuntimeError(
+                f"None of the {len(fsd_paths)} FSD tables could be read: "
+                f"{unreadable[0] if unreadable else 'unknown'}"
+            )
+        result = _core.pon_builder.compute_fsd_baseline(readable)
+
     if not result:
+        # Not "no data returned from Rust". That wording sent a reader hunting
+        # a backend bug once already (see `_compute_wps_baseline`); the backend
+        # is doing exactly what it was asked.
         raise RuntimeError(
-            "FSD baseline computation failed: no data returned from Rust"
+            f"FSD baseline is empty after reading {len(readable)} tables. "
+            "The inputs parsed but held no size-bin columns -- FSD headers "
+            "must carry bins like '65-69'. First input: "
+            f"{Path(fsd_paths[0]).name}"
         )
 
     logger.info(f"FSD baseline computed: {len(result)} arms")
@@ -1440,7 +1880,9 @@ def _compute_fsd_baseline(
     return FsdBaseline(size_bins=size_bins, arms=arms)
 
 
-def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
+def _compute_wps_baseline(
+    wps_paths: List[str],
+) -> tuple[Optional[WpsBaseline], Optional[WpsShapeBaseline]]:
     """
     Compute WPS baseline from Parquet vector format (v2.0).
 
@@ -1451,14 +1893,16 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
         wps_paths: List of paths to WPS Parquet files
 
     Returns:
-        WpsBaseline with 200-element vectors or None if no data
+        ``(vector baseline, shape baseline)``. Both come from the same Rust
+        pass -- it already holds every sample's vectors for a region, and the
+        Python side would have to re-read ~44 MB per sample to see them again.
 
     Raises:
         RuntimeError: If computation fails
     """
     if not wps_paths:
         logger.warning("No WPS paths provided for baseline computation")
-        return None
+        return None, None
 
     from krewlyzer import _core
 
@@ -1466,8 +1910,16 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
     result = _core.pon_builder.compute_wps_baseline(wps_paths)
 
     if not result:
+        # "no data returned from Rust" named the wrong thing. The usual cause
+        # is the >=3-sample floor added in 4cd634b dropping every anchor, which
+        # is what a cohort below that floor looks like from here -- and the old
+        # message sent the reader looking for a Rust bug instead.
         raise RuntimeError(
-            "WPS baseline computation failed: no data returned from Rust"
+            f"WPS baseline is empty after reading {len(wps_paths)} sample(s). "
+            f"Every anchor was backed by fewer than {MIN_SAMPLES_PER_KEY} "
+            "samples, so none has a measurable spread. A cohort this small "
+            "cannot support a WPS baseline -- see the 'skipped N of M anchors' "
+            "line above for the count."
         )
 
     logger.info(f"WPS vector baseline computed: {len(result)} regions")
@@ -1486,7 +1938,34 @@ def _compute_wps_baseline(wps_paths: List[str]) -> Optional[WpsBaseline]:
             }
         )
 
-    return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0")
+    # The derived shape quantities, keyed the same way. Kept in their own
+    # baseline rather than as more columns on the vector one: these are scalars
+    # per anchor and the vector table is already ~100M floats.
+    shape_regions = {
+        region_id: {
+            **{
+                f"{stat}_{moment}": float(data.get(f"{stat}_{moment}", float("nan")))
+                for stat in WPS_SHAPE_STATS
+                for moment in ("mean", "std")
+            },
+            "n_samples": int(data.get("n_samples", 0)),
+        }
+        for region_id, data in result.items()
+    }
+    shape = WpsShapeBaseline(regions=shape_regions)
+    _log_baseline_quality(
+        "WPS shape",
+        pd.DataFrame(
+            [
+                {"region_id": r, "std": v["shape_corr_fisher_std"]}
+                for r, v in shape_regions.items()
+            ]
+        ),
+        "std",
+        "anchor",
+    )
+
+    return WpsBaseline(regions=pd.DataFrame(rows), schema_version="2.0"), shape
 
 
 def _compute_ocf_baseline(all_ocf_data: List[pd.DataFrame]) -> "Optional[OcfBaseline]":
@@ -1544,12 +2023,16 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
 
         if values:
             kmer_expected[kmer] = np.mean(values)
-            kmer_std[kmer] = np.std(values) if len(values) > 1 else 0.001
+            # NaN, not 0.001: no spread is not a small spread, and a z
+            # divided by 0.001 is a fabrication with three decimal places.
+            kmer_std[kmer] = sample_std_or_nan(values)
 
     # Compute MDS mean/std
     mds_values = [s["mds"] for s in all_mds_data if s.get("mds") is not None]
-    mds_mean = np.mean(mds_values) if mds_values else 0.0
-    mds_std = np.std(mds_values) if len(mds_values) > 1 else 1.0
+    # mean 0.0 / std 1.0 would make `z` equal the raw MDS value -- about 0.95,
+    # a perfectly ordinary-looking z-score for a baseline that was never fitted.
+    mds_mean = float(np.mean(mds_values)) if mds_values else float("nan")
+    mds_std = sample_std_or_nan(mds_values)
 
     logger.info(
         f"MDS baseline: {len(kmer_expected)} k-mers, {len(all_mds_data)} samples"
@@ -1561,6 +2044,98 @@ def _compute_mds_baseline(all_mds_data: List[dict]) -> "Optional[MdsBaseline]":
         mds_mean=mds_mean,
         mds_std=mds_std,
     )
+
+
+def _compute_region_mds_exon_baseline(
+    mds_exon_paths: List[str],
+) -> "Optional[RegionMdsExonBaseline]":
+    """Per-exon MDS baseline from sample ``MDS.exon`` tables.
+
+    The finest localisation krewlyzer produces -- which exon, not which gene --
+    and until now the only feature output with no baseline at all, so
+    ``MDS.exon`` shipped a raw score no reader could put in context.
+
+    Aggregated in Python rather than Rust like its per-gene sibling: 1,006
+    (xs2) to 1,725 (xs1) rows per sample is a trivial groupby, and the FSC
+    gene and region baselines already aggregate this way in this module.
+    Adding a Rust entry point would be a second way to do the same thing.
+
+    Keyed on ``(gene, name)``. ``name`` alone is not unique across genes, and
+    coordinates would break whenever the panel BED is regenerated.
+    """
+    from .model import RegionMdsExonBaseline
+
+    if not mds_exon_paths:
+        return None
+
+    valid_paths = [p for p in mds_exon_paths if Path(p).exists()]
+    if not valid_paths:
+        logger.warning("No valid MDS.exon files found for region-MDS exon baseline")
+        return None
+
+    logger.info(
+        f"Computing region-MDS exon baseline from {len(valid_paths)} samples..."
+    )
+
+    frames = []
+    for path in valid_paths:
+        try:
+            frame = read_table(Path(path))
+        except Exception as exc:
+            logger.warning(f"Could not read {Path(path).name}: {exc}")
+            continue
+        if frame is None:
+            continue
+        missing = [c for c in ("gene", "name", "mds") if c not in frame.columns]
+        if missing:
+            # Loud, not silent: a renamed column here would otherwise produce
+            # an empty baseline that looks exactly like "no exon data".
+            raise ValueError(
+                f"{Path(path).name} is missing {missing}; found "
+                f"{sorted(frame.columns)}. Refusing to build a partial baseline."
+            )
+        frames.append(frame[["gene", "name", "mds"]])
+
+    if not frames:
+        logger.warning("No readable MDS.exon data for the exon baseline")
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined["mds"] = pd.to_numeric(combined["mds"], errors="coerce")
+
+    grouped = combined.groupby(["gene", "name"], sort=True)["mds"]
+    stats = grouped.agg(["mean", "std", "count"])  # std is ddof=1 in pandas
+
+    kept = stats[stats["count"] >= MIN_SAMPLES_PER_KEY]
+    skipped = len(stats) - len(kept)
+
+    exon_stats: Dict[tuple, Dict[str, float]] = {}
+    for key, row in kept.iterrows():
+        # A two-level MultiIndex from the (gene, name) groupby. Indexed rather
+        # than unpacked: iterrows' key is untyped, and unpacking it leaves
+        # mypy unable to infer either half.
+        exon_key = (str(key[0]), str(key[1]))  # type: ignore[index]
+        exon_stats[exon_key] = {
+            "mds_mean": float(row["mean"]),
+            "mds_std": sample_std_or_nan(grouped.get_group(key)),
+            "n_samples": int(row["count"]),
+        }
+
+    baseline = RegionMdsExonBaseline(exon_baseline=exon_stats)
+    frame = pd.DataFrame(
+        [
+            {"key": f"{g}|{n}", "mds_std": v["mds_std"]}
+            for (g, n), v in exon_stats.items()
+        ]
+    )
+    _log_baseline_quality("Region MDS exon", frame, "mds_std", "exon")
+    if skipped:
+        logger.warning(
+            f"Region MDS exon baseline: skipped {skipped} of {len(stats)} exons "
+            f"seen in fewer than {MIN_SAMPLES_PER_KEY} samples -- those exons "
+            "get no z-score rather than one from an unmeasurable spread."
+        )
+    return baseline
 
 
 def _compute_region_mds_baseline(
@@ -1595,21 +2170,43 @@ def _compute_region_mds_baseline(
     logger.info(f"Computing region-MDS baseline from {len(valid_paths)} samples...")
 
     try:
-        # Use Rust-accelerated aggregation
-        result = _core.pon_builder.compute_region_mds_baseline(valid_paths)
+        # Plain TSV, as with FSD -- this Rust reader is the other `BufReader`
+        # one. A `run-all` directory holds `.MDS.gene.parquet` and
+        # `.MDS.gene.tsv.gz` and no plain `.tsv`, and handing either straight
+        # over produced an empty result, one warning line, and a PON with no
+        # `region_mds` block at all. `validate-pon` skips absent blocks, so
+        # nothing downstream would have said so.
+        with tempfile.TemporaryDirectory(prefix="krewlyzer-mdsgene-") as staging:
+            readable, unreadable = _as_plain_tsv(valid_paths, Path(staging))
+            if not readable:
+                raise RuntimeError(
+                    f"none of the {len(valid_paths)} MDS.gene tables could be "
+                    f"read: {unreadable[0] if unreadable else 'unknown'}"
+                )
+            result = _core.pon_builder.compute_region_mds_baseline(readable)
 
         if not result:
-            logger.warning("Region-MDS baseline computation returned empty result")
-            return None
+            # Loud. This block being quietly absent is exactly the failure the
+            # warning above used to allow.
+            raise RuntimeError(
+                f"region-MDS baseline is empty after reading {len(readable)} "
+                "MDS.gene tables. They parsed but yielded no per-gene MDS -- "
+                f"check the columns of {Path(valid_paths[0]).name}"
+            )
 
-        # Convert to RegionMdsBaseline
+        # Convert to RegionMdsBaseline.
+        #
+        # No `0.0` / `1.0` defaults: that pair is a standard normal, so a
+        # missing statistic would make z equal the raw MDS -- about 0.95, an
+        # entirely ordinary-looking number. The same fabrication removed from
+        # `_compute_mds_baseline` and `get_periodicity_stats`.
         gene_baseline = {}
         for gene, data in result.items():
             gene_baseline[gene] = {
-                "mds_mean": data.get("mds_mean", 0.0),
-                "mds_std": data.get("mds_std", 1.0),
-                "mds_e1_mean": data.get("mds_e1_mean", 0.0),
-                "mds_e1_std": data.get("mds_e1_std", 1.0),
+                "mds_mean": data.get("mds_mean", float("nan")),
+                "mds_std": data.get("mds_std", float("nan")),
+                "mds_e1_mean": data.get("mds_e1_mean", float("nan")),
+                "mds_e1_std": data.get("mds_e1_std", float("nan")),
                 "n_samples": data.get("n_samples", 0),
             }
 
@@ -1622,6 +2219,40 @@ def _compute_region_mds_baseline(
         raise RuntimeError(f"Region-MDS baseline computation failed: {e}")
 
 
+def _log_baseline_quality(
+    label: str, frame: "pd.DataFrame", std_col: str, key_col: str
+) -> None:
+    """Say out loud how much of a baseline is actually usable.
+
+    A PON block reports its row count and nothing else, so a block that is
+    entirely placeholder looks identical to one fitted from 47 samples. Every
+    defect found in these models has been of that shape. This prints the one
+    number that distinguishes them: how many entries carry a spread that was
+    measured rather than assumed.
+    """
+    total = len(frame)
+    if total == 0:
+        logger.warning(f"{label} baseline: EMPTY -- no entries were fitted")
+        return
+    std = pd.to_numeric(frame[std_col], errors="coerce")
+    unusable = int((~np.isfinite(std)).sum())
+    usable = total - unusable
+    logger.info(f"{label} baseline: {usable}/{total} {key_col}s with a measured spread")
+    if unusable:
+        logger.warning(
+            f"{label} baseline: {unusable}/{total} {key_col}s have no measurable "
+            f"spread and will yield no z-score. This is reported rather than "
+            f"floored -- a z divided by a placeholder is not a measurement."
+        )
+    finite = std[np.isfinite(std)]
+    if len(finite) > 1 and finite.nunique() == 1:
+        logger.warning(
+            f"{label} baseline: every {key_col} has the identical std "
+            f"{finite.iloc[0]!r}. A baseline that cannot vary with the data is "
+            f"the signature of a fabricated one -- check the source columns."
+        )
+
+
 def _compute_wps_background_baseline(
     wps_background_paths: List[str],
 ) -> "Optional[WpsBackgroundBaseline]":
@@ -1631,11 +2262,18 @@ def _compute_wps_background_baseline(
     Aggregates nucleosome repeat length (NRL) and periodicity values across samples
     for Alu element stacking analysis.
 
+    Rows whose NRL sits at the FFT search-band edge (`nrl_at_band_limit`) are
+    excluded from the NRL fit but not from periodicity, and the group keeps its
+    row either way -- with NaN when fewer than `MIN_SAMPLES_PER_KEY` rows
+    measured an NRL. A group that xs1 can measure and xs2 cannot is itself
+    information when the two models are compared, which a dropped row destroys.
+
     Args:
         wps_background_paths: List of paths to WPS_background.parquet files
 
     Returns:
-        WpsBackgroundBaseline with per-group NRL/periodicity mean/std
+        WpsBackgroundBaseline with per-group NRL/periodicity mean/std, plus
+        `n_at_band_limit` and `n_nrl_fitted` recording why an NRL is absent
     """
     from .model import WpsBackgroundBaseline
 
@@ -1669,50 +2307,104 @@ def _compute_wps_background_baseline(
         # Concatenate all samples
         combined = pd.concat(all_groups, ignore_index=True)
 
-        # Aggregate by group_id
+        # The columns this block is built from, as WPS_background actually
+        # writes them. They were previously guessed as `nrl`/`period_score`;
+        # neither has ever existed, so the `else` arm fired on every build and
+        # every shipped PON carried a hardcoded 167.0/5.0/0.0/1.0 -- identical
+        # across all four models and all 28 groups, from cohorts of 21 and 47.
+        # Combined with the 0.8.x nrl_bp degeneracy that made nrl_z exactly
+        # -3.4 for every sample ever produced.
+        #
+        # Named once, and their absence is fatal. A baseline that silently
+        # substitutes a literal is worse than a missing one: it is present,
+        # plausible, and passes every schema check.
+        nrl_col, periodicity_col = "nrl_bp", "periodicity_score"
+        limit_col = "nrl_at_band_limit"
+        missing = [
+            c
+            for c in (nrl_col, periodicity_col, limit_col)
+            if c not in combined.columns
+        ]
+        if missing:
+            hint = ""
+            if missing == [limit_col]:
+                # By far the likeliest cause, and worth naming: pre-0.9.0
+                # output has every other column. Met immediately on the 0.8.3
+                # healthy-control corpus, which cannot seed this block.
+                hint = (
+                    " This table looks like pre-0.9.0 output: everything else "
+                    "is present. Without the flag there is no way to tell a "
+                    "repeat length from the edge of the window it was searched "
+                    "in, so re-run WPS_background with 0.9.0 to build this "
+                    "block."
+                )
+            raise ValueError(
+                f"WPS_background is missing {missing}; found "
+                f"{sorted(combined.columns)}. Refusing to substitute a default "
+                "-- a fabricated baseline cannot be told apart from a measured "
+                f"one once it is written.{hint}"
+            )
+
+        # Aggregate by group_id.
+        #
+        # The NRL is fitted from the rows that measured one. `nrl_bp = 250` is
+        # the top of the FFT search band, not a repeat length: across the xs2
+        # duplex cohort all 174 band-limited rows carry exactly 250.0, one
+        # unique value with zero variance, while the 414 others spread
+        # 194.9 +/- 24.0. Averaging the two together reports the edge of the
+        # search as the healthy expectation -- invariant #3, with the irony
+        # that `nrl_at_band_limit` exists because of the original `nrl_bp`
+        # degeneracy.
+        #
+        # Periodicity is fitted from *all* rows, including band-limited ones.
+        # It was measured, not floored: the same 174 rows hold 174 distinct
+        # periodicity values spanning 0.37-0.86. Only the peak position hit the
+        # band edge; the peak's strength is still a measurement, and dropping
+        # it would discard 30% of the cohort for no reason.
         group_stats = []
         for group_id in combined["group_id"].unique():
             group_data = combined[combined["group_id"] == group_id]
+            at_limit = group_data[limit_col].fillna(False).astype(bool)
+            nrl_fit = group_data.loc[~at_limit, nrl_col]
 
-            nrl_col = (
-                "nrl" if "nrl" in group_data.columns else "nucleosome_repeat_length"
-            )
-            periodicity_col = (
-                "periodicity" if "periodicity" in group_data.columns else "period_score"
-            )
-
-            nrl_mean = (
-                group_data[nrl_col].mean() if nrl_col in group_data.columns else 167.0
-            )
-            nrl_std = (
-                group_data[nrl_col].std() if nrl_col in group_data.columns else 5.0
-            )
-            period_mean = (
-                group_data[periodicity_col].mean()
-                if periodicity_col in group_data.columns
-                else 0.0
-            )
-            period_std = (
-                group_data[periodicity_col].std()
-                if periodicity_col in group_data.columns
-                else 1.0
-            )
+            # Below the floor there is no cohort to speak of, so the mean goes
+            # too -- not just the spread. A "healthy baseline" averaged over
+            # one donor is the same fabrication as a hardcoded one, and five
+            # xs2 duplex groups land here (four with no usable row at all,
+            # Chr13_All with exactly one).
+            fittable = len(nrl_fit.dropna()) >= MIN_SAMPLES_PER_KEY
 
             group_stats.append(
                 {
                     "group_id": group_id,
-                    "nrl_mean": nrl_mean,
-                    "nrl_std": max(nrl_std, 0.1),  # Avoid zero std
-                    "periodicity_mean": period_mean,
-                    "periodicity_std": max(period_std, 0.01),
+                    "n_samples": int(group_data[nrl_col].notna().sum()),
+                    # Recorded so the model says *why* a baseline is absent.
+                    # Without it an all-limited group is indistinguishable from
+                    # one that simply failed, and the reader cannot tell that
+                    # xs1 measured a group xs2 could not.
+                    "n_at_band_limit": int(at_limit.sum()),
+                    "n_nrl_fitted": int(len(nrl_fit.dropna())),
+                    # No floor. An unmeasurable spread yields NaN, which
+                    # propagates to an absent z rather than an enormous one --
+                    # dividing by a placeholder turns "no information" into
+                    # "infinite precision".
+                    "nrl_mean": float(nrl_fit.mean()) if fittable else float("nan"),
+                    "nrl_std": sample_std_or_nan(nrl_fit) if fittable else float("nan"),
+                    "periodicity_mean": group_data[periodicity_col].mean(),
+                    "periodicity_std": sample_std_or_nan(group_data[periodicity_col]),
                 }
             )
 
         groups_df = pd.DataFrame(group_stats)
-        logger.info(f"WPS background baseline: {len(groups_df)} groups")
+        _log_baseline_quality("WPS background", groups_df, "nrl_std", "group_id")
 
         return WpsBackgroundBaseline(groups=groups_df)
 
+    except ValueError:
+        # A refusal above is a build-stopping condition, not a read error --
+        # returning None here would drop the block and let the build report
+        # success, which is the failure mode this refusal exists to prevent.
+        raise
     except Exception as e:
         logger.error(f"WPS background baseline computation failed: {e}")
         return None
@@ -1760,10 +2452,10 @@ def _compute_fsc_gene_baseline(
     for gene, values in gene_values.items():
         if len(values) >= MIN_SAMPLES:
             mean_depth = float(np.mean(values))
-            std_depth = float(np.std(values))
-            # Ensure minimum std to avoid division by zero
-            std_depth = max(std_depth, 0.001)
-            data[gene] = (mean_depth, std_depth, len(values))
+            # ddof=1: these are a sample of healthy donors, not the population.
+            # np.std defaults to ddof=0 and understates the spread, which
+            # inflates every z built from it -- by 2.5% at n=21.
+            data[gene] = (mean_depth, sample_std_or_nan(values), len(values))
         else:
             skipped += 1
 
@@ -1821,10 +2513,10 @@ def _compute_fsc_region_baseline(
     for region_id, values in region_values.items():
         if len(values) >= MIN_SAMPLES:
             mean_depth = float(np.mean(values))
-            std_depth = float(np.std(values))
-            # Ensure minimum std to avoid division by zero
-            std_depth = max(std_depth, 0.001)
-            data[region_id] = (mean_depth, std_depth, len(values))
+            # ddof=1: these are a sample of healthy donors, not the population.
+            # np.std defaults to ddof=0 and understates the spread, which
+            # inflates every z built from it -- by 2.5% at n=21.
+            data[region_id] = (mean_depth, sample_std_or_nan(values), len(values))
         else:
             skipped += 1
 
@@ -1911,6 +2603,13 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
                 "reference": model.reference,
                 "panel_mode": model.panel_mode,
                 "target_regions_file": model.target_regions_file,
+                # Provenance. Inert for older readers -- PonModel.load goes
+                # through meta.get(key, default), so unknown keys are ignored
+                # and the four models already in the repo still load.
+                "krewlyzer_version": model.krewlyzer_version,
+                "cohort_digest": model.cohort_digest,
+                "input_kind": model.input_kind,
+                "cohort_label": model.cohort_label,
             }
         ]
     )
@@ -2014,6 +2713,33 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
                 }
             ]
         )
+
+    # Breakpoint-motif blocks. Same columns as the MDS blocks -- they reuse
+    # `MdsBaseline` -- but `mds_mean`/`mds_std` are NaN, because MDS is defined
+    # on end motifs and a number here would be a different statistic under the
+    # same name.
+    breakpoint_dfs = []
+    for table, block in (
+        ("breakpoint_motif_baseline", model.breakpoint_motif_baseline),
+        (
+            "breakpoint_motif_baseline_ontarget",
+            model.breakpoint_motif_baseline_ontarget,
+        ),
+    ):
+        if block:
+            breakpoint_dfs.append(
+                pd.DataFrame(
+                    [
+                        {
+                            "table": table,
+                            "mds_mean": float("nan"),
+                            "mds_std": float("nan"),
+                            "kmer_expected": block.kmer_expected,
+                            "kmer_std": block.kmer_std,
+                        }
+                    ]
+                )
+            )
 
     # Build on-target FSD baseline DataFrame (panel mode)
     fsd_ontarget_rows = []
@@ -2168,6 +2894,38 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
             )
     region_mds_df = pd.DataFrame(region_mds_rows) if region_mds_rows else pd.DataFrame()
 
+    # Build Region MDS exon baseline DataFrame.
+    #
+    # `gene` and `name` are stored as separate columns rather than a joined
+    # key: the reader needs both anyway, and a delimiter would be one more
+    # thing that can collide with an exon name.
+    region_mds_exon_rows: List[Dict] = []
+    if model.region_mds_exon and model.region_mds_exon.exon_baseline:
+        for (gene, exon_name), entry in model.region_mds_exon.exon_baseline.items():
+            region_mds_exon_rows.append(
+                {
+                    "table": "region_mds_exon",
+                    "gene": gene,
+                    "name": exon_name,
+                    "mds_mean": entry.get("mds_mean"),
+                    "mds_std": entry.get("mds_std"),
+                    "n_samples": entry.get("n_samples", 0),
+                }
+            )
+    region_mds_exon_df = (
+        pd.DataFrame(region_mds_exon_rows) if region_mds_exon_rows else pd.DataFrame()
+    )
+
+    # Build WPS shape baseline DataFrame -- scalars per anchor, kept apart
+    # from the 200-element vector table.
+    wps_shape_rows: List[Dict] = []
+    if model.wps_shape_baseline and model.wps_shape_baseline.regions:
+        for region_id, entry in model.wps_shape_baseline.regions.items():
+            wps_shape_rows.append(
+                {"table": "wps_shape_baseline", "region_id": region_id, **entry}
+            )
+    wps_shape_df = pd.DataFrame(wps_shape_rows) if wps_shape_rows else pd.DataFrame()
+
     # Build WPS Background baseline DataFrame
     wps_background_df = pd.DataFrame()
     if (
@@ -2196,6 +2954,7 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(mds_df)
     if not mds_ontarget_df.empty:
         all_dfs.append(mds_ontarget_df)
+    all_dfs.extend(breakpoint_dfs)
     if not fsd_ontarget_df.empty:
         all_dfs.append(fsd_ontarget_df)
     if not gc_bias_ontarget_df.empty:
@@ -2216,6 +2975,10 @@ def _save_pon_model(model: PonModel, output: Path) -> None:
         all_dfs.append(fsc_region_df)
     if not region_mds_df.empty:
         all_dfs.append(region_mds_df)
+    if not region_mds_exon_df.empty:
+        all_dfs.append(region_mds_exon_df)
+    if not wps_shape_df.empty:
+        all_dfs.append(wps_shape_df)
     if not wps_background_df.empty:
         all_dfs.append(wps_background_df)
 

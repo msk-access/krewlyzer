@@ -190,6 +190,7 @@ mod tests {
     use super::*;
     use arrow::array::Float64Array;
     use arrow::datatypes::{DataType, Field, Schema};
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[test]

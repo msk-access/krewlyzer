@@ -11,36 +11,43 @@ from pathlib import Path
 
 @pytest.fixture
 def sample_pon_parquet(tmp_path):
-    """Create a valid PON parquet file for testing."""
-    # PON format: parquet with 'table' column to identify row types
+    """A PON in the schema `build-pon` actually writes.
+
+    The previous version used `version` / `genome` / `sample_count`, which no
+    krewlyzer has ever produced -- the real metadata row carries
+    `schema_version` / `assay` / `n_samples` / `reference`. `PonModel.load`
+    reads through `meta.get(key, default)`, so every field fell back to its
+    default and the fixture loaded as a completely empty model: `assay=''`,
+    `n_samples=0`, every baseline `None`.
+
+    Nothing caught it because the tests using it only asserted
+    `model is not None`, and the one test that checked a real field was
+    marked skip with "PON parquet schema requires production format" rather
+    than the fixture being corrected.
+
+    Column names verified against
+    `src/krewlyzer/data/pon/GRCh37/all_unique/xs1.all_unique.pon.parquet`.
+    """
     metadata = pd.DataFrame(
         {
             "table": ["metadata"],
-            "version": ["1.0"],
-            "genome": ["hg19"],
-            "sample_count": [10],
-            "gc_bin": [None],
-            "short_expected": [None],
-            "short_std": [None],
-            "intermediate_expected": [None],
-            "intermediate_std": [None],
-            "long_expected": [None],
-            "long_std": [None],
-            "arm": [None],
-            "mean_ratio": [None],
-            "std_ratio": [None],
-            "gene_id": [None],
-            "wps_long_mean": [None],
-            "wps_long_std": [None],
+            "schema_version": ["1.0"],
+            "assay": ["xs1"],
+            "build_date": ["2026-01-01"],
+            "n_samples": [10.0],
+            "reference": ["Homo_sapiens_assembly19"],
+            "panel_mode": [True],
+            "target_regions_file": ["xs1.targets.bed.gz"],
+            # `load_pon_model` refuses anything below MIN_PON_VERSION, so a
+            # fixture standing in for a *valid* PON has to carry a version.
+            # Recording one is now part of what valid means.
+            "krewlyzer_version": ["0.9.0"],
         }
     )
 
     gc_bias = pd.DataFrame(
         {
             "table": ["gc_bias"] * 3,
-            "version": [None, None, None],
-            "genome": [None, None, None],
-            "sample_count": [None, None, None],
             "gc_bin": [0.3, 0.4, 0.5],
             "short_expected": [100.0, 120.0, 110.0],
             "short_std": [10.0, 12.0, 11.0],
@@ -48,36 +55,32 @@ def sample_pon_parquet(tmp_path):
             "intermediate_std": [20.0, 22.0, 21.0],
             "long_expected": [50.0, 55.0, 52.0],
             "long_std": [5.0, 5.5, 5.2],
-            "arm": [None, None, None],
-            "mean_ratio": [None, None, None],
-            "std_ratio": [None, None, None],
-            "gene_id": [None, None, None],
-            "wps_long_mean": [None, None, None],
-            "wps_long_std": [None, None, None],
         }
     )
 
-    # Drop all-NA columns before concat to avoid FutureWarning about
-    # dtype inference changes when concatenating with empty/all-NA columns.
-    metadata_clean = metadata.dropna(axis=1, how="all")
-    pon_df = pd.concat([metadata_clean, gc_bias], ignore_index=True)
     pon_file = tmp_path / "test.pon.parquet"
-    pon_df.to_parquet(pon_file, index=False)
+    pd.concat([metadata, gc_bias], ignore_index=True).to_parquet(pon_file, index=False)
     return pon_file
 
 
-@pytest.mark.skip(reason="PON parquet schema requires production format")
 @pytest.mark.integration
 def test_pon_model_loading(tmp_path, sample_pon_parquet):
-    """Test PON model loading from parquet."""
+    """The metadata row is parsed into the model, field by field.
+
+    Unskipped: it was marked "PON parquet schema requires production format",
+    which was true of the fixture, not of the loader.
+    """
     from krewlyzer.pon.model import PonModel
 
     # Load model
     model = PonModel.load(sample_pon_parquet)
 
-    # Model should load successfully
     assert model is not None
-    assert model.genome == "hg19"
+    assert model.assay == "xs1"
+    assert model.n_samples == 10
+    assert model.reference == "Homo_sapiens_assembly19"
+    assert model.panel_mode is True
+    assert model.gc_bias is not None, "the gc_bias block was not parsed"
 
 
 @pytest.mark.integration
@@ -96,13 +99,29 @@ def test_pon_zscore_calculation():
 
 @pytest.mark.integration
 def test_pon_integration_load_model(tmp_path, sample_pon_parquet):
-    """Test PON integration module load_pon_model function."""
+    """`load_pon_model` returns a populated model, not merely a non-None object.
+
+    This asserted only `model is not None`, which the absence of an exception
+    had already established. A loader that silently produced an empty model --
+    every baseline `None`, `n_samples` 0 -- would have passed, and an empty
+    model is exactly what a schema change or a renamed table produces.
+    """
     from krewlyzer.core.pon_integration import load_pon_model
 
-    # Load via integration module
     model = load_pon_model(sample_pon_parquet)
 
     assert model is not None
+    assert model.assay, "assay is unset; the metadata row was not parsed"
+    assert model.n_samples > 0, f"n_samples is {model.n_samples}"
+    populated = [
+        name
+        for name in ("gc_bias", "fsd_baseline", "wps_baseline", "mds_baseline")
+        if getattr(model, name, None) is not None
+    ]
+    assert populated, (
+        "every baseline is None -- the model loaded but carries no data, which "
+        "is what a renamed table or a schema change looks like"
+    )
 
 
 @pytest.mark.integration

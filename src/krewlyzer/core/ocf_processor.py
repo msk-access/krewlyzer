@@ -158,17 +158,55 @@ def apply_ocf_python_pon(
         convert_ocf_output(ocf_path, output_format, compress)
         return 0
 
-    # Compute z-scores per row using the baseline
+    # Two different absences, kept apart.
+    #
+    # `compute_zscore` returns None when the region is not in the baseline at
+    # all, and NaN when it is there but the baseline measured no usable spread.
+    # Both write NaN to the column -- correctly, since neither is a reading --
+    # but collapsing them in the log would report "0/1 matched" for a region
+    # that matched perfectly well and simply cannot be scored. That is the
+    # difference between "rebuild with this assay" and "this region has no
+    # variance in the cohort", and only the log can tell them apart.
     z_scores = []
+    n_absent = 0
+    n_unscoreable = 0
     for _, row in df.iterrows():
         z = baseline.compute_zscore(str(row[region_col]), float(row[ocf_col]))
-        z_scores.append(z if z is not None else float("nan"))
+        if z is None:
+            n_absent += 1
+            z_scores.append(float("nan"))
+            continue
+        if pd.isna(z):
+            n_unscoreable += 1
+        z_scores.append(z)
 
     df["ocf_z"] = z_scores
-    n_matched = sum(1 for z in z_scores if not pd.isna(z))
+    n_matched = len(df) - n_absent
+    n_scored = n_matched - n_unscoreable
 
     write_table(df, ocf_path, output_format=output_format, compress=compress)
+    # Same cleanup the genome-wide path does via `_write_ocf_output`.
+    #
+    # Without it a `--output-format parquet` run left `{sample}.OCF.ontarget.tsv`
+    # and `.offtarget.tsv` beside their Parquet, while the genome-wide table
+    # correctly had none. Two files for one table, differing in age, and no way
+    # for a reader to tell which is current -- the ambiguity `no_collided_columns`
+    # exists to catch one level down.
+    cleanup_intermediate_tsv(ocf_path, output_format, compress)
     logger.info(
-        f"OCF Python PON ({baseline_attr}): {n_matched}/{len(df)} regions matched ({ocf_path.name})"
+        f"OCF Python PON ({baseline_attr}): {n_matched}/{len(df)} regions matched, "
+        f"{n_scored} scored ({ocf_path.name})"
     )
+    if n_absent:
+        logger.warning(
+            f"OCF Python PON ({baseline_attr}): {n_absent}/{len(df)} regions are "
+            "absent from the baseline and get no z-score. Rebuild the PON for "
+            "this assay if they should be there."
+        )
+    if n_unscoreable:
+        logger.warning(
+            f"OCF Python PON ({baseline_attr}): {n_unscoreable}/{len(df)} regions "
+            "matched the baseline but it measured no usable spread for them, so "
+            "the z-score is NaN rather than a value divided by a placeholder."
+        )
     return n_matched

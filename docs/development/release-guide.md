@@ -49,19 +49,26 @@ git branch --show-current
 
 ## Phase 2: Update Version Files
 
-### Version Locations (37 total)
+### Version Locations
 
-| Category | File | Line(s) |
-|----------|------|---------|
-| **Python** | `src/krewlyzer/__init__.py` | 3 |
-| **Python** | `pyproject.toml` | 3 |
-| **Python** | `src/krewlyzer/wrapper.py` | 674 |
-| **Python** | `src/krewlyzer/core/feature_serializer.py` | 54, 291 |
-| **Rust** | `rust/Cargo.toml` | 3 |
-| **Rust** | `rust/Cargo.lock` | Auto-updated |
-| **Nextflow** | `nextflow/nextflow.config` | 171 |
-| **Nextflow** | `nextflow/main.nf` | 36 |
-| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module |
+Line numbers are deliberately omitted: the previous table pointed at
+`wrapper.py:674` and `feature_serializer.py:54,291`, none of which held a
+version by the time anyone read it. A stale pointer in a release checklist is
+worse than no pointer, because it invites editing the wrong line.
+
+| Category | File | Notes |
+|----------|------|-------|
+| **Python** | `src/krewlyzer/__init__.py` | `__version__` — the single source of truth |
+| **Python** | `pyproject.toml` | packaging metadata |
+| **Rust** | `rust/Cargo.toml` | crate version |
+| **Rust** | `rust/Cargo.lock` | auto-updated by `cargo check` |
+| **Nextflow** | `nextflow/nextflow.config` | container tag |
+| **Nextflow** | `nextflow/main.nf` | container tag |
+| **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module (container + `versions.yml`) |
+
+Everything on the Python side other than `__init__.py` imports `__version__`.
+`wrapper.py` and `core/feature_serializer.py` used to keep their own copies;
+`tests/unit/test_version_stamp.py` fails if one reappears.
 
 ### Quick Update Script
 
@@ -70,10 +77,12 @@ VERSION="X.Y.Z"
 OLD_VERSION="A.B.C"  # Current version before bump
 
 # Python
+# src/krewlyzer/__init__.py is the single source of truth for the Python side.
+# wrapper.py and core/feature_serializer.py used to carry their own copies and
+# needed their own sed lines; they now import __version__, so there is nothing
+# to substitute. tests/unit/test_version_stamp.py fails if a copy reappears.
 sed -i '' "s/__version__ = \".*\"/__version__ = \"${VERSION}\"/g" src/krewlyzer/__init__.py
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" pyproject.toml
-sed -i '' "s/version=\"${OLD_VERSION}\"/version=\"${VERSION}\"/g" src/krewlyzer/wrapper.py
-sed -i '' "s/\"${OLD_VERSION}\"/\"${VERSION}\"/g" src/krewlyzer/core/feature_serializer.py
 
 # Rust
 sed -i '' "s/version = \"${OLD_VERSION}\"/version = \"${VERSION}\"/g" rust/Cargo.toml
@@ -84,6 +93,27 @@ sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/nextflow.config
 sed -i '' "s/${OLD_VERSION}/${VERSION}/g" nextflow/main.nf
 find nextflow/modules -name "main.nf" -exec sed -i '' "s/${OLD_VERSION}/${VERSION}/g" {} \;
 ```
+
+!!! warning "Verify the bump landed"
+    Every command above depends on `OLD_VERSION` being exactly right, and
+    nothing in `sed` reports a pattern that matched nothing. Run this
+    afterwards — it fails if `__init__.py`, `pyproject.toml` and
+    `rust/Cargo.toml` disagree, or if any module has reintroduced a version
+    literal of its own:
+
+    ```bash
+    pytest tests/unit/test_version_stamp.py -q
+    ```
+
+    Then confirm nothing is left behind:
+
+    ```bash
+    git grep -n "${OLD_VERSION}" -- . ':!CHANGELOG.md' ':!docs'
+    ```
+
+    Remaining hits in `CHANGELOG.md` and `docs/` are expected: those are
+    historical references to how an older release behaved, and rewriting them
+    would falsify the record.
 
 ---
 
@@ -119,6 +149,65 @@ grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
     Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
 
 ---
+
+## Phase 2.6: Regenerate the aggregated documentation
+
+`krewlyzer_all_docs.md` is a single-file concatenation of `docs/`, generated
+rather than hand-maintained. Any doc edit in the release — including the
+version bumps in Phase 2.5 — leaves it stale.
+
+```bash
+python scripts/build_all_docs.py
+```
+
+CI runs `--check` and fails if it is out of date, so this cannot be skipped
+silently.
+
+---
+
+## Phase 2.7: Stamp the bundled PONs
+
+The version-update script in Phase 2 uses `sed`, and a PON is a Parquet file —
+so the models are the one place a version literal does **not** get updated by
+it. They record the version of whatever built them, which is a `develop`
+checkout still reporting the previous release.
+
+```bash
+krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version X.Y.Z
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet
+```
+
+`stamp-pon` refuses to stamp a model that fails `validate-pon`, so a broken
+model cannot be blessed by this step. Re-run `validate-pon` afterwards anyway:
+the file that ships should be the file that was checked.
+
+Commit the restamped models with `git lfs push --all` **before** pushing the
+branch, or the pointers land without the objects.
+
+## Phase 2.8: Does this release change what a PON means?
+
+Almost always **no**, and then there is nothing to do here.
+
+`MIN_PON_VERSION` in `src/krewlyzer/pon/provenance.py` is a compatibility
+floor, not the package version. It is a tuple — `(0, 9, 0)` — precisely so the
+`sed` in Phase 2 cannot move it, and so a PON stamped 0.9.0 keeps working at
+krewlyzer 1.0 and beyond. Ordinary releases leave it alone.
+
+Raise it **only** when this release changes what an existing feature *means*,
+such that a PON built before it would score samples against a different
+quantity. The 0.9.0 examples:
+
+- `wps_background` held a hardcoded `167.0 / 5.0` for every group
+- six σ floors turned "no spread measured" into a divisor
+- region-MDS was fitted over 65–400 bp while samples are measured over
+  65–1000 bp — a median bias of +1.15 σ in every gene
+
+Adding a *new* feature or block is not that: an older PON simply lacks it, and
+`validate-pon`'s packing-list check reports the absence.
+
+If you do raise it, every bundled PON must be rebuilt — not merely re-stamped.
+Stamping a model that predates the change would launder exactly the
+incompatibility the floor exists to catch.
 
 ## Phase 3: Update CHANGELOG
 

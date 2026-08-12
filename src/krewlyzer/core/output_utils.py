@@ -22,6 +22,9 @@ Design principles
 
 from __future__ import annotations
 
+import gzip
+import io
+import zlib
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -169,6 +172,92 @@ def cleanup_intermediate_tsv(
 # ---------------------------------------------------------------------------
 
 
+def _read_gzip_member_prefix(path: Path) -> "str | None":
+    """Decompress only the FIRST gzip member of ``path``, ignoring trailing bytes.
+
+    krewlyzer <= 0.8.3 appended the EndMotif1mer metadata footer as plain text
+    to an already-gzipped file, yielding ``<gzip member><raw text>``. Both
+    :func:`gzip.decompress` and pandas reject that with ``BadGzipFile``. zlib
+    stops at the member boundary and exposes the remainder as ``unused_data``,
+    so the table itself is fully recoverable.
+
+    Returns the decoded text of the first member, or ``None`` if ``path`` is
+    not gzip at all.
+    """
+    raw = path.read_bytes()
+    if not raw.startswith(b"\x1f\x8b"):
+        return None
+    dco = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    try:
+        data = dco.decompress(raw) + dco.flush()
+    except zlib.error:
+        return None
+    return data.decode("utf-8", errors="replace")
+
+
+TABLE_EXTENSIONS = (".tsv", ".tsv.gz", ".parquet")
+
+
+def strip_table_extension(name: str) -> str:
+    """Strip a known table extension, handling compound ones like ``.tsv.gz``.
+
+    ``Path.stem`` only removes the LAST dot-segment, so
+    ``Path("s.FSC.regions.tsv.gz").stem`` is ``"s.FSC.regions.tsv"`` -- which
+    silently corrupts any name derived from it.
+    """
+    for ext in (".tsv.gz", ".csv.gz", ".tsv", ".csv", ".parquet"):
+        if name.endswith(ext):
+            return name[: -len(ext)]
+    return name
+
+
+def resolve_table_path(base: Path) -> "Path | None":
+    """Find the file actually written for ``base``, whatever the output format.
+
+    ``base`` may be given with or without an extension. Writers honour
+    ``--output-format`` and ``--compress``, so the same logical output can land
+    as ``.tsv``, ``.tsv.gz`` or ``.parquet``; probing a single hard-coded
+    extension silently misses the file.
+    """
+    base = Path(base)
+    stem = strip_table_extension(base.name)
+    for ext in TABLE_EXTENSIONS:
+        candidate = base.parent / f"{stem}{ext}"
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def read_exact_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
+    """Read *this* file. No sibling resolution, no format preference.
+
+    The counterpart to :func:`read_table`, and the right choice immediately
+    after a write. ``read_table`` is deliberately parquet-first, which is
+    correct when you are looking for "whatever was produced for this output" —
+    and wrong when you have *just written* a specific file and want it back.
+
+    That distinction has cost real data twice. The Rust backends write plain
+    TSV, Python reads it back to honour ``--output-format``; where a stale
+    ``.parquet`` sibling was sitting in the directory from an earlier run,
+    ``read_table`` preferred it and the freshly computed values were discarded
+    silently. FSD lost its log-ratios that way (``c92ed86``); region entropy
+    would have emitted a *previous* run's z-scores on any re-run into the same
+    directory, which is what a Nextflow retry or ``-resume`` produces.
+
+    Returns ``None`` when the path does not exist, matching ``read_table``.
+    """
+    import pandas as pd  # local import, as elsewhere in this module
+
+    path = Path(path)
+    if not path.exists():
+        return None
+    if path.suffix == ".parquet":
+        return pd.read_parquet(path)
+    csv_kwargs.setdefault("sep", "\t")
+    csv_kwargs.setdefault("comment", "#")
+    return pd.read_csv(path, **csv_kwargs)
+
+
 def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
     """Parquet-first reader with TSV and ``.tsv.gz`` fallback.
 
@@ -233,9 +322,37 @@ def read_table(path: Path, **csv_kwargs) -> "pd.DataFrame | None":
                 "Literal['gzip'] | None",
                 "gzip" if str(candidate).endswith(".gz") else None,
             )
-            df = pd.read_csv(  # type: ignore[assignment]
-                candidate, sep="\t", compression=compression_arg, **csv_kwargs
-            )
+            # Several krewlyzer TSVs append '#'-prefixed metadata footers
+            # (e.g. EndMotif1mer writes '# c_fraction', '# entropy',
+            # '# c_bias', '# sample' after the data rows). Without
+            # comment='#' those lines are parsed as data and propagate into
+            # the unified features JSON as junk keys with NaN values.
+            # Callers may override by passing comment= explicitly.
+            csv_kwargs.setdefault("comment", "#")
+            try:
+                df = pd.read_csv(  # type: ignore[assignment]
+                    candidate, sep="\t", compression=compression_arg, **csv_kwargs
+                )
+            except (gzip.BadGzipFile, OSError, EOFError):
+                # Recovery path for files written by krewlyzer <= 0.8.3 with
+                # --compress: the metadata footer was appended as PLAIN text
+                # after the gzip member, so the file is a valid gzip member
+                # followed by raw bytes. gzip/pandas reject the whole file.
+                # zlib stops cleanly at the end of the first member and hands
+                # the trailing bytes back via unused_data, which is exactly
+                # the footer we want to skip anyway.
+                recovered = _read_gzip_member_prefix(candidate)
+                if recovered is None:
+                    raise
+                logger.warning(
+                    "read_table: %s has a plain-text footer appended after the "
+                    "gzip member (written by krewlyzer <= 0.8.3 with --compress); "
+                    "recovered the table and skipped the footer.",
+                    candidate.name,
+                )
+                df = pd.read_csv(  # type: ignore[assignment]
+                    io.StringIO(recovered), sep="\t", **csv_kwargs
+                )
             logger.debug(
                 "read_table: loaded TSV %s (%d rows × %d cols)",
                 candidate.name,

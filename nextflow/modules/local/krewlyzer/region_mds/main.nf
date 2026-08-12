@@ -11,7 +11,7 @@
 process KREWLYZER_REGION_MDS {
     tag "$meta.id"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     tuple val(meta), path(bam), path(bai)
@@ -35,6 +35,8 @@ process KREWLYZER_REGION_MDS {
     def pon_arg = pon_model ? "--pon-model ${pon_model}" : ""
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
     def silent_arg = params.silent ? "--silent" : ""
 
     """
@@ -48,6 +50,8 @@ process KREWLYZER_REGION_MDS {
         $pon_arg \\
         $skip_pon_arg \\
         $verbose_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $silent_arg \\
         $args
 

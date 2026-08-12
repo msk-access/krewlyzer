@@ -9,6 +9,7 @@ This page documents the expected formats for custom input files used as override
 | [Sample List](#sample-list) | paths | `build-pon` | `/path/to/sample.bam` |
 | [BED3](#bed3) | chrom, start, end | `--bin-input`, `--target-regions` | `chr1\t0\t100000` |
 | [Gene BED](#gene-bed) | chrom, start, end, gene, [name] | `--gene-bed` | `chr1\t100\t5000\tTP53\texon1` |
+| [Transcript Overrides](#transcript-overrides) | gene, transcript_id | `build_gene_bed.py --transcript-overrides` | `TP53\tENST00000269305` |
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
@@ -105,9 +106,105 @@ chr17	7676707	7676863	TP53	exon2
 chr7	140719327	140724764	BRAF	exon15
 ```
 
+### Bundled assets carry four extra columns
+
+The gene BEDs shipped in `src/krewlyzer/data/genes/` are generated from a
+GENCODE GTF by `scripts/build_gene_bed.py` and extend the format:
+
+```
+chrom  start  end  gene  name  transcript_id  exon_number  strand  is_e1  is_first_captured
+```
+
+| Column | Description |
+|--------|-------------|
+| `transcript_id` | Canonical transcript: MANE Select → Ensembl canonical → longest CDS |
+| `exon_number` | **Transcription** order from the GTF, not coordinate order |
+| `strand` | `+` / `-`; absent from the panel assets before 0.9.0 |
+| `is_e1` | Row overlaps the canonical transcript's exon 1 |
+| `is_alt_e1` | Row overlaps *another* basic protein-coding transcript's exon 1 |
+| `is_first_captured` | Most 5′ row for this gene, in transcription order |
+
+The first five columns are unchanged, so a custom 4- or 5-column file still
+works and readers indexing `gene`/`name` are unaffected.
+
+!!! note "The three `first` columns are not interchangeable"
+    Genes have several annotated first exons — a median of 13 — because
+    alternative promoters are common. On `xs1`, 25 of 128 genes have a tile on
+    the canonical exon 1, 15 more on another basic protein-coding transcript's
+    first exon, and 88 on neither. `is_first_captured` always exists but is
+    frequently an internal exon, which is not a promoter proxy.
+
+    Use `is_e1` when the promoter-proximal interpretation matters, `is_alt_e1`
+    to include alternative promoters, and `is_first_captured` only as a
+    positional anchor.
+
+    The canonical transcript is configurable per gene via
+    `--transcript-overrides`, so a panel built around specific clinical
+    transcripts can say so rather than inherit MANE.
+
+    `exon_number` deserves the same caution when reading *older* assets: the
+    pre-0.9.0 WGS BED numbered exons by coordinate, so its `exon_num 0` was the
+    last exon for every minus-strand gene.
+
 ### Used By
 
 - Custom gene files for panel FSC
+
+---
+
+## Transcript Overrides {#transcript-overrides}
+
+Two-column TSV naming the transcript to treat as canonical for specific genes,
+consumed at **build time** by `scripts/build_gene_bed.py`. Not a runtime input:
+its effect is baked into the generated gene BED.
+
+### Format
+
+```
+gene    transcript_id
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| gene | string | Gene symbol, matching the panel BED (`TP53`) |
+| transcript_id | string | Ensembl/GENCODE id, with or without version |
+
+Blank lines and `#` comments are ignored.
+
+### Example
+
+```tsv
+# Panel was designed around these transcripts, not MANE Select
+TP53	ENST00000269305
+MTOR	ENST00000361445
+H3F3A	ENST00000366813
+```
+
+### Why it exists
+
+A capture panel is designed around particular transcripts. Imposing MANE Select
+on it annotates a gene structure the assay was not built for — which decides
+where `is_e1` lands, and therefore what any promoter-proximal feature measures.
+
+An override takes precedence over every other tier of the
+[canonical-transcript policy](../features/core/fsc.md).
+
+### Errors
+
+These are fatal by design. A silent fall back to MANE would produce an asset
+that disagrees with the file you wrote, with nothing to indicate it:
+
+| Condition | Result |
+|-----------|--------|
+| Transcript absent from the GTF | Error; the message lists what *is* present for that gene |
+| Transcript belongs to a different gene | Error |
+| Malformed line, or a gene listed twice with different transcripts | Error |
+| A gene listed twice with the *same* transcript | Accepted |
+| Gene absent from this build | Warning — one file may serve several assays |
+
+Version suffixes are optional: `ENST00000269305` matches
+`ENST00000269305.9_9`, so a file need not track GENCODE releases. An
+unversioned id matching two transcripts is an error rather than a guess.
 
 ---
 

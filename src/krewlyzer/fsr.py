@@ -4,17 +4,28 @@ Fragment Size Ratio (FSR) calculation.
 Calculates FSR features for a single sample with comprehensive counts and ratios.
 This CLI is a thin wrapper around the unified processor.
 
-Fragment Size Bins (as defined by Rust backend):
-    - ultra_short: 65-99bp (TF footprints, highly tumor-specific)
-    - core_short: 100-149bp (tumor-enriched, primary biomarker)
-    - mono_nucl: 150-259bp (mono-nucleosomal fragments)
-    - di_nucl: 260-399bp (di-nucleosomal fragments)
-    - long: 400+bp (di-nucleosomal and larger)
+FSR reads the same per-bin counts as FSC (``{sample}.fsc_counts.*``), so the
+channels are FSC's, not a separate set:
+    - ultra_short: 65-100bp (di-nucleosomal debris, early apoptosis)
+    - core_short: 101-149bp (sub-nucleosomal)
+    - mono_nucl: 150-220bp (classic cfDNA peak)
+    - di_nucl: 221-260bp
+    - long: 261-400bp (multi-nucleosomal, necrosis)
+    - ultra_long: 401-1000bp (counted in ``total``; not an FSR channel)
+
+Short/long here are deliberately not a partition: short = ultra_short +
+core_short (65-149bp), long = di_nucl + long (221-400bp); mono_nucl is excluded
+so the ratio contrasts the two tails.
 
 Output Columns:
     Counts: short_count, long_count, total_count
     Ratios: short_long_ratio, short_long_log2
     Fractions: short_frac, long_frac
+
+``total_count`` spans 65-1000bp, so it includes ultra_long. ``short_frac`` and
+``long_frac`` therefore carry a sample-dependent denominator (ultra_long is
+2-5% of total on real samples, varying with necrotic content), while
+``short_long_ratio`` — being channel/channel — does not.
 """
 
 import typer
@@ -93,6 +104,17 @@ def fsr(
     ),
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only when format is tsv or both)",
     ),
 ):
     """
@@ -190,6 +212,8 @@ def fsr(
             gc_correct=gc_correct,
             threads=threads,
             verbose=verbose,
+            output_format=output_format,
+            compress=compress,
         )
 
         if outputs.fsr and outputs.fsr.exists():

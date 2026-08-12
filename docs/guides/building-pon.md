@@ -326,3 +326,78 @@ mkdir -p ./pon_temp && srun \
 
 !!! warning
     If jobs are OOM-killed, reduce `-P` or increase `--mem`. The new memory monitoring will log usage at each processing stage.
+
+---
+
+## Rebuilding the bundled PONs
+
+`scripts/build_pon.sh` takes the two things that differ between the four
+models as arguments:
+
+!!! danger "Check the environment first — and don't use the version string"
+    ```bash
+    micromamba activate krewlyzer
+    krewlyzer validate-pon --help >/dev/null && echo "has the PON work"
+    ```
+
+    **`krewlyzer --version` will not tell you.** It reports `0.8.3` on current
+    `develop` and will keep doing so until the release bump, so a version
+    comparison rejects exactly the build you want. The presence of
+    `validate-pon` is the honest test: it answers "does this code have the PON
+    fixes", which is the actual question.
+
+    It matters because the failure is silent. A `build-pon` without these fixes
+    exits 0 on a model whose `wps_background` is a hardcoded `167.0/5.0` —
+    which is how four of them shipped. The first attempt at this rebuild ran 18
+    minutes on such a build before the banner was noticed.
+
+    The script refuses in that case, but check anyway.
+
+```bash
+SAMPLE_LIST=<list> OUTPUT_DIR=<dir> sbatch scripts/build_pon.sh <assay> <variant>
+```
+
+`SAMPLE_LIST` is required and never derived. **The variant comes from the
+sample list, not a flag** — `build-pon` has none, and `all_unique` and `duplex`
+differ only in which BAMs the list points at. So each variant needs its own
+list, and only you know which is which; a script that guessed the filename
+would build the wrong variant under the right name.
+
+Overridable by environment variable: `SAMPLE_LIST`, `REFERENCE`, `OUTPUT_DIR`,
+`KEEP_DIR`, `COHORT_LABEL`, `KREWLYZER_ENV`.
+
+Each run ends by calling `krewlyzer validate-pon` on what it produced. **A
+build that produces a model the gate rejects has not succeeded**, whatever
+`build-pon`'s exit code said — that check is why four models carrying a
+fabricated baseline shipped for months.
+
+### What to watch in the log
+
+| Line | What it means if it looks wrong |
+|------|--------------------------------|
+| `WPS background baseline: N/28 group_ids with a measured spread` | Anything below 28/28 on a real cohort means the source columns are not what the builder expects |
+| `WPS baseline skipped N of M anchors` | Expected to be large for **duplex** (~36–38%), small for all_unique (~4.5%). Large for all_unique is worth stopping for |
+| `Region MDS exon baseline: N/M exons` | Should be all of them; exon coverage is dense, not sparse |
+| `... every {key} has the identical std` | The fabricated-baseline signature. Stop |
+
+### Why `--keep-sample-outputs`
+
+Per-sample features used to be extracted to a temp directory and deleted on
+success, so every rebuild re-ran extraction over every BAM — hours — and
+leave-one-out calibration would have cost *n* of those. The script keeps them,
+and they survive a failed build so a rerun skips what finished.
+
+### After the build
+
+1. `krewlyzer validate-pon` on all four (the script does one; check the set).
+2. Diff each new model against the one it replaces, per block, and keep it as
+   the acceptance record.
+3. `git lfs push --all` **before** pushing the branch, or the pointers land
+   without the objects.
+
+!!! warning "Expect the numbers to move"
+    0.9.0 changes what several features mean — reverse-strand fragment
+    placement moves ~half of all fragments, FSC bands were realigned, E1 comes
+    from GENCODE flags, and NRL is data-dependent for the first time. Do not
+    compare a 0.9.0 PON against an older one value-by-value; the old values
+    were measuring something else.

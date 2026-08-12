@@ -27,7 +27,9 @@ from datetime import datetime
 import pandas as pd
 
 from .output_utils import (
+    read_exact_table,
     read_table,
+    strip_table_extension,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
 
@@ -597,7 +599,9 @@ def write_motif_outputs(
                 # Append z-score to on-target MDS file
                 mds_on_output = mds_on_base.parent / (mds_on_base.name + ext)
                 try:
-                    mds_on_df = read_table(mds_on_output)
+                    # Exact: `ext` is the extension this run actually wrote, so
+                    # resolving could pick a sibling from an earlier run.
+                    mds_on_df = read_exact_table(mds_on_output)
                     if mds_on_df is not None and "mds_z" not in mds_on_df.columns:
                         mds_on_df["mds_z"] = mds_z_on
                         write_table(
@@ -630,6 +634,46 @@ def write_motif_outputs(
     )
     outputs["edm_1mer"] = edm_1mer_base.parent / (edm_1mer_base.name + ext)
     logger.debug(f"  C-end fraction: {c_end_metrics['c_fraction']:.4f}")
+
+    # Per-motif z-scores against the PON's k-mer baseline.
+    #
+    # 625 k-mer means and sigmas were built into every PON and read by nothing;
+    # EndMotif shipped Motif and Frequency alone, so a shift in one motif was
+    # invisible unless it moved the whole-sample MDS enough to notice. Applied
+    # here so `run-all` and the standalone `motif` command behave the same
+    # (invariant #6).
+    if pon is not None:
+        from .motif_pon import apply_motif_pon
+
+        # Each table against its own baseline. Until 0.9.0 all four used
+        # `mds_baseline` -- an end-motif, genome-wide block -- so three of them
+        # were scored against the wrong distribution.
+        #
+        # Breakpoint motifs are not end motifs: an end motif is the 4-mer at
+        # the fragment's 5' terminus, a breakpoint motif spans the cut site and
+        # includes reference bases not in the fragment. The two correlate 0.696
+        # on one sample, and `BreakPointMotif` came out at median |z| 5.85
+        # (XS1) and 11.25 (XS2) where a correct baseline gives ~0.67.
+        #
+        # `mds_baseline_ontarget` already existed and was already used for the
+        # whole-sample MDS z -- just not for the per-motif frequencies.
+        for key, baseline_attr in (
+            ("edm", "mds_baseline"),
+            ("bpm", "breakpoint_motif_baseline"),
+            ("edm_ontarget", "mds_baseline_ontarget"),
+            ("bpm_ontarget", "breakpoint_motif_baseline_ontarget"),
+        ):
+            path = outputs.get(key)
+            if path is None:
+                continue
+            apply_motif_pon(
+                path,
+                pon,
+                output_base=Path(strip_table_extension(str(path))),
+                output_format=output_format,
+                compress=compress,
+                baseline_attr=baseline_attr,
+            )
 
     logger.info(f"  Wrote {len(outputs)} motif files")
     return outputs
@@ -791,6 +835,7 @@ def process_sample(
     # Output format (forwarded to GC factor writes; feature outputs use run_features params)
     output_format: str = "tsv",
     compress: bool = False,
+    write_motif_files: bool = False,
 ) -> SampleOutputs:
     """
     Process a single sample through full feature extraction pipeline.
@@ -890,6 +935,44 @@ def process_sample(
         outputs.gc_observations_ontarget = result.gc_observations_ontarget
         outputs.mds_counts = result.kmer_frequencies
         outputs.mds_score = result.mds_score
+
+        # Write the motif tables, when asked.
+        #
+        # This has to live here: `write_motif_outputs` takes an
+        # `ExtractionResult`, which is live at this point and never returned,
+        # so no caller can do it afterwards. `run-all` calls it itself and
+        # `build-pon` did not, which is why a `--keep-sample-outputs` cache has
+        # no `EndMotif` or `MDS` table even though the same k-mer counts reach
+        # the model through memory two lines above.
+        #
+        # That gap made the cache unreadable by `--from-outputs`: today's
+        # builds are correct, but re-aggregating one after an aggregation fix
+        # -- the whole point of that route -- was impossible without re-reading
+        # every BAM.
+        #
+        # Default False so `run-all` keeps writing them at its own call site
+        # and nothing is written twice.
+        if write_motif_files:
+            try:
+                written = write_motif_outputs(
+                    result,
+                    output_dir,
+                    include_ontarget=bool(result.em_counts_ontarget),
+                    output_format=output_format,
+                    compress=compress,
+                )
+                logger.debug(
+                    f"[{short_id}] wrote motif tables: " f"{', '.join(sorted(written))}"
+                )
+            except Exception as exc:
+                # Loud. A cache silently short of these files is exactly the
+                # condition this flag exists to remove, and it would only
+                # surface much later as `--from-outputs` refusing the sample.
+                logger.error(
+                    f"[{short_id}] failed to write motif tables: "
+                    f"{type(exc).__name__}: {exc}. This sample's cache will be "
+                    "rejected by build-pon --from-outputs."
+                )
 
         # Log checkpoint after extraction
         elapsed = time.time() - phase_start

@@ -79,6 +79,81 @@ jobs:
         run: |
           docker build .
 
+  rust-test:
+    name: Rust unit tests (cargo test)
+    # Runs on macOS deliberately. krewlyzer_core is a pyo3 `extension-module`
+    # cdylib, so it does not link libpython; on Linux the `cargo test` binary
+    # therefore fails to resolve Python symbols at link time. macOS resolves
+    # them lazily and links fine. Linux compilation of the crate is already
+    # covered by the maturin build in the `test` job.
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      # pyo3 builds against whatever interpreter it finds, and the macOS runner
+      # ships one newer than pyo3 0.23 supports ("configured Python interpreter
+      # version (3.14) is newer than PyO3's maximum supported version (3.13)").
+      # Pin to the version the rest of the workflow uses.
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run cargo test
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --lib
+
+  phi-secret-scan:
+    name: PHI / secret scan
+    # The git hooks only protect contributors who ran
+    # `git config core.hooksPath .githooks`. This job is the backstop.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need the merge base to scope the scan
+
+      - name: Install gitleaks (pinned)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # Verify the rules still fire before trusting a clean scan. A rule that
+      # silently stopped matching would otherwise look identical to success.
+      - name: Verify the PHI guard itself
+        run: bash scripts/check_phi_guard.sh
+
+      # Scoped to what this branch adds. A full-history scan would flag commits
+      # that predate the guard and cannot be changed without a rewrite, which
+      # would block every push and train everyone to bypass it.
+      - name: Scan the incoming commits
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          echo "scanning ${BASE}..HEAD"
+          gitleaks detect --source . --log-opts="${BASE}..HEAD" \
+            --no-banner --redact --exit-code 1
+
+      # gitleaks scans diffs, never commit messages -- and a message cannot be
+      # edited after a push without rewriting history.
+      - name: Scan the commit messages
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          git log "${BASE}..HEAD" --format='%B%n%an %ae' > /tmp/commit-messages.txt
+          gitleaks stdin --config .gitleaks.toml \
+            --no-banner --redact --exit-code 1 < /tmp/commit-messages.txt
+
   lint:
     name: Lint (ruff · black · mypy · clippy)
     runs-on: ubuntu-latest
@@ -137,3 +212,10 @@ jobs:
             -D warnings \
             -A clippy::too_many_arguments \
             -A clippy::type_complexity
+
+      # Static gate: every output-writing call site must pass output_format=
+      # and compress=. .agents/rules/development.md already claims CI enforces
+      # this, but it was not wired into any workflow.
+      - name: Check output-format call sites
+        run: |
+          python scripts/check_output_format.py

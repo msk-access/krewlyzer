@@ -571,30 +571,40 @@ fn load_ocf_baseline_from_parquet(pon_path: &Path) -> Result<HashMap<String, Ocf
     for row_result in reader.get_row_iter(None)? {
         let row = row_result.with_context(|| "Failed to read row")?;
         
-        // Check if this row belongs to ocf_baseline table
-        if let Ok(table) = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "table").unwrap_or(0)
-        ) {
-            if table != "ocf_baseline" {
-                continue;
-            }
-        } else {
-            continue;
+        // Look columns up by name, and skip the row when a name is absent.
+        //
+        // `position(...).unwrap_or(0)` read *column zero* when a column could
+        // not be found, which in a PON parquet is `table`. Already removed
+        // from `region_entropy.rs` and from `fsd.rs`, where the same family of
+        // defaults made every size bin score against the last one; this was
+        // the third copy. OCF's values parse correctly today -- verified
+        // against a shipped PON, an observation 2 sigma above the mean scores
+        // exactly 2.0 -- so this closes a landmine rather than fixing a wrong
+        // number. It fires the moment a column is renamed.
+        let column = |name: &str| row.get_column_iter().position(|(n, _)| n == name);
+
+        match column("table").and_then(|i| row.get_string(i).ok()) {
+            Some(table) if table == "ocf_baseline" => {}
+            _ => continue,
         }
-        
-        // Extract region_id, ocf_mean, ocf_std
-        let region_id = row.get_string(
-            row.get_column_iter().position(|(name, _)| name == "region_id").unwrap_or(0)
-        ).map_or("".to_string(), |v| v.to_string());
-        
-        let ocf_mean = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "ocf_mean").unwrap_or(0)
-        ).unwrap_or(0.0);
-        
-        let ocf_std = row.get_double(
-            row.get_column_iter().position(|(name, _)| name == "ocf_std").unwrap_or(0)
-        ).unwrap_or(1.0);
-        
+
+        let region_id = column("region_id")
+            .and_then(|i| row.get_string(i).ok())
+            .map_or("".to_string(), |v| v.to_string());
+
+        // NaN, not 0.0 and 1.0. Together those two made z the raw difference
+        // from zero -- a fabricated reading, and the exact pairing removed
+        // from nine baseline classes as `zscore_or_nan`. The caller treats a
+        // non-positive or non-finite sigma as unusable, and `observed - NaN`
+        // is NaN regardless.
+        let ocf_mean = column("ocf_mean")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
+        let ocf_std = column("ocf_std")
+            .and_then(|i| row.get_double(i).ok())
+            .unwrap_or(f64::NAN);
+
         if !region_id.is_empty() {
             baseline.insert(region_id, OcfBaselineStats { 
                 ocf_mean, 

@@ -10,7 +10,7 @@
 process KREWLYZER_OCF {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.8.3"
+    container "ghcr.io/msk-access/krewlyzer:0.9.0"
 
     input:
     tuple val(meta), path(bed)
@@ -31,6 +31,8 @@ process KREWLYZER_OCF {
     def targets_arg = params.targets ? "--target-regions ${params.targets}" : ""
     def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
+    def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
+    def compress_arg = params.compress_tsv ? "--compress" : ""
     def skip_targets_arg = params.skip_target_regions ? "--skip-target-regions" : ""
 
     """
@@ -44,6 +46,8 @@ process KREWLYZER_OCF {
         $targets_arg \\
         $pon_arg \\
         $verbose_arg \\
+        $output_format_arg \\
+        $compress_arg \\
         $skip_targets_arg \\
         $args
 
