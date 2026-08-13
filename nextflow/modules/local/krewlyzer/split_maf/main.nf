@@ -148,9 +148,13 @@ process SPLIT_MAF {
     """
 
     stub:
+    // `metas`, not `sample_ids` -- the input was renamed so the metas could
+    // ride through and the caller could re-pair with a map instead of a join.
+    // The script block was updated and this was not, and no unit test reaches
+    // a stub block, so it took a `-stub-run` to surface it.
     """
     mkdir -p split
-    for s in ${sample_ids.join(' ')}; do
+    for s in ${metas.collect { it.id }.join(' ')}; do
         echo -e "Hugo_Symbol\\tChromosome\\tStart_Position\\tTumor_Sample_Barcode" > split/\$s.filtered.maf
     done
 
