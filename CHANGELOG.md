@@ -157,28 +157,26 @@ All notable changes to this project will be documented in this file.
   never run for it — silent cohort loss reintroduced one stage earlier than
   `--expect` can see it. The metas ride through the process so re-pairing is a
   `map`, preserving the join-free streaming this workflow is built around.
-- **RUNALL now retries up a partition ladder instead of terminating the run.**
-  Nothing set `errorStrategy` or `maxRetries`, so Nextflow's default
-  `terminate` applied: one bad sample out of 16,552 stopped everything. And
-  because `task.attempt` never exceeds 1 without a retry policy, **every
-  resource ramp in the config was dead code** — including the one commented
-  "doubles on retry".
+- **Reverted the RUNALL retry ladder added moments earlier in this cycle.** It
+  was built on the claim that the pipeline had no retry policy. That claim was
+  wrong: `queue`, `errorStrategy` and `maxRetries` come from the institutional
+  config `-profile iris` loads over HTTPS at parse time, so they appear nowhere
+  in this repository and a `grep` finds nothing. iris sets `maxRetries = 3`,
+  retries any failure, falls back to `ignore`, and selects the partition with a
+  closure honouring `--isolated` and `--partition`.
 
-  | attempt | queue | time | memory |
-  |---|---|---|---|
-  | 1 | `cmobic_short` | 3h | 32 GB |
-  | 2 | `cmobic_cpu` | 24h | 64 GB |
+  Because `withName` outranks a generic `process` block, the ladder silently
+  replaced all of that — cutting retries from 3 to 1, ignoring `--partition`
+  and `--isolated`, and pinning attempt 1 to the smaller of two partitions. The
+  `task.attempt` ramps it claimed to revive had been live all along.
 
-  Retry is gated on exit 137/140/143 — SLURM's OOM and wall-clock kills — so a
-  corrupt BAM that fails in seconds does not climb to a 7-day partition to fail
-  again. `cpushort` is deliberately not a rung: it has the idle capacity, but
-  these are 8-CPU multi-hour jobs and `--qos=priority` does not apply there.
+  The pre-existing behaviour is better and needs no queue names: a growing time
+  request makes SLURM pick the partition, since attempt 2's 4h no longer fits a
+  3h queue.
 
-  Once the ladder is exhausted the sample is **ignored**, not terminated: the
-  run completes and `validate-output --expect` names exactly what was dropped.
-  That pairing is the design — `ignore` alone would be silent cohort loss, and
-  `terminate` at this scale means one sample can cost the run.
-
+  `tests/unit/test_runall_resources.py` now pins the *absence* of `queue`,
+  `errorStrategy` and `maxRetries` from that block, so the next reader who
+  greps, finds nothing and "fixes" it lands on the explanation instead.
 - **`check_phi_guard.sh` runs in 2.3s instead of ~100s.** `git archive` applies
   the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
   parquet, gzipped BED and FASTA (75s), and assertion 5 grepped the same
