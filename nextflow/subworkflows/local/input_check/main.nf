@@ -12,12 +12,76 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-// Auto-detect BAM index
-def get_index = { bam ->
+// Auto-detect BAM index.
+//
+// A function, not a closure assigned to a variable. Nextflow 26 rejects the
+// latter at the top level of a script -- "Statements cannot be mixed with
+// script declarations" -- and the file will not compile. A function
+// declaration IS a script declaration, so it is allowed in both 25 and 26.
+//
+// Safe to change because every call site invokes it as `get_index(bam)`; it is
+// never passed around as a value, which is the one usage a function could not
+// serve.
+def get_index(bam) {
     def bai = file("${bam}.bai")
     if (!bai.exists()) bai = file("${bam.toString().replace('.bam', '.bai')}")
     return bai
 }
+
+// Asset resolution, as top-level FUNCTIONS.
+//
+// These were closures assigned inside the workflow body. Nextflow 26 parses
+// that but cannot resolve the names from inside the nested `.map { }` that
+// calls them -- "`resolvePon` is not defined". Placement was not the only
+// thing 26 tightened; closure scoping was too.
+//
+// Each lookup table moves into the function that uses it. Each was used by
+// exactly one, so nothing is duplicated -- and leaving them at the top level
+// as `def x = [...]` would just be the statement-vs-declaration error again.
+def resolvePon(row) {
+    def assayToPon = [
+        'XS1': 'GRCh37/xs1.pon.parquet',
+        'XS2': 'GRCh37/xs2.pon.parquet',
+        'WGS': 'GRCh37/wgs.pon.parquet'
+    ]
+    if (row.pon) return file(row.pon)
+    if (row.assay && params.asset_dir && assayToPon[row.assay]) {
+        def assay_pon = file("${params.asset_dir}/pon/${assayToPon[row.assay]}")
+        if (assay_pon.exists()) return assay_pon
+        log.warn "PON not found for assay ${row.assay}: ${assay_pon}"
+    }
+    if (params.pon_model) return file(params.pon_model)
+    return []
+}
+
+def resolveTargets(row) {
+    def assayToTargets = [
+        'XS1': 'GRCh37/xs1.targets.bed',
+        'XS2': 'GRCh37/xs2.targets.bed'
+    ]
+    if (row.targets) return file(row.targets)
+    if (row.assay && params.asset_dir && assayToTargets[row.assay]) {
+        def assay_targets = file("${params.asset_dir}/targets/${assayToTargets[row.assay]}")
+        if (assay_targets.exists()) return assay_targets
+        log.warn "Targets not found for assay ${row.assay}: ${assay_targets}"
+    }
+    if (params.targets) return file(params.targets)
+    return []
+}
+
+def resolveWpsAnchors(row) {
+    def assayToWpsAnchors = [
+        'XS1': 'GRCh37/xs1.wps_anchors.bed.gz',
+        'XS2': 'GRCh37/xs2.wps_anchors.bed.gz'
+    ]
+    if (params.wps_anchors) return file(params.wps_anchors)
+    if (row.assay && params.asset_dir && assayToWpsAnchors[row.assay]) {
+        def assay_anchors = file("${params.asset_dir}/WpsAnchors/${assayToWpsAnchors[row.assay]}")
+        if (assay_anchors.exists()) return assay_anchors
+    }
+    return []
+}
+
 
 workflow INPUT_CHECK {
     take:
@@ -27,56 +91,6 @@ workflow INPUT_CHECK {
     // =====================================================
     // ASSAY RESOLUTION MAPS
     // =====================================================
-    def assayToPon = [
-        'XS1': 'GRCh37/xs1.pon.parquet',
-        'XS2': 'GRCh37/xs2.pon.parquet',
-        'WGS': 'GRCh37/wgs.pon.parquet'
-    ]
-    
-    def assayToTargets = [
-        'XS1': 'GRCh37/xs1.targets.bed',
-        'XS2': 'GRCh37/xs2.targets.bed'
-    ]
-
-    def assayToWpsAnchors = [
-        'XS1': 'GRCh37/xs1.wps_anchors.bed.gz',
-        'XS2': 'GRCh37/xs2.wps_anchors.bed.gz'
-    ]
-
-    // =====================================================
-    // RESOLUTION FUNCTIONS
-    // =====================================================
-    def resolvePon = { row ->
-        if (row.pon) return file(row.pon)
-        if (row.assay && params.asset_dir && assayToPon[row.assay]) {
-            def assay_pon = file("${params.asset_dir}/pon/${assayToPon[row.assay]}")
-            if (assay_pon.exists()) return assay_pon
-            log.warn "PON not found for assay ${row.assay}: ${assay_pon}"
-        }
-        if (params.pon_model) return file(params.pon_model)
-        return []
-    }
-
-    def resolveTargets = { row ->
-        if (row.targets) return file(row.targets)
-        if (row.assay && params.asset_dir && assayToTargets[row.assay]) {
-            def assay_targets = file("${params.asset_dir}/targets/${assayToTargets[row.assay]}")
-            if (assay_targets.exists()) return assay_targets
-            log.warn "Targets not found for assay ${row.assay}: ${assay_targets}"
-        }
-        if (params.targets) return file(params.targets)
-        return []
-    }
-
-    def resolveWpsAnchors = { row ->
-        if (params.wps_anchors) return file(params.wps_anchors)
-        if (row.assay && params.asset_dir && assayToWpsAnchors[row.assay]) {
-            def assay_anchors = file("${params.asset_dir}/WpsAnchors/${assayToWpsAnchors[row.assay]}")
-            if (assay_anchors.exists()) return assay_anchors
-        }
-        return []
-    }
-
     // =====================================================
     // PARSE SAMPLESHEET
     // =====================================================
