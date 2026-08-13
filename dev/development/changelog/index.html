@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3258,54 +3258,31 @@
   never run for it — silent cohort loss reintroduced one stage earlier than
   <code>--expect</code> can see it. The metas ride through the process so re-pairing is a
   <code>map</code>, preserving the join-free streaming this workflow is built around.
-- <strong>RUNALL now retries up a partition ladder instead of terminating the run.</strong>
-  Nothing set <code>errorStrategy</code> or <code>maxRetries</code>, so Nextflow's default
-  <code>terminate</code> applied: one bad sample out of 16,552 stopped everything. And
-  because <code>task.attempt</code> never exceeds 1 without a retry policy, <strong>every
-  resource ramp in the config was dead code</strong> — including the one commented
-  "doubles on retry".</p>
-<table>
-<thead>
-<tr>
-<th>attempt</th>
-<th>queue</th>
-<th>time</th>
-<th>memory</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>1</td>
-<td><code>cmobic_short</code></td>
-<td>3h</td>
-<td>32 GB</td>
-</tr>
-<tr>
-<td>2</td>
-<td><code>cmobic_cpu</code></td>
-<td>24h</td>
-<td>64 GB</td>
-</tr>
-</tbody>
-</table>
-<p>Retry is gated on exit 137/140/143 — SLURM's OOM and wall-clock kills — so a
-  corrupt <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> that fails in seconds does not climb to a 7-day partition to fail
-  again. <code>cpushort</code> is deliberately not a rung: it has the idle capacity, but
-  these are 8-CPU multi-hour jobs and <code>--qos=priority</code> does not apply there.</p>
-<p>Once the ladder is exhausted the sample is <strong>ignored</strong>, not terminated: the
-  run completes and <code>validate-output --expect</code> names exactly what was dropped.
-  That pairing is the design — <code>ignore</code> alone would be silent cohort loss, and
-  <code>terminate</code> at this scale means one sample can cost the run.</p>
-<ul>
-<li>
-<p><strong><code>check_phi_guard.sh</code> runs in 2.3s instead of ~100s.</strong> <code>git archive</code> applies
+- <strong>Reverted the RUNALL retry ladder added moments earlier in this cycle.</strong> It
+  was built on the claim that the pipeline had no retry policy. That claim was
+  wrong: <code>queue</code>, <code>errorStrategy</code> and <code>maxRetries</code> come from the institutional
+  config <code>-profile iris</code> loads over HTTPS at parse time, so they appear nowhere
+  in this repository and a <code>grep</code> finds nothing. iris sets <code>maxRetries = 3</code>,
+  retries any failure, falls back to <code>ignore</code>, and selects the partition with a
+  closure honouring <code>--isolated</code> and <code>--partition</code>.</p>
+<p>Because <code>withName</code> outranks a generic <code>process</code> block, the ladder silently
+  replaced all of that — cutting retries from 3 to 1, ignoring <code>--partition</code>
+  and <code>--isolated</code>, and pinning attempt 1 to the smaller of two partitions. The
+  <code>task.attempt</code> ramps it claimed to revive had been live all along.</p>
+<p>The pre-existing behaviour is better and needs no queue names: a growing time
+  request makes SLURM pick the partition, since attempt 2's 4h no longer fits a
+  3h queue.</p>
+<p><code>tests/unit/test_runall_resources.py</code> now pins the <em>absence</em> of <code>queue</code>,
+  <code>errorStrategy</code> and <code>maxRetries</code> from that block, so the next reader who
+  greps, finds nothing and "fixes" it lands on the explanation instead.
+- <strong><code>check_phi_guard.sh</code> runs in 2.3s instead of ~100s.</strong> <code>git archive</code> applies
   the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
   parquet, gzipped <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> and FASTA (75s), and assertion 5 grepped the same
   binaries for <code>/Users/</code> (13s). <code>GIT_LFS_SKIP_SMUDGE</code> exports the 132-byte
   pointers instead, and assertion 5 skips LFS paths. This gives up scanning
   inside LFS payloads: accepted, because they are machine-built compressed
   reference data where a plaintext regex could never have matched.</p>
-</li>
+<ul>
 <li>
 <p><strong>Release guide Phase 5 merges <code>main</code> into <code>develop</code></strong>, not the release branch.
   The old form left each branch holding a merge commit the other lacked, so
