@@ -6,6 +6,21 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **SPLIT_MAF's stub block still referenced the pre-rename input.** Its input
+  became `metas` so the metas could ride through and the caller could re-pair
+  with a `map` instead of a `join`; the script block and tag were updated and
+  the `stub:` block was not. Groovy resolves `${...}` at task runtime, so the
+  file parsed, every unit test passed, and `nextflow -stub-run` failed
+  immediately with `No such variable: sample_ids`.
+
+  `tests/unit/test_module_interpolations.py` now asserts, for every module,
+  that the stub block references no name absent from its inputs and script —
+  which is exactly the shape of a rename applied to one block and not the
+  other. Written as a subset comparison between the two blocks rather than a
+  declaration check: parsing Nextflow's input syntax precisely (`path(x)`, bare
+  `path x`, multi-element tuples) produced false positives on seven modules,
+  and a test that cries wolf is worse than no test.
+
 - **The Nextflow pipeline reported itself as 0.8.3.** `manifest.version` sat at
   the previous release through all of 0.9.0. Nothing functional depended on it,
   which is why it drifted — but Nextflow writes it into every execution report,
