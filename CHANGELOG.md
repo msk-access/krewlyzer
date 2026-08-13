@@ -6,6 +6,26 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Nextflow 26.04 could not parse `nextflow.config` at all.** The nf-core
+  `try { includeConfig } catch` idiom is rejected outright — *"Try-catch blocks
+  cannot be mixed with config statements"* — so the pipeline refused to start.
+  25.10.3 accepted the same file, which is how it went unnoticed: the only
+  signal was a version nobody had run. Replaced with the ternary nf-core moved
+  to, which is why their own configs already parse under 26.
+
+  The behaviour change is the better half. The old `catch` swallowed **any**
+  failure, so a transient network blip left the run going with no institutional
+  config — no `process_single` label, no queue closure honouring
+  `--isolated`/`--partition`, no `maxRetries` — and three processes silently
+  falling back to 8 CPU / 32 GB / 24h, a request a short partition refuses at
+  submission. A whole run's resource policy changed, reported as one line of
+  stderr. Skipping now requires the operator to set `NXF_OFFLINE`.
+
+  `tests/unit/test_nextflow_config_parses_on_26.py` pins the construct. It is
+  not a parser and cannot claim the file is 26-clean — the parser stops at the
+  first error, so more may sit behind any given one. Only a real
+  `NXF_VER=26.04.6 ... -stub-run` can establish that.
+
 - **SPLIT_MAF's stub block still referenced the pre-rename input.** Its input
   became `metas` so the metas could ride through and the caller could re-pair
   with a `map` instead of a `join`; the script block and tag were updated and
