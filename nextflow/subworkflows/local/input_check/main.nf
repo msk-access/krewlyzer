@@ -12,8 +12,17 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
-// Auto-detect BAM index
-def get_index = { bam ->
+// Auto-detect BAM index.
+//
+// A function, not a closure assigned to a variable. Nextflow 26 rejects the
+// latter at the top level of a script -- "Statements cannot be mixed with
+// script declarations" -- and the file will not compile. A function
+// declaration IS a script declaration, so it is allowed in both 25 and 26.
+//
+// Safe to change because every call site invokes it as `get_index(bam)`; it is
+// never passed around as a value, which is the one usage a function could not
+// serve.
+def get_index(bam) {
     def bai = file("${bam}.bai")
     if (!bai.exists()) bai = file("${bam.toString().replace('.bam', '.bai')}")
     return bai
