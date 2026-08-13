@@ -29,17 +29,33 @@ _NF = sorted((Path(__file__).resolve().parents[2] / "nextflow").rglob("*.nf"))
 
 
 @pytest.mark.parametrize("path", _NF, ids=lambda p: f"{p.parent.name}/{p.name}")
-def test_no_top_level_closure_assignment(path: Path):
-    offenders = [
-        (i, line.rstrip())
-        for i, line in enumerate(path.read_text().splitlines(), start=1)
-        if re.match(r"^(def\s+)?[a-zA-Z_][A-Za-z0-9_]*\s*=\s*\{", line)
-    ]
+def test_a_closure_that_is_called_should_be_a_function(path: Path):
+    """One rule covering both ways 26 rejected this.
+
+    My first version of this test checked indentation, on the belief that only
+    *top-level* closures were a problem and workflow-scoped ones were fine.
+    They are not: 26 parses a workflow-scoped closure but cannot resolve it
+    from inside a nested `.map { }`, giving "`resolvePon` is not defined".
+    Placement was not the only thing tightened; scoping was too.
+
+    So the rule is about usage, not position. If a closure is *invoked* like a
+    function anywhere in the file, it should be declared as one -- that works
+    at any scope in both versions. A closure genuinely used as a value, passed
+    to an operator, never matches `name(` and is left alone.
+    """
+    text = path.read_text()
+    offenders = []
+    for i, line in enumerate(text.splitlines(), start=1):
+        m = re.match(r"\s*(?:def\s+)?([a-zA-Z_][A-Za-z0-9_]*)\s*=\s*\{", line)
+        if m and re.search(rf"\b{re.escape(m.group(1))}\s*\(", text):
+            offenders.append((i, m.group(1)))
+
     assert not offenders, (
-        f"{path.name} assigns a closure at the top level: "
-        + "; ".join(f"line {i}: {t[:48]}" for i, t in offenders)
-        + ". Nextflow 26 will not compile the script -- 'Statements cannot be "
-        "mixed with script declarations'. Declare it as a function instead, "
-        "`def name(args) { ... }`, which both 25 and 26 accept. Closures "
-        "*inside* a process or workflow block are unaffected."
+        f"{path.name} assigns closures that are then called as functions: "
+        + "; ".join(f"line {i}: {n}" for i, n in offenders)
+        + ". Nextflow 26 rejects this -- at the top level as 'Statements cannot "
+        "be mixed with script declarations', and at workflow scope as "
+        "'`name` is not defined' when called from a nested closure. Declare "
+        "them as `def name(args) { ... }`, which resolves at any scope in both "
+        "25 and 26."
     )
