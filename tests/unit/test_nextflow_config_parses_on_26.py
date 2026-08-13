@@ -39,6 +39,26 @@ def test_no_try_catch_in_config(path: Path):
     )
 
 
+@pytest.mark.parametrize("path", _CONFIGS, ids=lambda p: p.name)
+def test_no_bare_environment_variable(path: Path):
+    """26 rejects `${HOME}`; it wants `env('HOME')`.
+
+    The second error 26 reported, after the try/catch. Found by grepping the
+    pattern rather than waiting for the parser to surface them one run at a
+    time -- it stops at the first, so a fix-and-rerun loop costs a cluster
+    round trip per instance.
+
+    `env()` is safe on 25: iris.config uses it five times and parses there.
+    """
+    bare = re.findall(r"\$\{([A-Z][A-Z0-9_]*)\}", path.read_text())
+    assert not bare, (
+        f"{path.name} interpolates the environment variable(s) {sorted(set(bare))} "
+        'directly. Nextflow 26 will not parse the file -- "`HOME` is not '
+        "defined (hint: use env('...'))\". Write ${env('HOME')} instead, which "
+        "both 25 and 26 accept."
+    )
+
+
 def test_the_institutional_include_survives():
     """The ternary must still actually include the config in the normal case.
 
