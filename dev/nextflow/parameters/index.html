@@ -82,7 +82,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
   
   
     
@@ -835,6 +835,23 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Output Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-long_partition-and-partition-lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --long_partition and partition lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2576,6 +2593,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Output Parameters">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#-long_partition-and-partition-lists" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --long_partition and partition lists
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2925,8 +2959,31 @@
 <td><code>100</code></td>
 <td>Maximum concurrent executor jobs; also derives <code>FILTER_MAF</code> maxForks.</td>
 </tr>
+<tr>
+<td><code>--long_partition</code></td>
+<td><code>null</code></td>
+<td>Partition for <strong>retried</strong> <code>run-all</code> tasks whose grown time request no longer fits the shortest partition in <code>--partition</code>. See below.</td>
+</tr>
 </tbody>
 </table>
+<h3 id="-long_partition-and-partition-lists"><code>--long_partition</code> and partition lists</h3>
+<p>A retry asks for more time than the attempt before it — 2h, then 4h, then 6h.
+On a scheduler configured <code>EnforcePartLimits = ALL</code>, a <strong>partition list enforces
+the intersection of the limits while offering the union of the nodes</strong>. Passing
+<code>--partition short,long</code> therefore caps every request at the <em>short</em> partition's
+limit, and a 4h retry is not rerouted to the long partition — it is refused
+before it queues:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>allocation failure: Requested time limit is invalid (missing or exceeds some limit)
+</code></pre></div>
+<p>The effect is that any task needing a second attempt fails to submit, three
+times, and is then dropped by the retry policy's fallback.</p>
+<p>Set <code>--long_partition</code> to a partition whose limit covers the grown request and
+retries go there instead:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>--partition<span class="w"> </span><span class="s2">"short_queue,long_queue"</span><span class="w"> </span>--long_partition<span class="w"> </span>long_queue
+</code></pre></div>
+<p>Leave it unset and nothing changes: attempt 1 and every retry use <code>--partition</code>
+as given. Check your scheduler with <code>scontrol show config | grep -i
+EnforcePartLimits</code> — under <code>ANY</code> this does not apply.</p>
 <div class="admonition warning">
 <p class="admonition-title">Selecting <code>tsv</code> produces a cohort the downstream consumer cannot read</p>
 <p>kreview reads <strong>Parquet only</strong>. A tsv-only run additionally <strong>skips output
@@ -2968,7 +3025,7 @@ start whenever the selection excludes Parquet.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 18:52:33 UTC"><span class="timeago" datetime="2026-07-31T18:52:33+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 18:52:33 UTC">2026-07-31</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 14, 2026 02:08:55 UTC"><span class="timeago" datetime="2026-08-14T02:08:55+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 14, 2026 02:08:55 UTC">2026-08-14</span>
   </span>
 
     

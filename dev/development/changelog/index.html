@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3089,6 +3089,34 @@
 <p>All notable changes to this project will be documented in this file.</p>
 <h2 id="unreleased">[Unreleased]</h2>
 <h3 id="fixed">Fixed</h3>
+<ul>
+<li>
+<p><strong>A 16,552-sample run produced zero samples.</strong> Three faults compounded:</p>
+</li>
+<li>
+<p><strong>SPLIT_MAF interpolated the sample ids into its script.</strong> Nextflow strips
+     a script block's common indentation <em>after</em> interpolating, so 16,552
+     zero-indent id lines left no common prefix, nothing was stripped, and
+     python saw <code>import os</code> on line 2. <code>.command.sh</code> was 16,648 lines: 96
+     of code, 16,552 of ids. Exit 1. The ids are now a <strong>staged file</strong> — a
+     filename is one token and cannot defeat the dedent at any cohort size.</p>
+</li>
+<li><strong>Retries could not submit.</strong> The scheduler runs <code>EnforcePartLimits=ALL</code>,
+     where a partition list enforces the <em>intersection</em> of limits and offers
+     the union of nodes. <code>2.h * task.attempt</code> asked 4h on attempt 2 against a
+     list containing a 3h partition and was refused — <em>"Requested time limit is
+     invalid"</em> — not rerouted. New <code>--long_partition</code> sends retries to a
+     partition whose limit covers the grown request.</li>
+<li><strong><code>ignore</code> on a fan-in step lost everything.</strong> SPLIT_MAF is one task for
+     the whole cohort, so ignoring it left RUNALL with no input and the run
+     completed having done nothing. It is now <code>terminate</code>: a fan-in failure
+     stops the run in ninety seconds instead of after the queue drains.</li>
+</ul>
+<p>The unit tests could not have caught (1): the harness dedents <em>before</em>
+  substituting, Nextflow does the reverse, so it tested well-formed Python while
+  production shipped broken. The stub run could not either — its ids are joined
+  with spaces, one line, nothing to defeat. <code>test_module_interpolations.py</code> now
+  refuses any newline-joined value in a <code>.nf</code>.</p>
 <ul>
 <li><strong>Nextflow 26.04 could not parse <code>nextflow.config</code> at all.</strong> The nf-core
   <code>try { includeConfig } catch</code> idiom is rejected outright — <em>"Try-catch blocks
