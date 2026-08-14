@@ -76,6 +76,34 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
 | `--gc_correct` | `true` | Apply GC bias correction during extraction. |
 | `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
+| `--long_partition` | `null` | Partition for **retried** `run-all` tasks whose grown time request no longer fits the shortest partition in `--partition`. See below. |
+
+### `--long_partition` and partition lists
+
+A retry asks for more time than the attempt before it — 2h, then 4h, then 6h.
+On a scheduler configured `EnforcePartLimits = ALL`, a **partition list enforces
+the intersection of the limits while offering the union of the nodes**. Passing
+`--partition short,long` therefore caps every request at the *short* partition's
+limit, and a 4h retry is not rerouted to the long partition — it is refused
+before it queues:
+
+```
+allocation failure: Requested time limit is invalid (missing or exceeds some limit)
+```
+
+The effect is that any task needing a second attempt fails to submit, three
+times, and is then dropped by the retry policy's fallback.
+
+Set `--long_partition` to a partition whose limit covers the grown request and
+retries go there instead:
+
+```bash
+--partition "short_queue,long_queue" --long_partition long_queue
+```
+
+Leave it unset and nothing changes: attempt 1 and every retry use `--partition`
+as given. Check your scheduler with `scontrol show config | grep -i
+EnforcePartLimits` — under `ANY` this does not apply.
 
 !!! warning "Selecting `tsv` produces a cohort the downstream consumer cannot read"
     kreview reads **Parquet only**. A tsv-only run additionally **skips output

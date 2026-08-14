@@ -64,3 +64,32 @@ def test_stub_references_nothing_the_script_does_not(path: Path):
         "script and missed here -- and because Groovy resolves it at runtime, "
         "only `nextflow -stub-run` would ever find it."
     )
+
+
+@pytest.mark.parametrize("path", _MODULES, ids=lambda p: p.parent.name)
+def test_no_multiline_value_is_interpolated_into_a_script(path: Path):
+    """Injecting a newline-joined list into a script block breaks the dedent.
+
+    Nextflow interpolates a script block and *then* strips its common
+    indentation. A value carrying newlines contributes zero-indent lines, so the
+    common prefix becomes empty, nothing is stripped, and every original line
+    keeps the block indent. For a Python script that is `IndentationError` on
+    line 2.
+
+    It cost a 16,552-sample run: SPLIT_MAF injected that many ids, exited 1, and
+    because it fans in to the whole cohort the run produced no samples at all.
+
+    Pass such values as a staged file instead -- a filename is one token and
+    cannot defeat the dedent at any size.
+    """
+    hits = [
+        (i, line.strip()[:60])
+        for i, line in enumerate(path.read_text().splitlines(), start=1)
+        if re.search(r"""join\(\s*['"](\\n|\n)['"]\s*\)""", line)
+    ]
+    assert not hits, (
+        f"{path.parent.name} builds a newline-joined value: "
+        + "; ".join(f"line {i}: {t}" for i, t in hits)
+        + ". If that reaches a script block it defeats Nextflow's dedent and "
+        "the task fails on line 2. Stage it as a file instead."
+    )
