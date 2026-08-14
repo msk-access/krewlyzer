@@ -33,7 +33,7 @@ process SPLIT_MAF {
     label 'process_low'
 
     input:
-    tuple val(metas), val(single_sample), path(maf)
+    tuple val(metas), val(single_sample), path(maf), path(ids)
 
     output:
     tuple val(metas), path("split/*.filtered.maf"), emit: maf
@@ -45,7 +45,15 @@ process SPLIT_MAF {
     script:
     // The metas ride through so the caller can re-pair by id in a map rather
     // than a join -- this workflow is deliberately join-free so RUNALL streams.
-    def ids_arg = metas.collect { it.id }.join('\n')
+    //
+    // The ids arrive as a STAGED FILE, never interpolated. Injecting them was a
+    // 16,552-sample outage: Nextflow strips a script block's common indentation
+    // AFTER interpolating, so 16,552 zero-indent id lines left no common prefix,
+    // nothing was stripped, and python saw `    import os` at line 2 --
+    // IndentationError, exit 1, and with SPLIT_MAF fanning in to everything the
+    // whole cohort produced nothing. A filename is a single token and cannot
+    // defeat the dedent at any cohort size.
+    def expected_n = metas.size()
     def single_flag = single_sample ? 'true' : 'false'
     """
     #!/usr/bin/env python3
@@ -55,8 +63,15 @@ process SPLIT_MAF {
 
     os.makedirs('split', exist_ok=True)
 
-    sample_ids = [s for s in '''${ids_arg}'''.split('\\n') if s]
+    with open('${ids}') as fh:
+        sample_ids = [line.strip() for line in fh if line.strip()]
     single = '${single_flag}' == 'true'
+
+    # The caller and this file must agree on the cohort. A truncated or
+    # mis-staged id file would otherwise split silently into fewer samples.
+    if len(sample_ids) != ${expected_n}:
+        sys.exit('ids file holds %d sample(s), caller expected ${expected_n}'
+                 % len(sample_ids))
 
     # Case-insensitive, matching FILTER_MAF. Keep the first spelling seen for
     # each id so output filenames match the samplesheet exactly.
@@ -154,7 +169,7 @@ process SPLIT_MAF {
     // a stub block, so it took a `-stub-run` to surface it.
     """
     mkdir -p split
-    for s in ${metas.collect { it.id }.join(' ')}; do
+    for s in \$(cat ${ids}); do
         echo -e "Hugo_Symbol\\tChromosome\\tStart_Position\\tTumor_Sample_Barcode" > split/\$s.filtered.maf
     done
 

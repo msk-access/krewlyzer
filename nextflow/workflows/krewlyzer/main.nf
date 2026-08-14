@@ -74,10 +74,25 @@ workflow KREWLYZER {
         // groupTuple is a barrier, and deliberately so: this channel comes
         // straight from the samplesheet, so it completes in seconds, and
         // nothing downstream could start before the MAFs existed anyway.
+        // The sample ids go to SPLIT_MAF as a FILE, never interpolated into its
+        // script. Injecting them cost a 16,552-sample run: Nextflow strips a
+        // script block's common indentation *after* interpolation, so 16,552
+        // zero-indent id lines left no common prefix, the Python kept its block
+        // indent, and the task died on line 2 with IndentationError.
+        //
+        // The filename is derived from the group key, so it is stable across
+        // runs and `-resume` still hits. Written here rather than in a process
+        // because it is one small text file per distinct MAF, not work.
         ch_grouped = ch_maf_split.has_maf
             .map { meta, maf -> [ [maf, meta.single_sample ?: false], meta ] }
             .groupTuple()
-            .map { key, metas -> [ metas, key[1], key[0] ] }
+            .map { key, metas ->
+                def dir = file("${workflow.workDir}/split-maf-ids")
+                dir.mkdirs()
+                def ids = file("${dir}/${Math.abs(key.toString().hashCode())}.ids.txt")
+                ids.text = metas.collect { it.id }.join('\n') + '\n'
+                [ metas, key[1], key[0], ids ]
+            }
 
         SPLIT_MAF(ch_grouped)
         ch_versions = ch_versions.mix(SPLIT_MAF.out.versions.first())

@@ -34,13 +34,20 @@ def _script(sample_ids, single, maf_name):
     """Lift the script block out of the module and bind its Groovy templates."""
     text = _MODULE.read_text()
     body = text.split('"""', 1)[1].split('"""', 1)[0]
-    # Dedent BEFORE substituting. Nextflow strips a script block's common
-    # indentation, so this must too -- but ids_arg is multi-line and its
-    # injected lines carry no indentation, which would leave dedent no common
-    # prefix to remove and every line an IndentationError.
+    # Dedent BEFORE substituting, mirroring Nextflow.
+    #
+    # NOTE: Nextflow actually does the opposite -- it interpolates first and
+    # dedents after. That difference is not cosmetic: it is why this file could
+    # not catch the outage. The module used to inject 16,552 id lines at zero
+    # indent, which left `stripIndent()` no common prefix, and the task died on
+    # `    import os`. Here the substitution happened after the dedent, so the
+    # test saw well-formed Python and passed. The ids are a staged file now, so
+    # nothing multi-line is interpolated and the orders cannot diverge again --
+    # `test_module_interpolations.py` asserts that.
     body = textwrap.dedent(body)
-    body = body.replace("${ids_arg}", "\n".join(sample_ids))
     body = body.replace("${single_flag}", "true" if single else "false")
+    body = body.replace("${expected_n}", str(len(sample_ids)))
+    body = body.replace("${ids}", "ids.txt")
     body = body.replace("${maf}", maf_name)
     body = body.replace("${task.process}", "SPLIT_MAF")
     # Groovy escapes these for its own interpolation; Python needs them raw.
@@ -50,6 +57,7 @@ def _script(sample_ids, single, maf_name):
 def _run(tmp_path, sample_ids, rows, single=False):
     maf = tmp_path / "cohort.maf"
     maf.write_text(_HEADER + "\n" + "".join(rows))
+    (tmp_path / "ids.txt").write_text("\n".join(sample_ids) + "\n")
     script = tmp_path / "split.py"
     script.write_text(_script(sample_ids, single, "cohort.maf"))
     proc = subprocess.run(
@@ -115,6 +123,7 @@ def test_single_sample_mode_passes_every_row_to_every_sample(tmp_path):
 def test_comment_lines_are_stripped(tmp_path):
     maf = tmp_path / "cohort.maf"
     maf.write_text("#version 2.4\n" + _HEADER + "\n" + _row("sample_01"))
+    (tmp_path / "ids.txt").write_text("sample_01\n")
     script = tmp_path / "split.py"
     script.write_text(_script(["sample_01"], False, "cohort.maf"))
     proc = subprocess.run(

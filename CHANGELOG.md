@@ -6,6 +6,31 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **A 16,552-sample run produced zero samples.** Three faults compounded:
+
+  1. **SPLIT_MAF interpolated the sample ids into its script.** Nextflow strips
+     a script block's common indentation *after* interpolating, so 16,552
+     zero-indent id lines left no common prefix, nothing was stripped, and
+     python saw `    import os` on line 2. `.command.sh` was 16,648 lines: 96
+     of code, 16,552 of ids. Exit 1. The ids are now a **staged file** — a
+     filename is one token and cannot defeat the dedent at any cohort size.
+  2. **Retries could not submit.** The scheduler runs `EnforcePartLimits=ALL`,
+     where a partition list enforces the *intersection* of limits and offers
+     the union of nodes. `2.h * task.attempt` asked 4h on attempt 2 against a
+     list containing a 3h partition and was refused — *"Requested time limit is
+     invalid"* — not rerouted. New `--long_partition` sends retries to a
+     partition whose limit covers the grown request.
+  3. **`ignore` on a fan-in step lost everything.** SPLIT_MAF is one task for
+     the whole cohort, so ignoring it left RUNALL with no input and the run
+     completed having done nothing. It is now `terminate`: a fan-in failure
+     stops the run in ninety seconds instead of after the queue drains.
+
+  The unit tests could not have caught (1): the harness dedents *before*
+  substituting, Nextflow does the reverse, so it tested well-formed Python while
+  production shipped broken. The stub run could not either — its ids are joined
+  with spaces, one line, nothing to defeat. `test_module_interpolations.py` now
+  refuses any newline-joined value in a `.nf`.
+
 - **Nextflow 26.04 could not parse `nextflow.config` at all.** The nf-core
   `try { includeConfig } catch` idiom is rejected outright — *"Try-catch blocks
   cannot be mixed with config statements"* — so the pipeline refused to start.

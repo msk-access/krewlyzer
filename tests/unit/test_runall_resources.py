@@ -50,15 +50,41 @@ def runall_block() -> str:
     raise AssertionError("unbalanced KREWLYZER_RUNALL block")
 
 
-@pytest.mark.parametrize("directive", ["queue", "errorStrategy", "maxRetries"])
-def test_cluster_policy_is_left_to_the_cluster_config(runall_block, directive):
+@pytest.mark.parametrize("directive", ["errorStrategy", "maxRetries"])
+def test_retry_policy_is_left_to_the_cluster_config(runall_block, directive):
+    """`queue` is deliberately NOT in this list any more.
+
+    It was, when #57 was reverted, on the reasoning that the cluster's own queue
+    closure would route a grown request to a partition that could take it. A
+    real 16,552-sample run disproved that: with `EnforcePartLimits = ALL` a
+    partition list enforces the intersection of the limits, so attempt 2's 4h
+    against a list containing a 3h partition was refused outright --
+    "Requested time limit is invalid" -- rather than rerouted.
+
+    So the pipeline does now set `queue`, per attempt, which is what #57 got
+    right. What it got wrong, and what this still guards, is overriding the
+    retry policy: iris gives 3 attempts and a fallback, and a `withName` block
+    outranks it silently.
+    """
     assert not re.search(rf"\b{directive}\s*=", runall_block), (
         f"KREWLYZER_RUNALL sets `{directive}`, which overrides the institutional "
         "config (-profile iris) because withName outranks a generic process "
-        "block. iris already sets maxRetries=3, falls back to `ignore`, and "
-        "selects the partition from a closure honouring --isolated/--partition. "
-        "Setting it here silently replaces all of that. See the comment above "
-        "the block; this is the mistake #57 made."
+        "block. iris already sets maxRetries=3 and falls back to `ignore`; "
+        "setting it here silently replaces that. This is the mistake #57 made."
+    )
+
+
+def test_the_queue_ladder_moves_retries_to_the_long_partition(runall_block):
+    """The measured half of #57, kept.
+
+    Attempt 1 uses `--partition`; a retry, whose time request has grown past the
+    shortest partition's cap, uses `--long_partition` if given. Without this a
+    retry is not rerouted but refused, and the sample is dropped.
+    """
+    assert "task.attempt > 1" in runall_block and "long_partition" in runall_block, (
+        "the retry queue ladder is gone. Under EnforcePartLimits=ALL a grown "
+        "time request against a partition list is refused, not rerouted, so "
+        "every retry would fail to submit and the sample would be dropped."
     )
 
 
