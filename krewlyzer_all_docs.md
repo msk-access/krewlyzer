@@ -1251,30 +1251,38 @@ Docker image versions are referenced in documentation files:
 
 | File | Version Location |
 |------|------------------|
-| `docs/getting-started/installation.md` | Docker/Singularity pull commands |
-| `docs/getting-started/quickstart.md` | Docker pull example |
-| `docs/nextflow/examples.md` | Container image references |
+| `docs/index.md` | Docker pull and run examples |
+
+Verify rather than trust this table — it previously named three files that hold
+no version at all, which is the stale pointer this guide warns about in Phase 2:
+
+```bash
+grep -rn "ghcr.io/msk-access/krewlyzer:[0-9]" docs/ README.md
+```
 
 ### Update Script
 
 ```bash
-OLD_VERSION="0.5.1"
+OLD_VERSION="A.B.C"
 VERSION="X.Y.Z"
 
-# Update installation docs
-sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/installation.md
-sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/quickstart.md
+# Substitute only the container tag, never a bare version number: docs contain
+# historical references ("default changed in 0.9.0") that a blanket sed would
+# falsify.
+grep -rln "krewlyzer:${OLD_VERSION}" docs/ README.md \
+  | xargs sed -i '' "s|krewlyzer:${OLD_VERSION}|krewlyzer:${VERSION}|g"
 
-# Verify no :latest tags remain (we don't publish :latest)
-grep -r ":latest" docs/ && echo "WARNING: :latest tags found!" || echo "✓ No :latest tags"
-
-# Verify changes
-grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
+# Verify
+grep -rn "ghcr.io/msk-access/krewlyzer:[0-9]" docs/ README.md
 ```
 
-!!! warning "No :latest Tag"
-    We do NOT publish a `:latest` tag. Always use explicit version tags (e.g., `:0.5.3`).
-    Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
+!!! note "`:latest` is published"
+    `release.yml` tags every release as both `:X.Y.Z` and `:latest`, and the
+    README's quick-start pulls `:latest` deliberately. This guide previously
+    claimed the opposite; three sources disagreed with it.
+
+    Pin an explicit version anywhere reproducibility matters -- a pipeline
+    module, a paper's methods -- and leave `:latest` to the quick-start.
 
 ---
 
@@ -1293,12 +1301,30 @@ silently.
 
 ---
 
-## Phase 2.7: Stamp the bundled PONs
+## Phase 2.7: Stamp the bundled PONs — only if they were rebuilt
 
-The version-update script in Phase 2 uses `sed`, and a PON is a Parquet file —
-so the models are the one place a version literal does **not** get updated by
-it. They record the version of whatever built them, which is a `develop`
-checkout still reporting the previous release.
+**Skip this unless the models changed in this release.** A stamp is a claim
+about which krewlyzer semantics a model's baselines match, not a shipping
+label, and re-stamping an unchanged model rewrites 543 MB of Parquet to say
+something it already said. Every rewrite is a new immutable LFS object, so a
+release cadence of six a year adds ~3 GB annually of byte-different,
+information-identical blobs — against a download quota that is already
+exhausted.
+
+It is also a footgun. Phase 2.8 warns that raising the floor requires a
+*rebuild*, "not merely a re-stamp", because stamping a model that predates a
+semantic change "would launder exactly the incompatibility the floor exists to
+catch". Stamping by default puts that laundering one command away, two sections
+earlier in the same checklist.
+
+A model stamped 0.9.0 keeps clearing a `(0, 9, 0)` floor at any later release,
+so nothing breaks by leaving it alone. 0.9.1 skipped this step for exactly that
+reason.
+
+When the models *were* rebuilt: the version-update script in Phase 2 uses
+`sed`, and a PON is a Parquet file — so they are the one place a version
+literal does not get updated by it. They record the version of whatever built
+them, which is a `develop` checkout still reporting the previous release.
 
 ```bash
 krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version X.Y.Z
@@ -7887,9 +7913,9 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
 ### With Docker (Recommended)
 ```bash
-docker pull ghcr.io/msk-access/krewlyzer:0.9.0
+docker pull ghcr.io/msk-access/krewlyzer:0.9.1
 # Example usage:
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.9.0 run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.9.1 run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
 ```
 
 ### With uv / pip

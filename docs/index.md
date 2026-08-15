@@ -49,9 +49,9 @@ krewlyzer run-all -i sample.bam --reference hg19.fa --output results/
 
 ### With Docker (Recommended)
 ```bash
-docker pull ghcr.io/msk-access/krewlyzer:0.9.0
+docker pull ghcr.io/msk-access/krewlyzer:0.9.1
 # Example usage:
-docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.9.0 run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
+docker run --rm -v $PWD:/data ghcr.io/msk-access/krewlyzer:0.9.1 run-all -i /data/sample.bam --reference /data/hg19.fa --output /data/output_dir
 ```
 
 ### With uv / pip

@@ -10,7 +10,7 @@
 process KREWLYZER_EXTRACT {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.9.0"
+    container "ghcr.io/msk-access/krewlyzer:0.9.1"
 
     input:
     tuple val(meta), path(bam), path(bai)

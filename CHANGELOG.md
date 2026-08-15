@@ -2,125 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
-
-### Fixed
-
-- **A 16,552-sample run produced zero samples.** Three faults compounded:
-
-  1. **SPLIT_MAF interpolated the sample ids into its script.** Nextflow strips
-     a script block's common indentation *after* interpolating, so 16,552
-     zero-indent id lines left no common prefix, nothing was stripped, and
-     python saw `    import os` on line 2. `.command.sh` was 16,648 lines: 96
-     of code, 16,552 of ids. Exit 1. The ids are now a **staged file** — a
-     filename is one token and cannot defeat the dedent at any cohort size.
-  2. **Retries could not submit.** The scheduler runs `EnforcePartLimits=ALL`,
-     where a partition list enforces the *intersection* of limits and offers
-     the union of nodes. `2.h * task.attempt` asked 4h on attempt 2 against a
-     list containing a 3h partition and was refused — *"Requested time limit is
-     invalid"* — not rerouted. New `--long_partition` sends retries to a
-     partition whose limit covers the grown request.
-  3. **`ignore` on a fan-in step lost everything.** SPLIT_MAF is one task for
-     the whole cohort, so ignoring it left RUNALL with no input and the run
-     completed having done nothing. It is now `terminate`: a fan-in failure
-     stops the run in ninety seconds instead of after the queue drains.
-
-  The unit tests could not have caught (1): the harness dedents *before*
-  substituting, Nextflow does the reverse, so it tested well-formed Python while
-  production shipped broken. The stub run could not either — its ids are joined
-  with spaces, one line, nothing to defeat. `test_module_interpolations.py` now
-  refuses any newline-joined value in a `.nf`.
-
-- **Nextflow 26.04 could not parse `nextflow.config` at all.** The nf-core
-  `try { includeConfig } catch` idiom is rejected outright — *"Try-catch blocks
-  cannot be mixed with config statements"* — so the pipeline refused to start.
-  25.10.3 accepted the same file, which is how it went unnoticed: the only
-  signal was a version nobody had run. Replaced with the ternary nf-core moved
-  to, which is why their own configs already parse under 26.
-
-  The behaviour change is the better half. The old `catch` swallowed **any**
-  failure, so a transient network blip left the run going with no institutional
-  config — no `process_single` label, no queue closure honouring
-  `--isolated`/`--partition`, no `maxRetries` — and three processes silently
-  falling back to 8 CPU / 32 GB / 24h, a request a short partition refuses at
-  submission. A whole run's resource policy changed, reported as one line of
-  stderr. Skipping now requires the operator to set `NXF_OFFLINE`.
-
-  `tests/unit/test_nextflow_config_parses_on_26.py` pins the construct. It is
-  not a parser and cannot claim the file is 26-clean — the parser stops at the
-  first error, so more may sit behind any given one. Only a real
-  `NXF_VER=26.04.6 ... -stub-run` can establish that.
-
-- **SPLIT_MAF's stub block still referenced the pre-rename input.** Its input
-  became `metas` so the metas could ride through and the caller could re-pair
-  with a `map` instead of a `join`; the script block and tag were updated and
-  the `stub:` block was not. Groovy resolves `${...}` at task runtime, so the
-  file parsed, every unit test passed, and `nextflow -stub-run` failed
-  immediately with `No such variable: sample_ids`.
-
-  `tests/unit/test_module_interpolations.py` now asserts, for every module,
-  that the stub block references no name absent from its inputs and script —
-  which is exactly the shape of a rename applied to one block and not the
-  other. Written as a subset comparison between the two blocks rather than a
-  declaration check: parsing Nextflow's input syntax precisely (`path(x)`, bare
-  `path x`, multi-element tuples) produced false positives on seven modules,
-  and a test that cries wolf is worse than no test.
-
-- **The Nextflow pipeline reported itself as 0.8.3.** `manifest.version` sat at
-  the previous release through all of 0.9.0. Nothing functional depended on it,
-  which is why it drifted — but Nextflow writes it into every execution report,
-  trace file and Tower entry, so a 16,000-sample cohort would have been labelled
-  0.8.3 in its own provenance while running 0.9.0 containers.
-
-  The Phase 2 version bump is a `sed` over container tags in the modules and
-  never matched this line. The release guide compounded it by listing
-  `nextflow.config` under "container tag" — there is no container pin in that
-  file at all. Both corrected, and `tests/unit/test_nextflow_version.py` now
-  pins `manifest.version` and every module container tag to `__version__`.
-
-  The container half matters more than the manifest: a stale pin there does not
-  mislabel a run, it executes the previous release's defects under this
-  version's name.
-
-- **The documentation site stopped publishing on 2026-07-31 and nobody noticed
-  for a whole release.** `ba13fd4` (#32) replaced the docs workflow with the
-  aggregate check alone, dropping the `mike` deploys and the strict build with
-  it. Nothing has published since: `stable` still served **0.8.3** — the
-  documentation for the release whose defects 0.9.0 exists to fix — and `dev`
-  froze at the same date. Tagging 0.9.0 did not help, because the old workflow
-  only deployed on pushes to `main`/`develop`, never on tags.
-
-  Restored, with three changes. **A tag publishes `stable`**, not a push to
-  `main`: the tag is the authoritative "released" signal, and hanging it on a
-  `main` push is what let PyPI and the container ship while the site sat still.
-  **No `paths` filter on push**, because GitHub requires the ref filter and the
-  path filter to both match, so `tags: ['*']` beside `paths:` would drop any tag
-  whose commits missed `docs/`. And **`workflow_dispatch` takes a version**, so
-  0.9.0 can be backfilled without re-tagging.
-
-  `mkdocs build --strict` returns as a PR check. Its absence is why three links
-  to non-existent anchors survived into the release.
-
-- **Git LFS had silently disabled the PHI guard.** `git lfs install` writes its
-  hooks into `core.hooksPath` — `.githooks/` here — and only declines when it
-  recognises the hook already present. Checking out a commit predating
-  `.githooks/` removes the hooks, and the next LFS command installs a three-line
-  `pre-push` stub in their place. That happened during the 0.9.0 release:
-  `pre-commit` was gone and `pre-push` was the stub, so nothing scanned staged
-  content for patient identifiers, and nothing reported it.
-
-  `pre-push` now reads the ref list once and delegates to `git lfs pre-push`
-  after its own checks pass, so LFS never needs to install anything and the two
-  cannot clobber each other. The three LFS hooks are tracked for the same
-  reason. A side effect: `git push` uploads LFS objects by itself again, rather
-  than needing a separate `git lfs push --all`.
-
-- **The version guard hardcoded `0.9.0`** in one of its two messages instead of
-  formatting `MIN_PON_VERSION`, so raising the floor would have left that branch
-  naming the old one.
-
-- **Three documentation links pointed at anchors that never existed**, including
-  one whose target is an `!!! note` admonition, which generates no anchor at all.
+## [0.9.1] - 2026-08-15
 
 ### Added
 
@@ -253,6 +135,124 @@ All notable changes to this project will be documented in this file.
 - **The gates table in `AGENTS.md` has a "Read first" column.** `.agents/rules/`
   was described as read "on demand" with nothing creating demand, so those files
   went unopened for a whole release.
+
+### Fixed
+
+- **A 16,552-sample run produced zero samples.** Three faults compounded:
+
+  1. **SPLIT_MAF interpolated the sample ids into its script.** Nextflow strips
+     a script block's common indentation *after* interpolating, so 16,552
+     zero-indent id lines left no common prefix, nothing was stripped, and
+     python saw `    import os` on line 2. `.command.sh` was 16,648 lines: 96
+     of code, 16,552 of ids. Exit 1. The ids are now a **staged file** — a
+     filename is one token and cannot defeat the dedent at any cohort size.
+  2. **Retries could not submit.** The scheduler runs `EnforcePartLimits=ALL`,
+     where a partition list enforces the *intersection* of limits and offers
+     the union of nodes. `2.h * task.attempt` asked 4h on attempt 2 against a
+     list containing a 3h partition and was refused — *"Requested time limit is
+     invalid"* — not rerouted. New `--long_partition` sends retries to a
+     partition whose limit covers the grown request.
+  3. **`ignore` on a fan-in step lost everything.** SPLIT_MAF is one task for
+     the whole cohort, so ignoring it left RUNALL with no input and the run
+     completed having done nothing. It is now `terminate`: a fan-in failure
+     stops the run in ninety seconds instead of after the queue drains.
+
+  The unit tests could not have caught (1): the harness dedents *before*
+  substituting, Nextflow does the reverse, so it tested well-formed Python while
+  production shipped broken. The stub run could not either — its ids are joined
+  with spaces, one line, nothing to defeat. `test_module_interpolations.py` now
+  refuses any newline-joined value in a `.nf`.
+
+- **Nextflow 26.04 could not parse `nextflow.config` at all.** The nf-core
+  `try { includeConfig } catch` idiom is rejected outright — *"Try-catch blocks
+  cannot be mixed with config statements"* — so the pipeline refused to start.
+  25.10.3 accepted the same file, which is how it went unnoticed: the only
+  signal was a version nobody had run. Replaced with the ternary nf-core moved
+  to, which is why their own configs already parse under 26.
+
+  The behaviour change is the better half. The old `catch` swallowed **any**
+  failure, so a transient network blip left the run going with no institutional
+  config — no `process_single` label, no queue closure honouring
+  `--isolated`/`--partition`, no `maxRetries` — and three processes silently
+  falling back to 8 CPU / 32 GB / 24h, a request a short partition refuses at
+  submission. A whole run's resource policy changed, reported as one line of
+  stderr. Skipping now requires the operator to set `NXF_OFFLINE`.
+
+  `tests/unit/test_nextflow_config_parses_on_26.py` pins the construct. It is
+  not a parser and cannot claim the file is 26-clean — the parser stops at the
+  first error, so more may sit behind any given one. Only a real
+  `NXF_VER=26.04.6 ... -stub-run` can establish that.
+
+- **SPLIT_MAF's stub block still referenced the pre-rename input.** Its input
+  became `metas` so the metas could ride through and the caller could re-pair
+  with a `map` instead of a `join`; the script block and tag were updated and
+  the `stub:` block was not. Groovy resolves `${...}` at task runtime, so the
+  file parsed, every unit test passed, and `nextflow -stub-run` failed
+  immediately with `No such variable: sample_ids`.
+
+  `tests/unit/test_module_interpolations.py` now asserts, for every module,
+  that the stub block references no name absent from its inputs and script —
+  which is exactly the shape of a rename applied to one block and not the
+  other. Written as a subset comparison between the two blocks rather than a
+  declaration check: parsing Nextflow's input syntax precisely (`path(x)`, bare
+  `path x`, multi-element tuples) produced false positives on seven modules,
+  and a test that cries wolf is worse than no test.
+
+- **The Nextflow pipeline reported itself as 0.8.3.** `manifest.version` sat at
+  the previous release through all of 0.9.0. Nothing functional depended on it,
+  which is why it drifted — but Nextflow writes it into every execution report,
+  trace file and Tower entry, so a 16,000-sample cohort would have been labelled
+  0.8.3 in its own provenance while running 0.9.0 containers.
+
+  The Phase 2 version bump is a `sed` over container tags in the modules and
+  never matched this line. The release guide compounded it by listing
+  `nextflow.config` under "container tag" — there is no container pin in that
+  file at all. Both corrected, and `tests/unit/test_nextflow_version.py` now
+  pins `manifest.version` and every module container tag to `__version__`.
+
+  The container half matters more than the manifest: a stale pin there does not
+  mislabel a run, it executes the previous release's defects under this
+  version's name.
+
+- **The documentation site stopped publishing on 2026-07-31 and nobody noticed
+  for a whole release.** `ba13fd4` (#32) replaced the docs workflow with the
+  aggregate check alone, dropping the `mike` deploys and the strict build with
+  it. Nothing has published since: `stable` still served **0.8.3** — the
+  documentation for the release whose defects 0.9.0 exists to fix — and `dev`
+  froze at the same date. Tagging 0.9.0 did not help, because the old workflow
+  only deployed on pushes to `main`/`develop`, never on tags.
+
+  Restored, with three changes. **A tag publishes `stable`**, not a push to
+  `main`: the tag is the authoritative "released" signal, and hanging it on a
+  `main` push is what let PyPI and the container ship while the site sat still.
+  **No `paths` filter on push**, because GitHub requires the ref filter and the
+  path filter to both match, so `tags: ['*']` beside `paths:` would drop any tag
+  whose commits missed `docs/`. And **`workflow_dispatch` takes a version**, so
+  0.9.0 can be backfilled without re-tagging.
+
+  `mkdocs build --strict` returns as a PR check. Its absence is why three links
+  to non-existent anchors survived into the release.
+
+- **Git LFS had silently disabled the PHI guard.** `git lfs install` writes its
+  hooks into `core.hooksPath` — `.githooks/` here — and only declines when it
+  recognises the hook already present. Checking out a commit predating
+  `.githooks/` removes the hooks, and the next LFS command installs a three-line
+  `pre-push` stub in their place. That happened during the 0.9.0 release:
+  `pre-commit` was gone and `pre-push` was the stub, so nothing scanned staged
+  content for patient identifiers, and nothing reported it.
+
+  `pre-push` now reads the ref list once and delegates to `git lfs pre-push`
+  after its own checks pass, so LFS never needs to install anything and the two
+  cannot clobber each other. The three LFS hooks are tracked for the same
+  reason. A side effect: `git push` uploads LFS objects by itself again, rather
+  than needing a separate `git lfs push --all`.
+
+- **The version guard hardcoded `0.9.0`** in one of its two messages instead of
+  formatting `MIN_PON_VERSION`, so raising the floor would have left that branch
+  naming the old one.
+
+- **Three documentation links pointed at anchors that never existed**, including
+  one whose target is an `!!! note` admonition, which generates no anchor at all.
 
 ### Documentation
 
