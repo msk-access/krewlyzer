@@ -1,26 +1,26 @@
-"""RUNALL must not take over queue selection or retry from the cluster config.
+"""Which resource decisions this pipeline owns, and which belong to the cluster.
 
-`queue`, `errorStrategy` and `maxRetries` come from the institutional config
-that `-profile iris` pulls in over HTTPS at parse time. Nothing in this
-repository contains them, so `grep` says they do not exist -- which is exactly
-the mistake #57 made. It hardcoded a partition ladder and a retry policy in the
-`withName` block on the belief that nothing retried.
+Two rules, learned the expensive way.
 
-`withName` outranks a generic `process` block regardless of include order, so
-that silently:
+**Retry policy is the cluster's.** `errorStrategy` and `maxRetries` come from
+the institutional config `-profile iris` pulls in over HTTPS at parse time, so
+`grep` over this repository says they do not exist. #57 believed that and
+hardcoded its own, and because `withName` outranks a generic `process` block it
+silently replaced a working 3-attempt policy with 1.
 
-* replaced a working 3-attempt policy with 1;
-* ignored `--isolated` and `--partition`, which the cluster closure honours;
-* pinned attempt 1 to `cmobic_short` alone rather than letting SLURM choose
-  between both partitions.
+**Resource requests are ours, and must be set with `withName`.** The `withLabel`
+blocks in `nextflow.config` are inert under `-profile iris`: the institutional
+config is included afterwards and defines the same labels, and at equal
+specificity the later definition wins. SPLIT_MAF ran at 12 GB / 2h, never the
+4 GB / 1h its label declares.
 
-What the pipeline should own is the resource *request*, and only that. The
-escalation falls out of it: a growing time request makes SLURM pick the
-partition, because attempt 2's 4h no longer fits a 3h queue.
-
-This test pins the absence. A future reader -- human or agent -- who greps for
-`maxRetries`, finds nothing, and "fixes" it will fail here and be sent to the
-comment that explains why.
+That stays invisible until a request is illegal. Under `EnforcePartLimits =
+ALL`, a partition list enforces the *intersection* of the limits, so a 4h
+request against a list containing a 3h partition is refused before it queues.
+It cost two things on one 16,552-sample run: every RUNALL retry (fixed with a
+per-attempt `queue`), and KREWLYZER_VALIDATE_COHORT on its *first* attempt --
+four refusals, then ignored, and the cohort degeneracy report was never
+produced with nothing to say so.
 """
 
 from __future__ import annotations
@@ -110,3 +110,49 @@ def test_the_resource_ramp_survives(runall_block):
     )
     assert re.search(r"memory\s*=\s*\{\s*\d+\.GB \* task\.attempt", runall_block)
     assert re.search(r"time\s*=\s*\{\s*\d+\.h\s*\* task\.attempt", runall_block)
+
+
+# Processes the run-all path actually executes. A process missing from
+# nextflow.config's withName blocks runs on the institutional config's numbers,
+# because our withLabel blocks are overridden by it -- see below.
+_RUNALL_PATH_PROCESSES = (
+    "SPLIT_MAF",
+    "FILTER_MAF",
+    "KREWLYZER_RUNALL",
+    "KREWLYZER_VALIDATE_PON",
+    "KREWLYZER_VALIDATE_COHORT",
+)
+
+
+@pytest.mark.parametrize("process", _RUNALL_PATH_PROCESSES)
+def test_every_runall_process_pins_its_own_time(process):
+    """`withLabel` is inert under `-profile iris`; only `withName` overrides it.
+
+    The institutional config is included after our `process` block and defines
+    the same labels, and at equal selector specificity the later definition
+    wins. So `withLabel:process_low` here never applied -- SPLIT_MAF ran at
+    12 GB / 2h, not the 4 GB / 1h it declares.
+
+    That is invisible until a request is illegal. iris's `process_single` asks
+    4h, and under `EnforcePartLimits = ALL` a 4h request against a partition
+    list containing a 3h partition is refused before it queues. On a completed
+    16,552-sample run, KREWLYZER_VALIDATE_COHORT failed to submit on its FIRST
+    attempt, four times, and was ignored -- the cohort degeneracy report was
+    never produced and nothing said so.
+
+    `--long_partition` cannot help: it moves retries, and that request was
+    already illegal at attempt 1.
+    """
+    text = _CONFIG.read_text()
+    block = re.search(rf"withName:\s*'{process}'\s*\{{(.*?)\n    \}}", text, re.S)
+    assert block, (
+        f"{process} has no withName block, so it inherits the institutional "
+        "config's resources. Ours are overridden and cannot constrain it. If "
+        "those numbers exceed the shortest partition in --partition, the "
+        "process is refused at submission and -- with the cluster's `ignore` "
+        "fallback -- its output silently never appears."
+    )
+    assert re.search(r"\btime\s*=", block.group(1)), (
+        f"{process}'s withName block does not pin `time`. That is the directive "
+        "that gets a job refused under EnforcePartLimits=ALL."
+    )
