@@ -2,6 +2,271 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.1] - 2026-08-15
+
+### Added
+
+- **`validate-output --expect`** — reconcile the samples you meant to run
+  against the ones that exist. Everything else in the gate validates the
+  samples it *finds*, and two failure modes leave nothing to find:
+
+  | | before |
+  |---|---|
+  | No output directory at all | invisible |
+  | Directory exists, no Parquet written | **invisible** — `discover_samples` skips it |
+  | Parquet present, no completion marker | ERROR ✓ |
+
+  A job killed between `mkdir` and its first write was indistinguishable from
+  one never submitted. At a handful of samples that is obvious; across a
+  16,000-sample cohort it is not, and the consumer reads a short cohort without
+  knowing it was short.
+
+  Takes a Nextflow samplesheet (using its `sample` column) or a plain list. The
+  two absences are reported separately, because an empty directory means the
+  job ran and its logs exist while a missing one usually means it was never
+  submitted. An unexpected sample is a WARN, not an ERROR — it corrupts
+  nothing, but it usually means an identifier that does not round-trip, which
+  makes every other count unreliable. A CSV without a `sample` column is an
+  error rather than a guess at the first column: reconciling against the wrong
+  field reports every sample missing, which reads as a catastrophic run failure
+  instead of a malformed input.
+
+  The summary table shows counts; the `--json-report` names every affected
+  sample, which is the split that keeps it readable at cohort scale.
+
+- **A check that a release actually published.** Every other gate verifies the
+  repository; nothing asked the registries whether the release landed. 0.9.0
+  passed every workflow while the docs site served 0.8.3 and no GitHub Release
+  existed — both invisible, because green CI only means the configured steps
+  ran, not that the steps you need exist.
+
+  `scripts/check_release_artifacts.py` compares the newest tag against PyPI,
+  GHCR, the docs `stable` alias, and the Release object. It runs weekly, and
+  after the `Release` workflow finishes via `workflow_run` — not a tag trigger
+  with a `sleep`, which would idle a runner for 40 minutes and cry wolf
+  whenever publishing ran long. The weekly schedule is the load-bearing one: a
+  post-release check alone would not have caught the docs, because that deploy
+  had been deleted three weeks *before* 0.9.0.
+
+  Three exit codes, because "could not reach the registry" is not "in sync":
+  0 matches, 1 stale, 2 unreachable. A network failure reported as success is
+  the silent pass the whole script exists to prevent.
+
+- **`check_phi_guard.sh` assertion 6** — every tracked hook exists, matches the
+  staged version, and `pre-push` still delegates to git-lfs. Compared against
+  the index rather than `HEAD`, so a deliberate edit passes while an
+  out-of-band overwrite fails.
+
+- **A stale-extension warning at pytest session start.** Python imports whatever
+  `maturin develop` built last, so after a `rust/src/` change the suite tests the
+  previous binary — passing, and proving nothing. In `conftest.py` rather than a
+  per-tool hook so it fires for a human, for CI, and for any agent. A warning
+  and never a failure: the comparison is mtime-based and `git checkout` rewrites
+  mtimes, so a branch switch can trip it.
+
+- **`release.yml` now creates the GitHub Release**, using the CHANGELOG section
+  for the tag as the body. Until now the Releases page was hand-maintained,
+  which is why 0.9.0's tag went green with nothing on it. A missing section
+  fails the step; a section over 60,000 characters is cut at a heading boundary
+  and linked (0.9.0's was 103,376 against GitHub's 125,000 limit).
+
+- **`MIN_PON_VERSION` and `KREWLYZER_ALLOW_OLD_PON` pinned in the claims
+  registry**, now that three documents quote them.
+
+### Changed
+
+- **FILTER_MAF no longer runs once per sample when the MAF is shared.** It
+  scanned the entire cohort MAF, line by line in Python, to extract one
+  sample's rows — so a 16,552-sample run performed 16,552 full scans of the
+  same file, each as its own SLURM job whose scheduling overhead exceeded the
+  work it did. `maxForks queue_size.intdiv(2)` then reserved **250 of 500
+  slots** for it, upstream of RUNALL, so the opening wave of a run was nothing
+  but MAF filtering and no real work could start. This was the observed queue
+  clog on the 0.8.3 cohort.
+
+  The new `SPLIT_MAF` does one pass per distinct MAF: **1 job instead of
+  16,552**, and the whole queue freed for RUNALL.
+
+  Batching keys on **(maf, single_sample)**, not the MAF alone — grouping a
+  pass-through sample with a filtered one would apply a single mode to both and
+  silently corrupt one. A sheet with per-sample MAFs yields one task each and
+  behaves exactly as before; samples with no MAF keep FILTER_MAF and its
+  header-only placeholder.
+
+  Every requested sample gets a file, including those with zero matching
+  variants, and `SPLIT_MAF` exits non-zero if it wrote a short set. A sample
+  with no file would be dropped by the caller's re-pairing and RUNALL would
+  never run for it — silent cohort loss reintroduced one stage earlier than
+  `--expect` can see it. The metas ride through the process so re-pairing is a
+  `map`, preserving the join-free streaming this workflow is built around.
+- **Reverted the RUNALL retry ladder added moments earlier in this cycle.** It
+  was built on the claim that the pipeline had no retry policy. That claim was
+  wrong: `queue`, `errorStrategy` and `maxRetries` come from the institutional
+  config `-profile iris` loads over HTTPS at parse time, so they appear nowhere
+  in this repository and a `grep` finds nothing. iris sets `maxRetries = 3`,
+  retries any failure, falls back to `ignore`, and selects the partition with a
+  closure honouring `--isolated` and `--partition`.
+
+  Because `withName` outranks a generic `process` block, the ladder silently
+  replaced all of that — cutting retries from 3 to 1, ignoring `--partition`
+  and `--isolated`, and pinning attempt 1 to the smaller of two partitions. The
+  `task.attempt` ramps it claimed to revive had been live all along.
+
+  The pre-existing behaviour is better and needs no queue names: a growing time
+  request makes SLURM pick the partition, since attempt 2's 4h no longer fits a
+  3h queue.
+
+  `tests/unit/test_runall_resources.py` now pins the *absence* of `queue`,
+  `errorStrategy` and `maxRetries` from that block, so the next reader who
+  greps, finds nothing and "fixes" it lands on the explanation instead.
+- **`check_phi_guard.sh` runs in 2.3s instead of ~100s.** `git archive` applies
+  the smudge filter, so assertion 1 was unpacking and scanning 660 MB of
+  parquet, gzipped BED and FASTA (75s), and assertion 5 grepped the same
+  binaries for `/Users/` (13s). `GIT_LFS_SKIP_SMUDGE` exports the 132-byte
+  pointers instead, and assertion 5 skips LFS paths. This gives up scanning
+  inside LFS payloads: accepted, because they are machine-built compressed
+  reference data where a plaintext regex could never have matched.
+
+- **Release guide Phase 5 merges `main` into `develop`**, not the release branch.
+  The old form left each branch holding a merge commit the other lacked, so
+  `main` sat permanently one ahead; merging `main` makes it an ancestor and
+  `git merge-base --is-ancestor main develop` becomes a valid post-release check.
+
+- **The gates table in `AGENTS.md` has a "Read first" column.** `.agents/rules/`
+  was described as read "on demand" with nothing creating demand, so those files
+  went unopened for a whole release.
+
+### Fixed
+
+- **A 16,552-sample run produced zero samples.** Three faults compounded:
+
+  1. **SPLIT_MAF interpolated the sample ids into its script.** Nextflow strips
+     a script block's common indentation *after* interpolating, so 16,552
+     zero-indent id lines left no common prefix, nothing was stripped, and
+     python saw `    import os` on line 2. `.command.sh` was 16,648 lines: 96
+     of code, 16,552 of ids. Exit 1. The ids are now a **staged file** — a
+     filename is one token and cannot defeat the dedent at any cohort size.
+  2. **Retries could not submit.** The scheduler runs `EnforcePartLimits=ALL`,
+     where a partition list enforces the *intersection* of limits and offers
+     the union of nodes. `2.h * task.attempt` asked 4h on attempt 2 against a
+     list containing a 3h partition and was refused — *"Requested time limit is
+     invalid"* — not rerouted. New `--long_partition` sends retries to a
+     partition whose limit covers the grown request.
+  3. **`ignore` on a fan-in step lost everything.** SPLIT_MAF is one task for
+     the whole cohort, so ignoring it left RUNALL with no input and the run
+     completed having done nothing. It is now `terminate`: a fan-in failure
+     stops the run in ninety seconds instead of after the queue drains.
+
+  The unit tests could not have caught (1): the harness dedents *before*
+  substituting, Nextflow does the reverse, so it tested well-formed Python while
+  production shipped broken. The stub run could not either — its ids are joined
+  with spaces, one line, nothing to defeat. `test_module_interpolations.py` now
+  refuses any newline-joined value in a `.nf`.
+
+- **Nextflow 26.04 could not parse `nextflow.config` at all.** The nf-core
+  `try { includeConfig } catch` idiom is rejected outright — *"Try-catch blocks
+  cannot be mixed with config statements"* — so the pipeline refused to start.
+  25.10.3 accepted the same file, which is how it went unnoticed: the only
+  signal was a version nobody had run. Replaced with the ternary nf-core moved
+  to, which is why their own configs already parse under 26.
+
+  The behaviour change is the better half. The old `catch` swallowed **any**
+  failure, so a transient network blip left the run going with no institutional
+  config — no `process_single` label, no queue closure honouring
+  `--isolated`/`--partition`, no `maxRetries` — and three processes silently
+  falling back to 8 CPU / 32 GB / 24h, a request a short partition refuses at
+  submission. A whole run's resource policy changed, reported as one line of
+  stderr. Skipping now requires the operator to set `NXF_OFFLINE`.
+
+  `tests/unit/test_nextflow_config_parses_on_26.py` pins the construct. It is
+  not a parser and cannot claim the file is 26-clean — the parser stops at the
+  first error, so more may sit behind any given one. Only a real
+  `NXF_VER=26.04.6 ... -stub-run` can establish that.
+
+- **SPLIT_MAF's stub block still referenced the pre-rename input.** Its input
+  became `metas` so the metas could ride through and the caller could re-pair
+  with a `map` instead of a `join`; the script block and tag were updated and
+  the `stub:` block was not. Groovy resolves `${...}` at task runtime, so the
+  file parsed, every unit test passed, and `nextflow -stub-run` failed
+  immediately with `No such variable: sample_ids`.
+
+  `tests/unit/test_module_interpolations.py` now asserts, for every module,
+  that the stub block references no name absent from its inputs and script —
+  which is exactly the shape of a rename applied to one block and not the
+  other. Written as a subset comparison between the two blocks rather than a
+  declaration check: parsing Nextflow's input syntax precisely (`path(x)`, bare
+  `path x`, multi-element tuples) produced false positives on seven modules,
+  and a test that cries wolf is worse than no test.
+
+- **The Nextflow pipeline reported itself as 0.8.3.** `manifest.version` sat at
+  the previous release through all of 0.9.0. Nothing functional depended on it,
+  which is why it drifted — but Nextflow writes it into every execution report,
+  trace file and Tower entry, so a 16,000-sample cohort would have been labelled
+  0.8.3 in its own provenance while running 0.9.0 containers.
+
+  The Phase 2 version bump is a `sed` over container tags in the modules and
+  never matched this line. The release guide compounded it by listing
+  `nextflow.config` under "container tag" — there is no container pin in that
+  file at all. Both corrected, and `tests/unit/test_nextflow_version.py` now
+  pins `manifest.version` and every module container tag to `__version__`.
+
+  The container half matters more than the manifest: a stale pin there does not
+  mislabel a run, it executes the previous release's defects under this
+  version's name.
+
+- **The documentation site stopped publishing on 2026-07-31 and nobody noticed
+  for a whole release.** `ba13fd4` (#32) replaced the docs workflow with the
+  aggregate check alone, dropping the `mike` deploys and the strict build with
+  it. Nothing has published since: `stable` still served **0.8.3** — the
+  documentation for the release whose defects 0.9.0 exists to fix — and `dev`
+  froze at the same date. Tagging 0.9.0 did not help, because the old workflow
+  only deployed on pushes to `main`/`develop`, never on tags.
+
+  Restored, with three changes. **A tag publishes `stable`**, not a push to
+  `main`: the tag is the authoritative "released" signal, and hanging it on a
+  `main` push is what let PyPI and the container ship while the site sat still.
+  **No `paths` filter on push**, because GitHub requires the ref filter and the
+  path filter to both match, so `tags: ['*']` beside `paths:` would drop any tag
+  whose commits missed `docs/`. And **`workflow_dispatch` takes a version**, so
+  0.9.0 can be backfilled without re-tagging.
+
+  `mkdocs build --strict` returns as a PR check. Its absence is why three links
+  to non-existent anchors survived into the release.
+
+- **Git LFS had silently disabled the PHI guard.** `git lfs install` writes its
+  hooks into `core.hooksPath` — `.githooks/` here — and only declines when it
+  recognises the hook already present. Checking out a commit predating
+  `.githooks/` removes the hooks, and the next LFS command installs a three-line
+  `pre-push` stub in their place. That happened during the 0.9.0 release:
+  `pre-commit` was gone and `pre-push` was the stub, so nothing scanned staged
+  content for patient identifiers, and nothing reported it.
+
+  `pre-push` now reads the ref list once and delegates to `git lfs pre-push`
+  after its own checks pass, so LFS never needs to install anything and the two
+  cannot clobber each other. The three LFS hooks are tracked for the same
+  reason. A side effect: `git push` uploads LFS objects by itself again, rather
+  than needing a separate `git lfs push --all`.
+
+- **The version guard hardcoded `0.9.0`** in one of its two messages instead of
+  formatting `MIN_PON_VERSION`, so raising the floor would have left that branch
+  naming the old one.
+
+- **Three documentation links pointed at anchors that never existed**, including
+  one whose target is an `!!! note` admonition, which generates no anchor at all.
+
+### Documentation
+
+- **The PON version guard is in the README.** 0.9.0 refuses any PON built below
+  the floor — the first thing an upgrading user with a self-built model meets —
+  and neither the refusal nor its escape hatch was documented there.
+
+- **`build-pon --from-outputs` is in the README and `pon-models.md`**, not just
+  the developer guide. It turns a ~15h build into minutes and is how all four
+  bundled models were rebuilt for 0.9.0. Both examples previously shown for it
+  used a `--pon-variant` flag that `build-pon` does not have.
+
+- **`BreakPointMotif`** added to the README feature table.
+
 ## [0.9.0] - 2026-08-11
 
 ### Added

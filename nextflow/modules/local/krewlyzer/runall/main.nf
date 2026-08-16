@@ -15,9 +15,14 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.9.0"
+    container "ghcr.io/msk-access/krewlyzer:0.9.1"
 
-    publishDir "${params.outdir}/${meta.id}", mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+    // `path: { ... }`, not a bare string. A directive string is evaluated when
+    // the process is DEFINED, and `meta` only exists once a task is created --
+    // 26 says "No such variable: meta" and refuses to load the module. 25
+    // tolerated it. A closure defers evaluation to task time, and both accept
+    // it; `saveAs` beside it was already in that form.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
 
     input:
     tuple val(meta), path(bam), path(bai), path(mfsd_bam), path(mfsd_bai), path(bisulfite_bam), path(variants), path(pon), path(targets), path(wps_anchors), path(wps_background)

@@ -285,6 +285,25 @@ CLAIMS: Tuple[Claim, ...] = (
         "the gate must enforce the same floor the builder applies, or one of "
         "them is decoration",
     ),
+    # The version guard is the first thing an upgrading user meets: a PON built
+    # below this floor is refused outright. README.md, docs/reference/pon-models.md
+    # and the release guide all quote the floor and the escape hatch, and the
+    # guide's Phase 2.8 turns on whether the floor moved -- so a bump that misses
+    # one of them tells somebody to rebuild against the wrong version.
+    Claim(
+        "pon.min_version",
+        "(0, 9, 0)",
+        PyConst("krewlyzer.pon.provenance", "MIN_PON_VERSION"),
+        "0.9.0 changed what the features mean; a PON below this floor is "
+        "refused rather than silently scored against",
+    ),
+    Claim(
+        "pon.allow_old_env",
+        "KREWLYZER_ALLOW_OLD_PON",
+        PyConst("krewlyzer.pon.provenance", "ALLOW_OLD_PON_ENV"),
+        "the documented escape hatch; a renamed variable would leave the docs "
+        "advertising an override that does nothing",
+    ),
 )
 
 

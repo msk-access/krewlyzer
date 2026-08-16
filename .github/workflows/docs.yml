@@ -1,24 +1,53 @@
 name: Docs
 
-# Deliberately a separate workflow. `test.yml` carries
-# `paths-ignore: docs/**, *.md`, so it never runs for a documentation-only
-# change -- which is precisely when this check is needed. Putting the check
-# there would have made it look enforced while never firing on the PRs that
-# matter.
+# Two jobs with different costs, deliberately kept apart.
+#
+# `aggregate` is stdlib-only and takes seconds, so it runs on every docs change.
+# `site` installs the full mkdocs-material stack and is the one that publishes.
+#
+# `test.yml` carries `paths-ignore: docs/**, *.md`, so it never runs for a
+# documentation-only change -- which is precisely when these are needed. Putting
+# them there would have made them look enforced while never firing on the PRs
+# that matter.
+#
+# HISTORY, so this is not lost again: ba13fd4 (#32) replaced this workflow with
+# the aggregate check alone and silently dropped the mike deploys and the strict
+# build. Nothing published for the whole 0.9.0 cycle, and `stable` sat on 0.8.3
+# -- documentation for the release whose defects 0.9.0 exists to fix. The strict
+# build went with it, which is why three links to non-existent anchors survived.
 on:
   pull_request:
     paths:
       - 'docs/**'
+      - 'mkdocs.yml'
       - 'krewlyzer_all_docs.md'
       - 'scripts/build_all_docs.py'
       - '.github/workflows/docs.yml'
+  # No `paths` filter on push, deliberately. GitHub requires the ref filter AND
+  # the path filter to both match, so `tags: ['*']` alongside `paths:` would
+  # drop any tag whose commits happen not to touch docs/ -- the deploy would
+  # silently never fire, which is the exact failure this restores. The cost is
+  # a mkdocs build on pushes that changed no documentation; the alternative is
+  # a publish step that works until the release where it matters.
+  # `main` is absent on purpose: nothing here deploys from it. The tag that
+  # follows the release merge is what publishes stable, so building on the
+  # merge as well would be a job where no step fires.
   push:
-    branches: [ main, develop ]
-    paths:
-      - 'docs/**'
-      - 'krewlyzer_all_docs.md'
-      - 'scripts/build_all_docs.py'
+    branches: [ develop ]
+    tags:
+      - '*'
   workflow_dispatch:
+    inputs:
+      publish_stable:
+        description: >-
+          Version to publish as `stable` (e.g. 0.9.0). Leave blank to only
+          rebuild `dev`. Use this to backfill a release whose tag predates
+          this workflow.
+        required: false
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
   aggregate:
@@ -35,3 +64,77 @@ jobs:
       # seconds-long job rather than another full environment build.
       - name: Check krewlyzer_all_docs.md matches docs/
         run: python scripts/build_all_docs.py --check
+
+  site:
+    name: Build and publish the docs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # mike writes to gh-pages, and git-revision-date-localized reads
+          # history for every page. Both need the full clone.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - run: echo "cache_id=$(date --utc '+%V')" >> $GITHUB_ENV
+
+      - uses: actions/cache@v5
+        with:
+          key: mkdocs-material-${{ env.cache_id }}
+          path: .cache
+          restore-keys: |
+            mkdocs-material-
+
+      # cairosvg backs the `social` plugin's card rendering. It needs native
+      # cairo, which ubuntu-latest has and macOS commonly does not -- so
+      # `mkdocs build --strict` can fail locally with dozens of "cairosvg
+      # crashed" warnings while passing here. Local strict failures are not
+      # necessarily real.
+      - name: Install dependencies
+        run: |
+          pip install mkdocs-material mkdocs-mermaid2-plugin \
+            mkdocs-glightbox mkdocs-git-revision-date-localized-plugin \
+            mkdocs-panzoom-plugin pillow cairosvg mike mkdocs-pdf
+
+      - name: Build documentation (PR check only)
+        if: github.event_name == 'pull_request'
+        run: mkdocs build --strict
+
+      - name: Configure Git credentials
+        if: github.event_name != 'pull_request'
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+      # develop -> "dev". The moving target contributors read.
+      - name: Deploy development docs
+        if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
+        run: mike deploy --push --update-aliases dev develop
+
+      # A TAG publishes stable, not a push to main.
+      #
+      # The old workflow deployed stable on any push to main and read the
+      # version out of pyproject.toml. That made publishing depend on a main
+      # push happening to occur, and it did not: 0.9.0 was tagged, PyPI and the
+      # container went out, and the docs site never moved. The tag is the
+      # authoritative "this is released" signal, so hang it there.
+      - name: Deploy stable docs for a tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          mike deploy --push --update-aliases "${GITHUB_REF_NAME}" stable
+          mike set-default --push stable
+
+      # Backfill: publish a release whose tag predates this workflow, or
+      # rebuild dev, without minting a new version.
+      - name: Deploy on manual request
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          if [ -n "${{ inputs.publish_stable }}" ]; then
+            mike deploy --push --update-aliases "${{ inputs.publish_stable }}" stable
+            mike set-default --push stable
+          else
+            mike deploy --push --update-aliases dev develop
+          fi

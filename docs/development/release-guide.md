@@ -62,7 +62,7 @@ worse than no pointer, because it invites editing the wrong line.
 | **Python** | `pyproject.toml` | packaging metadata |
 | **Rust** | `rust/Cargo.toml` | crate version |
 | **Rust** | `rust/Cargo.lock` | auto-updated by `cargo check` |
-| **Nextflow** | `nextflow/nextflow.config` | container tag |
+| **Nextflow** | `nextflow/nextflow.config` | `manifest.version` — **not** a container tag; there is no container pin in this file, and the `sed` over container tags never matches it. 0.9.0 shipped with this still reading 0.8.3. Pinned by `tests/unit/test_nextflow_version.py` |
 | **Nextflow** | `nextflow/main.nf` | container tag |
 | **Modules** | `nextflow/modules/local/krewlyzer/*/main.nf` | 2 per module (container + `versions.yml`) |
 
@@ -123,30 +123,38 @@ Docker image versions are referenced in documentation files:
 
 | File | Version Location |
 |------|------------------|
-| `docs/getting-started/installation.md` | Docker/Singularity pull commands |
-| `docs/getting-started/quickstart.md` | Docker pull example |
-| `docs/nextflow/examples.md` | Container image references |
+| `docs/index.md` | Docker pull and run examples |
+
+Verify rather than trust this table — it previously named three files that hold
+no version at all, which is the stale pointer this guide warns about in Phase 2:
+
+```bash
+grep -rn "ghcr.io/msk-access/krewlyzer:[0-9]" docs/ README.md
+```
 
 ### Update Script
 
 ```bash
-OLD_VERSION="0.5.1"
+OLD_VERSION="A.B.C"
 VERSION="X.Y.Z"
 
-# Update installation docs
-sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/installation.md
-sed -i '' "s/${OLD_VERSION}/${VERSION}/g" docs/getting-started/quickstart.md
+# Substitute only the container tag, never a bare version number: docs contain
+# historical references ("default changed in 0.9.0") that a blanket sed would
+# falsify.
+grep -rln "krewlyzer:${OLD_VERSION}" docs/ README.md \
+  | xargs sed -i '' "s|krewlyzer:${OLD_VERSION}|krewlyzer:${VERSION}|g"
 
-# Verify no :latest tags remain (we don't publish :latest)
-grep -r ":latest" docs/ && echo "WARNING: :latest tags found!" || echo "✓ No :latest tags"
-
-# Verify changes
-grep -n "ghcr.io/msk-access/krewlyzer" docs/getting-started/*.md
+# Verify
+grep -rn "ghcr.io/msk-access/krewlyzer:[0-9]" docs/ README.md
 ```
 
-!!! warning "No :latest Tag"
-    We do NOT publish a `:latest` tag. Always use explicit version tags (e.g., `:0.5.3`).
-    Replace `X.Y.Z` with the version from [releases](https://github.com/msk-access/krewlyzer/releases).
+!!! note "`:latest` is published"
+    `release.yml` tags every release as both `:X.Y.Z` and `:latest`, and the
+    README's quick-start pulls `:latest` deliberately. This guide previously
+    claimed the opposite; three sources disagreed with it.
+
+    Pin an explicit version anywhere reproducibility matters -- a pipeline
+    module, a paper's methods -- and leave `:latest` to the quick-start.
 
 ---
 
@@ -165,12 +173,30 @@ silently.
 
 ---
 
-## Phase 2.7: Stamp the bundled PONs
+## Phase 2.7: Stamp the bundled PONs — only if they were rebuilt
 
-The version-update script in Phase 2 uses `sed`, and a PON is a Parquet file —
-so the models are the one place a version literal does **not** get updated by
-it. They record the version of whatever built them, which is a `develop`
-checkout still reporting the previous release.
+**Skip this unless the models changed in this release.** A stamp is a claim
+about which krewlyzer semantics a model's baselines match, not a shipping
+label, and re-stamping an unchanged model rewrites 543 MB of Parquet to say
+something it already said. Every rewrite is a new immutable LFS object, so a
+release cadence of six a year adds ~3 GB annually of byte-different,
+information-identical blobs — against a download quota that is already
+exhausted.
+
+It is also a footgun. Phase 2.8 warns that raising the floor requires a
+*rebuild*, "not merely a re-stamp", because stamping a model that predates a
+semantic change "would launder exactly the incompatibility the floor exists to
+catch". Stamping by default puts that laundering one command away, two sections
+earlier in the same checklist.
+
+A model stamped 0.9.0 keeps clearing a `(0, 9, 0)` floor at any later release,
+so nothing breaks by leaving it alone. 0.9.1 skipped this step for exactly that
+reason.
+
+When the models *were* rebuilt: the version-update script in Phase 2 uses
+`sed`, and a PON is a Parquet file — so they are the one place a version
+literal does not get updated by it. They record the version of whatever built
+them, which is a `develop` checkout still reporting the previous release.
 
 ```bash
 krewlyzer stamp-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet --version X.Y.Z
@@ -255,27 +281,84 @@ git push -u origin release/X.Y.Z
 
 ## Phase 5: Finalize Release
 
-After review and approval:
+Open a PR from the release branch into `main` and get it reviewed. `main` has no
+`pull_request` rule, so GitHub will report `BLOCKED` from the `update` rule while
+an admin merge still goes through — that status is not a real blocker.
+
+**Merge with a merge commit, never squash.** The tag sits on this history; a
+squash flattens the release branch into one commit and the `--no-ff` shape the
+rest of this guide assumes is gone.
 
 ```bash
-# Merge to main
+# After the PR is merged, tag the merge commit on main
 git checkout main
 git pull origin main
-git merge --no-ff release/X.Y.Z -m "Release X.Y.Z"
 
-# Create annotated tag
+# Confirm you are tagging the right thing before you publish anything
+grep -h '"X.Y.Z"' pyproject.toml rust/Cargo.toml src/krewlyzer/__init__.py | wc -l   # expect 3
+krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet                     # expect 0 findings
+
 git tag -a X.Y.Z -m "Release X.Y.Z"
-
-# Push main and tag (triggers CI release)
-git push origin main
 git push origin X.Y.Z
+```
 
-# Merge back to develop
-git checkout develop
-git merge --no-ff release/X.Y.Z -m "Merge release/X.Y.Z back to develop"
-git push origin develop
+Pushing the tag triggers `release.yml`, which **publishes to PyPI and pushes the
+container**. PyPI cannot be un-published, only yanked — so verify before pushing
+the tag, not after.
 
-# Delete release branch
+### Sync develop: merge `main`, not the release branch
+
+```bash
+# Open a PR: base develop, head main  (develop requires one approval)
+gh pr create --base develop --head main --title "Merge main back to develop after X.Y.Z"
+```
+
+Git Flow's usual advice is `git merge --no-ff release/X.Y.Z` into `develop`. **Do
+not do that here.** It leaves each branch holding a merge commit the other lacks,
+so `main` sits permanently one commit ahead and there is no cheap way to ask
+whether everything released is also in `develop`.
+
+Merging `main` instead makes it an ancestor of `develop`, so the question has a
+one-line answer that is valid after every release:
+
+```bash
+git merge-base --is-ancestor main develop && echo "develop has everything released"
+```
+
+The two produce identical *files*; only the graph differs. Adopted during 0.9.0.
+
+### The GitHub Release
+
+`release.yml` creates it, using the CHANGELOG section for the tag as the body.
+Two consequences worth knowing before you tag:
+
+- **A missing CHANGELOG section fails the step.** It runs last, so PyPI and the
+  container are already published if this is what breaks — write the section
+  first.
+- **Long sections are truncated** at a heading boundary with a link to the full
+  entry. 0.9.0's was 103,376 characters against GitHub's 125,000 limit.
+
+Before 0.9.0 this was manual and got forgotten, which is why the guide now says
+so explicitly rather than leaving the Releases page to habit.
+
+### Confirm it actually published
+
+The `Published artifacts` workflow runs automatically once `Release` finishes
+and asks the registries directly — PyPI, GHCR, the docs site's `stable` alias,
+and the Release object. Same check by hand:
+
+```bash
+python scripts/check_release_artifacts.py
+```
+
+It exists because 0.9.0 passed every workflow while the docs site served 0.8.3
+and no Release object existed. Green CI means the steps that *are* configured
+ran; it says nothing about steps that were deleted or never written. Exit 2 is
+"could not reach a registry" and is not a pass — rerun it.
+
+### Clean up
+
+```bash
 git branch -d release/X.Y.Z
 git push origin --delete release/X.Y.Z
 ```

@@ -47,11 +47,23 @@ scan() {  # scan <path> -> exit 1 if findings
 }
 
 # ---------------------------------------------------------------------------
-echo "  [1/5] tracked tree is clean ..."
+echo "  [1/6] tracked tree is clean ..."
 # git archive gives exactly the tracked files, so gitignored local artifacts
 # cannot cause a false alarm.
+#
+# GIT_LFS_SKIP_SMUDGE exports the 132-byte LFS pointers instead of the hydrated
+# blobs. Without it `git archive` runs the smudge filter and this scan covers
+# 660 MB of parquet, gzipped BED and FASTA -- 75 seconds of the script's ~100,
+# to search compressed binary for a regex that could only match plaintext.
+#
+# What this gives up, stated plainly: an identifier *inside* an LFS payload is
+# no longer scanned. That is an accepted trade. Those payloads are machine-built
+# reference data (PON models, GC references, panel BEDs), none of it carrying
+# free text, and every one is compressed -- gitleaks was never going to match a
+# patient id in a zstd page anyway. The pointers ARE what git stores, so this
+# scan now covers exactly the tracked content.
 mkdir -p "$TMP/tracked"
-(cd "$REPO_ROOT" && git archive HEAD) | tar -x -C "$TMP/tracked"
+(cd "$REPO_ROOT" && GIT_LFS_SKIP_SMUDGE=1 git archive HEAD) | tar -x -C "$TMP/tracked"
 if ! scan "$TMP/tracked"; then
     echo "        findings:" >&2
     gitleaks detect --source "$TMP/tracked" --config "$CONFIG" --no-git \
@@ -63,7 +75,7 @@ fi
 echo "        OK -- no findings in tracked files"
 
 # ---------------------------------------------------------------------------
-echo "  [2/5] every rule still fires ..."
+echo "  [2/6] every rule still fires ..."
 # Read the rule ids out of the config so a newly added rule cannot go unprobed.
 # Not `mapfile`: macOS ships bash 3.2, so that would pass CI on Ubuntu and fail
 # for every developer running this locally -- the worst way for a guard to break.
@@ -107,7 +119,7 @@ done
 echo "        OK -- all ${#RULE_IDS[@]} rule(s) fired: $fired"
 
 # ---------------------------------------------------------------------------
-echo "  [3/5] documented placeholders are allowed ..."
+echo "  [3/6] documented placeholders are allowed ..."
 mkdir -p "$TMP/placeholder"
 {
   echo 'Example output: P-0000000-T01-XS1.FSC.gene.parquet'
@@ -120,7 +132,7 @@ scan "$TMP/placeholder" \
 echo "        OK -- P-0000000 and C-000000-L000 pass"
 
 # ---------------------------------------------------------------------------
-echo "  [4/5] the config itself carries no identifier ..."
+echo "  [4/6] the config itself carries no identifier ..."
 # gitleaks refuses to scan its own config, so renaming it is the only way in.
 mkdir -p "$TMP/configcopy"
 cp "$CONFIG" "$TMP/configcopy/config-copy.txt"
@@ -131,8 +143,13 @@ scan "$TMP/configcopy" \
 echo "        OK -- no identifiers in the config"
 
 # ---------------------------------------------------------------------------
-echo "  [5/5] no absolute home paths in tracked files ..."
-LEAKED="$(cd "$REPO_ROOT" && git ls-files -z \
+echo "  [5/6] no absolute home paths in tracked files ..."
+# LFS payloads excluded for the same reason as assertion 1: grepping 660 MB of
+# compressed reference data for "/Users/" costs 13 seconds and cannot match.
+(cd "$REPO_ROOT" && git lfs ls-files -n 2>/dev/null || true) | sort > "$TMP/lfs-paths"
+LEAKED="$(cd "$REPO_ROOT" && git ls-files \
+    | { [ -s "$TMP/lfs-paths" ] && grep -vxF -f "$TMP/lfs-paths" || cat; } \
+    | tr '\n' '\0' \
     | xargs -0 grep -lE '(/Users/|/home/)[A-Za-z0-9._-]+' 2>/dev/null || true)"
 if [ -n "$LEAKED" ]; then
     echo "        offending files:" >&2
@@ -142,5 +159,41 @@ if [ -n "$LEAKED" ]; then
       variable, or a CLI argument."
 fi
 echo "        OK -- no home paths in tracked files"
+
+# ---------------------------------------------------------------------------
+echo "  [6/6] the hooks on disk are the hooks in the repo ..."
+DRIFT=""
+for hook in $(cd "$REPO_ROOT" && git ls-files .githooks/); do
+    disk="$REPO_ROOT/$hook"
+    [ -f "$disk" ] || { DRIFT="$DRIFT
+        $hook -- MISSING from the working tree"; continue; }
+    # Worktree vs INDEX, not vs HEAD. A hook you are deliberately editing is
+    # staged, and should pass; an overwrite by `git lfs install` is not staged,
+    # and should fail. Comparing against HEAD would flag every legitimate edit
+    # and train people to ignore this assertion.
+    if ! (cd "$REPO_ROOT" && git diff --quiet -- "$hook") 2>/dev/null; then
+        DRIFT="$DRIFT
+        $hook -- differs from the staged version"
+    fi
+done
+
+# The guard is only armed if pre-push still delegates to git-lfs. Without this,
+# `git lfs install` has a reason to run, and installing is what replaces the
+# hook -- so a missing delegation is a latent version of assertion 6 failing.
+grep -q 'git lfs pre-push' "$REPO_ROOT/.githooks/pre-push" 2>/dev/null \
+    || DRIFT="$DRIFT
+        .githooks/pre-push -- no longer delegates to git-lfs"
+
+if [ -n "$DRIFT" ]; then
+    echo "        drift:$DRIFT" >&2
+    fail "assertion 6: a git hook on disk does not match the one in the repo.
+      This is how the guard was lost during 0.9.0: checking out a commit that
+      predates .githooks/ removes the hooks, and the next \`git lfs install\`
+      writes its own three-line pre-push in place of the PHI scan. Nothing
+      reports it -- the push simply stops being checked. Restore with
+      \`git checkout -- .githooks/\` and confirm \`git config core.hooksPath\`
+      is still .githooks."
+fi
+echo "        OK -- hooks match the repo and pre-push still chains git-lfs"
 
 echo "PHI guard healthy."
