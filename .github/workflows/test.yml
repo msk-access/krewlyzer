@@ -16,32 +16,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  # Whether the bundled data itself moved. Deliberately narrower than the
+  # `full-assets` trigger: that one also fires on the build scripts and the
+  # asset tests, because those can invalidate a *conclusion*. This one asks a
+  # different question -- can tier 1 trust the release image? -- and only a
+  # change to the bytes under src/krewlyzer/data can answer it no. Editing a
+  # test file leaves the image perfectly valid.
+  #
+  # Its own job so `test` can be skipped outright rather than run degraded. A
+  # checkout without LFS leaves 130-byte pointers, not absent files, and the
+  # suite has guards that pass on a pointer and then die inside a reader
+  # ("Parquet magic bytes not found in footer"). Measured: 11 failed, 3 errors
+  # across 7 files in that state. On the rare PR that does change the data,
+  # `full-assets` runs the whole suite against real LFS, so a degraded tier 1
+  # would add nothing but noise.
+  #
+  # Asks the API rather than diffing, so the checkout stays shallow --
+  # `.git/objects` is 191 MB and fetch-depth: 0 would pay that every run.
+  detect:
+    name: Did the bundled data change?
     runs-on: ubuntu-latest
+    outputs:
+      data_changed: ${{ steps.check.outputs.data_changed }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          # Never LFS here. Tier 1 gets the bundled data from the pinned
-          # release image instead -- see .github/data-image.txt for why, and
-          # the change-detection step below for when it is allowed to.
-          lfs: false
-
-      # Tier 1 may only use the image when this change does not touch the
-      # assets, because the image carries release-time data. When it does touch
-      # them, the image is stale by definition and the `full-assets` workflow
-      # takes over with a real LFS pull.
-      #
-      # The generator scripts and the asset tests are in the filter too, not
-      # just the data. A change to scripts/build_gene_bed.py without a
-      # regeneration puts the asset and its builder out of step; a weakened
-      # assertion in the asset tests would, under a data-only filter, never run
-      # to reveal itself.
-      #
-      # Asks the API rather than diffing, so the checkout stays shallow --
-      # `.git/objects` is 191 MB and fetch-depth: 0 would pay that every run.
-      - name: Does this change touch the bundled assets?
-        id: assets
+      - id: check
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -54,26 +52,43 @@ jobs:
             push)
               before="${{ github.event.before }}"
               if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-                files=""   # new branch, no diff base
+                files=""
               else
                 files=$(gh api \
                   "repos/${{ github.repository }}/compare/${before}...${{ github.sha }}" \
                   --jq '.files[].filename') ;
               fi ;;
-            *) files="" ;;   # workflow_dispatch: no diff context
+            *) files="" ;;
           esac
-          # No diff context falls through to "unchanged" deliberately. The
-          # image is still hash-verified, so the worst case is a loud failure,
-          # not silently testing the wrong bytes.
-          if printf '%s\n' "$files" | grep -qE '^(src/krewlyzer/data/|scripts/build_|tests/unit/test_gene_bed_assets\.py|tests/integration/test_region_entropy\.py)'; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::This change touches the bundled assets, so tier 1 skips them entirely. The full-assets workflow checks them against real LFS."
+          # No diff context (workflow_dispatch, a new branch) falls through to
+          # "unchanged" deliberately: the image is hash-verified either way, so
+          # the worst case is a loud failure, never silently wrong bytes.
+          if printf '%s\n' "$files" | grep -q '^src/krewlyzer/data/'; then
+            echo "data_changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::src/krewlyzer/data changed, so the release image is stale by definition. The unit-test job stands down and the full-assets workflow checks this against real LFS."
           else
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "data_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
+  test:
+    needs: detect
+    # Skipped, not silently degraded, when the data moved -- `full-assets` is
+    # the gate for those. NOTE: a skipped job is not a passed job for branch
+    # protection; if `test` is required, make `full-assets` required too, or
+    # neither.
+    if: needs.detect.outputs.data_changed == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          # Never LFS here. This job only runs when the data is unchanged
+          # (see the `detect` job), so the pinned release image carries the
+          # same bytes -- and proves it in the verify step below.
+          # .github/data-image.txt explains why an image at all.
+          lfs: false
+
       - name: Fetch the bundled data from the pinned release image
-        if: steps.assets.outputs.changed == 'false'
         run: |
           set -euo pipefail
           digest=$(grep -v '^#' .github/data-image.txt | tr -d '[:space:]')
@@ -95,7 +110,6 @@ jobs:
       # tracked file against the oid in its LFS pointer. This is what makes the
       # image a transport rather than a second source of truth.
       - name: Verify the bundled data against the LFS pointers
-        if: steps.assets.outputs.changed == 'false'
         run: python3 scripts/verify_lfs_objects.py
 
       - name: Set up Python
@@ -116,12 +130,12 @@ jobs:
           uv pip install .[test]
       - name: Run unit tests
         env:
-          # Set only when the assets were fetched and verified above. Unset,
-          # the asset-integrity tests skip; set, they run and *fail* if the
-          # files are not really there. See conftest.requires_full_assets --
-          # the marker keys on being asked for the assets, not on their
-          # happening to be present, so this cannot go quietly green.
-          KREWLYZER_FULL_ASSETS: ${{ steps.assets.outputs.changed == 'false' && '1' || '' }}
+          # Unconditional here: this job only runs with verified assets in
+          # place, so the integrity tests must run. The marker keys on being
+          # asked for the assets rather than on their happening to be present
+          # (conftest.requires_full_assets), so if the fetch above had somehow
+          # produced nothing these fail rather than skipping green.
+          KREWLYZER_FULL_ASSETS: '1'
         run: |
           source .venv/bin/activate
           uv pip list

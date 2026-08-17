@@ -42,6 +42,35 @@ def _check_data_available():
 
 DATA_AVAILABLE = _check_data_available()
 
+
+#: The first bytes of a Git LFS pointer file.
+_LFS_POINTER_PREFIX = b"version https://git-lfs"
+
+
+def is_hydrated(path) -> bool:
+    """True when ``path`` is the real file and not an unfetched LFS pointer.
+
+    ``Path.exists()`` is not enough for anything under ``src/krewlyzer/data``.
+    A checkout that skipped LFS leaves a ~130-byte text stub at every one of
+    those paths, so an existence guard passes and the failure arrives much
+    later and much less legibly -- ``Parquet magic bytes not found in footer``
+    from inside pyarrow, or ``Not a gzipped file`` from inside a reader.
+
+    That is not hypothetical: CI never saw it while every job fetched LFS, and
+    it appeared the moment tier 1 stopped. ``tests/invariants/synth.py`` builds
+    its own assets specifically to avoid this, and its docstring states the
+    rule -- "a test that silently needs them is a test that silently skips".
+
+    Use this for any guard on a file under ``src/krewlyzer/data``. Guards on
+    ``tests/data/fixtures`` do not need it: those are ordinary git blobs.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return False
+    with p.open("rb") as handle:
+        return handle.read(len(_LFS_POINTER_PREFIX)) != _LFS_POINTER_PREFIX
+
+
 # Marker for tests that require bundled data
 requires_data = pytest.mark.skipif(
     not DATA_AVAILABLE,
