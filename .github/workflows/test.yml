@@ -85,8 +85,8 @@ jobs:
           docker cp "${cid}:/usr/local/lib/python3.10/site-packages/krewlyzer/data/." src/krewlyzer/data/
 
       # Absence is not loud on its own. Measured: with the data removed, pytest
-      # reports 27 failed and 986 passed -- but also 34 skipped against a
-      # baseline of 4, because conftest marks 30 tests `requires_data`. A skip
+      # reports 27 failed and 986 passed -- but also 68 skipped against a
+      # baseline of 38, because conftest marks 30 tests `requires_data`. A skip
       # count does not fail a build. A partial fetch is worse: the paths exist
       # as ~130-byte pointers, so existence checks pass and the failure arrives
       # much later as "Corrupt footer" from inside a reader.
