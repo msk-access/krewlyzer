@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -980,10 +980,10 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#phase-27-stamp-the-bundled-pons">
+<a class="md-nav__link" href="#phase-27-stamp-the-bundled-pons-only-if-they-were-rebuilt">
 <span class="md-ellipsis">
       
-        Phase 2.7: Stamp the bundled PONs
+        Phase 2.7: Stamp the bundled PONs — only if they were rebuilt
       
     </span>
 </a>
@@ -1290,10 +1290,10 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#phase-27-stamp-the-bundled-pons">
+<a class="md-nav__link" href="#phase-27-stamp-the-bundled-pons-only-if-they-were-rebuilt">
 <span class="md-ellipsis">
       
-        Phase 2.7: Stamp the bundled PONs
+        Phase 2.7: Stamp the bundled PONs — only if they were rebuilt
       
     </span>
 </a>
@@ -1583,55 +1583,68 @@ would falsify the record.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>docs/getting-started/installation.md</code></td>
-<td>Docker/Singularity pull commands</td>
-</tr>
-<tr>
-<td><code>docs/getting-started/quickstart.md</code></td>
-<td>Docker pull example</td>
-</tr>
-<tr>
-<td><code>docs/nextflow/examples.md</code></td>
-<td>Container image references</td>
+<td><code>docs/index.md</code></td>
+<td>Docker pull and run examples</td>
 </tr>
 </tbody>
 </table>
-<h3 id="update-script">Update Script</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-4-1" id="__codelineno-4-1" name="__codelineno-4-1"></a><span class="nv">OLD_VERSION</span><span class="o">=</span><span class="s2">"0.5.1"</span>
-<a href="#__codelineno-4-2" id="__codelineno-4-2" name="__codelineno-4-2"></a><span class="nv">VERSION</span><span class="o">=</span><span class="s2">"X.Y.Z"</span>
-<a href="#__codelineno-4-3" id="__codelineno-4-3" name="__codelineno-4-3"></a>
-<a href="#__codelineno-4-4" id="__codelineno-4-4" name="__codelineno-4-4"></a><span class="c1"># Update installation docs</span>
-<a href="#__codelineno-4-5" id="__codelineno-4-5" name="__codelineno-4-5"></a>sed<span class="w"> </span>-i<span class="w"> </span><span class="s1">''</span><span class="w"> </span><span class="s2">"s/</span><span class="si">${</span><span class="nv">OLD_VERSION</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">/g"</span><span class="w"> </span>docs/getting-started/installation.md
-<a href="#__codelineno-4-6" id="__codelineno-4-6" name="__codelineno-4-6"></a>sed<span class="w"> </span>-i<span class="w"> </span><span class="s1">''</span><span class="w"> </span><span class="s2">"s/</span><span class="si">${</span><span class="nv">OLD_VERSION</span><span class="si">}</span><span class="s2">/</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">/g"</span><span class="w"> </span>docs/getting-started/quickstart.md
-<a href="#__codelineno-4-7" id="__codelineno-4-7" name="__codelineno-4-7"></a>
-<a href="#__codelineno-4-8" id="__codelineno-4-8" name="__codelineno-4-8"></a><span class="c1"># Verify no :latest tags remain (we don't publish :latest)</span>
-<a href="#__codelineno-4-9" id="__codelineno-4-9" name="__codelineno-4-9"></a>grep<span class="w"> </span>-r<span class="w"> </span><span class="s2">":latest"</span><span class="w"> </span>docs/<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"WARNING: :latest tags found!"</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"✓ No :latest tags"</span>
-<a href="#__codelineno-4-10" id="__codelineno-4-10" name="__codelineno-4-10"></a>
-<a href="#__codelineno-4-11" id="__codelineno-4-11" name="__codelineno-4-11"></a><span class="c1"># Verify changes</span>
-<a href="#__codelineno-4-12" id="__codelineno-4-12" name="__codelineno-4-12"></a>grep<span class="w"> </span>-n<span class="w"> </span><span class="s2">"ghcr.io/msk-access/krewlyzer"</span><span class="w"> </span>docs/getting-started/*.md
+<p>Verify rather than trust this table — it previously named three files that hold
+no version at all, which is the stale pointer this guide warns about in Phase 2:</p>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-4-1" id="__codelineno-4-1" name="__codelineno-4-1"></a>grep<span class="w"> </span>-rn<span class="w"> </span><span class="s2">"ghcr.io/msk-access/krewlyzer:[0-9]"</span><span class="w"> </span>docs/<span class="w"> </span>README.md
 </code></pre></div>
-<div class="admonition warning">
-<p class="admonition-title">No :latest Tag</p>
-<p>We do NOT publish a <code>:latest</code> tag. Always use explicit version tags (e.g., <code>:0.5.3</code>).
-Replace <code>X.Y.Z</code> with the version from <a href="https://github.com/msk-access/krewlyzer/releases">releases</a>.</p>
+<h3 id="update-script">Update Script</h3>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-5-1" id="__codelineno-5-1" name="__codelineno-5-1"></a><span class="nv">OLD_VERSION</span><span class="o">=</span><span class="s2">"A.B.C"</span>
+<a href="#__codelineno-5-2" id="__codelineno-5-2" name="__codelineno-5-2"></a><span class="nv">VERSION</span><span class="o">=</span><span class="s2">"X.Y.Z"</span>
+<a href="#__codelineno-5-3" id="__codelineno-5-3" name="__codelineno-5-3"></a>
+<a href="#__codelineno-5-4" id="__codelineno-5-4" name="__codelineno-5-4"></a><span class="c1"># Substitute only the container tag, never a bare version number: docs contain</span>
+<a href="#__codelineno-5-5" id="__codelineno-5-5" name="__codelineno-5-5"></a><span class="c1"># historical references ("default changed in 0.9.0") that a blanket sed would</span>
+<a href="#__codelineno-5-6" id="__codelineno-5-6" name="__codelineno-5-6"></a><span class="c1"># falsify.</span>
+<a href="#__codelineno-5-7" id="__codelineno-5-7" name="__codelineno-5-7"></a>grep<span class="w"> </span>-rln<span class="w"> </span><span class="s2">"krewlyzer:</span><span class="si">${</span><span class="nv">OLD_VERSION</span><span class="si">}</span><span class="s2">"</span><span class="w"> </span>docs/<span class="w"> </span>README.md<span class="w"> </span><span class="se">\</span>
+<a href="#__codelineno-5-8" id="__codelineno-5-8" name="__codelineno-5-8"></a><span class="w">  </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>sed<span class="w"> </span>-i<span class="w"> </span><span class="s1">''</span><span class="w"> </span><span class="s2">"s|krewlyzer:</span><span class="si">${</span><span class="nv">OLD_VERSION</span><span class="si">}</span><span class="s2">|krewlyzer:</span><span class="si">${</span><span class="nv">VERSION</span><span class="si">}</span><span class="s2">|g"</span>
+<a href="#__codelineno-5-9" id="__codelineno-5-9" name="__codelineno-5-9"></a>
+<a href="#__codelineno-5-10" id="__codelineno-5-10" name="__codelineno-5-10"></a><span class="c1"># Verify</span>
+<a href="#__codelineno-5-11" id="__codelineno-5-11" name="__codelineno-5-11"></a>grep<span class="w"> </span>-rn<span class="w"> </span><span class="s2">"ghcr.io/msk-access/krewlyzer:[0-9]"</span><span class="w"> </span>docs/<span class="w"> </span>README.md
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title"><code>:latest</code> is published</p>
+<p><code>release.yml</code> tags every release as both <code>:X.Y.Z</code> and <code>:latest</code>, and the
+README's quick-start pulls <code>:latest</code> deliberately. This guide previously
+claimed the opposite; three sources disagreed with it.</p>
+<p>Pin an explicit version anywhere reproducibility matters -- a pipeline
+module, a paper's methods -- and leave <code>:latest</code> to the quick-start.</p>
 </div>
 <hr>
 <h2 id="phase-26-regenerate-the-aggregated-documentation">Phase 2.6: Regenerate the aggregated documentation</h2>
 <p><code>krewlyzer_all_docs.md</code> is a single-file concatenation of <code>docs/</code>, generated
 rather than hand-maintained. Any doc edit in the release — including the
 version bumps in Phase 2.5 — leaves it stale.</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-5-1" id="__codelineno-5-1" name="__codelineno-5-1"></a>python<span class="w"> </span>scripts/build_all_docs.py
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-6-1" id="__codelineno-6-1" name="__codelineno-6-1"></a>python<span class="w"> </span>scripts/build_all_docs.py
 </code></pre></div>
 <p>CI runs <code>--check</code> and fails if it is out of date, so this cannot be skipped
 silently.</p>
 <hr>
-<h2 id="phase-27-stamp-the-bundled-pons">Phase 2.7: Stamp the bundled PONs</h2>
-<p>The version-update script in Phase 2 uses <code>sed</code>, and a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> is a Parquet file —
-so the models are the one place a version literal does <strong>not</strong> get updated by
-it. They record the version of whatever built them, which is a <code>develop</code>
-checkout still reporting the previous release.</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-6-1" id="__codelineno-6-1" name="__codelineno-6-1"></a>krewlyzer<span class="w"> </span>stamp-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w"> </span>--version<span class="w"> </span>X.Y.Z
-<a href="#__codelineno-6-2" id="__codelineno-6-2" name="__codelineno-6-2"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet
+<h2 id="phase-27-stamp-the-bundled-pons-only-if-they-were-rebuilt">Phase 2.7: Stamp the bundled PONs — only if they were rebuilt</h2>
+<p><strong>Skip this unless the models changed in this release.</strong> A stamp is a claim
+about which krewlyzer semantics a model's baselines match, not a shipping
+label, and re-stamping an unchanged model rewrites 543 MB of Parquet to say
+something it already said. Every rewrite is a new immutable LFS object, so a
+release cadence of six a year adds ~3 GB annually of byte-different,
+information-identical blobs — against a download quota that is already
+exhausted.</p>
+<p>It is also a footgun. Phase 2.8 warns that raising the floor requires a
+<em>rebuild</em>, "not merely a re-stamp", because stamping a model that predates a
+semantic change "would launder exactly the incompatibility the floor exists to
+catch". Stamping by default puts that laundering one command away, two sections
+earlier in the same checklist.</p>
+<p>A model stamped 0.9.0 keeps clearing a <code>(0, 9, 0)</code> floor at any later release,
+so nothing breaks by leaving it alone. 0.9.1 skipped this step for exactly that
+reason.</p>
+<p>When the models <em>were</em> rebuilt: the version-update script in Phase 2 uses
+<code>sed</code>, and a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> is a Parquet file — so they are the one place a version
+literal does not get updated by it. They record the version of whatever built
+them, which is a <code>develop</code> checkout still reporting the previous release.</p>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a>krewlyzer<span class="w"> </span>stamp-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w"> </span>--version<span class="w"> </span>X.Y.Z
+<a href="#__codelineno-7-2" id="__codelineno-7-2" name="__codelineno-7-2"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet
 </code></pre></div>
 <p><code>stamp-pon</code> refuses to stamp a model that fails <code>validate-pon</code>, so a broken
 model cannot be blessed by this step. Re-run <code>validate-pon</code> afterwards anyway:
@@ -1660,37 +1673,37 @@ Stamping a model that predates the change would launder exactly the
 incompatibility the floor exists to catch.</p>
 <h2 id="phase-3-update-changelog">Phase 3: Update CHANGELOG</h2>
 <p>Add new entry at the top of <code>CHANGELOG.md</code>:</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-7-1" id="__codelineno-7-1" name="__codelineno-7-1"></a><span class="gu">## [X.Y.Z] - YYYY-MM-DD</span>
-<a href="#__codelineno-7-2" id="__codelineno-7-2" name="__codelineno-7-2"></a>
-<a href="#__codelineno-7-3" id="__codelineno-7-3" name="__codelineno-7-3"></a><span class="gu">### Added</span>
-<a href="#__codelineno-7-4" id="__codelineno-7-4" name="__codelineno-7-4"></a><span class="k">-</span><span class="w"> </span>Feature descriptions
-<a href="#__codelineno-7-5" id="__codelineno-7-5" name="__codelineno-7-5"></a>
-<a href="#__codelineno-7-6" id="__codelineno-7-6" name="__codelineno-7-6"></a><span class="gu">### Changed</span>
-<a href="#__codelineno-7-7" id="__codelineno-7-7" name="__codelineno-7-7"></a><span class="k">-</span><span class="w"> </span>Breaking changes and modifications
-<a href="#__codelineno-7-8" id="__codelineno-7-8" name="__codelineno-7-8"></a>
-<a href="#__codelineno-7-9" id="__codelineno-7-9" name="__codelineno-7-9"></a><span class="gu">### Fixed</span>
-<a href="#__codelineno-7-10" id="__codelineno-7-10" name="__codelineno-7-10"></a><span class="k">-</span><span class="w"> </span>Bug fixes
-<a href="#__codelineno-7-11" id="__codelineno-7-11" name="__codelineno-7-11"></a>
-<a href="#__codelineno-7-12" id="__codelineno-7-12" name="__codelineno-7-12"></a><span class="gu">### Documentation</span>
-<a href="#__codelineno-7-13" id="__codelineno-7-13" name="__codelineno-7-13"></a><span class="k">-</span><span class="w"> </span>Doc updates
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-8-1" id="__codelineno-8-1" name="__codelineno-8-1"></a><span class="gu">## [X.Y.Z] - YYYY-MM-DD</span>
+<a href="#__codelineno-8-2" id="__codelineno-8-2" name="__codelineno-8-2"></a>
+<a href="#__codelineno-8-3" id="__codelineno-8-3" name="__codelineno-8-3"></a><span class="gu">### Added</span>
+<a href="#__codelineno-8-4" id="__codelineno-8-4" name="__codelineno-8-4"></a><span class="k">-</span><span class="w"> </span>Feature descriptions
+<a href="#__codelineno-8-5" id="__codelineno-8-5" name="__codelineno-8-5"></a>
+<a href="#__codelineno-8-6" id="__codelineno-8-6" name="__codelineno-8-6"></a><span class="gu">### Changed</span>
+<a href="#__codelineno-8-7" id="__codelineno-8-7" name="__codelineno-8-7"></a><span class="k">-</span><span class="w"> </span>Breaking changes and modifications
+<a href="#__codelineno-8-8" id="__codelineno-8-8" name="__codelineno-8-8"></a>
+<a href="#__codelineno-8-9" id="__codelineno-8-9" name="__codelineno-8-9"></a><span class="gu">### Fixed</span>
+<a href="#__codelineno-8-10" id="__codelineno-8-10" name="__codelineno-8-10"></a><span class="k">-</span><span class="w"> </span>Bug fixes
+<a href="#__codelineno-8-11" id="__codelineno-8-11" name="__codelineno-8-11"></a>
+<a href="#__codelineno-8-12" id="__codelineno-8-12" name="__codelineno-8-12"></a><span class="gu">### Documentation</span>
+<a href="#__codelineno-8-13" id="__codelineno-8-13" name="__codelineno-8-13"></a><span class="k">-</span><span class="w"> </span>Doc updates
 </code></pre></div>
 <hr>
 <h2 id="phase-4-verify-and-commit">Phase 4: Verify and Commit</h2>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-8-1" id="__codelineno-8-1" name="__codelineno-8-1"></a><span class="c1"># Run tests</span>
-<a href="#__codelineno-8-2" id="__codelineno-8-2" name="__codelineno-8-2"></a>pytest<span class="w"> </span>tests/<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>short
-<a href="#__codelineno-8-3" id="__codelineno-8-3" name="__codelineno-8-3"></a>
-<a href="#__codelineno-8-4" id="__codelineno-8-4" name="__codelineno-8-4"></a><span class="c1"># Verify Rust compiles</span>
-<a href="#__codelineno-8-5" id="__codelineno-8-5" name="__codelineno-8-5"></a><span class="nb">cd</span><span class="w"> </span>rust<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>check<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
-<a href="#__codelineno-8-6" id="__codelineno-8-6" name="__codelineno-8-6"></a>
-<a href="#__codelineno-8-7" id="__codelineno-8-7" name="__codelineno-8-7"></a><span class="c1"># Check version</span>
-<a href="#__codelineno-8-8" id="__codelineno-8-8" name="__codelineno-8-8"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"from krewlyzer import __version__; print(__version__)"</span>
-<a href="#__codelineno-8-9" id="__codelineno-8-9" name="__codelineno-8-9"></a>
-<a href="#__codelineno-8-10" id="__codelineno-8-10" name="__codelineno-8-10"></a><span class="c1"># Commit</span>
-<a href="#__codelineno-8-11" id="__codelineno-8-11" name="__codelineno-8-11"></a>git<span class="w"> </span>add<span class="w"> </span>-A
-<a href="#__codelineno-8-12" id="__codelineno-8-12" name="__codelineno-8-12"></a>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"chore: bump version to X.Y.Z"</span>
-<a href="#__codelineno-8-13" id="__codelineno-8-13" name="__codelineno-8-13"></a>
-<a href="#__codelineno-8-14" id="__codelineno-8-14" name="__codelineno-8-14"></a><span class="c1"># Push release branch for review</span>
-<a href="#__codelineno-8-15" id="__codelineno-8-15" name="__codelineno-8-15"></a>git<span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>release/X.Y.Z
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-9-1" id="__codelineno-9-1" name="__codelineno-9-1"></a><span class="c1"># Run tests</span>
+<a href="#__codelineno-9-2" id="__codelineno-9-2" name="__codelineno-9-2"></a>pytest<span class="w"> </span>tests/<span class="w"> </span>-v<span class="w"> </span>--tb<span class="o">=</span>short
+<a href="#__codelineno-9-3" id="__codelineno-9-3" name="__codelineno-9-3"></a>
+<a href="#__codelineno-9-4" id="__codelineno-9-4" name="__codelineno-9-4"></a><span class="c1"># Verify Rust compiles</span>
+<a href="#__codelineno-9-5" id="__codelineno-9-5" name="__codelineno-9-5"></a><span class="nb">cd</span><span class="w"> </span>rust<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>cargo<span class="w"> </span>check<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">cd</span><span class="w"> </span>..
+<a href="#__codelineno-9-6" id="__codelineno-9-6" name="__codelineno-9-6"></a>
+<a href="#__codelineno-9-7" id="__codelineno-9-7" name="__codelineno-9-7"></a><span class="c1"># Check version</span>
+<a href="#__codelineno-9-8" id="__codelineno-9-8" name="__codelineno-9-8"></a>python<span class="w"> </span>-c<span class="w"> </span><span class="s2">"from krewlyzer import __version__; print(__version__)"</span>
+<a href="#__codelineno-9-9" id="__codelineno-9-9" name="__codelineno-9-9"></a>
+<a href="#__codelineno-9-10" id="__codelineno-9-10" name="__codelineno-9-10"></a><span class="c1"># Commit</span>
+<a href="#__codelineno-9-11" id="__codelineno-9-11" name="__codelineno-9-11"></a>git<span class="w"> </span>add<span class="w"> </span>-A
+<a href="#__codelineno-9-12" id="__codelineno-9-12" name="__codelineno-9-12"></a>git<span class="w"> </span>commit<span class="w"> </span>-m<span class="w"> </span><span class="s2">"chore: bump version to X.Y.Z"</span>
+<a href="#__codelineno-9-13" id="__codelineno-9-13" name="__codelineno-9-13"></a>
+<a href="#__codelineno-9-14" id="__codelineno-9-14" name="__codelineno-9-14"></a><span class="c1"># Push release branch for review</span>
+<a href="#__codelineno-9-15" id="__codelineno-9-15" name="__codelineno-9-15"></a>git<span class="w"> </span>push<span class="w"> </span>-u<span class="w"> </span>origin<span class="w"> </span>release/X.Y.Z
 </code></pre></div>
 <hr>
 <h2 id="phase-5-finalize-release">Phase 5: Finalize Release</h2>
@@ -1700,23 +1713,23 @@ an admin merge still goes through — that status is not a real blocker.</p>
 <p><strong>Merge with a merge commit, never squash.</strong> The tag sits on this history; a
 squash flattens the release branch into one commit and the <code>--no-ff</code> shape the
 rest of this guide assumes is gone.</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-9-1" id="__codelineno-9-1" name="__codelineno-9-1"></a><span class="c1"># After the PR is merged, tag the merge commit on main</span>
-<a href="#__codelineno-9-2" id="__codelineno-9-2" name="__codelineno-9-2"></a>git<span class="w"> </span>checkout<span class="w"> </span>main
-<a href="#__codelineno-9-3" id="__codelineno-9-3" name="__codelineno-9-3"></a>git<span class="w"> </span>pull<span class="w"> </span>origin<span class="w"> </span>main
-<a href="#__codelineno-9-4" id="__codelineno-9-4" name="__codelineno-9-4"></a>
-<a href="#__codelineno-9-5" id="__codelineno-9-5" name="__codelineno-9-5"></a><span class="c1"># Confirm you are tagging the right thing before you publish anything</span>
-<a href="#__codelineno-9-6" id="__codelineno-9-6" name="__codelineno-9-6"></a>grep<span class="w"> </span>-h<span class="w"> </span><span class="s1">'"X.Y.Z"'</span><span class="w"> </span>pyproject.toml<span class="w"> </span>rust/Cargo.toml<span class="w"> </span>src/krewlyzer/__init__.py<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l<span class="w">   </span><span class="c1"># expect 3</span>
-<a href="#__codelineno-9-7" id="__codelineno-9-7" name="__codelineno-9-7"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w">                     </span><span class="c1"># expect 0 findings</span>
-<a href="#__codelineno-9-8" id="__codelineno-9-8" name="__codelineno-9-8"></a>
-<a href="#__codelineno-9-9" id="__codelineno-9-9" name="__codelineno-9-9"></a>git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>X.Y.Z<span class="w"> </span>-m<span class="w"> </span><span class="s2">"Release X.Y.Z"</span>
-<a href="#__codelineno-9-10" id="__codelineno-9-10" name="__codelineno-9-10"></a>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>X.Y.Z
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-10-1" id="__codelineno-10-1" name="__codelineno-10-1"></a><span class="c1"># After the PR is merged, tag the merge commit on main</span>
+<a href="#__codelineno-10-2" id="__codelineno-10-2" name="__codelineno-10-2"></a>git<span class="w"> </span>checkout<span class="w"> </span>main
+<a href="#__codelineno-10-3" id="__codelineno-10-3" name="__codelineno-10-3"></a>git<span class="w"> </span>pull<span class="w"> </span>origin<span class="w"> </span>main
+<a href="#__codelineno-10-4" id="__codelineno-10-4" name="__codelineno-10-4"></a>
+<a href="#__codelineno-10-5" id="__codelineno-10-5" name="__codelineno-10-5"></a><span class="c1"># Confirm you are tagging the right thing before you publish anything</span>
+<a href="#__codelineno-10-6" id="__codelineno-10-6" name="__codelineno-10-6"></a>grep<span class="w"> </span>-h<span class="w"> </span><span class="s1">'"X.Y.Z"'</span><span class="w"> </span>pyproject.toml<span class="w"> </span>rust/Cargo.toml<span class="w"> </span>src/krewlyzer/__init__.py<span class="w"> </span><span class="p">|</span><span class="w"> </span>wc<span class="w"> </span>-l<span class="w">   </span><span class="c1"># expect 3</span>
+<a href="#__codelineno-10-7" id="__codelineno-10-7" name="__codelineno-10-7"></a>krewlyzer<span class="w"> </span>validate-pon<span class="w"> </span>src/krewlyzer/data/pon/GRCh37/*/*.parquet<span class="w">                     </span><span class="c1"># expect 0 findings</span>
+<a href="#__codelineno-10-8" id="__codelineno-10-8" name="__codelineno-10-8"></a>
+<a href="#__codelineno-10-9" id="__codelineno-10-9" name="__codelineno-10-9"></a>git<span class="w"> </span>tag<span class="w"> </span>-a<span class="w"> </span>X.Y.Z<span class="w"> </span>-m<span class="w"> </span><span class="s2">"Release X.Y.Z"</span>
+<a href="#__codelineno-10-10" id="__codelineno-10-10" name="__codelineno-10-10"></a>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>X.Y.Z
 </code></pre></div>
 <p>Pushing the tag triggers <code>release.yml</code>, which <strong>publishes to PyPI and pushes the
 container</strong>. PyPI cannot be un-published, only yanked — so verify before pushing
 the tag, not after.</p>
 <h3 id="sync-develop-merge-main-not-the-release-branch">Sync develop: merge <code>main</code>, not the release branch</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-10-1" id="__codelineno-10-1" name="__codelineno-10-1"></a><span class="c1"># Open a PR: base develop, head main  (develop requires one approval)</span>
-<a href="#__codelineno-10-2" id="__codelineno-10-2" name="__codelineno-10-2"></a>gh<span class="w"> </span>pr<span class="w"> </span>create<span class="w"> </span>--base<span class="w"> </span>develop<span class="w"> </span>--head<span class="w"> </span>main<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Merge main back to develop after X.Y.Z"</span>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-11-1" id="__codelineno-11-1" name="__codelineno-11-1"></a><span class="c1"># Open a PR: base develop, head main  (develop requires one approval)</span>
+<a href="#__codelineno-11-2" id="__codelineno-11-2" name="__codelineno-11-2"></a>gh<span class="w"> </span>pr<span class="w"> </span>create<span class="w"> </span>--base<span class="w"> </span>develop<span class="w"> </span>--head<span class="w"> </span>main<span class="w"> </span>--title<span class="w"> </span><span class="s2">"Merge main back to develop after X.Y.Z"</span>
 </code></pre></div>
 <p>Git Flow's usual advice is <code>git merge --no-ff release/X.Y.Z</code> into <code>develop</code>. <strong>Do
 not do that here.</strong> It leaves each branch holding a merge commit the other lacks,
@@ -1724,7 +1737,7 @@ so <code>main</code> sits permanently one commit ahead and there is no cheap way
 whether everything released is also in <code>develop</code>.</p>
 <p>Merging <code>main</code> instead makes it an ancestor of <code>develop</code>, so the question has a
 one-line answer that is valid after every release:</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-11-1" id="__codelineno-11-1" name="__codelineno-11-1"></a>git<span class="w"> </span>merge-base<span class="w"> </span>--is-ancestor<span class="w"> </span>main<span class="w"> </span>develop<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"develop has everything released"</span>
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-12-1" id="__codelineno-12-1" name="__codelineno-12-1"></a>git<span class="w"> </span>merge-base<span class="w"> </span>--is-ancestor<span class="w"> </span>main<span class="w"> </span>develop<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="s2">"develop has everything released"</span>
 </code></pre></div>
 <p>The two produce identical <em>files</em>; only the graph differs. Adopted during 0.9.0.</p>
 <h3 id="the-github-release">The GitHub Release</h3>
@@ -1743,26 +1756,26 @@ so explicitly rather than leaving the Releases page to habit.</p>
 <p>The <code>Published artifacts</code> workflow runs automatically once <code>Release</code> finishes
 and asks the registries directly — PyPI, GHCR, the docs site's <code>stable</code> alias,
 and the Release object. Same check by hand:</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-12-1" id="__codelineno-12-1" name="__codelineno-12-1"></a>python<span class="w"> </span>scripts/check_release_artifacts.py
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-13-1" id="__codelineno-13-1" name="__codelineno-13-1"></a>python<span class="w"> </span>scripts/check_release_artifacts.py
 </code></pre></div>
 <p>It exists because 0.9.0 passed every workflow while the docs site served 0.8.3
 and no Release object existed. Green CI means the steps that <em>are</em> configured
 ran; it says nothing about steps that were deleted or never written. Exit 2 is
 "could not reach a registry" and is not a pass — rerun it.</p>
 <h3 id="clean-up">Clean up</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-13-1" id="__codelineno-13-1" name="__codelineno-13-1"></a>git<span class="w"> </span>branch<span class="w"> </span>-d<span class="w"> </span>release/X.Y.Z
-<a href="#__codelineno-13-2" id="__codelineno-13-2" name="__codelineno-13-2"></a>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>--delete<span class="w"> </span>release/X.Y.Z
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-14-1" id="__codelineno-14-1" name="__codelineno-14-1"></a>git<span class="w"> </span>branch<span class="w"> </span>-d<span class="w"> </span>release/X.Y.Z
+<a href="#__codelineno-14-2" id="__codelineno-14-2" name="__codelineno-14-2"></a>git<span class="w"> </span>push<span class="w"> </span>origin<span class="w"> </span>--delete<span class="w"> </span>release/X.Y.Z
 </code></pre></div>
 <hr>
 <h2 id="git-lfs">Git LFS</h2>
 <p>Large files are tracked via Git LFS (see <code>.gitattributes</code>):</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-14-1" id="__codelineno-14-1" name="__codelineno-14-1"></a>src/krewlyzer/data/**/*.gz filter=lfs diff=lfs merge=lfs -text
-<a href="#__codelineno-14-2" id="__codelineno-14-2" name="__codelineno-14-2"></a>src/krewlyzer/data/**/*.parquet filter=lfs diff=lfs merge=lfs -text
-<a href="#__codelineno-14-3" id="__codelineno-14-3" name="__codelineno-14-3"></a>src/krewlyzer/data/**/*.bed filter=lfs diff=lfs merge=lfs -text
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-15-1" id="__codelineno-15-1" name="__codelineno-15-1"></a>src/krewlyzer/data/**/*.gz filter=lfs diff=lfs merge=lfs -text
+<a href="#__codelineno-15-2" id="__codelineno-15-2" name="__codelineno-15-2"></a>src/krewlyzer/data/**/*.parquet filter=lfs diff=lfs merge=lfs -text
+<a href="#__codelineno-15-3" id="__codelineno-15-3" name="__codelineno-15-3"></a>src/krewlyzer/data/**/*.bed filter=lfs diff=lfs merge=lfs -text
 </code></pre></div>
 <p>Ensure Git LFS is installed before cloning:</p>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-15-1" id="__codelineno-15-1" name="__codelineno-15-1"></a>git<span class="w"> </span>lfs<span class="w"> </span>install
-<a href="#__codelineno-15-2" id="__codelineno-15-2" name="__codelineno-15-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/msk-access/krewlyzer.git
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-16-1" id="__codelineno-16-1" name="__codelineno-16-1"></a>git<span class="w"> </span>lfs<span class="w"> </span>install
+<a href="#__codelineno-16-2" id="__codelineno-16-2" name="__codelineno-16-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/msk-access/krewlyzer.git
 </code></pre></div>
 <hr>
 <h2 id="nextflow-module-locations">Nextflow Module Locations</h2>
@@ -1850,7 +1863,7 @@ ran; it says nothing about steps that were deleted or never written. Exit 2 is
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 12, 2026 20:13:58 UTC"><span class="timeago" datetime="2026-08-12T20:13:58+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 12, 2026 20:13:58 UTC">2026-08-12</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 15, 2026 02:36:03 UTC"><span class="timeago" datetime="2026-08-15T02:36:03+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 15, 2026 02:36:03 UTC">2026-08-15</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
