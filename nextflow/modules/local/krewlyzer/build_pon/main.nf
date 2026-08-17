@@ -10,7 +10,7 @@
 process KREWLYZER_BUILD_PON {
     tag "$assay"
     label 'process_high'
-    container "ghcr.io/msk-access/krewlyzer:0.9.0"
+    container "ghcr.io/msk-access/krewlyzer:0.9.1"
 
     input:
     path sample_list          // Text file with BAM/CRAM/BED.gz paths (one per line)

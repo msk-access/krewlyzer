@@ -1,6 +1,6 @@
 [package]
 name = "krewlyzer_core"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 rust-version = "1.87"  # Required for u64::is_multiple_of (stabilized 1.87)
 authors = ["Ronak Shah <shahr2@mskcc.org>"]
