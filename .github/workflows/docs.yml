@@ -15,6 +15,20 @@ name: Docs
 # build. Nothing published for the whole 0.9.0 cycle, and `stable` sat on 0.8.3
 # -- documentation for the release whose defects 0.9.0 exists to fix. The strict
 # build went with it, which is why three links to non-existent anchors survived.
+# Serialise the deploys. `mike deploy --push` is fetch-modify-push against a
+# single gh-pages branch, so two concurrent runs race and the loser dies with
+#     ! [rejected]  gh-pages -> gh-pages (fetch first)
+# after having built the site successfully -- a green build and no publish.
+# Observed on 2026-08-17 when #67 and #68 merged minutes apart.
+#
+# `cancel-in-progress: false`, not true: a publish is the point of the run, and
+# cancelling the earlier one to run the later would be fine only if they always
+# carried the same content. A tag build publishing `stable` must not be killed
+# by a develop push that arrives while it is deploying.
+concurrency:
+  group: docs-deploy
+  cancel-in-progress: false
+
 on:
   pull_request:
     paths:

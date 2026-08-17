@@ -22,7 +22,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true  # Required for data files in src/krewlyzer/data/
+          # The one job that needs it: 44 objects, 643 MB, all under
+          # src/krewlyzer/data/. rust-test and lint were pulling the same
+          # payload for nothing -- see the note on their checkouts.
+          lfs: true
+
+      # LFS has two ways to leave this job without data, and neither announces
+      # itself as such:
+      #
+      #   - `lfs: false` here: 30 data-dependent tests SKIP (conftest's
+      #     `requires_data`) while 27 others fail. Measured, not assumed. The
+      #     failures are loud, but they say nothing about the cause, and the
+      #     30 that vanished are invisible in a pytest summary line.
+      #   - a partial or smudge-skipped fetch: the paths exist as ~130-byte
+      #     pointer files, so existence checks pass and the failures arrive as
+      #     "Corrupt footer" and "Not a gzipped file" from deep inside a reader.
+      #
+      # One step, ahead of the install, that names the actual problem.
+      - name: Assert the LFS objects hydrated
+        run: |
+          set -euo pipefail
+          unhydrated=0
+          while IFS= read -r f; do
+            [ -f "$f" ] || { echo "missing:     $f"; unhydrated=$((unhydrated+1)); continue; }
+            # A pointer file is a three-line text stub well under 1 KiB; the
+            # smallest real object here is orders of magnitude larger.
+            size=$(wc -c < "$f" | tr -d " ")
+            if [ "$size" -lt 1024 ] && head -c 40 "$f" | grep -q '^version https://git-lfs'; then
+              echo "pointer:     $f ($size bytes)"
+              unhydrated=$((unhydrated+1))
+            fi
+          done < <(git lfs ls-files -n)
+          if [ "$unhydrated" -gt 0 ]; then
+            echo "::error::${unhydrated} LFS object(s) did not hydrate. \
+          Tests that need src/krewlyzer/data would skip or fail obscurely. \
+          Check the LFS bandwidth quota and that this checkout sets lfs: true."
+            exit 1
+          fi
+          echo "all $(git lfs ls-files -n | wc -l | tr -d ' ') LFS objects hydrated"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -92,7 +130,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true
+          # No LFS. Proven empirically, not assumed: with src/krewlyzer/data
+          # renamed away, `cargo test --lib` passes all 112 tests and every lint
+          # check is clean. The Rust sources reference the data directory
+          # nowhere, and their test fixtures are synthetic names written into
+          # tempdirs.
+          #
+          # It matters because the bundled data is 643 MB across 44 objects and
+          # three jobs were each pulling it. On 2026-08-17 the download quota ran
+          # out and every job failed at Checkout, before running anything:
+          #     error: failed to fetch some objects from '.../info/lfs'
+          # Only the `test` job genuinely needs it.
+          lfs: false
 
       # pyo3 builds against whatever interpreter it finds, and the macOS runner
       # ships one newer than pyo3 0.23 supports ("configured Python interpreter
@@ -162,7 +211,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true
+          # No LFS. Proven empirically, not assumed: with src/krewlyzer/data
+          # renamed away, `cargo test --lib` passes all 112 tests and every lint
+          # check is clean. The Rust sources reference the data directory
+          # nowhere, and their test fixtures are synthetic names written into
+          # tempdirs.
+          #
+          # It matters because the bundled data is 643 MB across 44 objects and
+          # three jobs were each pulling it. On 2026-08-17 the download quota ran
+          # out and every job failed at Checkout, before running anything:
+          #     error: failed to fetch some objects from '.../info/lfs'
+          # Only the `test` job genuinely needs it.
+          lfs: false
 
       - name: Set up Python
         uses: actions/setup-python@v6
