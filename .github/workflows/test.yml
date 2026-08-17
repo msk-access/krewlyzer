@@ -22,79 +22,80 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          # `lfs: false` here and pull explicitly below, so the objects can be
-          # cached. checkout's own LFS fetch happens before any cache step can
-          # run, so it re-downloads 643 MB on every single run -- which is how
-          # the download quota was exhausted in the first place.
+          # Never LFS here. Tier 1 gets the bundled data from the pinned
+          # release image instead -- see .github/data-image.txt for why, and
+          # the change-detection step below for when it is allowed to.
           lfs: false
 
-      # Seed once, then never spend bandwidth again.
+      # Tier 1 may only use the image when this change does not touch the
+      # assets, because the image carries release-time data. When it does touch
+      # them, the image is stale by definition and the `full-assets` workflow
+      # takes over with a real LFS pull.
       #
-      # The key is the list of object IDs, so it changes only when the data
-      # changes. `git lfs ls-files -l` reads the pointer files, so it works
-      # before anything is hydrated. On a hit, `git lfs pull` finds every
-      # object already in .git/lfs/objects and does no network I/O at all.
+      # The generator scripts and the asset tests are in the filter too, not
+      # just the data. A change to scripts/build_gene_bed.py without a
+      # regeneration puts the asset and its builder out of step; a weakened
+      # assertion in the asset tests would, under a data-only filter, never run
+      # to reveal itself.
       #
-      # restore-keys makes a data change incremental rather than a full
-      # re-download: a stale cache still supplies the unchanged objects and
-      # `git lfs pull` fetches only what is new.
-      #
-      # This does NOT fix a quota that is already exhausted -- the seeding run
-      # still has to download. It is what stops the next month repeating it.
-      - name: List the LFS object IDs
-        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-object-ids
-
-      - name: Cache the LFS objects
-        uses: actions/cache@v4
-        with:
-          path: .git/lfs
-          key: lfs-${{ runner.os }}-${{ hashFiles('.lfs-object-ids') }}
-          restore-keys: lfs-${{ runner.os }}-
-
-      - name: Pull the LFS objects
-        id: lfs_pull
-        continue-on-error: true
-        run: git lfs pull
-
-      # The budget can be spent, and on 2026-08-17 it was:
-      #
-      #     batch response: This repository exceeded its LFS budget.
-      #
-      # That is an org billing setting, not something the repository can fix,
-      # and it takes every job down with it. But the release image already
-      # carries this exact data -- Dockerfile:53 copies src/krewlyzer/data into
-      # site-packages -- and a GHCR pull of a public package does not touch the
-      # LFS budget at all.
-      #
-      # The obvious objection is staleness: the image is built at release time,
-      # so a branch that changed the data would be tested against the old copy
-      # and pass. That is not a risk here, because it is not a judgement call.
-      # An LFS pointer records the sha256 of the object it stands for, so the
-      # verify step below compares the recovered bytes against what git says
-      # they must be. Either every hash matches -- in which case the data is
-      # provably what LFS would have handed over -- or the build fails.
-      - name: Recover the data from the release image if LFS is unavailable
-        if: steps.lfs_pull.outcome == 'failure'
+      # Asks the API rather than diffing, so the checkout stays shallow --
+      # `.git/objects` is 191 MB and fetch-depth: 0 would pay that every run.
+      - name: Does this change touch the bundled assets?
+        id: assets
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          image="ghcr.io/msk-access/krewlyzer:latest"
-          echo "::warning::git lfs pull failed. Recovering src/krewlyzer/data from ${image}; the hashes are verified against the LFS pointers in the next step."
-          docker pull -q "$image"
+          case "${{ github.event_name }}" in
+            pull_request)
+              files=$(gh api --paginate \
+                "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+                --jq '.[].filename') ;;
+            push)
+              before="${{ github.event.before }}"
+              if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+                files=""   # new branch, no diff base
+              else
+                files=$(gh api \
+                  "repos/${{ github.repository }}/compare/${before}...${{ github.sha }}" \
+                  --jq '.files[].filename') ;
+              fi ;;
+            *) files="" ;;   # workflow_dispatch: no diff context
+          esac
+          # No diff context falls through to "unchanged" deliberately. The
+          # image is still hash-verified, so the worst case is a loud failure,
+          # not silently testing the wrong bytes.
+          if printf '%s\n' "$files" | grep -qE '^(src/krewlyzer/data/|scripts/build_|tests/unit/test_gene_bed_assets\.py|tests/integration/test_region_entropy\.py)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::This change touches the bundled assets, so tier 1 skips them entirely. The full-assets workflow checks them against real LFS."
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch the bundled data from the pinned release image
+        if: steps.assets.outputs.changed == 'false'
+        run: |
+          set -euo pipefail
+          digest=$(grep -v '^#' .github/data-image.txt | tr -d '[:space:]')
+          [ -n "$digest" ] || { echo "::error::.github/data-image.txt has no digest"; exit 1; }
+          image="ghcr.io/msk-access/krewlyzer@${digest}"
+          if ! docker pull -q "$image"; then
+            echo "::error::Could not pull ${image}. If this is a fork, or the \
+          package was retagged, the pin in .github/data-image.txt needs updating."
+            exit 1
+          fi
           cid=$(docker create "$image")
           trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
-          docker cp "${cid}:/usr/local/lib/python3.10/site-packages/krewlyzer/data/." src/krewlyzer/data/
+          # Path is fixed by Dockerfile:53. If that COPY ever moves or is
+          # dropped, this fails here rather than testing an empty directory.
+          docker cp "${cid}:/usr/local/lib/python3.10/site-packages/krewlyzer/data/." \
+                    src/krewlyzer/data/
 
-      # Absence is not loud on its own. Measured: with the data removed, pytest
-      # reports 27 failed and 986 passed -- but also 68 skipped against a
-      # baseline of 38, because conftest marks 30 tests `requires_data`. A skip
-      # count does not fail a build. A partial fetch is worse: the paths exist
-      # as ~130-byte pointers, so existence checks pass and the failure arrives
-      # much later as "Corrupt footer" from inside a reader.
-      #
-      # Same script, both jobs above: it hashes every tracked file and compares
-      # against the oid in its pointer, so it answers "did the pull hydrate?"
-      # and "is the image's copy the right data?" with one check.
-      - name: Verify the LFS objects
+      # Proves the extracted bytes are the ones git recorded, by hashing each
+      # tracked file against the oid in its LFS pointer. This is what makes the
+      # image a transport rather than a second source of truth.
+      - name: Verify the bundled data against the LFS pointers
+        if: steps.assets.outputs.changed == 'false'
         run: python3 scripts/verify_lfs_objects.py
 
       - name: Set up Python
@@ -114,6 +115,13 @@ jobs:
           source .venv/bin/activate
           uv pip install .[test]
       - name: Run unit tests
+        env:
+          # Set only when the assets were fetched and verified above. Unset,
+          # the asset-integrity tests skip; set, they run and *fail* if the
+          # files are not really there. See conftest.requires_full_assets --
+          # the marker keys on being asked for the assets, not on their
+          # happening to be present, so this cannot go quietly green.
+          KREWLYZER_FULL_ASSETS: ${{ steps.assets.outputs.changed == 'false' && '1' || '' }}
         run: |
           source .venv/bin/activate
           uv pip list

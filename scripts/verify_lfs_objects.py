@@ -98,8 +98,15 @@ def main() -> int:
         for problem in problems:
             print(f"  {problem}", file=sys.stderr)
         print(
-            "\nTests that read src/krewlyzer/data would skip or fail obscurely.\n"
-            "Check the LFS budget, and that the pull or the image fallback ran.",
+            "\nThe asset-integrity tests read these files directly, so this has to\n"
+            "be right before they mean anything.\n"
+            "  tier 1 (test.yml)          the pinned release image in\n"
+            "                             .github/data-image.txt is stale or did not\n"
+            "                             extract; a mismatch means the assets moved\n"
+            "                             since that image was built\n"
+            "  tier 2 (full-assets.yml)   `git lfs pull` did not deliver; check the\n"
+            "                             org's LFS budget\n"
+            "  locally                    run `git lfs pull`",
             file=sys.stderr,
         )
         return 1

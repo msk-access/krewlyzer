@@ -9,6 +9,8 @@ Tests that require bundled data files use DATA_AVAILABLE to skip in PyPI install
 For full test coverage, use: git clone + pip install -e .
 """
 
+import os
+
 import pytest
 from pathlib import Path
 import pysam
@@ -44,6 +46,37 @@ DATA_AVAILABLE = _check_data_available()
 requires_data = pytest.mark.skipif(
     not DATA_AVAILABLE,
     reason="Bundled data not available (PyPI install). Use git clone + pip install -e .",
+)
+
+
+# =============================================================================
+# Asset-integrity tests: demanded, not merely available
+# =============================================================================
+#
+# `requires_data` keys on *presence*, which is right for "can the runtime load
+# an asset" but wrong for "is the shipped asset correct". A presence-keyed skip
+# means a job where the data silently failed to arrive reports green with the
+# checks that matter never having run -- the exact failure mode invariant #1
+# describes, one level up: a gate that cannot fail is worse than no gate.
+#
+# So this marker keys on the caller *asking* for the real assets. A job that
+# sets KREWLYZER_FULL_ASSETS=1 and then cannot supply them gets a red test, not
+# a skip, because the tests themselves assert the files are present and are not
+# LFS pointers (see test_gene_bed_assets.py). Unset, the tests skip, which is
+# correct for a run that was never going to have the assets in the first place.
+#
+# CI sets it in two places: the tier-1 job once the bundled data has been
+# recovered from the pinned release image and hash-verified against the LFS
+# pointers, and the tier-2 `full-assets` job, which pulls real LFS and runs on
+# any change to the assets, their build scripts, or these tests.
+FULL_ASSETS = os.environ.get("KREWLYZER_FULL_ASSETS") == "1"
+
+requires_full_assets = pytest.mark.skipif(
+    not FULL_ASSETS,
+    reason=(
+        "asset-integrity tests run only against the real bundled assets; "
+        "set KREWLYZER_FULL_ASSETS=1 (CI does this once the assets are verified)"
+    ),
 )
 
 

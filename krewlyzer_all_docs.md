@@ -1407,6 +1407,38 @@ git push -u origin release/X.Y.Z
 
 ---
 
+## Phase 4.5: Re-pin the data image — only if the bundled data changed
+
+**Skip this unless `src/krewlyzer/data/**` changed in this release.**
+
+CI reads the bundled data out of the release image rather than pulling 674 MB of
+LFS on every push, pinned by digest in `.github/data-image.txt`. The pin is a
+digest and not `:latest` so a re-run of an old commit's CI uses the same bytes
+the original run did.
+
+Do this **after** the tag has published the image, since the digest does not
+exist until then:
+
+```bash
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:msk-access/krewlyzer:pull" | jq -r .token)
+curl -sI -H "Authorization: Bearer $TOKEN" \
+  -H "Accept: application/vnd.oci.image.index.v1+json" \
+  "https://ghcr.io/v2/msk-access/krewlyzer/manifests/X.Y.Z" | grep -i docker-content-digest
+```
+
+Put that digest on the last line of `.github/data-image.txt`, update the version
+comment above it, and land it on `develop` with the back-merge.
+
+!!! note "Forgetting this is safe, and it announces itself"
+    The pin only has to move when the *data* moves. While the assets are
+    unchanged, an older image still carries byte-identical files and
+    `scripts/verify_lfs_objects.py` passes — it hashes every tracked file
+    against the oid in its LFS pointer, so a stale pin cannot quietly serve the
+    wrong data. Once the data has changed and the pin has not, that check fails
+    loudly on the next PR and names this step.
+
+---
+
 ## Phase 5: Finalize Release
 
 Open a PR from the release branch into `main` and get it reviewed. `main` has no
