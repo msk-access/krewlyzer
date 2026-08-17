@@ -136,6 +136,13 @@ jobs:
           # (conftest.requires_full_assets), so if the fetch above had somehow
           # produced nothing these fail rather than skipping green.
           KREWLYZER_FULL_ASSETS: '1'
+          # The wheel excludes data/ (PyPI's 100 MB limit), so the *installed*
+          # package has none and `AssetManager` would resolve into an empty
+          # site-packages/krewlyzer/data. Point it at the checkout, where the
+          # step above put the verified copy. This is the documented override
+          # for pip installs (README, "pip + Data Clone") and assets.py:52
+          # checks it before anything else -- not a test-only hack.
+          KREWLYZER_DATA_DIR: ${{ github.workspace }}/src/krewlyzer/data
         run: |
           source .venv/bin/activate
           uv pip list
