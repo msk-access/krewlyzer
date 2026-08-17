@@ -7868,6 +7868,10 @@ For best results, use a PON built with the same `--target-regions` as sample pro
   <img src="https://raw.githubusercontent.com/msk-access/krewlyzer/main/src/krewlyzer/logo.svg" alt="Krewlyzer logo" width="120"/>
 </p>
 
+<p align="center">
+  <a href="https://deepwiki.com/msk-access/krewlyzer"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+</p>
+
 **Krewlyzer** is a robust, user-friendly command-line toolkit for extracting a wide range of biological features from cell-free DNA (cfDNA) sequencing data. It is designed for cancer genomics, liquid biopsy research, and clinical bioinformatics, providing high-performance, reproducible feature extraction from BAM files.
 
 Krewlyzer draws inspiration from [cfDNAFE](https://github.com/Cuiwanxin1998/cfDNAFE) and implements state-of-the-art methods for fragmentation, motif, and methylation analysis, all in a modern Pythonic interface with rich parallelization and logging.
