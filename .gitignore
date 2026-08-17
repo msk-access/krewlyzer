@@ -81,3 +81,6 @@ results/
 # MkDocs
 .cache/
 site/
+
+# Generated in CI to key the LFS object cache; never committed.
+.lfs-object-ids

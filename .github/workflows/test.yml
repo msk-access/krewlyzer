@@ -22,15 +22,42 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          # The one job that needs it: 44 objects, 643 MB, all under
-          # src/krewlyzer/data/. rust-test and lint were pulling the same
-          # payload for nothing -- see the note on their checkouts.
-          lfs: true
+          # `lfs: false` here and pull explicitly below, so the objects can be
+          # cached. checkout's own LFS fetch happens before any cache step can
+          # run, so it re-downloads 643 MB on every single run -- which is how
+          # the download quota was exhausted in the first place.
+          lfs: false
+
+      # Seed once, then never spend bandwidth again.
+      #
+      # The key is the list of object IDs, so it changes only when the data
+      # changes. `git lfs ls-files -l` reads the pointer files, so it works
+      # before anything is hydrated. On a hit, `git lfs pull` finds every
+      # object already in .git/lfs/objects and does no network I/O at all.
+      #
+      # restore-keys makes a data change incremental rather than a full
+      # re-download: a stale cache still supplies the unchanged objects and
+      # `git lfs pull` fetches only what is new.
+      #
+      # This does NOT fix a quota that is already exhausted -- the seeding run
+      # still has to download. It is what stops the next month repeating it.
+      - name: List the LFS object IDs
+        run: git lfs ls-files -l | cut -d' ' -f1 | sort > .lfs-object-ids
+
+      - name: Cache the LFS objects
+        uses: actions/cache@v4
+        with:
+          path: .git/lfs
+          key: lfs-${{ runner.os }}-${{ hashFiles('.lfs-object-ids') }}
+          restore-keys: lfs-${{ runner.os }}-
+
+      - name: Pull the LFS objects
+        run: git lfs pull
 
       # LFS has two ways to leave this job without data, and neither announces
       # itself as such:
       #
-      #   - `lfs: false` here: 30 data-dependent tests SKIP (conftest's
+      #   - the pull above silently doing nothing: 30 data-dependent tests SKIP (conftest's
       #     `requires_data`) while 27 others fail. Measured, not assumed. The
       #     failures are loud, but they say nothing about the cause, and the
       #     30 that vanished are invisible in a pytest summary line.
@@ -56,7 +83,7 @@ jobs:
           if [ "$unhydrated" -gt 0 ]; then
             echo "::error::${unhydrated} LFS object(s) did not hydrate. \
           Tests that need src/krewlyzer/data would skip or fail obscurely. \
-          Check the LFS bandwidth quota and that this checkout sets lfs: true."
+          Check the LFS bandwidth quota, and that the cache/pull steps above ran."
             exit 1
           fi
           echo "all $(git lfs ls-files -n | wc -l | tr -d ' ') LFS objects hydrated"
