@@ -52,41 +52,50 @@ jobs:
           restore-keys: lfs-${{ runner.os }}-
 
       - name: Pull the LFS objects
+        id: lfs_pull
+        continue-on-error: true
         run: git lfs pull
 
-      # LFS has two ways to leave this job without data, and neither announces
-      # itself as such:
+      # The budget can be spent, and on 2026-08-17 it was:
       #
-      #   - the pull above silently doing nothing: 30 data-dependent tests SKIP (conftest's
-      #     `requires_data`) while 27 others fail. Measured, not assumed. The
-      #     failures are loud, but they say nothing about the cause, and the
-      #     30 that vanished are invisible in a pytest summary line.
-      #   - a partial or smudge-skipped fetch: the paths exist as ~130-byte
-      #     pointer files, so existence checks pass and the failures arrive as
-      #     "Corrupt footer" and "Not a gzipped file" from deep inside a reader.
+      #     batch response: This repository exceeded its LFS budget.
       #
-      # One step, ahead of the install, that names the actual problem.
-      - name: Assert the LFS objects hydrated
+      # That is an org billing setting, not something the repository can fix,
+      # and it takes every job down with it. But the release image already
+      # carries this exact data -- Dockerfile:53 copies src/krewlyzer/data into
+      # site-packages -- and a GHCR pull of a public package does not touch the
+      # LFS budget at all.
+      #
+      # The obvious objection is staleness: the image is built at release time,
+      # so a branch that changed the data would be tested against the old copy
+      # and pass. That is not a risk here, because it is not a judgement call.
+      # An LFS pointer records the sha256 of the object it stands for, so the
+      # verify step below compares the recovered bytes against what git says
+      # they must be. Either every hash matches -- in which case the data is
+      # provably what LFS would have handed over -- or the build fails.
+      - name: Recover the data from the release image if LFS is unavailable
+        if: steps.lfs_pull.outcome == 'failure'
         run: |
           set -euo pipefail
-          unhydrated=0
-          while IFS= read -r f; do
-            [ -f "$f" ] || { echo "missing:     $f"; unhydrated=$((unhydrated+1)); continue; }
-            # A pointer file is a three-line text stub well under 1 KiB; the
-            # smallest real object here is orders of magnitude larger.
-            size=$(wc -c < "$f" | tr -d " ")
-            if [ "$size" -lt 1024 ] && head -c 40 "$f" | grep -q '^version https://git-lfs'; then
-              echo "pointer:     $f ($size bytes)"
-              unhydrated=$((unhydrated+1))
-            fi
-          done < <(git lfs ls-files -n)
-          if [ "$unhydrated" -gt 0 ]; then
-            echo "::error::${unhydrated} LFS object(s) did not hydrate. \
-          Tests that need src/krewlyzer/data would skip or fail obscurely. \
-          Check the LFS bandwidth quota, and that the cache/pull steps above ran."
-            exit 1
-          fi
-          echo "all $(git lfs ls-files -n | wc -l | tr -d ' ') LFS objects hydrated"
+          image="ghcr.io/msk-access/krewlyzer:latest"
+          echo "::warning::git lfs pull failed. Recovering src/krewlyzer/data from ${image}; the hashes are verified against the LFS pointers in the next step."
+          docker pull -q "$image"
+          cid=$(docker create "$image")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          docker cp "${cid}:/usr/local/lib/python3.10/site-packages/krewlyzer/data/." src/krewlyzer/data/
+
+      # Absence is not loud on its own. Measured: with the data removed, pytest
+      # reports 27 failed and 986 passed -- but also 34 skipped against a
+      # baseline of 4, because conftest marks 30 tests `requires_data`. A skip
+      # count does not fail a build. A partial fetch is worse: the paths exist
+      # as ~130-byte pointers, so existence checks pass and the failure arrives
+      # much later as "Corrupt footer" from inside a reader.
+      #
+      # Same script, both jobs above: it hashes every tracked file and compares
+      # against the oid in its pointer, so it answers "did the pull hydrate?"
+      # and "is the image's copy the right data?" with one check.
+      - name: Verify the LFS objects
+        run: python3 scripts/verify_lfs_objects.py
 
       - name: Set up Python
         uses: actions/setup-python@v6
