@@ -90,18 +90,20 @@ def build_gc_reference(
 
     # Default exclude regions from existing data
     if exclude_regions is None:
-        pkg_dir = Path(__file__).parent
+        # Shared resolver, so KREWLYZER_DATA_DIR is honoured here too. This
+        # degraded loudly rather than silently -- the warning below fires -- but
+        # a pip user with the env var set still got that warning and blacklist-
+        # free output for no good reason.
+        from krewlyzer.assets import bundled_data_dir
+
+        data_dir = bundled_data_dir()
         # Try existing exclude regions based on genome name hint
         ref_name_lower = reference.name.lower()
         if "hg38" in ref_name_lower or "grch38" in ref_name_lower:
-            exclude_regions = (
-                pkg_dir / "data" / "exclude-regions" / "hg38-blacklist.v2.bed.gz"
-            )
+            exclude_regions = data_dir / "exclude-regions" / "hg38-blacklist.v2.bed.gz"
         else:
             # Default to hg19 for hg19/b37/GRCh37
-            exclude_regions = (
-                pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed.gz"
-            )
+            exclude_regions = data_dir / "exclude-regions" / "hg19-blacklist.v2.bed.gz"
 
         if exclude_regions.exists():
             logger.info(f"Using default exclude regions: {exclude_regions}")

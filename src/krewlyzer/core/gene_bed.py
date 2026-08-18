@@ -441,16 +441,44 @@ def get_bundled_gene_bed(assay: str, genome: str = "GRCh37") -> Optional[Path]:
         PosixPath('.../data/genes/GRCh37/xs2.genes.bed.gz')
     """
     import importlib.resources
+    import os
+
+    from krewlyzer.assets import bundled_data_dir
 
     assay = assay.lower()
     if assay not in ("xs1", "xs2"):
         logger.debug(f"Unknown assay '{assay}', no bundled gene BED")
         return None
 
+    filename = f"{assay}.genes.bed.gz"
+
+    # KREWLYZER_DATA_DIR first, via the shared resolver. This used to be absent
+    # here: both branches below look inside the installed package, and the
+    # wheel excludes data/ (PyPI's 100 MB limit), so a pip install pointed at a
+    # separate clone -- the layout the README prescribes -- got None from this
+    # function while AssetManager resolved its own assets perfectly well. None
+    # is returned quietly, so the caller simply produced no gene-level output.
+    #
+    # When the variable is set it is the whole answer: resolve there or return
+    # None, never fall through to the bundled copy. That matches AssetManager,
+    # which assigns base_path to the external directory and never consults the
+    # package again. A fallback would demote the override to a suggestion and
+    # would mask a misconfigured data clone behind whatever the package shipped.
+    if os.environ.get("KREWLYZER_DATA_DIR"):
+        try:
+            external = bundled_data_dir() / "genes" / genome / filename
+        except ValueError as e:  # set, but pointing nowhere
+            logger.warning(str(e))
+            return None
+        if external.is_file():
+            logger.debug(f"Found gene BED in KREWLYZER_DATA_DIR: {external}")
+            return external
+        logger.debug(f"Gene BED not present in KREWLYZER_DATA_DIR: {external}")
+        return None
+
     # Use importlib.resources for package data
     try:
         data_pkg = f"krewlyzer.data.genes.{genome}"
-        filename = f"{assay}.genes.bed.gz"
 
         # Try to get the file path
         ref = importlib.resources.files(data_pkg) / filename
@@ -462,7 +490,7 @@ def get_bundled_gene_bed(assay: str, genome: str = "GRCh37") -> Optional[Path]:
 
     # Fallback: check relative to this file
     data_dir = Path(__file__).parent.parent / "data" / "genes" / genome
-    bundled_path = data_dir / f"{assay}.genes.bed.gz"
+    bundled_path = data_dir / filename
 
     if bundled_path.exists():
         logger.debug(f"Found bundled gene BED: {bundled_path}")

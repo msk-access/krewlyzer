@@ -2,6 +2,36 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`KREWLYZER_DATA_DIR` is now honoured by every bundled-data lookup, not just
+  one.** The README prescribes it for pip installs — the wheel excludes
+  `data/` to stay under PyPI's 100 MB limit, so those users keep a separate
+  clone and point at it. `AssetManager` honoured it; `get_bundled_gene_bed` and
+  `build-gc-reference` did not, and each resolved against the installed
+  package instead.
+
+  For a pip user, that meant panel assets loaded correctly while
+  `get_bundled_gene_bed` returned `None` — and `None` is not an error here, so
+  gene-level FSC and region-MDS were simply absent from the output with only a
+  debug-level log to say so. `build-gc-reference` degraded more loudly,
+  warning that regions "may include problematic areas", but degraded all the
+  same.
+
+  The resolution rule now lives once, in `assets.bundled_data_dir()`. Where the
+  variable is set it is the whole answer — resolve there or return nothing,
+  never fall back to the bundled copy, matching what `AssetManager` already
+  did. A fallback would demote the override to a suggestion and mask a
+  misconfigured data clone behind whatever the package happened to ship.
+
+  Nothing caught this because the tests that would have were skipped in CI for
+  precisely the same reason: `conftest.DATA_AVAILABLE` asked the dataless
+  installed package too. It now resolves the way the runtime does, which puts
+  16 previously-skipped tests into every CI run — and they found this on the
+  first one.
+
 ## [0.9.1] - 2026-08-15
 
 ### Added

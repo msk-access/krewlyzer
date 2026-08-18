@@ -21,28 +21,6 @@ import gzip
 # =============================================================================
 
 
-def _check_data_available():
-    """
-    Check if bundled data is available in the installed package.
-
-    In CI: git checkout has data, but pip install . creates wheel without data.
-    Tests run from checkout but imports come from installed package.
-    So we must check the INSTALLED package path, not source.
-    """
-    try:
-        import krewlyzer
-
-        pkg_path = Path(krewlyzer.__file__).parent
-        data_dir = pkg_path / "data"
-        # Check if data directory and at least one key asset exist
-        return data_dir.exists() and (data_dir / "genes").exists()
-    except ImportError:
-        return False
-
-
-DATA_AVAILABLE = _check_data_available()
-
-
 #: The first bytes of a Git LFS pointer file.
 _LFS_POINTER_PREFIX = b"version https://git-lfs"
 
@@ -69,6 +47,48 @@ def is_hydrated(path) -> bool:
         return False
     with p.open("rb") as handle:
         return handle.read(len(_LFS_POINTER_PREFIX)) != _LFS_POINTER_PREFIX
+
+
+#: A file every bundled-data layout has, used to prove the directory is real.
+_SENTINEL_ASSET = Path("genes") / "GRCh37" / "xs1.genes.bed.gz"
+
+
+def _resolve_data_dir():
+    """Where the runtime will actually look for bundled data.
+
+    Mirrors ``AssetManager`` (``src/krewlyzer/assets.py``): ``KREWLYZER_DATA_DIR``
+    wins, and only failing that does it fall back to the installed package's
+    ``data/``. Kept deliberately in step, because when the two disagree the
+    tests skip while the code under test finds its files perfectly well -- which
+    is exactly what happened: the wheel excludes ``data/`` to stay under PyPI's
+    100 MB limit, so CI's installed package has none, and these tests had never
+    run there even once the checkout carried the real assets.
+    """
+    env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
+    if env_data_dir:
+        return Path(env_data_dir).expanduser()
+    try:
+        import krewlyzer
+    except ImportError:
+        return None
+    return Path(krewlyzer.__file__).parent / "data"
+
+
+def _check_data_available():
+    """True when the bundled data is present *and* actually fetched.
+
+    The old check was ``data_dir.exists() and (data_dir / "genes").exists()``,
+    both directories -- and a directory full of unfetched Git LFS pointers
+    exists just as happily as a real one. Hence the sentinel file: it is the
+    difference between "the layout is there" and "the bytes are there".
+    """
+    data_dir = _resolve_data_dir()
+    if data_dir is None or not data_dir.is_dir():
+        return False
+    return is_hydrated(data_dir / _SENTINEL_ASSET)
+
+
+DATA_AVAILABLE = _check_data_available()
 
 
 # Marker for tests that require bundled data
