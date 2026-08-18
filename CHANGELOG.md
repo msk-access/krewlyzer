@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`pip install 'krewlyzer[all]'`** — every optional capability in one target:
+  `[report]` (HTML rendering and charts) plus `psutil`, which sharpens
+  available-memory detection. It excludes `[docs]`, `[test]` and `[dev]` on
+  purpose; installing the tool should not deliver mkdocs and a linter.
+
+  `tests/unit/test_optional_dependencies.py` comes with it, and is the more
+  useful half. It walks the source for imports guarded by `except ImportError`
+  and asserts each is declared in some extra — which is the check that was
+  missing when `markdown` was imported and declared nowhere. It found `psutil`
+  in the same state while being written. It also pins that `[all]` covers every
+  runtime extra, and that it covers no contributor tooling.
+
 ### Fixed
 
 - **`describe-output -o page.html` wrote unrendered Markdown.** The file was a

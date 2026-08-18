@@ -129,9 +129,18 @@ krewlyzer validate -G hg19                        # assets are intact
 krewlyzer validate-pon model.pon.parquet          # the reference is sound
 krewlyzer validate-output results/                # results satisfy the contract
 krewlyzer describe-output results/{sample_id}/    # what is in each file
-pip install 'krewlyzer[report]'
+
+# HTML output needs the rendering extras; without them describe-output writes
+# the Markdown source into the page and says so.
+pip install 'krewlyzer[all]'                      # or [report] for just these
+krewlyzer describe-output results/{sample_id}/ -o page.html
 krewlyzer report results/{sample_id}/ -o report.html
 ```
+
+**Extras.** `[all]` is every optional capability of the tool — today `[report]`
+(HTML rendering and charts) plus `psutil` for sharper memory detection. It
+deliberately excludes `[docs]`, `[test]` and `[dev]`, which are contributor
+tooling: installing the tool should not deliver a linter.
 
 > [!NOTE]
 > A `report` contains one sample's actual measurements — generate it on demand
