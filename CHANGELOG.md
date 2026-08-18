@@ -6,6 +6,25 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`describe-output -o page.html` wrote unrendered Markdown.** The file was a
+  valid HTML document — doctype, head, styles — whose body was the Markdown
+  source escaped into a `<pre>`, so it displayed `##` headings and `|` tables
+  as literal text. Nothing said why, and the CLI reported `wrote <path>`.
+
+  `render_html_page` converts the Markdown only when the `markdown` package is
+  importable, and `markdown` was declared in **no dependency group at all** —
+  not core, not `report`, not `dev`. No install of krewlyzer could satisfy it,
+  so every user took the fallback; it worked only where something unrelated
+  (mkdocs) had pulled the package in.
+
+  `markdown>=3.4` now sits in the `report` extra, alongside `plotly` — that
+  group is human-readable output, which is what both commands produce. The
+  fallback also announces itself now, in the page and on the console, matching
+  `krewlyzer report`, whose charts each state when plotly is absent rather than
+  quietly rendering nothing. Asking for `.html` and getting Markdown is
+  confusing precisely because the file *is* HTML; nothing looks wrong except
+  the contents.
+
 - **`KREWLYZER_DATA_DIR` is now honoured by every bundled-data lookup, not just
   one.** The README prescribes it for pip installs — the wheel excludes
   `data/` to stay under PyPI's 100 MB limit, so those users keep a separate

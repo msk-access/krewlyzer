@@ -26,11 +26,17 @@ test = [
     # `krewlyzer report` is exercised end to end by tests/unit/test_report.py.
     "plotly>=5.18.0"
 ]
-# `krewlyzer report` only. Kept out of the core install because a pipeline that
-# never renders a report should not carry a plotting stack; without it the
-# command still runs and every chart states that it is missing.
+# Human-readable output: `krewlyzer report`, and the HTML form of
+# `krewlyzer describe-output -o page.html`. Kept out of the core install
+# because a pipeline that never renders either should not carry a plotting
+# stack; without it both commands still run and both say what is missing.
+#
+# `markdown` was previously imported by describe.py and declared nowhere at
+# all, so no install could satisfy it -- `-o page.html` wrote a valid HTML
+# document whose body was the raw Markdown in a <pre>, and said nothing.
 report = [
-    "plotly>=5.18.0"
+    "plotly>=5.18.0",
+    "markdown>=3.4"
 ]
 dev = [
     "pytest>=7.0.0",

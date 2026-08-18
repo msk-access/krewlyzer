@@ -413,25 +413,55 @@ def render_markdown(report: SampleReport) -> str:
     return "\n".join(out)
 
 
+def markdown_renderer_available() -> bool:
+    """Whether `render_html_page` can produce real HTML rather than a <pre>.
+
+    Exposed so the CLI can warn *before* claiming it wrote an HTML report.
+    Kept as one predicate rather than a second try/except at the call site, so
+    the two can never disagree about what the page will contain.
+    """
+    try:
+        import markdown  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 def render_html_page(report: SampleReport, markdown: str) -> str:
     """Wrap the Markdown in a self-contained page, attachable or hostable as-is.
 
     Named apart from ``htmlreport.render_html`` on purpose: that one builds
     the full charted report, this one only wraps ``render_markdown`` output.
 
-    Markdown is embedded and rendered client-side only if `markdown` is
-    installed; otherwise it is shown in a <pre>, which stays readable. A hard
-    dependency on a renderer would make the whole command unavailable in a
-    minimal install for the sake of formatting.
+    Rendered with `markdown` when it is installed; otherwise the Markdown is
+    escaped into a <pre>, which stays readable. A hard dependency on a renderer
+    would make the whole command unavailable in a minimal install for the sake
+    of formatting.
+
+    The fallback now says so, in the page and to the caller. It used to do
+    neither, and `markdown` was declared in no dependency group at all, so
+    every real install took this branch: `-o page.html` wrote a valid HTML
+    document whose body was raw Markdown -- `##` headings, `|` tables -- and
+    the CLI reported success. Someone who asked for HTML and got Markdown had
+    nothing to tell them why. Following `krewlyzer report`, whose charts each
+    state when plotly is absent rather than quietly rendering nothing.
     """
-    try:
+    if markdown_renderer_available():
         import markdown as _md  # type: ignore[import-untyped]
 
         body = _md.markdown(markdown, extensions=["tables", "toc"])
-    except ImportError:
+        notice = ""
+    else:
         from html import escape
 
         body = f"<pre>{escape(markdown)}</pre>"
+        notice = (
+            '<p class="krw-notice"><strong>Unrendered.</strong> The '
+            "<code>markdown</code> package is not installed, so this page shows "
+            "the Markdown source rather than formatted HTML. Install it with "
+            "<code>pip install &#39;krewlyzer[report]&#39;</code> and re-run to "
+            "get tables and headings.</p>"
+        )
 
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -450,6 +480,9 @@ def render_html_page(report: SampleReport, markdown: str) -> str:
   blockquote {{ border-left: 3px solid #e5a; margin: 1rem 0; padding: .1rem 1rem;
                background: #e5a1; }}
   h3 {{ margin-top: 2rem; border-top: 1px solid #8883; padding-top: 1rem; }}
+  .krw-notice {{ border: 1px solid #c60; background: #c601; padding: .6rem 1rem;
+                border-radius: 4px; }}
 </style></head><body>
+{notice}
 {body}
 </body></html>"""
