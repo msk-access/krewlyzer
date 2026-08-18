@@ -76,8 +76,40 @@ docker build -t msk-access/krewlyzer:dev .
 
 ## Lint & Type Checking — Run Before Every Commit
 
-> **Agent rule:** Always run the full lint suite before committing. CI enforces exactly these
-> same commands as a blocking `lint` job. Fix all failures before pushing.
+```bash
+bash scripts/lint.sh          # what CI runs, at the versions CI runs it
+bash scripts/lint.sh --fix    # same, but let black and ruff rewrite
+```
+
+> **Agent rule:** run `scripts/lint.sh`, not the bare tools. Fix everything
+> before pushing.
+
+**Why the script and not `black`/`mypy` from your shell.** CI installs
+`.[dev]`, so it runs the `==` pins in `pyproject.toml`. Your shell runs
+whatever your environment happens to have, and the two drift without saying so.
+Measured on one machine in August 2026:
+
+| tool | pinned | local |
+|---|---|---|
+| `black` | 26.1.0 | 26.5.1 |
+| `ruff` | 0.15.4 | 0.15.4 ✓ |
+| `mypy` | 1.19.1 | **2.3.1** |
+
+That mypy gap is not theoretical: 1.19.1 reports
+`error: Library stubs not installed for "markdown" [import-untyped]` and 2.3.1
+does not, so #71 passed locally and failed CI on it. The script reads the pins
+from `pyproject.toml` and runs each tool through `uvx` at that exact version,
+so there is one source of truth. Without `uvx` it still runs, but prints the
+version it used, because a silently different version is the whole problem.
+
+`tests/unit/test_lint_script_matches_ci.py` asserts the script keeps matching
+the workflow — same tools, same flags — so it cannot quietly become a laxer
+check that people trust.
+
+### The individual commands
+
+Useful for running one thing in isolation. **These are the commands, not the
+versions** — prefer the script above when the answer needs to match CI.
 
 ```bash
 # 1. Auto-fix import order and style issues

@@ -67,7 +67,7 @@ demand, so a rule nobody opens is a rule that does not exist.
 
 | When | Run | Read first |
 |---|---|---|
-| Any change | `pytest tests/ -q` · `black` · `ruff` · `mypy` | — |
+| Any change | `pytest tests/ -q` · `bash scripts/lint.sh` | `rules/development.md` — why the bare `black`/`mypy` on your PATH is not the gate |
 | Rust change | `cargo test --manifest-path rust/Cargo.toml --lib` · `cargo clippy` | `rules/architecture.md` — the boundary table, and the three traps in reading a PON parquet |
 | Output-writing change | `python scripts/check_output_format.py` | `rules/output-contract.md` — what downstream relies on |
 | Docs or constants | `pytest tests/unit/test_claims_registry.py` | — |
