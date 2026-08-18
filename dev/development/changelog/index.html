@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3151,6 +3151,21 @@
 <p>All notable changes to this project will be documented in this file.</p>
 <h2 id="unreleased">[Unreleased]</h2>
 <h3 id="added">Added</h3>
+<ul>
+<li><strong><code>scripts/lint.sh</code></strong> — runs the lint suite at the versions CI runs it.</li>
+</ul>
+<p>CI installs <code>.[dev]</code>, so it uses the <code>==</code> pins in <code>pyproject.toml</code>; a
+  developer's shell uses whatever it happens to have. On one machine that was
+  black 26.5.1 against a 26.1.0 pin and mypy 2.3.1 against 1.19.1 — and 1.19.1
+  reports <code>[import-untyped]</code> where 2.3.1 does not, so #71 passed locally and
+  failed CI on exactly that. The script reads the pins from <code>pyproject.toml</code>
+  and runs each tool through <code>uvx</code> at that version, keeping one source of
+  truth. Without <code>uvx</code> it still runs but prints the version it used, since a
+  silently different version is the whole problem.</p>
+<p><code>tests/unit/test_lint_script_matches_ci.py</code> asserts it stays faithful — the
+  same tools and the same flags as the workflow, versions never hardcoded, no
+  pinned tool left unrun. A script trusted to reproduce CI while quietly
+  checking less is worse than no script.</p>
 <ul>
 <li><strong><code>pip install 'krewlyzer[all]'</code></strong> — every optional capability in one target:
   <code>[report]</code> (HTML rendering and charts) plus <code>psutil</code>, which sharpens
