@@ -6,6 +6,22 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **`scripts/lint.sh`** — runs the lint suite at the versions CI runs it.
+
+  CI installs `.[dev]`, so it uses the `==` pins in `pyproject.toml`; a
+  developer's shell uses whatever it happens to have. On one machine that was
+  black 26.5.1 against a 26.1.0 pin and mypy 2.3.1 against 1.19.1 — and 1.19.1
+  reports `[import-untyped]` where 2.3.1 does not, so #71 passed locally and
+  failed CI on exactly that. The script reads the pins from `pyproject.toml`
+  and runs each tool through `uvx` at that version, keeping one source of
+  truth. Without `uvx` it still runs but prints the version it used, since a
+  silently different version is the whole problem.
+
+  `tests/unit/test_lint_script_matches_ci.py` asserts it stays faithful — the
+  same tools and the same flags as the workflow, versions never hardcoded, no
+  pinned tool left unrun. A script trusted to reproduce CI while quietly
+  checking less is worse than no script.
+
 - **`pip install 'krewlyzer[all]'`** — every optional capability in one target:
   `[report]` (HTML rendering and charts) plus `psutil`, which sharpens
   available-memory detection. It excludes `[docs]`, `[test]` and `[dev]` on
