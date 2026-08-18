@@ -421,7 +421,9 @@ def markdown_renderer_available() -> bool:
     the two can never disagree about what the page will contain.
     """
     try:
-        import markdown  # noqa: F401
+        # Same ignore as the call site below: typeshed knows this package,
+        # so --ignore-missing-imports does not cover [import-untyped].
+        import markdown  # type: ignore[import-untyped] # noqa: F401
     except ImportError:
         return False
     return True
