@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from conftest import is_hydrated
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -45,8 +47,12 @@ pytestmark = pytest.mark.invariant
 
 @pytest.fixture(scope="module")
 def pon():
-    if not _PON.exists():
-        pytest.skip("bundled PON not available (git lfs pull)")
+    # `is_hydrated`, not `.exists()`: a checkout without LFS leaves a 130-byte
+    # pointer here, which exists happily and then dies inside pyarrow with
+    # "Parquet magic bytes not found in footer". That is precisely the
+    # guarded-on-exists() defect this module was written about.
+    if not is_hydrated(_PON):
+        pytest.skip("bundled PON not hydrated (git lfs pull)")
     model = PonModel.load(_PON)
     if not model.fsc_gene_baseline:
         pytest.skip("bundled PON has no fsc_gene_baseline")

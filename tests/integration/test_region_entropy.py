@@ -12,7 +12,7 @@ in PyPI installs. They will be skipped in CI. Run locally with: git clone + pip 
 import pytest
 import gzip
 
-from conftest import requires_data
+from conftest import requires_data, requires_full_assets
 
 
 def _rust_available():
@@ -25,9 +25,18 @@ def _rust_available():
         return False
 
 
-@requires_data
+@requires_full_assets
 class TestRegionEntropyAssets:
-    """Test that TFBS/ATAC assets are available."""
+    """Test that TFBS/ATAC assets are available.
+
+    ``requires_full_assets``, not ``requires_data``. These assert the shipped
+    TFBS/ATAC files exist, so they are asset-integrity checks and belong with
+    the rest of that tier -- and ``requires_data`` was the wrong guard for them
+    anyway: ``conftest._check_data_available`` tests only that ``data/genes``
+    is present, so a checkout carrying genes but not TFBS reported "available"
+    and these four failed rather than skipping. Measured, hiding the four large
+    asset directories: 4 failed, all of them here.
+    """
 
     def test_tfbs_regions_available_grch37(self):
         """TFBS regions should be bundled for GRCh37."""
