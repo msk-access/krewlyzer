@@ -87,15 +87,31 @@ def test_bin_width_matches_the_window_the_rust_side_writes():
 
 def test_an_off_bait_profile_says_so():
     chart = wps_anchor_profile(_wps_frame(captured=0))
-    assert "inside baits" in chart.caption
+    assert "Bait coverage:" in chart.caption
     assert "off-target coverage" in chart.caption
 
 
-def test_a_captured_profile_does_not_cry_wolf():
-    """A WGS-style run is fully captured and must not carry the warning."""
+def test_a_fully_captured_profile_says_nothing():
+    """A WGS run has no baits, so the notion does not apply and a note is noise."""
     chart = wps_anchor_profile(_wps_frame(captured=N_BINS))
-    assert "inside baits" in chart.caption
-    assert "off-target coverage" not in chart.caption
+    assert "Bait coverage" not in chart.caption
+
+
+def test_the_note_counts_anchors_not_only_bins():
+    """The bin fraction alone misleads, in both directions.
+
+    A WPS window is 2000 bp against a bait of order 100 bp, so even a perfectly
+    bait-centred anchor captures a small minority of its bins. Anchors-touching
+    -bait is the number that separates a panel anchor set from a genome-wide
+    one: 5 of 166 against 33 of 58,522 on the sample this was written from.
+    """
+    # 3 of 8 anchors carry a captured bin.
+    frame = _wps_frame(captured=0, n=4)
+    mask_hit = [1] * 20 + [0] * (N_BINS - 20)
+    frame.loc[[0, 1, 4], "capture_mask"] = pd.Series([mask_hit] * 3, index=[0, 1, 4])
+    caption = wps_anchor_profile(frame).caption
+    assert "3 of 8 anchors" in caption
+    assert "60 of 1,600 bins" in caption
 
 
 def test_the_capture_fraction_never_rounds_away_to_zero():
@@ -104,16 +120,26 @@ def test_the_capture_fraction_never_rounds_away_to_zero():
     Reporting it as "0.00%" reads as a rounding artefact rather than a fact, so
     the note carries counts and a significant-digit percentage.
     """
-    frame = _wps_frame(captured=1, n=250)  # 250 captured of 100,000
+    frame = _wps_frame(captured=1, n=250)  # 250 captured bins of 100,000
     chart = wps_anchor_profile(frame)
     assert "0.00%" not in chart.caption
-    assert "500 of 100,000" in chart.caption
+    assert "500 of 100,000 bins" in chart.caption
+
+
+def test_the_note_does_not_call_panel_anchors_unintended():
+    """An earlier draft said "not the assay's intended capture".
+
+    That was wrong for `.WPS.panel.parquet`: those anchors are precisely what
+    the assay targets, and the low bin fraction is window-versus-bait geometry.
+    """
+    caption = wps_panel_profile(_wps_frame(captured=1)).caption
+    assert "intended capture" not in caption
 
 
 def test_no_capture_column_means_no_claim_about_capture():
     """The Alu background has no mask; inventing a figure would be worse."""
     frame = _wps_frame().drop(columns=["capture_mask"])
-    assert "inside baits" not in wps_anchor_profile(frame).caption
+    assert "Bait coverage" not in wps_anchor_profile(frame).caption
 
 
 def test_the_legend_says_how_many_anchors_each_curve_averages():

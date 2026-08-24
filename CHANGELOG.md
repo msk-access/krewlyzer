@@ -60,10 +60,18 @@ All notable changes to this project will be documented in this file.
   panel the genome-wide anchors are almost entirely off-bait: one XS2 sample
   had **506 captured bins of 11,704,400**. The profile is real, and off-target
   coverage genuinely carries fragmentomic signal, but a clean chromatin curve
-  invites a reading it cannot support. Both anchor panels now state the
-  captured count, and say plainly when the curve rests on off-target coverage.
-  Counts rather than a bare percentage: every fixed-decimal format renders
-  0.00432% as "0.00%", which reads as rounding rather than as a fact.
+  invites a reading it cannot support.
+
+  Both anchor panels now report bait coverage per *anchor* as well as per bin.
+  The bin fraction alone misleads: a WPS window is 2000 bp against baits of
+  order 100 bp, so even a perfectly bait-centred anchor captures a small
+  minority of its bins — the best anchor on that sample reached 103 of 200 and
+  the median among capturing anchors was 7. A low percentage is the expected
+  geometry, not a badly chosen anchor set. What the anchor count does separate
+  is real: 5 of 166 panel anchors touch a bait against 33 of 58,522
+  genome-wide. Counts rather than a bare percentage throughout, because every
+  fixed-decimal format renders 0.00432% as "0.00%", which reads as rounding
+  rather than as a fact.
 
 - **`describe-output -o page.html` wrote unrendered Markdown.** The file was a
   valid HTML document — doctype, head, styles — whose body was the Markdown

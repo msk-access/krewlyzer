@@ -930,18 +930,29 @@ def fsd_region_heatmap(fsd: Optional[pd.DataFrame]) -> Chart:
 
 
 def _capture_note(frame: "pd.DataFrame") -> str:
-    """One sentence stating how much of the profile the assay actually captured.
+    """State how much of the profile sits on capture bait, and per anchor.
 
     `capture_mask` is 1 only for bins inside a bait and away from its edges
-    (`rust/src/wps.rs`); everything off-bait or near an edge is 0. On a
-    targeted panel almost every genome-wide anchor is off-bait -- one XS2
-    sample carried 506 captured bins out of 11,704,400 -- so the profile is
-    built from off-target coverage. That is a legitimate signal and this
-    codebase already relies on off-target fragments for GC modelling, but a
-    reader seeing a clean chromatin curve will not assume it, and nothing in
-    the Python package read this column at all before now.
+    (`rust/src/wps.rs`). Nothing in the Python package read it before this.
 
-    Returns "" when the column is absent, rather than inventing a figure.
+    Reported per *anchor* as well as per bin, because the bin fraction alone
+    misleads in both directions. A WPS window is 2000 bp and a bait is of order
+    100 bp, so even a perfectly bait-centred anchor can only ever have a small
+    minority of its bins captured -- on one XS2 sample the best anchor reached
+    103 bins of 200 and the median among capturing anchors was 7. A low bin
+    percentage is therefore the expected geometry, not evidence that the
+    anchors were badly chosen, and an earlier draft of this note said "not the
+    assay's intended capture", which was simply wrong for the panel set: those
+    anchors are exactly what the assay targets.
+
+    What the anchor count does distinguish is real. On that sample 5 of 166
+    panel anchors touched a bait against 33 of 58,522 genome-wide -- the panel
+    set is some thirty times more bait-proximal, and both curves still rest
+    mostly on off-target coverage.
+
+    Returns "" when the column is absent, and when every position is captured:
+    a WGS run has no baits, so the whole notion does not apply and a note would
+    be noise.
     """
     if "capture_mask" not in getattr(frame, "columns", []):
         return ""
@@ -950,21 +961,21 @@ def _capture_note(frame: "pd.DataFrame") -> str:
     masks = [np.asarray(m, dtype=float) for m in frame["capture_mask"] if m is not None]
     if not masks:
         return ""
-    flat = np.concatenate(masks)
-    n_captured, n_total = int(flat.sum()), int(flat.size)
-    pct = 100.0 * n_captured / n_total if n_total else 0.0
+    stacked = np.vstack(masks)
+    n_bins, n_total = int(stacked.sum()), int(stacked.size)
+    if n_bins == n_total:
+        return ""
+    n_anchors = int((stacked.sum(axis=1) > 0).sum())
 
-    # Counts, not just a percentage. A genome-wide anchor set on a targeted
-    # panel gives 506 captured of 11,704,400, and every fixed-decimal format
-    # renders that as "0.00%" -- which reads as a rounding artefact rather than
-    # the fact it is. `.3g` keeps the significant digits at any magnitude.
-    fraction = f"{n_captured:,} of {n_total:,} contributing positions ({pct:.3g}%)"
-    if pct >= 50:
-        return f" {fraction} are inside baits."
+    # Counts, not a bare percentage: 506 of 11,704,400 renders as "0.00%" under
+    # every fixed-decimal format and then reads as rounding rather than a fact.
+    pct = 100.0 * n_bins / n_total if n_total else 0.0
     return (
-        f" Only {fraction} are inside baits, so this profile is built almost "
-        "entirely from off-target coverage — real signal, but not the assay's "
-        "intended capture."
+        f" Bait coverage: {n_anchors:,} of {len(stacked):,} anchors have any "
+        f"bait-covered position, {n_bins:,} of {n_total:,} bins ({pct:.3g}%). "
+        "A WPS window spans 2000 bp and a capture bait is far narrower, so even "
+        "an on-bait anchor is mostly flanked by off-target coverage — read this "
+        "as a fragmentomic profile, not a targeted measurement."
     )
 
 
