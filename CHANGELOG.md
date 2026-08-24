@@ -6,6 +6,14 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
+- **A WPS panel-anchor figure.** `.WPS.panel.parquet` was written on every
+  panel run and plotted by nothing, so the report showed only the genome-wide
+  anchors. On a targeted assay those are two different measurements: one XS2
+  sample gave amplitudes of 1.6 (CTCF) and 14.7 (TSS) over 34,851 and 23,671
+  genome-wide anchors, against 262 and 199 over the 105 and 61 the panel
+  targets. Both are now drawn, from one shared builder, and each legend states
+  the anchor count behind its mean.
+
 - **`scripts/lint.sh`** — runs the lint suite at the versions CI runs it.
 
   CI installs `.[dev]`, so it uses the `==` pins in `pyproject.toml`; a
@@ -35,6 +43,27 @@ All notable changes to this project will be documented in this file.
   runtime extra, and that it covers no contributor tooling.
 
 ### Fixed
+
+- **WPS figures plotted bin index but labelled the axis "bp".** Every WPS
+  profile is 200 bins of 10 bp over a 2000 bp window (`rust/src/wps.rs`), and
+  all three panels used the bin number directly as the x value. Distances read
+  ten times too small: a TSS dip at bin +15 appeared at "+15 bp" when it is
+  +150, and the ±1000 bp window appeared as ±100. Nothing was miscomputed — the
+  curves match the Parquet exactly — which is why it survived: the figure was
+  wrong only in a way a reader takes at face value. `WPS_BIN_BP` is pinned in
+  `validate/claims.py` against `NUM_BINS` and `WINDOW_SIZE`, so changing the
+  window fails a test rather than silently rescaling every WPS axis again.
+
+- **WPS figures did not say how much of the profile the assay captured.**
+  `capture_mask` marks bins inside a bait and away from its edges, and nothing
+  in the Python package read it — not the plots, not validation. On a targeted
+  panel the genome-wide anchors are almost entirely off-bait: one XS2 sample
+  had **506 captured bins of 11,704,400**. The profile is real, and off-target
+  coverage genuinely carries fragmentomic signal, but a clean chromatin curve
+  invites a reading it cannot support. Both anchor panels now state the
+  captured count, and say plainly when the curve rests on off-target coverage.
+  Counts rather than a bare percentage: every fixed-decimal format renders
+  0.00432% as "0.00%", which reads as rounding rather than as a fact.
 
 - **`describe-output -o page.html` wrote unrendered Markdown.** The file was a
   valid HTML document — doctype, head, styles — whose body was the Markdown
