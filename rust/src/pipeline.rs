@@ -312,7 +312,7 @@ pub fn run_unified_pipeline(
         
         // Load BaitMask if target regions provided (for panel edge detection)
         if let Some(ref target_path) = target_regions_path {
-            let bait_mask = crate::wps::BaitMask::from_bed(target_path, &mut chrom_map, bait_padding)
+            let bait_mask = crate::wps::BaitMask::from_bed(target_path, bait_padding)
                 .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load target regions for WPS: {}", e)))?;
             consumer = consumer.with_bait_mask(bait_mask);
             info!("WPS: BaitMask enabled, padding={}bp (adaptive safety applies)", bait_padding);

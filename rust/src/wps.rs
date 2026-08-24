@@ -340,21 +340,28 @@ use coitrees::{COITree, IntervalNode, IntervalTree};
 /// - Positions outside baits: capture_mask = 0 (unreliable)
 #[derive(Clone)]
 pub struct BaitMask {
-    /// COITree for efficient bait overlap queries
-    tree: HashMap<u32, COITree<(u64, u64), u32>>, // Store (start, end) as metadata
+    /// COITree per chromosome, keyed by the *normalised* chromosome name
+    /// ("1", "X"), not by a numeric id.
+    ///
+    /// It was keyed by `u32` id, and neither caller could supply the right one:
+    /// one hardcoded `0`, the other took an arbitrary key out of a HashMap.
+    /// Every position on every chromosome was therefore tested against one
+    /// chromosome's baits. Keying by name removes the lookup that was being
+    /// got wrong rather than fixing it in two places.
+    tree: HashMap<String, COITree<(u64, u64), u32>>, // Store (start, end) as metadata
     /// Number of bp to trim from each bait edge (default 50)
     trim_bp: u64,
 }
 
 impl BaitMask {
     /// Create BaitMask from target regions BED file
-    pub fn from_bed(bed_path: &Path, chrom_map: &mut ChromosomeMap, trim_bp: u64) -> Result<Self> {
+    pub fn from_bed(bed_path: &Path, trim_bp: u64) -> Result<Self> {
         use std::io::BufRead;
         
         // Use bed::get_reader to handle both plain and gzipped BED files
         let reader = crate::bed::get_reader(bed_path)
             .with_context(|| format!("Failed to open target regions: {:?}", bed_path))?;
-        let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<(u64, u64), u32>>> = HashMap::new();
+        let mut nodes_by_chrom: HashMap<String, Vec<IntervalNode<(u64, u64), u32>>> = HashMap::new();
         
         let valid_chroms: Vec<String> = (1..=22).map(|i| i.to_string()).chain(vec!["X".to_string(), "Y".to_string()]).collect();
         
@@ -372,18 +379,17 @@ impl BaitMask {
             let chrom_norm = chrom_raw.trim_start_matches("chr");
             if !valid_chroms.iter().any(|c| c == chrom_norm) { continue; }
             
-            let chrom_id = chrom_map.get_id(chrom_norm);
             let end_closed = if end > start { end - 1 } else { start };
             
-            nodes_by_chrom.entry(chrom_id).or_default().push(
+            nodes_by_chrom.entry(chrom_norm.to_string()).or_default().push(
                 IntervalNode::new(start as i32, end_closed as i32, (start, end))
             );
         }
         
         let mut tree = HashMap::new();
         let total_baits: usize = nodes_by_chrom.values().map(|v| v.len()).sum();
-        for (chrom_id, nodes) in nodes_by_chrom {
-            tree.insert(chrom_id, COITree::new(&nodes));
+        for (chrom_name, nodes) in nodes_by_chrom {
+            tree.insert(chrom_name, COITree::new(&nodes));
         }
         
         info!("BaitMask: Loaded {} target regions, trim_bp={}", total_baits, trim_bp);
@@ -399,8 +405,12 @@ impl BaitMask {
     /// 
     /// Adaptive Safety: effective_trim = min(user_trim, bait_length / 4)
     /// This ensures we never mask more than 50% of a small exon (25% per side)
-    pub fn check_position(&self, chrom_id: u32, pos: u64) -> (bool, bool) {
-        if let Some(tree) = self.tree.get(&chrom_id) {
+    pub fn check_position(&self, chrom: &str, pos: u64) -> (bool, bool) {
+        // Normalise here as well as in from_bed: anchors BEDs use "1" and
+        // reference FASTAs often "chr1", and a mismatch would silently mark
+        // every position off-target -- the failure this call site already had.
+        let chrom = chrom.trim_start_matches("chr");
+        if let Some(tree) = self.tree.get(chrom) {
             let mut is_on_target = false;
             let mut is_reliable = false;
             
@@ -688,9 +698,8 @@ impl WpsConsumer {
                 
                 // Compute capture_mask using bait_mask if available
                 let capture_mask = if let Some(ref mask) = self.bait_mask {
-                    let chrom_id = *self.trees.keys().find(|_| true).unwrap_or(&0); // Get chrom_id
                     let pos = region.start + j as u64;
-                    let (_on_target, is_reliable) = mask.check_position(chrom_id, pos);
+                    let (_on_target, is_reliable) = mask.check_position(&region.chrom, pos);
                     if is_reliable { 1u8 } else { 0u8 }
                 } else {
                     1u8 // No panel data = assume all reliable
@@ -915,9 +924,8 @@ impl WpsConsumer {
                         
                         // Check capture mask for panel edge detection
                         if let Some(ref mask) = bait_mask {
-                            let chrom_id = 0u32; // Simplified - need proper chrom_id lookup
                             let pos = region.start + j as u64;
-                            let (_, reliable) = mask.check_position(chrom_id, pos);
+                            let (_, reliable) = mask.check_position(&region.chrom, pos);
                             if !reliable {
                                 mask_ok = false;
                             }
@@ -2828,4 +2836,77 @@ fn apply_pon_zscore_inner(
         );
     }
     Ok(n_scored)
+}
+
+#[cfg(test)]
+mod bait_mask_tests {
+    use super::*;
+    use std::io::Write;
+
+    /// Baits on three chromosomes, at deliberately overlapping coordinates.
+    ///
+    /// The coordinate collision is the point: chr1 and chr7 both have a bait
+    /// at 1_000_000. A lookup that ignores the chromosome cannot tell them
+    /// apart, and that is exactly what shipped -- one call site passed a
+    /// hardcoded `0`, the other `*self.trees.keys().find(|_| true)`, an
+    /// arbitrary HashMap key. Every position on every chromosome was tested
+    /// against one chromosome's baits.
+    ///
+    /// Measured on a real XS2 sample before the fix: of 33 anchors flagged as
+    /// captured, all 33 overlapped a chr1 bait and only the 9 that were
+    /// themselves on chr1 overlapped a bait on their own chromosome.
+    fn fixture() -> (tempfile::TempDir, BaitMask) {
+        let dir = tempfile::tempdir().unwrap();
+        let bed = dir.path().join("baits.bed");
+        let mut fh = std::fs::File::create(&bed).unwrap();
+        // 400bp baits, so the adaptive trim (length/4 = 100) leaves a
+        // 200bp reliable core rather than trimming the bait away entirely.
+        writeln!(fh, "1\t1000000\t1000400").unwrap();
+        writeln!(fh, "chr7\t1000000\t1000400").unwrap(); // "chr" prefix, same coords
+        writeln!(fh, "X\t2000000\t2000400").unwrap();
+        drop(fh);
+        let mask = BaitMask::from_bed(&bed, 100).unwrap();
+        (dir, mask)
+    }
+
+    #[test]
+    fn a_bait_is_only_reliable_on_its_own_chromosome() {
+        let (_dir, mask) = fixture();
+        // Centre of the chr1 bait: reliable on 1, and nowhere else except the
+        // chr7 bait that genuinely shares the coordinate.
+        assert_eq!(mask.check_position("1", 1_000_200).1, true);
+        assert_eq!(mask.check_position("7", 1_000_200).1, true);
+        assert_eq!(mask.check_position("2", 1_000_200).1, false, "chr2 has no bait here");
+        assert_eq!(mask.check_position("X", 1_000_200).1, false, "chrX has no bait here");
+    }
+
+    #[test]
+    fn a_bait_on_one_chromosome_does_not_cover_another() {
+        let (_dir, mask) = fixture();
+        // The X bait must not make the same coordinate reliable on 1 or 7.
+        assert_eq!(mask.check_position("X", 2_000_200).1, true);
+        assert_eq!(mask.check_position("1", 2_000_200).1, false);
+        assert_eq!(mask.check_position("7", 2_000_200).1, false);
+    }
+
+    #[test]
+    fn the_chr_prefix_is_normalised_on_both_sides() {
+        let (_dir, mask) = fixture();
+        // Written as "chr7" in the BED, queried both ways; anchors BEDs use
+        // bare names and references often do not.
+        assert_eq!(mask.check_position("chr7", 1_000_200).1, true);
+        assert_eq!(mask.check_position("7", 1_000_200).1, true);
+        assert_eq!(mask.check_position("chr1", 1_000_200).1, true);
+    }
+
+    #[test]
+    fn bait_edges_are_still_trimmed() {
+        let (_dir, mask) = fixture();
+        // Inside the bait but within the adaptive trim: on target, not reliable.
+        let (on_target, reliable) = mask.check_position("1", 1_000_010);
+        assert!(on_target, "10bp into a 400bp bait is on target");
+        assert!(!reliable, "but within the trim, so not reliable");
+        // Outside every bait: neither.
+        assert_eq!(mask.check_position("1", 999_000), (false, false));
+    }
 }
