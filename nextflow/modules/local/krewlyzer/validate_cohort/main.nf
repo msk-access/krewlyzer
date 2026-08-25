@@ -19,7 +19,7 @@
 process KREWLYZER_VALIDATE_COHORT {
     tag "cohort"
     label 'process_single'
-    container "ghcr.io/msk-access/krewlyzer:0.9.1"
+    container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
     path fingerprints, stageAs: "fingerprints/*"
@@ -54,7 +54,7 @@ process KREWLYZER_VALIDATE_COHORT {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.3
+        krewlyzer: 0.9.2
     END_VERSIONS
     """
 }

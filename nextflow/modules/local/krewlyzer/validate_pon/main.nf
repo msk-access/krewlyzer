@@ -22,7 +22,7 @@
 process KREWLYZER_VALIDATE_PON {
     tag "${pon_model.name}"
     label 'process_single'
-    container "ghcr.io/msk-access/krewlyzer:0.9.1"
+    container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
     path pon_model
@@ -55,7 +55,7 @@ process KREWLYZER_VALIDATE_PON {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.3
+        krewlyzer: 0.9.2
     END_VERSIONS
     """
 }

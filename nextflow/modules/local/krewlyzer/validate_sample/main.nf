@@ -19,7 +19,7 @@
 process KREWLYZER_VALIDATE_SAMPLE {
     tag "$meta.id"
     label 'process_single'
-    container "ghcr.io/msk-access/krewlyzer:0.9.1"
+    container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
     tuple val(meta), path(sample_dir)
@@ -70,7 +70,7 @@ process KREWLYZER_VALIDATE_SAMPLE {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.3
+        krewlyzer: 0.9.2
     END_VERSIONS
     """
 }
