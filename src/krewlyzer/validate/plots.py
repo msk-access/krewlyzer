@@ -929,6 +929,17 @@ def fsd_region_heatmap(fsd: Optional[pd.DataFrame]) -> Chart:
     return Chart(suffix, title, caption, fig)
 
 
+def _translucent(hex_colour: str, alpha: float) -> str:
+    """`#ef5552` -> `rgba(239,85,82,0.15)`.
+
+    Plotly rejects 8-digit hex outright, so the alpha has to be carried in
+    rgba() rather than appended to the colour constant.
+    """
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def _capture_note(frame: "pd.DataFrame") -> str:
     """State how much of the profile sits on capture bait, and per anchor.
 
@@ -970,12 +981,16 @@ def _capture_note(frame: "pd.DataFrame") -> str:
     # Counts, not a bare percentage: 506 of 11,704,400 renders as "0.00%" under
     # every fixed-decimal format and then reads as rounding rather than a fact.
     pct = 100.0 * n_bins / n_total if n_total else 0.0
+    # States what was measured and the geometry that produced it, and stops
+    # there. An earlier draft ended "read this as a fragmentomic profile, not a
+    # targeted measurement", which is a verdict on usability -- not this
+    # toolkit's call to make. Measure it, report what it rests on, and let the
+    # reader and the downstream consumer decide what it supports.
     return (
         f" Bait coverage: {n_anchors:,} of {len(stacked):,} anchors have any "
         f"bait-covered position, {n_bins:,} of {n_total:,} bins ({pct:.3g}%). "
-        "A WPS window spans 2000 bp and a capture bait is far narrower, so even "
-        "an on-bait anchor is mostly flanked by off-target coverage — read this "
-        "as a fragmentomic profile, not a targeted measurement."
+        "A WPS window spans 2000 bp and a capture bait is typically far "
+        "narrower, so most of the window lies outside bait regardless."
     )
 
 
@@ -1016,9 +1031,29 @@ def _anchor_profile_chart(
         if np.allclose(mean, mean[0]):
             continue
         centre = len(mean) // 2
+        x = [(j - centre) * WPS_BIN_BP for j in range(len(mean))]
+
+        # A +-1 SEM band, so the reader can see how much the mean is worth
+        # instead of being told. It is the difference between a curve over
+        # 34,851 anchors and one over 105, and describing that in prose invites
+        # the caption to draw the conclusion for them.
+        if len(stacked) > 1:
+            sem = np.nanstd(stacked, axis=0, ddof=1) / np.sqrt(len(stacked))
+            fig.add_trace(
+                go.Scatter(
+                    x=x + x[::-1],
+                    y=list(mean + sem) + list((mean - sem)[::-1]),
+                    fill="toself",
+                    fillcolor=_translucent(ACCENT if i == 0 else OPPOSE, 0.15),
+                    line=dict(width=0),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name=f"{str(name)} +-1 SEM",
+                )
+            )
         fig.add_trace(
             go.Scatter(
-                x=[(j - centre) * WPS_BIN_BP for j in range(len(mean))],
+                x=x,
                 y=mean,
                 mode="lines",
                 # str() first, here as in the tooltip below: the groupby key

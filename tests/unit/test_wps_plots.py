@@ -34,6 +34,15 @@ pytest.importorskip("plotly")
 N_BINS = 200
 
 
+def _lines(chart):
+    """The mean curves, excluding the ±SEM band polygons.
+
+    The bands are closed shapes of 2*N_BINS points, so anything walking
+    `figure.data` for the profile has to skip them.
+    """
+    return [t for t in chart.figure.data if t.fill != "toself"]
+
+
 def _profile(depth: float = 1.0) -> list:
     """A dip at the centre, so the degeneracy guard lets the chart draw."""
     x = np.arange(N_BINS) - N_BINS // 2
@@ -67,7 +76,7 @@ def test_the_x_axis_is_base_pairs_not_bin_index(builder, frame):
     """±1000 bp across 200 bins, so the step is WPS_BIN_BP and the span is ±1000."""
     chart = builder(frame)
     assert chart.drawn, chart.reason
-    for trace in chart.figure.data:
+    for trace in _lines(chart):
         x = list(trace.x)
         assert len(x) == N_BINS
         assert x[1] - x[0] == WPS_BIN_BP, "x is bin index, not bp"
@@ -88,7 +97,7 @@ def test_bin_width_matches_the_window_the_rust_side_writes():
 def test_an_off_bait_profile_says_so():
     chart = wps_anchor_profile(_wps_frame(captured=0))
     assert "Bait coverage:" in chart.caption
-    assert "off-target coverage" in chart.caption
+    assert "0 of 8 anchors" in chart.caption, "state the fact, in counts"
 
 
 def test_a_fully_captured_profile_says_nothing():
@@ -145,7 +154,7 @@ def test_no_capture_column_means_no_claim_about_capture():
 def test_the_legend_says_how_many_anchors_each_curve_averages():
     """n is the difference between a mean over 105 anchors and over 34,851."""
     chart = wps_anchor_profile(_wps_frame(n=7))
-    assert all("n=7" in (t.name or "") for t in chart.figure.data)
+    assert all("n=7" in (t.name or "") for t in _lines(chart))
 
 
 def test_the_two_anchor_sets_are_separate_charts():
@@ -155,3 +164,69 @@ def test_the_two_anchor_sets_are_separate_charts():
     assert a.suffix == ".WPS.parquet"
     assert b.suffix == ".WPS.panel.parquet"
     assert a.title != b.title
+
+
+# ---------------------------------------------------------------------------
+# Show the uncertainty; do not rule on usability
+# ---------------------------------------------------------------------------
+
+
+def _bands(chart):
+    return [t for t in chart.figure.data if t.fill == "toself"]
+
+
+def test_each_curve_carries_a_sem_band():
+    """The mean alone hides whether it is worth anything.
+
+    A profile over 34,851 anchors and one over 105 are drawn identically
+    otherwise, and the difference decides how much either supports.
+    """
+    chart = wps_anchor_profile(_wps_frame(n=4))
+    bands = _bands(chart)
+    assert len(bands) == 2, "one band per anchor group"
+    for band in bands:
+        # A closed polygon: the profile out, then the lower edge back.
+        assert len(band.y) == 2 * N_BINS
+        assert band.showlegend is False, "the band is context, not a series"
+
+
+def test_the_band_narrows_as_anchors_accumulate():
+    """SEM goes as 1/sqrt(n), so more anchors must give a tighter band.
+
+    Pinned because a band that ignored n would be worse than none: it would
+    look like a confidence statement while carrying no information.
+    """
+    import numpy as np
+
+    def width(n):
+        frame = _wps_frame(n=n)
+        # Vary the profiles so the SEM is non-zero.
+        rng = np.random.default_rng(0)
+        frame["wps_nuc"] = [
+            list(np.asarray(v) + rng.normal(0, 1.0, N_BINS)) for v in frame["wps_nuc"]
+        ]
+        band = _bands(wps_anchor_profile(frame))[0]
+        y = np.asarray(band.y, dtype=float)
+        return float(np.nanmedian(y[:N_BINS] - y[N_BINS:][::-1]))
+
+    assert width(64) < width(4), "a band that ignores n is not a confidence band"
+
+
+def test_a_single_anchor_gets_no_band():
+    """SEM is undefined at n=1; drawing a zero-width band would assert certainty."""
+    chart = wps_anchor_profile(_wps_frame(n=1))
+    assert chart.drawn
+    assert _bands(chart) == []
+
+
+def test_the_caption_reports_and_does_not_rule():
+    """Measuring is this toolkit's job; deciding what a measurement supports is not.
+
+    An earlier caption ended "read this as a fragmentomic profile, not a
+    targeted measurement" — a verdict on usability. The consumer downstream,
+    and the reader, make that call from the numbers and the band.
+    """
+    caption = wps_anchor_profile(_wps_frame(captured=1)).caption
+    for verdict in ("read this as", "not a targeted measurement", "intended capture"):
+        assert verdict not in caption, f"caption editorialises: {verdict!r}"
+    assert "Bait coverage:" in caption, "but it must still report what it rests on"

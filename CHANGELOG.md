@@ -62,7 +62,18 @@ All notable changes to this project will be documented in this file.
   coverage genuinely carries fragmentomic signal, but a clean chromatin curve
   invites a reading it cannot support.
 
-  Both anchor panels now report bait coverage per *anchor* as well as per bin.
+  Both anchor panels now carry a ±1 SEM band and report bait coverage per
+  *anchor* as well as per bin. The band is the honest way to convey what a
+  mean is worth: a profile over 34,851 anchors and one over 105 are otherwise
+  drawn identically, and on one sample the genome-wide CTCF band is 26% of the
+  curve's own amplitude while TSS's is 6%. That says "noise-dominated" without
+  the caption having to, which matters because deciding what a measurement
+  supports is the downstream consumer's call, not this toolkit's. An earlier
+  draft ended the caption "read this as a fragmentomic profile, not a targeted
+  measurement" — a usability verdict — and a test now pins that such wording
+  stays out.
+
+  Both panels also report bait coverage per *anchor* as well as per bin.
   The bin fraction alone misleads: a WPS window is 2000 bp against baits of
   order 100 bp, so even a perfectly bait-centred anchor captures a small
   minority of its bins — the best anchor on that sample reached 103 of 200 and
