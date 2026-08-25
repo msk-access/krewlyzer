@@ -26,18 +26,34 @@ from typing import Dict, Iterator, List
 
 import pytest
 
+from conftest import requires_full_assets
+
+#: Every test here validates the committed asset itself, so every one needs the
+#: real file.
+#:
+#: Deliberately ``requires_full_assets`` and *not* ``requires_data``. The two
+#: differ in polarity and the difference is the whole point. ``requires_data``
+#: keys on the data being *present*, so a CI job that failed to fetch it would
+#: skip these and report green -- assets regenerated from a new GENCODE release
+#: would never be checked, which is most of the value.
+#: ``requires_full_assets`` keys on the caller having *asked* for the real
+#: assets, so a job that asks and then cannot supply them fails on
+#: ``test_asset_exists_and_is_not_an_lfs_pointer`` below rather than skipping.
+#:
+#: Previously these carried no marker at all and simply failed when the data
+#: was absent, which was honest but forced every CI job to pull 643 MB of LFS
+#: on every push to check four files that change when a genome build or an
+#: assay panel does -- a per-commit cost for a per-change risk. CI now runs
+#: them where the risk actually is: tier 1 once the assets are recovered from
+#: the pinned release image and hash-verified, and the tier-2 ``full-assets``
+#: job on any change to these assets, their build scripts, or this file.
+pytestmark = requires_full_assets
+
 #: Read from the checkout, not the installed package.
 #:
 #: ``pyproject.toml`` excludes ``data/`` from the wheel to stay under PyPI's
 #: 100 MB limit, so ``Path(krewlyzer.__file__).parent / "data"`` is present
-#: under an editable install and absent in CI. ``conftest.requires_data``
-#: exists for exactly that and skips such tests.
-#:
-#: These are deliberately *not* marked ``requires_data``. They validate the
-#: committed asset files themselves, not the runtime's ability to load them,
-#: and the CI checkout fetches LFS (``lfs: true``). Skipping here would mean
-#: assets regenerated from a new GENCODE release are never checked by CI --
-#: which is most of the value.
+#: under an editable install and absent in CI.
 _GENES = Path(__file__).resolve().parents[2] / "src" / "krewlyzer" / "data" / "genes"
 
 EXPECTED_COLUMNS = [

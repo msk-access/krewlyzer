@@ -146,6 +146,31 @@ CLAIMS: Tuple[Claim, ...] = (
         "300bp of Alu body alone admitted exactly one period inside the "
         "nucleosomal band, pinning nrl_bp at 150.0 for every sample",
     ),
+    # -- WPS profile binning ------------------------------------------------
+    # Three numbers that have to stay consistent or every WPS figure silently
+    # rescales. The report plotted the bin index and labelled the axis "bp",
+    # so a TSS dip at bin +15 read as +15 bp when it is +150, and a +-1000 bp
+    # window read as +-100. Fixed by scaling with WPS_BIN_BP; pinned here so
+    # changing the window or the bin count fails a test instead of quietly
+    # making the axis wrong again in the other direction.
+    Claim(
+        "wps.anchor.num_bins",
+        "200",
+        RustConst("wps.rs", "NUM_BINS"),
+        "profile length for every WPS table; the plots derive the centre from it",
+    ),
+    Claim(
+        "wps.anchor.window_size_bp",
+        "2000",
+        RustConst("wps.rs", "WINDOW_SIZE"),
+        "anchors are 1bp points expanded to +-1000bp; halved, this is the axis range",
+    ),
+    Claim(
+        "wps.plot.bin_bp",
+        "10",
+        PyConst("krewlyzer.validate.plots", "WPS_BIN_BP"),
+        "WINDOW_SIZE / NUM_BINS; the factor the WPS x-axes were missing",
+    ),
     Claim(
         "wps.background.flank_bp",
         "850",

@@ -1,0 +1,113 @@
+name: Full Assets
+
+# Tier 2. The only job that pulls real Git LFS on a pull request, and it runs
+# only when a change could invalidate the bundled assets.
+#
+# Why a separate tier at all. `tests/unit/test_gene_bed_assets.py` validates
+# the committed gene BEDs -- schema, strand on every row, the E1 flag matching
+# GENCODE's transcription order. Those files are keyed to a genome build and an
+# assay panel, so they change when a build or a panel does: years apart, not
+# weekly. Running them on every push meant pulling 674 MB of LFS on every push
+# to re-check four files that had not moved, which is a per-commit cost for a
+# per-change risk -- and it exhausted the org's LFS budget, taking all of CI
+# down at Checkout on 2026-08-17.
+#
+# Tier 1 (`test.yml`) now takes the same data out of the pinned release image
+# and hash-verifies it, which is sound precisely because the image carries
+# release-time bytes and the paths below have not changed. The moment they do,
+# the image is stale by definition, tier 1 stands down, and this runs instead
+# against the real objects.
+#
+# The filter deliberately covers more than the data:
+#   - the build scripts, because editing a generator without regenerating puts
+#     the asset and its builder out of step;
+#   - the asset test files, because under a data-only filter a weakened
+#     assertion would never run to reveal itself.
+#
+# NOTE ON BRANCH PROTECTION: do not mark this a required check. A path-filtered
+# job that does not run reports nothing, and a required check that reports
+# nothing leaves the PR pending forever. If it must be required, add the usual
+# always-runs companion job reporting the same check name.
+on:
+  pull_request:
+    branches: [ main, develop ]
+    # Written out twice on purpose: GitHub's workflow parser does not support
+    # YAML anchors, so an alias here would not expand -- it would silently
+    # produce a filter that never matches. Keep the two lists identical.
+    paths:
+      - 'src/krewlyzer/data/**'
+      - 'scripts/build_*.py'
+      - 'tests/unit/test_gene_bed_assets.py'
+      - 'tests/integration/test_region_entropy.py'
+      - '.github/workflows/full-assets.yml'
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/krewlyzer/data/**'
+      - 'scripts/build_*.py'
+      - 'tests/unit/test_gene_bed_assets.py'
+      - 'tests/integration/test_region_entropy.py'
+      - '.github/workflows/full-assets.yml'
+  workflow_dispatch:
+
+jobs:
+  full-assets:
+    name: Asset integrity (real LFS)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code with the real LFS objects
+        uses: actions/checkout@v5
+        with:
+          # The one place in CI that still spends LFS download budget. It fires
+          # on asset changes and releases only. If it fails with
+          #   batch response: This repository exceeded its LFS budget
+          # that is an org billing setting and the fix is to raise it -- there
+          # is no way to validate an asset you will not download, and the
+          # release image cannot stand in here because the whole point is that
+          # these bytes are new.
+          lfs: true
+
+      - name: Verify the LFS objects hydrated
+        run: python3 scripts/verify_lfs_objects.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang libclang-dev
+          pip install uv
+          uv venv .venv
+          source .venv/bin/activate
+          uv pip install .[test]
+
+      - name: Run the asset-integrity tests against the real assets
+        env:
+          # Demanded, not merely available. If the assets are somehow absent
+          # despite the checkout above, these fail rather than skipping --
+          # which is the entire reason this marker exists separately from
+          # `requires_data`. See tests/conftest.py.
+          KREWLYZER_FULL_ASSETS: '1'
+          # The wheel excludes data/ (PyPI's 100 MB limit), so the *installed*
+          # package has none and `AssetManager` would resolve into an empty
+          # site-packages/krewlyzer/data. Point it at the checkout, where the
+          # step above put the verified copy. This is the documented override
+          # for pip installs (README, "pip + Data Clone") and assets.py:52
+          # checks it before anything else -- not a test-only hack.
+          KREWLYZER_DATA_DIR: ${{ github.workspace }}/src/krewlyzer/data
+        run: |
+          source .venv/bin/activate
+          python -m pytest tests/ -q --disable-warnings
+
+      - name: Validate the bundled PONs
+        env:
+          KREWLYZER_FULL_ASSETS: '1'
+        run: |
+          source .venv/bin/activate
+          # The release guide has called for this since 0.9.0 as a manual
+          # checklist step (Phase 2.7). A regenerated PON reaching develop
+          # unchecked is exactly what it is meant to prevent, so run it here
+          # too, where the change actually arrives.
+          krewlyzer validate-pon src/krewlyzer/data/pon/GRCh37/*/*.parquet

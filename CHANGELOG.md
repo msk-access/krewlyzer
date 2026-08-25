@@ -2,6 +2,163 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.2] - 2026-08-25
+
+### Added
+
+- **A WPS panel-anchor figure.** `.WPS.panel.parquet` was written on every
+  panel run and plotted by nothing, so the report showed only the genome-wide
+  anchors. On a targeted assay those are two different measurements: one XS2
+  sample gave amplitudes of 1.6 (CTCF) and 14.7 (TSS) over 34,851 and 23,671
+  genome-wide anchors, against 262 and 199 over the 105 and 61 the panel
+  targets. Both are now drawn, from one shared builder, and each legend states
+  the anchor count behind its mean.
+
+- **`scripts/lint.sh`** — runs the lint suite at the versions CI runs it.
+
+  CI installs `.[dev]`, so it uses the `==` pins in `pyproject.toml`; a
+  developer's shell uses whatever it happens to have. On one machine that was
+  black 26.5.1 against a 26.1.0 pin and mypy 2.3.1 against 1.19.1 — and 1.19.1
+  reports `[import-untyped]` where 2.3.1 does not, so #71 passed locally and
+  failed CI on exactly that. The script reads the pins from `pyproject.toml`
+  and runs each tool through `uvx` at that version, keeping one source of
+  truth. Without `uvx` it still runs but prints the version it used, since a
+  silently different version is the whole problem.
+
+  `tests/unit/test_lint_script_matches_ci.py` asserts it stays faithful — the
+  same tools and the same flags as the workflow, versions never hardcoded, no
+  pinned tool left unrun. A script trusted to reproduce CI while quietly
+  checking less is worse than no script.
+
+- **`pip install 'krewlyzer[all]'`** — every optional capability in one target:
+  `[report]` (HTML rendering and charts) plus `psutil`, which sharpens
+  available-memory detection. It excludes `[docs]`, `[test]` and `[dev]` on
+  purpose; installing the tool should not deliver mkdocs and a linter.
+
+  `tests/unit/test_optional_dependencies.py` comes with it, and is the more
+  useful half. It walks the source for imports guarded by `except ImportError`
+  and asserts each is declared in some extra — which is the check that was
+  missing when `markdown` was imported and declared nowhere. It found `psutil`
+  in the same state while being written. It also pins that `[all]` covers every
+  runtime extra, and that it covers no contributor tooling.
+
+### Fixed
+
+- **`capture_mask` was computed against one chromosome's baits, for every
+  chromosome.** Neither call site in `rust/src/wps.rs` supplied the region's
+  chromosome: one hardcoded `0u32` under a comment reading "Simplified - need
+  proper chrom_id lookup", the other used `*self.trees.keys().find(|_| true)`,
+  an arbitrary key from HashMap iteration order and so not even deterministic.
+  Every position on every chromosome was tested against whichever chromosome
+  that resolved to.
+
+  Measured on an XS2 sample: of 33 genome-wide anchors flagged as captured,
+  **all 33** overlapped a chr1 bait while only the 9 that were themselves on
+  chr1 overlapped a bait on their own chromosome — of the 24 elsewhere, zero
+  did. In the panel table all 5 flagged anchors were on chr1, and all 5 chr1
+  anchors were flagged. The mask produced both false negatives (real on-bait
+  positions elsewhere marked unreliable) and false positives (off-bait
+  positions colliding with a chr1 bait).
+
+  `BaitMask` is now keyed by normalised chromosome name instead of a numeric
+  id, which deletes the lookup both callers were getting wrong rather than
+  fixing it in two places. Four Rust tests cover it, with baits at
+  deliberately colliding coordinates on different chromosomes; two fail
+  against the old behaviour.
+
+  **Outputs produced before this fix carry the wrong mask.** No feature value
+  is affected — nothing else read the column — but any bait-coverage figure
+  derived from it understates real coverage for anchors off chr1. Re-run WPS
+  to correct it.
+
+  The bait-coverage line described in the next entry is computed from this
+  column, so on pre-fix outputs it reports the wrong figure.
+
+- **WPS figures plotted bin index but labelled the axis "bp".** Every WPS
+  profile is 200 bins of 10 bp over a 2000 bp window (`rust/src/wps.rs`), and
+  all three panels used the bin number directly as the x value. Distances read
+  ten times too small: a TSS dip at bin +15 appeared at "+15 bp" when it is
+  +150, and the ±1000 bp window appeared as ±100. Nothing was miscomputed — the
+  curves match the Parquet exactly — which is why it survived: the figure was
+  wrong only in a way a reader takes at face value. `WPS_BIN_BP` is pinned in
+  `validate/claims.py` against `NUM_BINS` and `WINDOW_SIZE`, so changing the
+  window fails a test rather than silently rescaling every WPS axis again.
+
+- **WPS figures did not say how much of the profile the assay captured.**
+  `capture_mask` marks bins inside a bait and away from its edges, and nothing
+  in the Python package read it — not the plots, not validation. On a targeted
+  panel the genome-wide anchors are almost entirely off-bait: one XS2 sample
+  had **506 captured bins of 11,704,400**. The profile is real, and off-target
+  coverage genuinely carries fragmentomic signal, but a clean chromatin curve
+  invites a reading it cannot support.
+
+  Both anchor panels now carry a ±1 SEM band and report bait coverage per
+  *anchor* as well as per bin. The band is the honest way to convey what a
+  mean is worth: a profile over 34,851 anchors and one over 105 are otherwise
+  drawn identically, and on one sample the genome-wide CTCF band is 26% of the
+  curve's own amplitude while TSS's is 6%. That says "noise-dominated" without
+  the caption having to, which matters because deciding what a measurement
+  supports is the downstream consumer's call, not this toolkit's. An earlier
+  draft ended the caption "read this as a fragmentomic profile, not a targeted
+  measurement" — a usability verdict — and a test now pins that such wording
+  stays out.
+
+  Both panels also report bait coverage per *anchor* as well as per bin.
+  The bin fraction alone misleads: a WPS window is 2000 bp against baits of
+  order 100 bp, so even a perfectly bait-centred anchor captures a small
+  minority of its bins — the best anchor on that sample reached 103 of 200 and
+  the median among capturing anchors was 7. A low percentage is the expected
+  geometry, not a badly chosen anchor set. What the anchor count does separate
+  is real: 5 of 166 panel anchors touch a bait against 33 of 58,522
+  genome-wide. Counts rather than a bare percentage throughout, because every
+  fixed-decimal format renders 0.00432% as "0.00%", which reads as rounding
+  rather than as a fact.
+
+- **`describe-output -o page.html` wrote unrendered Markdown.** The file was a
+  valid HTML document — doctype, head, styles — whose body was the Markdown
+  source escaped into a `<pre>`, so it displayed `##` headings and `|` tables
+  as literal text. Nothing said why, and the CLI reported `wrote <path>`.
+
+  `render_html_page` converts the Markdown only when the `markdown` package is
+  importable, and `markdown` was declared in **no dependency group at all** —
+  not core, not `report`, not `dev`. No install of krewlyzer could satisfy it,
+  so every user took the fallback; it worked only where something unrelated
+  (mkdocs) had pulled the package in.
+
+  `markdown>=3.4` now sits in the `report` extra, alongside `plotly` — that
+  group is human-readable output, which is what both commands produce. The
+  fallback also announces itself now, in the page and on the console, matching
+  `krewlyzer report`, whose charts each state when plotly is absent rather than
+  quietly rendering nothing. Asking for `.html` and getting Markdown is
+  confusing precisely because the file *is* HTML; nothing looks wrong except
+  the contents.
+
+- **`KREWLYZER_DATA_DIR` is now honoured by every bundled-data lookup, not just
+  one.** The README prescribes it for pip installs — the wheel excludes
+  `data/` to stay under PyPI's 100 MB limit, so those users keep a separate
+  clone and point at it. `AssetManager` honoured it; `get_bundled_gene_bed` and
+  `build-gc-reference` did not, and each resolved against the installed
+  package instead.
+
+  For a pip user, that meant panel assets loaded correctly while
+  `get_bundled_gene_bed` returned `None` — and `None` is not an error here, so
+  gene-level FSC and region-MDS were simply absent from the output with only a
+  debug-level log to say so. `build-gc-reference` degraded more loudly,
+  warning that regions "may include problematic areas", but degraded all the
+  same.
+
+  The resolution rule now lives once, in `assets.bundled_data_dir()`. Where the
+  variable is set it is the whole answer — resolve there or return nothing,
+  never fall back to the bundled copy, matching what `AssetManager` already
+  did. A fallback would demote the override to a suggestion and mask a
+  misconfigured data clone behind whatever the package happened to ship.
+
+  Nothing caught this because the tests that would have were skipped in CI for
+  precisely the same reason: `conftest.DATA_AVAILABLE` asked the dataless
+  installed package too. It now resolves the way the runtime does, which puts
+  16 previously-skipped tests into every CI run — and they found this on the
+  first one.
+
 ## [0.9.1] - 2026-08-15
 
 ### Added

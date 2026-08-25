@@ -28,6 +28,41 @@ class Genome(str, Enum):
     GRCH38 = "GRCh38"
 
 
+def bundled_data_dir() -> Path:
+    """The directory bundled data is read from.
+
+    ``KREWLYZER_DATA_DIR`` wins; otherwise the copy inside the installed
+    package. That order is the documented contract for pip installs -- the
+    wheel excludes ``data/`` to stay under PyPI's 100 MB limit, so the env var
+    is how those users point at a separate clone (README, "pip + Data Clone").
+
+    Shared rather than reimplemented. It used to live only in ``AssetManager``,
+    and the two other resolvers in the codebase each grew their own version
+    without it: ``core/gene_bed.py`` and ``build_gc_reference.py`` both went
+    straight to a path relative to their own ``__file__``. The result was a
+    partial contract -- with the env var set, AssetManager assets resolved and
+    bundled gene BEDs came back ``None``, silently, from a debug-level log.
+    Nothing caught it because the tests that would have were skipped in CI for
+    the very same reason: no data in the installed package.
+
+    Raises:
+        ValueError: if KREWLYZER_DATA_DIR is set but does not exist. Set and
+            wrong is a mistake worth reporting; unset is a supported default.
+    """
+    env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
+    if not env_data_dir:
+        return Path(__file__).parent / "data"
+
+    base_path = Path(env_data_dir).expanduser()
+    if not base_path.exists():
+        raise ValueError(
+            f"KREWLYZER_DATA_DIR does not exist: {env_data_dir}\n"
+            f"Clone data with: git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data && cd ~/.krewlyzer-data && git lfs pull"
+        )
+    logger.info(f"Using external data directory: {base_path}")
+    return base_path
+
+
 class AssetManager:
     """
     Manages access to bundled data assets for specific genomes.
@@ -47,19 +82,9 @@ class AssetManager:
                 f"Unsupported genome: {genome}. Must be hg19/GRCh37 or hg38/GRCh38."
             )
 
-        # Check KREWLYZER_DATA_DIR env var first (for pip install + external data clone)
-        # Then fall back to bundled data (for editable install or Docker)
-        env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
-        if env_data_dir:
-            self.base_path = Path(env_data_dir).expanduser()
-            if not self.base_path.exists():
-                raise ValueError(
-                    f"KREWLYZER_DATA_DIR does not exist: {env_data_dir}\n"
-                    f"Clone data with: git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data && cd ~/.krewlyzer-data && git lfs pull"
-                )
-            logger.info(f"Using external data directory: {self.base_path}")
-        else:
-            self.base_path = Path(__file__).parent / "data"
+        # KREWLYZER_DATA_DIR first, then the bundled copy. One rule, shared
+        # with the other resolvers -- see bundled_data_dir above.
+        self.base_path = bundled_data_dir()
 
     def _get_path(self, category_dir: str, filename: str) -> Path:
         path = self.base_path / category_dir / self.genome_dir / filename

@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from conftest import is_hydrated
+
 import pandas as pd
 import pytest
 
@@ -27,10 +29,17 @@ from krewlyzer.validate.pon_gate import MIN_SAMPLES, check_pon, describe, exit_c
 
 pytestmark = pytest.mark.unit
 
+# Filtered on hydration, not just on the glob. Without LFS these paths still
+# match -- as 130-byte pointers -- so an unfiltered glob would hand `check_pon`
+# a text stub. CI's tier-2 job runs scripts/verify_lfs_objects.py before pytest,
+# so a genuinely-missing object fails the job there rather than emptying this
+# list and skipping quietly.
 _SHIPPED = sorted(
-    (Path(__file__).resolve().parents[2] / "src/krewlyzer/data/pon/GRCh37").glob(
-        "*/*.pon.parquet"
-    )
+    p
+    for p in (
+        Path(__file__).resolve().parents[2] / "src/krewlyzer/data/pon/GRCh37"
+    ).glob("*/*.pon.parquet")
+    if is_hydrated(p)
 )
 
 

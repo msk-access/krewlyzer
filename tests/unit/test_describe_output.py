@@ -15,11 +15,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
 
 from krewlyzer.validate.describe import (
+    markdown_renderer_available,
+    render_html_page,
     REDACTED,
     _column_facts,
     describe_sample,
@@ -221,3 +224,73 @@ def test_a_numeric_measurement_still_reports_its_range():
     facts = _column_facts(pd.Series([0.1, 0.9]), "short_long_log2", {})
     assert facts.minimum == pytest.approx(0.1)
     assert facts.maximum == pytest.approx(0.9)
+
+
+# ---------------------------------------------------------------------------
+# `-o page.html` must produce HTML, or say why it did not
+# ---------------------------------------------------------------------------
+
+
+class _NoMarkdown:
+    """Meta-path hook that makes `import markdown` fail, as a real install does."""
+
+    def find_module(self, name, path=None):
+        return self if name == "markdown" else None
+
+    def load_module(self, name):
+        raise ImportError("markdown is not installed")
+
+
+@pytest.fixture
+def without_markdown(monkeypatch):
+    import sys
+
+    monkeypatch.delitem(sys.modules, "markdown", raising=False)
+    monkeypatch.setattr(sys, "meta_path", [_NoMarkdown(), *sys.meta_path])
+
+
+_REPORT = SimpleNamespace(sample_id="P-0000000")
+_MARKDOWN = "## Heading\n\n| col | type |\n|---|---|\n| a | int |\n"
+_BANNER = '<p class="krw-notice"'
+
+
+def test_html_output_is_actually_rendered(request):
+    """The point of `-o page.html`: tables as tables, not as pipes.
+
+    `markdown` is declared in the `report` extra, so this is the supported
+    path. It was declared nowhere at all, which is why every install silently
+    took the fallback below.
+    """
+    pytest.importorskip("markdown")
+    page = render_html_page(_REPORT, _MARKDOWN)
+
+    assert "<tbody>" in page, "the Markdown table did not become an HTML table"
+    assert "<h2" in page
+    assert "|---|---|" not in page, "raw Markdown leaked into the rendered page"
+    assert _BANNER not in page, "the missing-renderer banner must not appear"
+
+
+def test_without_the_renderer_the_page_says_so(without_markdown):
+    """A silent fallback is the whole defect, not the fallback itself.
+
+    Asking for `.html` and getting Markdown is confusing precisely because the
+    file *is* valid HTML -- doctype, head, styles -- so nothing looks wrong
+    except the contents. `krewlyzer report` states in each chart when plotly is
+    absent; this now does the same.
+    """
+    page = render_html_page(_REPORT, _MARKDOWN)
+
+    assert "<pre>" in page, "expected the escaped-source fallback"
+    assert "<tbody>" not in page
+    assert _BANNER in page, "the fallback must announce itself in the page"
+    assert "krewlyzer[report]" in page, "and must say how to fix it"
+
+
+def test_the_predicate_agrees_with_what_the_page_contains(without_markdown):
+    """One predicate drives both the page and the CLI warning.
+
+    Two independent try/except blocks could disagree, and then the CLI would
+    promise rendered HTML while the file held a <pre>.
+    """
+    assert markdown_renderer_available() is False
+    assert _BANNER in render_html_page(_REPORT, _MARKDOWN)

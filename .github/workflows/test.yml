@@ -16,13 +16,102 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Whether the bundled data itself moved. Deliberately narrower than the
+  # `full-assets` trigger: that one also fires on the build scripts and the
+  # asset tests, because those can invalidate a *conclusion*. This one asks a
+  # different question -- can tier 1 trust the release image? -- and only a
+  # change to the bytes under src/krewlyzer/data can answer it no. Editing a
+  # test file leaves the image perfectly valid.
+  #
+  # Its own job so `test` can be skipped outright rather than run degraded. A
+  # checkout without LFS leaves 130-byte pointers, not absent files, and the
+  # suite has guards that pass on a pointer and then die inside a reader
+  # ("Parquet magic bytes not found in footer"). Measured: 11 failed, 3 errors
+  # across 7 files in that state. On the rare PR that does change the data,
+  # `full-assets` runs the whole suite against real LFS, so a degraded tier 1
+  # would add nothing but noise.
+  #
+  # Asks the API rather than diffing, so the checkout stays shallow --
+  # `.git/objects` is 191 MB and fetch-depth: 0 would pay that every run.
+  detect:
+    name: Did the bundled data change?
+    runs-on: ubuntu-latest
+    outputs:
+      data_changed: ${{ steps.check.outputs.data_changed }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          case "${{ github.event_name }}" in
+            pull_request)
+              files=$(gh api --paginate \
+                "repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files" \
+                --jq '.[].filename') ;;
+            push)
+              before="${{ github.event.before }}"
+              if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+                files=""
+              else
+                files=$(gh api \
+                  "repos/${{ github.repository }}/compare/${before}...${{ github.sha }}" \
+                  --jq '.files[].filename') ;
+              fi ;;
+            *) files="" ;;
+          esac
+          # No diff context (workflow_dispatch, a new branch) falls through to
+          # "unchanged" deliberately: the image is hash-verified either way, so
+          # the worst case is a loud failure, never silently wrong bytes.
+          if printf '%s\n' "$files" | grep -q '^src/krewlyzer/data/'; then
+            echo "data_changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::src/krewlyzer/data changed, so the release image is stale by definition. The unit-test job stands down and the full-assets workflow checks this against real LFS."
+          else
+            echo "data_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
+    needs: detect
+    # Skipped, not silently degraded, when the data moved -- `full-assets` is
+    # the gate for those. NOTE: a skipped job is not a passed job for branch
+    # protection; if `test` is required, make `full-assets` required too, or
+    # neither.
+    if: needs.detect.outputs.data_changed == 'false'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true  # Required for data files in src/krewlyzer/data/
+          # Never LFS here. This job only runs when the data is unchanged
+          # (see the `detect` job), so the pinned release image carries the
+          # same bytes -- and proves it in the verify step below.
+          # .github/data-image.txt explains why an image at all.
+          lfs: false
+
+      - name: Fetch the bundled data from the pinned release image
+        run: |
+          set -euo pipefail
+          digest=$(grep -v '^#' .github/data-image.txt | tr -d '[:space:]')
+          [ -n "$digest" ] || { echo "::error::.github/data-image.txt has no digest"; exit 1; }
+          image="ghcr.io/msk-access/krewlyzer@${digest}"
+          if ! docker pull -q "$image"; then
+            echo "::error::Could not pull ${image}. If this is a fork, or the \
+          package was retagged, the pin in .github/data-image.txt needs updating."
+            exit 1
+          fi
+          cid=$(docker create "$image")
+          trap 'docker rm -f "$cid" >/dev/null 2>&1 || true' EXIT
+          # Path is fixed by Dockerfile:53. If that COPY ever moves or is
+          # dropped, this fails here rather than testing an empty directory.
+          docker cp "${cid}:/usr/local/lib/python3.10/site-packages/krewlyzer/data/." \
+                    src/krewlyzer/data/
+
+      # Proves the extracted bytes are the ones git recorded, by hashing each
+      # tracked file against the oid in its LFS pointer. This is what makes the
+      # image a transport rather than a second source of truth.
+      - name: Verify the bundled data against the LFS pointers
+        run: python3 scripts/verify_lfs_objects.py
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -40,6 +129,20 @@ jobs:
           source .venv/bin/activate
           uv pip install .[test]
       - name: Run unit tests
+        env:
+          # Unconditional here: this job only runs with verified assets in
+          # place, so the integrity tests must run. The marker keys on being
+          # asked for the assets rather than on their happening to be present
+          # (conftest.requires_full_assets), so if the fetch above had somehow
+          # produced nothing these fail rather than skipping green.
+          KREWLYZER_FULL_ASSETS: '1'
+          # The wheel excludes data/ (PyPI's 100 MB limit), so the *installed*
+          # package has none and `AssetManager` would resolve into an empty
+          # site-packages/krewlyzer/data. Point it at the checkout, where the
+          # step above put the verified copy. This is the documented override
+          # for pip installs (README, "pip + Data Clone") and assets.py:52
+          # checks it before anything else -- not a test-only hack.
+          KREWLYZER_DATA_DIR: ${{ github.workspace }}/src/krewlyzer/data
         run: |
           source .venv/bin/activate
           uv pip list
@@ -92,7 +195,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true
+          # No LFS. Proven empirically, not assumed: with src/krewlyzer/data
+          # renamed away, `cargo test --lib` passes all 112 tests and every lint
+          # check is clean. The Rust sources reference the data directory
+          # nowhere, and their test fixtures are synthetic names written into
+          # tempdirs.
+          #
+          # It matters because the bundled data is 643 MB across 44 objects and
+          # three jobs were each pulling it. On 2026-08-17 the download quota ran
+          # out and every job failed at Checkout, before running anything:
+          #     error: failed to fetch some objects from '.../info/lfs'
+          # Only the `test` job genuinely needs it.
+          lfs: false
 
       # pyo3 builds against whatever interpreter it finds, and the macOS runner
       # ships one newer than pyo3 0.23 supports ("configured Python interpreter
@@ -162,7 +276,18 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          lfs: true
+          # No LFS. Proven empirically, not assumed: with src/krewlyzer/data
+          # renamed away, `cargo test --lib` passes all 112 tests and every lint
+          # check is clean. The Rust sources reference the data directory
+          # nowhere, and their test fixtures are synthetic names written into
+          # tempdirs.
+          #
+          # It matters because the bundled data is 643 MB across 44 objects and
+          # three jobs were each pulling it. On 2026-08-17 the download quota ran
+          # out and every job failed at Checkout, before running anything:
+          #     error: failed to fetch some objects from '.../info/lfs'
+          # Only the `test` job genuinely needs it.
+          lfs: false
 
       - name: Set up Python
         uses: actions/setup-python@v6

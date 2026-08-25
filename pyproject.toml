@@ -1,6 +1,6 @@
 [project]
 name = "krewlyzer"
-version = "0.9.1"
+version = "0.9.2"
 description = "Feature extraction tools for circulating tumor DNA from GRCh37 aligned BAM files"
 authors = [{name = "Ronak Shah", email = "shahr2@mskcc.org"}]
 requires-python = ">=3.10"
@@ -24,13 +24,44 @@ test = [
     "pytest>=7.0.0",
     "pytest-mock>=3.10.0",
     # `krewlyzer report` is exercised end to end by tests/unit/test_report.py.
-    "plotly>=5.18.0"
+    "plotly>=5.18.0",
+    # tests/unit/test_optional_dependencies.py reads this file. requires-python
+    # is >=3.10 and tomllib only arrives in 3.11, so on 3.10 -- which is what
+    # CI runs -- the parser has to be installed. Without it that test would
+    # skip on the one interpreter that matters.
+    "tomli>=2.0; python_version < '3.11'"
 ]
-# `krewlyzer report` only. Kept out of the core install because a pipeline that
-# never renders a report should not carry a plotting stack; without it the
-# command still runs and every chart states that it is missing.
+# Human-readable output: `krewlyzer report`, and the HTML form of
+# `krewlyzer describe-output -o page.html`. Kept out of the core install
+# because a pipeline that never renders either should not carry a plotting
+# stack; without it both commands still run and both say what is missing.
+#
+# `markdown` was previously imported by describe.py and declared nowhere at
+# all, so no install could satisfy it -- `-o page.html` wrote a valid HTML
+# document whose body was the raw Markdown in a <pre>, and said nothing.
 report = [
-    "plotly>=5.18.0"
+    "plotly>=5.18.0",
+    "markdown>=3.4"
+]
+# Everything the *tool* can optionally do, in one target. Deliberately not
+# "every group in this file": `docs`, `test` and `dev` are contributor
+# tooling, and a user asking for full functionality should not receive
+# mkdocs-material and mypy. Contributors want `[dev]`.
+#
+# Self-referencing rather than restating `report`'s contents, so the two cannot
+# drift apart. `tests/unit/test_optional_dependencies.py` asserts both that
+# this covers every runtime extra and -- the reason it exists -- that every
+# optional import in the source is declared *somewhere*. Two were not:
+# `markdown`, which made `describe-output -o page.html` emit unrendered
+# Markdown, and `psutil` below.
+all = [
+    "krewlyzer[report]",
+    # Sharpens available-memory detection in core/resource_utils.py. It has no
+    # extra of its own because it is a last resort there, tried after
+    # /proc/meminfo and followed by a conservative fallback, so its absence
+    # degrades a number rather than losing a feature. It belongs in `all`
+    # regardless: `all` means every optional capability, including this one.
+    "psutil>=5.9"
 ]
 dev = [
     "pytest>=7.0.0",

@@ -314,7 +314,11 @@ def describe_output(
         None,
         "--output",
         "-o",
-        help="Write Markdown here instead of stdout. A .html suffix renders HTML.",
+        help=(
+            "Write Markdown here instead of stdout. A .html suffix renders "
+            "HTML, which needs the `markdown` package: pip install "
+            "'krewlyzer[report]'."
+        ),
     ),
 ) -> None:
     """Describe what a sample's output files contain.
@@ -325,7 +329,12 @@ def describe_output(
     gated comes from the output contract. Nothing about the biology is
     restated, so this cannot drift from the reference documentation.
     """
-    from .describe import describe_sample, render_html_page, render_markdown
+    from .describe import (
+        describe_sample,
+        markdown_renderer_available,
+        render_html_page,
+        render_markdown,
+    )
 
     report_obj = describe_sample(sample_dir, sample_id)
     markdown = render_markdown(report_obj)
@@ -333,6 +342,16 @@ def describe_output(
     if output is None:
         print(markdown)
     elif output.suffix.lower() in (".html", ".htm"):
+        # Say it before claiming success. Asking for .html and receiving a page
+        # of raw Markdown is confusing precisely because the file *is* HTML --
+        # nothing about it looks wrong except the contents.
+        if not markdown_renderer_available():
+            console.print(
+                "[yellow]warning[/yellow] the `markdown` package is not "
+                "installed, so the page will contain the Markdown source "
+                "rather than rendered HTML.\n"
+                "          install it with: pip install 'krewlyzer[report]'"
+            )
         output.write_text(render_html_page(report_obj, markdown), encoding="utf-8")
         console.print(f"[green]wrote[/green] {output}")
     else:

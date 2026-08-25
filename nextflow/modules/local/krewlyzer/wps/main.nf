@@ -11,7 +11,7 @@
 process KREWLYZER_WPS {
     tag "$meta.id"
     label 'process_medium'
-    container "ghcr.io/msk-access/krewlyzer:0.9.1"
+    container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
     tuple val(meta), path(bed)
@@ -77,7 +77,7 @@ process KREWLYZER_WPS {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.3
+        krewlyzer: 0.9.2
     END_VERSIONS
     """
 }

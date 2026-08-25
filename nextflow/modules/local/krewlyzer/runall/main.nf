@@ -15,7 +15,7 @@ process KREWLYZER_RUNALL {
     tag "$meta.id"
     label 'process_high'
 
-    container "ghcr.io/msk-access/krewlyzer:0.9.1"
+    container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     // `path: { ... }`, not a bare string. A directive string is evaluated when
     // the process is DEFINED, and `meta` only exists once a task is created --
@@ -311,7 +311,7 @@ process KREWLYZER_RUNALL {
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":
-        krewlyzer: 0.8.3
+        krewlyzer: 0.9.2
     END_VERSIONS
     """
 }

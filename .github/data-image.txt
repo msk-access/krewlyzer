@@ -1,0 +1,35 @@
+# The release image CI reads src/krewlyzer/data out of, pinned by digest.
+#
+# Why an image at all: the bundled data is 44 LFS objects and 674 MB, and
+# `actions/checkout` fetches LFS before any step can cache it, so every push
+# re-downloaded the lot. That exhausted the org's LFS budget on 2026-08-17 and
+# took every CI job down at Checkout. `Dockerfile:53` already copies this same
+# data into the release image, and a GHCR pull of a public package does not
+# touch the LFS budget. The pull-and-extract takes 16s, measured.
+#
+# Why a digest and not `:latest`: a tag is mutable. Pinned to `:latest`, CI's
+# test data would move under every release, and re-running an old commit's CI
+# could use different bytes than the original run. A digest is content-
+# addressed, so a rerun is a rerun.
+#
+# Why this is not circular, and cannot go stale unnoticed: the image is a
+# transport, not a source of truth. An LFS pointer records the sha256 of the
+# object it stands for, and the pointers are in git even when the objects are
+# not, so `scripts/verify_lfs_objects.py` proves the extracted bytes are what
+# git says they must be. If the pin drifts from the assets on the branch, that
+# check fails loudly rather than testing yesterday's data. CI additionally
+# refuses to use the image at all on any change that touches the assets --
+# those go to the `full-assets` workflow, which pulls real LFS.
+#
+# Updating: bump this after a release that changed src/krewlyzer/data/**, per
+# docs/development/release-guide.md. Forgetting is safe while the data is
+# unchanged, and self-announcing once it is not.
+#
+# Resolve a digest with:
+#   TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:msk-access/krewlyzer:pull" | jq -r .token)
+#   curl -sI -H "Authorization: Bearer $TOKEN" \
+#     -H "Accept: application/vnd.oci.image.index.v1+json" \
+#     https://ghcr.io/v2/msk-access/krewlyzer/manifests/<tag> | grep -i docker-content-digest
+#
+# 0.9.1
+sha256:3bebb3dc09295fb0bc0e791c6b072488fe42ccfaa48a9637b1bb9dfed5c347ca

@@ -9,6 +9,8 @@ Tests that require bundled data files use DATA_AVAILABLE to skip in PyPI install
 For full test coverage, use: git clone + pip install -e .
 """
 
+import os
+
 import pytest
 from pathlib import Path
 import pysam
@@ -19,31 +21,111 @@ import gzip
 # =============================================================================
 
 
-def _check_data_available():
-    """
-    Check if bundled data is available in the installed package.
+#: The first bytes of a Git LFS pointer file.
+_LFS_POINTER_PREFIX = b"version https://git-lfs"
 
-    In CI: git checkout has data, but pip install . creates wheel without data.
-    Tests run from checkout but imports come from installed package.
-    So we must check the INSTALLED package path, not source.
+
+def is_hydrated(path) -> bool:
+    """True when ``path`` is the real file and not an unfetched LFS pointer.
+
+    ``Path.exists()`` is not enough for anything under ``src/krewlyzer/data``.
+    A checkout that skipped LFS leaves a ~130-byte text stub at every one of
+    those paths, so an existence guard passes and the failure arrives much
+    later and much less legibly -- ``Parquet magic bytes not found in footer``
+    from inside pyarrow, or ``Not a gzipped file`` from inside a reader.
+
+    That is not hypothetical: CI never saw it while every job fetched LFS, and
+    it appeared the moment tier 1 stopped. ``tests/invariants/synth.py`` builds
+    its own assets specifically to avoid this, and its docstring states the
+    rule -- "a test that silently needs them is a test that silently skips".
+
+    Use this for any guard on a file under ``src/krewlyzer/data``. Guards on
+    ``tests/data/fixtures`` do not need it: those are ordinary git blobs.
     """
+    p = Path(path)
+    if not p.is_file():
+        return False
+    with p.open("rb") as handle:
+        return handle.read(len(_LFS_POINTER_PREFIX)) != _LFS_POINTER_PREFIX
+
+
+#: A file every bundled-data layout has, used to prove the directory is real.
+_SENTINEL_ASSET = Path("genes") / "GRCh37" / "xs1.genes.bed.gz"
+
+
+def _resolve_data_dir():
+    """Where the runtime will actually look for bundled data.
+
+    Mirrors ``AssetManager`` (``src/krewlyzer/assets.py``): ``KREWLYZER_DATA_DIR``
+    wins, and only failing that does it fall back to the installed package's
+    ``data/``. Kept deliberately in step, because when the two disagree the
+    tests skip while the code under test finds its files perfectly well -- which
+    is exactly what happened: the wheel excludes ``data/`` to stay under PyPI's
+    100 MB limit, so CI's installed package has none, and these tests had never
+    run there even once the checkout carried the real assets.
+    """
+    env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
+    if env_data_dir:
+        return Path(env_data_dir).expanduser()
     try:
         import krewlyzer
-
-        pkg_path = Path(krewlyzer.__file__).parent
-        data_dir = pkg_path / "data"
-        # Check if data directory and at least one key asset exist
-        return data_dir.exists() and (data_dir / "genes").exists()
     except ImportError:
+        return None
+    return Path(krewlyzer.__file__).parent / "data"
+
+
+def _check_data_available():
+    """True when the bundled data is present *and* actually fetched.
+
+    The old check was ``data_dir.exists() and (data_dir / "genes").exists()``,
+    both directories -- and a directory full of unfetched Git LFS pointers
+    exists just as happily as a real one. Hence the sentinel file: it is the
+    difference between "the layout is there" and "the bytes are there".
+    """
+    data_dir = _resolve_data_dir()
+    if data_dir is None or not data_dir.is_dir():
         return False
+    return is_hydrated(data_dir / _SENTINEL_ASSET)
 
 
 DATA_AVAILABLE = _check_data_available()
+
 
 # Marker for tests that require bundled data
 requires_data = pytest.mark.skipif(
     not DATA_AVAILABLE,
     reason="Bundled data not available (PyPI install). Use git clone + pip install -e .",
+)
+
+
+# =============================================================================
+# Asset-integrity tests: demanded, not merely available
+# =============================================================================
+#
+# `requires_data` keys on *presence*, which is right for "can the runtime load
+# an asset" but wrong for "is the shipped asset correct". A presence-keyed skip
+# means a job where the data silently failed to arrive reports green with the
+# checks that matter never having run -- the exact failure mode invariant #1
+# describes, one level up: a gate that cannot fail is worse than no gate.
+#
+# So this marker keys on the caller *asking* for the real assets. A job that
+# sets KREWLYZER_FULL_ASSETS=1 and then cannot supply them gets a red test, not
+# a skip, because the tests themselves assert the files are present and are not
+# LFS pointers (see test_gene_bed_assets.py). Unset, the tests skip, which is
+# correct for a run that was never going to have the assets in the first place.
+#
+# CI sets it in two places: the tier-1 job once the bundled data has been
+# recovered from the pinned release image and hash-verified against the LFS
+# pointers, and the tier-2 `full-assets` job, which pulls real LFS and runs on
+# any change to the assets, their build scripts, or these tests.
+FULL_ASSETS = os.environ.get("KREWLYZER_FULL_ASSETS") == "1"
+
+requires_full_assets = pytest.mark.skipif(
+    not FULL_ASSETS,
+    reason=(
+        "asset-integrity tests run only against the real bundled assets; "
+        "set KREWLYZER_FULL_ASSETS=1 (CI does this once the assets are verified)"
+    ),
 )
 
 
