@@ -744,6 +744,22 @@ def gene_level_mds(mds_gene: Optional[pd.DataFrame]) -> Chart:
     return Chart(suffix, title, caption + " Lowest 25 genes by mean.", fig)
 
 
+#: Base pairs per stored WPS bin.
+#:
+#: Every WPS profile in the output -- foreground anchors, panel anchors and the
+#: Alu background -- is 200 bins over a 2000 bp window (`rust/src/wps.rs`:
+#: `NUM_BINS`, `WINDOW_SIZE`, and "2000bp profile / 10bp bins = 200 bins" for
+#: the background). The plots below used the bin index directly as the x value
+#: while labelling the axis "bp", which understated every distance tenfold: a
+#: TSS dip at bin +15 read as +15 bp when it is +150 bp, and a +-1000 bp window
+#: read as +-100 bp.
+#:
+#: Pinned in `validate/claims.py` against the Rust constants, so a change to
+#: the window or the bin count fails a test rather than silently rescaling
+#: every WPS figure.
+WPS_BIN_BP = 10
+
+
 def nucleosome_profile(bg: Optional[pd.DataFrame]) -> Chart:
     """Act 3 — reinstated. Every derived WPS metric was constant before 0.9.0."""
     suffix, title = ".WPS_background.parquet", "Nucleosome protection over Alu"
@@ -771,7 +787,7 @@ def nucleosome_profile(bg: Optional[pd.DataFrame]) -> Chart:
 
     profile = list(row["stacked_wps_nuc"])
     centre = len(profile) // 2
-    x = list(range(-centre, len(profile) - centre))
+    x = [(i - centre) * WPS_BIN_BP for i in range(len(profile))]
     group = str(row.get("group_id", "Alu"))
 
     fig = go.Figure(
@@ -913,20 +929,79 @@ def fsd_region_heatmap(fsd: Optional[pd.DataFrame]) -> Chart:
     return Chart(suffix, title, caption, fig)
 
 
-def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
-    """Act 3.1 — the foreground WPS profile, averaged over anchors.
+def _translucent(hex_colour: str, alpha: float) -> str:
+    """`#ef5552` -> `rgba(239,85,82,0.15)`.
 
-    The audit withdrew every *derived* WPS metric because each was constant.
-    The stacking itself was always sound, and this is the panel that was
-    explicitly still worth plotting.
+    Plotly rejects 8-digit hex outright, so the alpha has to be carried in
+    rgba() rather than appended to the colour constant.
     """
-    suffix, title = ".WPS.parquet", "Protection around TSS and CTCF"
-    caption = (
-        "Windowed protection score averaged across anchors, by anchor type. A "
-        "positioned nucleosome shields the DNA beneath it, so the dip at the "
-        "anchor traces the nucleosome-depleted region at an active promoter, "
-        "and the flanking ridges are the nucleosomes either side of it."
+    h = hex_colour.lstrip("#")
+    r, g, b = (int(h[i : i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def _capture_note(frame: "pd.DataFrame") -> str:
+    """State how much of the profile sits on capture bait, and per anchor.
+
+    `capture_mask` is 1 only for bins inside a bait and away from its edges
+    (`rust/src/wps.rs`). Nothing in the Python package read it before this.
+
+    Reported per *anchor* as well as per bin, because the bin fraction alone
+    misleads in both directions. A WPS window is 2000 bp and a bait is of order
+    100 bp, so even a perfectly bait-centred anchor can only ever have a small
+    minority of its bins captured -- on one XS2 sample the best anchor reached
+    103 bins of 200 and the median among capturing anchors was 7. A low bin
+    percentage is therefore the expected geometry, not evidence that the
+    anchors were badly chosen, and an earlier draft of this note said "not the
+    assay's intended capture", which was simply wrong for the panel set: those
+    anchors are exactly what the assay targets.
+
+    What the anchor count does distinguish is real. On that sample 5 of 166
+    panel anchors touched a bait against 33 of 58,522 genome-wide -- the panel
+    set is some thirty times more bait-proximal, and both curves still rest
+    mostly on off-target coverage.
+
+    Returns "" when the column is absent, and when every position is captured:
+    a WGS run has no baits, so the whole notion does not apply and a note would
+    be noise.
+    """
+    if "capture_mask" not in getattr(frame, "columns", []):
+        return ""
+    import numpy as np
+
+    masks = [np.asarray(m, dtype=float) for m in frame["capture_mask"] if m is not None]
+    if not masks:
+        return ""
+    stacked = np.vstack(masks)
+    n_bins, n_total = int(stacked.sum()), int(stacked.size)
+    if n_bins == n_total:
+        return ""
+    n_anchors = int((stacked.sum(axis=1) > 0).sum())
+
+    # Counts, not a bare percentage: 506 of 11,704,400 renders as "0.00%" under
+    # every fixed-decimal format and then reads as rounding rather than a fact.
+    pct = 100.0 * n_bins / n_total if n_total else 0.0
+    # States what was measured and the geometry that produced it, and stops
+    # there. An earlier draft ended "read this as a fragmentomic profile, not a
+    # targeted measurement", which is a verdict on usability -- not this
+    # toolkit's call to make. Measure it, report what it rests on, and let the
+    # reader and the downstream consumer decide what it supports.
+    return (
+        f" Bait coverage: {n_anchors:,} of {len(stacked):,} anchors have any "
+        f"bait-covered position, {n_bins:,} of {n_total:,} bins ({pct:.3g}%). "
+        "A WPS window spans 2000 bp and a capture bait is typically far "
+        "narrower, so most of the window lies outside bait regardless."
     )
+
+
+def _anchor_profile_chart(
+    wps: "Optional[pd.DataFrame]", suffix: str, title: str, caption: str
+) -> Chart:
+    """Mean WPS around anchors, grouped by `region_type`.
+
+    Shared by the genome-wide and panel anchor sets: same columns, same
+    binning, same degeneracy rule, so a fix to one is a fix to both.
+    """
     go = _plotly()
     if go is None:
         return _no(suffix, title, caption, _NO_PLOTLY)
@@ -934,6 +1009,8 @@ def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
         return _no(suffix, title, caption, "WPS absent")
 
     import numpy as np
+
+    caption += _capture_note(wps)
 
     groups = (
         wps.groupby("region_type") if "region_type" in wps.columns else [("all", wps)]
@@ -954,15 +1031,37 @@ def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
         if np.allclose(mean, mean[0]):
             continue
         centre = len(mean) // 2
+        x = [(j - centre) * WPS_BIN_BP for j in range(len(mean))]
+
+        # A +-1 SEM band, so the reader can see how much the mean is worth
+        # instead of being told. It is the difference between a curve over
+        # 34,851 anchors and one over 105, and describing that in prose invites
+        # the caption to draw the conclusion for them.
+        if len(stacked) > 1:
+            sem = np.nanstd(stacked, axis=0, ddof=1) / np.sqrt(len(stacked))
+            fig.add_trace(
+                go.Scatter(
+                    x=x + x[::-1],
+                    y=list(mean + sem) + list((mean - sem)[::-1]),
+                    fill="toself",
+                    fillcolor=_translucent(ACCENT if i == 0 else OPPOSE, 0.15),
+                    line=dict(width=0),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name=f"{str(name)} +-1 SEM",
+                )
+            )
         fig.add_trace(
             go.Scatter(
-                x=list(range(-centre, len(mean) - centre)),
+                x=x,
                 y=mean,
                 mode="lines",
-                name=str(name),
+                # str() first, here as in the tooltip below: the groupby key
+                # is Any, and interpolating bytes renders b'TSS'. The tooltip
+                # already did this; the legend was added later and repeated
+                # the mistake the comment was written about.
+                name=f"{str(name)} (n={len(stacked)})",
                 line=dict(color=ACCENT if i == 0 else OPPOSE, width=1.8),
-                # str() first: the groupby key is Any, and interpolating
-                # bytes would render b'TSS' in the tooltip.
                 hovertemplate=(
                     f"{str(name)}<br>%{{x}} bp<br>WPS %{{y:.2f}}<extra></extra>"
                 ),
@@ -991,6 +1090,46 @@ def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
         ),
     )
     return Chart(suffix, title, caption, fig)
+
+
+def wps_anchor_profile(wps: Optional[pd.DataFrame]) -> Chart:
+    """Act 3.1 — the foreground WPS profile, averaged over anchors.
+
+    The audit withdrew every *derived* WPS metric because each was constant.
+    The stacking itself was always sound, and this is the panel that was
+    explicitly still worth plotting.
+    """
+    return _anchor_profile_chart(
+        wps,
+        ".WPS.parquet",
+        "Protection around TSS and CTCF",
+        "Windowed protection score averaged across genome-wide anchors, by "
+        "anchor type. A positioned nucleosome shields the DNA beneath it, so "
+        "the dip at the anchor traces the nucleosome-depleted region at an "
+        "active promoter, and the flanking ridges are the nucleosomes either "
+        "side of it.",
+    )
+
+
+def wps_panel_profile(wps: Optional[pd.DataFrame]) -> Chart:
+    """The same profile over the panel's own anchors.
+
+    Worth its own figure rather than a footnote. The genome-wide set is
+    dominated by off-bait positions on a targeted assay, so its curve is an
+    off-target readout; these anchors are the ones the panel was designed
+    around, and on the sample this was written against they carry far more
+    amplitude (262 and 199, against 1.6 and 14.7) from a far smaller n
+    (105 and 61). Two different measurements, and previously only one was
+    plotted while both were written.
+    """
+    return _anchor_profile_chart(
+        wps,
+        ".WPS.panel.parquet",
+        "Protection around the panel's anchors",
+        "As the genome-wide profile, but over the anchors the panel targets. "
+        "Far fewer anchors, so the mean is noisier, but they are the positions "
+        "the assay was designed to cover.",
+    )
 
 
 def gc_correction_curve(factors: Optional[pd.DataFrame]) -> Chart:
@@ -1101,6 +1240,7 @@ def build_charts(tables: Dict) -> List[Chart]:
         # Act 3 -- nucleosome positioning. Withdrawn from earlier reporting
         # because every derived metric was constant; reinstated in 0.9.0.
         wps_anchor_profile(g(".WPS.parquet")),
+        wps_panel_profile(g(".WPS.panel.parquet")),
         nucleosome_profile(g(".WPS_background.parquet")),
         # Act 4 -- tissue and accessibility
         tissue_shedding(ocf_suffix, ocf),
