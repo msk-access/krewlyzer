@@ -44,6 +44,36 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`capture_mask` was computed against one chromosome's baits, for every
+  chromosome.** Neither call site in `rust/src/wps.rs` supplied the region's
+  chromosome: one hardcoded `0u32` under a comment reading "Simplified - need
+  proper chrom_id lookup", the other used `*self.trees.keys().find(|_| true)`,
+  an arbitrary key from HashMap iteration order and so not even deterministic.
+  Every position on every chromosome was tested against whichever chromosome
+  that resolved to.
+
+  Measured on an XS2 sample: of 33 genome-wide anchors flagged as captured,
+  **all 33** overlapped a chr1 bait while only the 9 that were themselves on
+  chr1 overlapped a bait on their own chromosome — of the 24 elsewhere, zero
+  did. In the panel table all 5 flagged anchors were on chr1, and all 5 chr1
+  anchors were flagged. The mask produced both false negatives (real on-bait
+  positions elsewhere marked unreliable) and false positives (off-bait
+  positions colliding with a chr1 bait).
+
+  `BaitMask` is now keyed by normalised chromosome name instead of a numeric
+  id, which deletes the lookup both callers were getting wrong rather than
+  fixing it in two places. Four Rust tests cover it, with baits at
+  deliberately colliding coordinates on different chromosomes; two fail
+  against the old behaviour.
+
+  **Outputs produced before this fix carry the wrong mask.** No feature value
+  is affected — nothing else read the column — but any bait-coverage figure
+  derived from it understates real coverage for anchors off chr1. Re-run WPS
+  to correct it.
+
+  The bait-coverage line described in the next entry is computed from this
+  column, so on pre-fix outputs it reports the wrong figure.
+
 - **WPS figures plotted bin index but labelled the axis "bp".** Every WPS
   profile is 200 bins of 10 bp over a 2000 bp window (`rust/src/wps.rs`), and
   all three panels used the bin number directly as the x value. Distances read
