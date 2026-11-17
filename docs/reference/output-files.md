@@ -539,7 +539,7 @@ Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene 
 | `capture_mask` | list[int8] | Per-position flag for panel capture overlap |
 | `prot_frac_nuc` | list[float] | Per-position protected fraction, nucleosomal |
 | `prot_frac_tf` | list[float] | Per-position protected fraction, TF |
-| `local_depth` | float | Mean coverage at the anchor |
+| `local_depth` | float | Weighted mean coverage over the anchor window |
 
 **With `--pon-model`, seven more.** Absent from a `--skip-pon` run, and absent
 per anchor when that anchor is not in the PON — `null` rather than `0.0`, since
