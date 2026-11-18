@@ -547,6 +547,72 @@ impl RegionAccumulator {
     }
 }
 
+/// Add one fragment to a region accumulator, in both streams.
+///
+/// `frag_start`/`frag_end` are the fragment's coordinates exactly as read from
+/// the BED: 0-based, half-open. `region_start` is the genomic position of the
+/// accumulator's index 0. A stream weight of `0.0` means that stream ignores
+/// the fragment; the weights already include the GC factor.
+///
+/// Extracted unchanged from the region loop so that each stream's interval can
+/// be tested on a single fragment (#83). The arithmetic here is the shipped
+/// behaviour, not yet the corrected one.
+fn accumulate_fragment(
+    acc: &mut RegionAccumulator,
+    region_start: u64,
+    frag_start: u64,
+    frag_end: u64,
+    nuc_weight: f64,
+    tf_weight: f64,
+    nuc_window: i64,
+    tf_window: i64,
+) {
+    let r_start = region_start as i64;
+    // Fragment coords relative to region
+    let f_start = (frag_start + 1) as i64 - r_start;
+    let f_end = frag_end as i64 - r_start; // exclusive
+
+    // Nucleosome stream (WPS-Nuc). `!= 0.0`, not `> 0.0`: the loop used to test
+    // the length weight alone and then multiply in the GC factor, so a zero,
+    // negative or NaN GC factor still reached these calls. Kept identical.
+    if nuc_weight != 0.0 {
+        let weight = nuc_weight;
+
+        // Coverage: [start, end)
+        RegionAccumulator::add_range(&mut acc.cov_long, f_start, f_end, weight);
+
+        // WPS: protection window from config
+        let p = nuc_window;
+        RegionAccumulator::add_range(&mut acc.wps_long, f_start + p, f_end - p + 1, weight);
+        RegionAccumulator::add_range(&mut acc.wps_long, f_start - p, f_start + p, -weight);
+        RegionAccumulator::add_range(&mut acc.wps_long, f_end - p + 1, f_end + p + 1, -weight);
+
+        // Protection fraction tracking
+        // Spanning: central window [start+p, end-p]
+        RegionAccumulator::add_range(&mut acc.spanning_long, f_start + p, f_end - p + 1, weight);
+        // Endpoints: flanking windows [start-p, start+p) and [end-p, end+p)
+        RegionAccumulator::add_range(&mut acc.endpoints_long, f_start - p, f_start + p, weight);
+        RegionAccumulator::add_range(&mut acc.endpoints_long, f_end - p + 1, f_end + p + 1, weight);
+    }
+
+    // TF stream (WPS-TF)
+    if tf_weight != 0.0 {
+        let weight = tf_weight;
+
+        RegionAccumulator::add_range(&mut acc.cov_short, f_start, f_end, weight);
+
+        let p = tf_window;
+        RegionAccumulator::add_range(&mut acc.wps_short, f_start + p, f_end - p + 1, weight);
+        RegionAccumulator::add_range(&mut acc.wps_short, f_start - p, f_start + p, -weight);
+        RegionAccumulator::add_range(&mut acc.wps_short, f_end - p + 1, f_end + p + 1, -weight);
+
+        // Protection fraction tracking for TF
+        RegionAccumulator::add_range(&mut acc.spanning_short, f_start + p, f_end - p + 1, weight);
+        RegionAccumulator::add_range(&mut acc.endpoints_short, f_start - p, f_start + p, weight);
+        RegionAccumulator::add_range(&mut acc.endpoints_short, f_end - p + 1, f_end + p + 1, weight);
+    }
+}
+
 #[derive(Clone)]
 pub struct WpsConsumer {
     // Shared state
@@ -1228,48 +1294,19 @@ impl FragmentConsumer for WpsConsumer {
                 });
 
                 let region = &self.regions[region_idx];
-                let r_start = region.start as i64;
-                // Fragment coords relative to region
-                let f_start = (fragment.start + 1) as i64 - r_start;
-                let f_end = fragment.end as i64 - r_start; // exclusive
-                
-                // Nucleosome stream (WPS-Nuc)
-                if nuc_len_weight > 0.0 {
-                    let weight = nuc_len_weight * gc_weight;
-                    
-                    // Coverage: [start, end)
-                    RegionAccumulator::add_range(&mut acc.cov_long, f_start, f_end, weight);
-                    
-                    // WPS: protection window from config
-                    let p = self.config.nuc_window;
-                    RegionAccumulator::add_range(&mut acc.wps_long, f_start + p, f_end - p + 1, weight);
-                    RegionAccumulator::add_range(&mut acc.wps_long, f_start - p, f_start + p, -weight);
-                    RegionAccumulator::add_range(&mut acc.wps_long, f_end - p + 1, f_end + p + 1, -weight);
-                    
-                    // Protection fraction tracking
-                    // Spanning: central window [start+p, end-p]
-                    RegionAccumulator::add_range(&mut acc.spanning_long, f_start + p, f_end - p + 1, weight);
-                    // Endpoints: flanking windows [start-p, start+p) and [end-p, end+p)
-                    RegionAccumulator::add_range(&mut acc.endpoints_long, f_start - p, f_start + p, weight);
-                    RegionAccumulator::add_range(&mut acc.endpoints_long, f_end - p + 1, f_end + p + 1, weight);
-                }
-                
-                // TF stream (WPS-TF)
-                if tf_len_weight > 0.0 {
-                    let weight = tf_len_weight * gc_weight;
-                    
-                    RegionAccumulator::add_range(&mut acc.cov_short, f_start, f_end, weight);
-                    
-                    let p = self.config.tf_window;
-                    RegionAccumulator::add_range(&mut acc.wps_short, f_start + p, f_end - p + 1, weight);
-                    RegionAccumulator::add_range(&mut acc.wps_short, f_start - p, f_start + p, -weight);
-                    RegionAccumulator::add_range(&mut acc.wps_short, f_end - p + 1, f_end + p + 1, -weight);
-                    
-                    // Protection fraction tracking for TF
-                    RegionAccumulator::add_range(&mut acc.spanning_short, f_start + p, f_end - p + 1, weight);
-                    RegionAccumulator::add_range(&mut acc.endpoints_short, f_start - p, f_start + p, weight);
-                    RegionAccumulator::add_range(&mut acc.endpoints_short, f_end - p + 1, f_end + p + 1, weight);
-                }
+                // A stream whose length weight is zero ignores the fragment.
+                let nuc_weight = if nuc_len_weight > 0.0 { nuc_len_weight * gc_weight } else { 0.0 };
+                let tf_weight = if tf_len_weight > 0.0 { tf_len_weight * gc_weight } else { 0.0 };
+                accumulate_fragment(
+                    acc,
+                    region.start,
+                    fragment.start,
+                    fragment.end,
+                    nuc_weight,
+                    tf_weight,
+                    self.config.nuc_window,
+                    self.config.tf_window,
+                );
             }
         }
     }
