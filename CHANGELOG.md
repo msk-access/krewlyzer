@@ -81,9 +81,15 @@ All notable changes to this project will be documented in this file.
 
   `test.yml`'s filter is now `'**.md'` instead of `'*.md'`. In a GitHub path
   filter `*` does not cross `/`, so the old pattern matched root-level markdown
-  only and an edit to `.agents/rules/*.md` ran the whole suite. Both workflows
-  also cancel a superseded run of the same PR; pushes to `develop` and `main`
-  are never cancelled.
+  only and an edit to `.agents/rules/*.md` ran the whole suite.
+
+  Both workflows cancel a superseded run of the same PR, and give every branch
+  push a concurrency group of its own (`github.run_id`). One group per branch
+  looked equivalent and was not: GitHub keeps at most one *pending* run per
+  group and a new one cancels it, so three quick pushes to `develop` would
+  have dropped the middle run -- and with each push scanned from its own
+  `before`, nothing would ever have scanned that push. Caught in review on
+  #86; `tests/unit/test_ci_concurrency.py` now pins it.
 
   Not changed, deliberately: a PR's path filter is evaluated against the whole
   PR diff, so resolving a conflict in a PR that changes code still runs the

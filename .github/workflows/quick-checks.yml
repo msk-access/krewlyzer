@@ -35,9 +35,18 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # One run per PR: a newer push supersedes an older one. Pushes to develop and
-  # main are never cancelled -- those runs are the record of what landed.
-  group: quick-${{ github.event.pull_request.number || github.ref }}
+  # PRs: one group per PR, and a newer push cancels the older run. Safe for the
+  # PHI scan, because a PR run scans base.sha..HEAD -- the whole PR -- so the
+  # surviving run covers everything the cancelled one would have.
+  #
+  # Branch pushes: a group of their own (run_id), so no push can ever displace
+  # another. Sharing one group per branch looked equivalent and was not.
+  # GitHub keeps at most one *pending* run per group (`queue: single`) and a
+  # new one cancels it, so three quick pushes to develop dropped the middle
+  # run -- and each push run scans from its own `before`, so nothing ever
+  # scanned that middle push. Found in review on #86. `queue: max` would also
+  # fix it, but cannot be combined with `cancel-in-progress: true`.
+  group: quick-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
