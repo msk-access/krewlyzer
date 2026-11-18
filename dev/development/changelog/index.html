@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -913,6 +913,15 @@
 <nav aria-label="[Unreleased]" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
+<a class="md-nav__link" href="#removed">
+<span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#changed">
 <span class="md-ellipsis">
       
@@ -1042,7 +1051,7 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#removed">
+<a class="md-nav__link" href="#removed_1">
 <span class="md-ellipsis">
       
         Removed
@@ -1838,7 +1847,7 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#removed_1">
+<a class="md-nav__link" href="#removed_2">
 <span class="md-ellipsis">
       
         Removed
@@ -2107,6 +2116,15 @@
 <nav aria-label="[Unreleased]" class="md-nav">
 <ul class="md-nav__list">
 <li class="md-nav__item">
+<a class="md-nav__link" href="#removed">
+<span class="md-ellipsis">
+      
+        Removed
+      
+    </span>
+</a>
+</li>
+<li class="md-nav__item">
 <a class="md-nav__link" href="#changed">
 <span class="md-ellipsis">
       
@@ -2236,7 +2254,7 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#removed">
+<a class="md-nav__link" href="#removed_1">
 <span class="md-ellipsis">
       
         Removed
@@ -3032,7 +3050,7 @@
 </a>
 </li>
 <li class="md-nav__item">
-<a class="md-nav__link" href="#removed_1">
+<a class="md-nav__link" href="#removed_2">
 <span class="md-ellipsis">
       
         Removed
@@ -3212,6 +3230,31 @@
 <h1 id="changelog">Changelog</h1>
 <p>All notable changes to this project will be documented in this file.</p>
 <h2 id="unreleased">[Unreleased]</h2>
+<h3 id="removed">Removed</h3>
+<ul>
+<li><strong><code>statrs</code>, an unused Rust dependency, and the redundant <code>homepage</code> key.</strong>
+  Cargo warned about both on every build of <code>rust/</code>, and a build whose output
+  is always two warnings long is a build nobody reads — the ubuntu-26.04
+  libclang-21 break was found in that noise.</li>
+</ul>
+<p><code>statrs = "0.17"</code> was declared under <code># Numerical</code> and referenced nowhere:
+  <code>grep -rn statrs rust/src/</code> returns nothing, so <code>cargo::unused_dependencies</code>
+  flagged it. It contributed compile time and eleven transitive crates
+  (<code>nalgebra</code>, <code>simba</code>, <code>rand</code>, <code>rand_distr</code>, <code>bytemuck</code>, <code>wide</code>, ...) to
+  every build and nothing to the binary. <code>rust/Cargo.lock</code> loses all twelve.</p>
+<p><code>package.homepage</code> duplicated <code>package.repository</code> verbatim, which
+  <code>cargo::redundant_homepage</code> warns about. One thing did read it, which the
+  obvious check misses: maturin copied it into the wheel's <code>Home-page</code>, so
+  that field is now empty where it used to carry the repository URL. It is the
+  <em>deprecated</em> metadata field, superseded by <code>Project-URL</code> — and
+  <code>[project.urls]</code> in <code>pyproject.toml</code> still emits
+  <code>Project-URL: Homepage, https://github.com/msk-access/krewlyzer</code>, which is
+  what PyPI renders the Homepage link from. So the link survives; only the
+  dead field goes blank. Nothing else read it: the crate is a pyo3
+  <code>extension-module</code> cdylib never published to crates.io, mkdocs has its own
+  <code>repo_url</code>, Nextflow its own <code>homePage</code>, and no test, script or workflow
+  mentions either field. <code>package.repository</code> stays, and is what cargo says is
+  sufficient.</p>
 <h3 id="changed">Changed</h3>
 <ul>
 <li><strong>The clippy gate now lints test code (<code>--tests</code>).</strong> Without that flag clippy
@@ -4643,7 +4686,7 @@
   zero. Now <code>NaN</code>, with a WARNING naming how many labels are affected. Applies
   both when no <code>--pon-model</code> was given and when the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> lacks the table.</li>
 </ul>
-<h3 id="removed">Removed</h3>
+<h3 id="removed_1">Removed</h3>
 <ul>
 <li><strong>271 lines of dead Rust.</strong> <code>_core.wps.apply_pon_zscore</code> (173 lines) plus
   <code>load_wps_baseline_from_parquet</code>, <code>phase_shift</code>, <code>PHASE_MAX_LAG</code> and the
@@ -6210,7 +6253,7 @@ all minus-strand genes. Earlier values are not comparable.</p>
 <li><strong>Test Suite</strong>: Cleaned up <code>tests/</code> directory, removing obsolete scripts and fixing integration tests (<code>test_science.py</code>, <code>test_run_all_unified_wrapper.py</code>).</li>
 <li><strong>Validation</strong>: Fixed <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> header issues in tests.</li>
 </ul>
-<h3 id="removed_1">Removed</h3>
+<h3 id="removed_2">Removed</h3>
 <ul>
 <li><strong>Legacy Python Backends</strong>: Removed pure Python implementations of <code>extract</code>, <code>motif</code>, <code>fsc</code>, <code>fsd</code>, ensuring all paths use the unified Rust core.</li>
 <li><strong>Validation Artifacts</strong>: Deleted temporary validation scripts and data.</li>
