@@ -20,7 +20,23 @@ pyo3 = { version = "0.23", features = ["extension-module"] }
 # noodles for BED/BGZF/Tabix
 noodles = { version = "0.103", features = ["bed", "tabix", "bgzf", "core"] }
 
-# rust-htslib for BAM operations
+# rust-htslib for BAM operations.
+#
+# This crate forces bindgen on: it declares `hts-sys` with
+# `features = ["bindgen"], default-features = false`, so hts-sys' prebuilt
+# bindings are never used and every build parses htslib's C headers with
+# whatever libclang is on the machine. That makes the build sensitive to the
+# host toolchain, and the sensitivity is one-directional -- a libclang newer
+# than the pinned bindgen knows about yields *opaque* structs rather than an
+# error, so the failure surfaces as missing fields in rust-htslib's own source:
+#
+#     error[E0609]: no field `n_targets` on type `sam_hdr_t`
+#       = note: available field is: `_address`
+#
+# If you see that, the bindgen in rust/Cargo.lock is older than your libclang.
+# The fix is `cargo update -p hts-sys` (hts-sys 2.2.1 moved bindgen 0.69 -> 0.72
+# for libclang 21), not a code change. Keep the lock committed: it is the only
+# thing recording which bindgen this builds with.
 rust-htslib = "0.51"
 
 # Parallelism

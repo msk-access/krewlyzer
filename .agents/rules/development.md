@@ -47,6 +47,32 @@ krewlyzer/
 
 ## Building (Unified Python + Rust)
 
+### Toolchain prerequisite: libclang
+
+The Rust build needs **clang and libclang headers** present, not just a Rust
+toolchain. `rust-htslib` enables `hts-sys/bindgen` unconditionally, so every
+build regenerates htslib's FFI bindings from the C headers using the host
+libclang (`apt install clang libclang-dev`, or Xcode's on macOS).
+
+Two consequences worth knowing before you lose an hour to either:
+
+- **A libclang newer than the bindgen in `rust/Cargo.lock` does not error --
+  it silently produces opaque structs**, so the build fails inside
+  *rust-htslib's own source*, not in ours:
+
+  ```
+  error[E0609]: no field `n_targets` on type `sam_hdr_t`
+    = note: available field is: `_address`
+  ```
+
+  The fix is `cargo update -p hts-sys`, never a source change. See the comment
+  at `rust-htslib` in `rust/Cargo.toml`.
+- **CI only exercises this on Linux**, and `test.yml` has `paths-ignore` for
+  `docs/**` and `*.md`. A docs-only stretch of merges can leave the Linux build
+  untested for months while a runner-image bump breaks it; that is exactly how
+  the clang 21 break reached a release workflow unnoticed. Use
+  `workflow_dispatch` on **Run Unit Tests** after a long docs-only run.
+
 ```bash
 # Development build (editable install with Rust)
 maturin develop --release
