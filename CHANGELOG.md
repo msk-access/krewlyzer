@@ -60,7 +60,54 @@ All notable changes to this project will be documented in this file.
   the kind the claims registry exists to prevent, found by re-measuring instead
   of by reading.
 
+- **CI is split by cost, and the PHI scan is no longer skipped for prose.**
+  The PHI / secret scan lived in `test.yml`, so it inherited that workflow's
+  `paths-ignore` for markdown. #78, which changed only `CLAUDE.md`, merged with
+  Greptile as its only check -- no scan, no tests -- although the job describes
+  itself as the backstop for contributors who never enabled the git hooks, and
+  prose is where an identifier is most likely to be pasted by hand. It now runs
+  in a new `quick-checks.yml` with no path filter at all, under the same check
+  name.
+
+  `quick-checks.yml` also runs the tests that read markdown, which `test.yml`
+  was skipping on precisely the changes they check. Found by sweeping `tests/`
+  for paths built to markdown rather than by reading docstrings: three files,
+  none needing the Rust extension -- with krewlyzer not installed they ran in
+  0.11 s. A README-only change linking a page mkdocs does not publish now
+  fails; before, it skipped CI entirely. Which tests belong in that job is
+  asserted by a new test that walks every test's AST, so adding a markdown
+  reader without listing it fails rather than relying on someone remembering
+  a comment.
+
+  `test.yml`'s filter is now `'**.md'` instead of `'*.md'`. In a GitHub path
+  filter `*` does not cross `/`, so the old pattern matched root-level markdown
+  only and an edit to `.agents/rules/*.md` ran the whole suite.
+
+  Both workflows cancel a superseded run of the same PR, and give every branch
+  push a concurrency group of its own (`github.run_id`). One group per branch
+  looked equivalent and was not: GitHub keeps at most one *pending* run per
+  group and a new one cancels it, so three quick pushes to `develop` would
+  have dropped the middle run -- and with each push scanned from its own
+  `before`, nothing would ever have scanned that push. Caught in review on
+  #86; `tests/unit/test_ci_concurrency.py` now pins it.
+
+  Not changed, deliberately: a PR's path filter is evaluated against the whole
+  PR diff, so resolving a conflict in a PR that changes code still runs the
+  full suite. That run is correct -- the merge brings in whatever landed on
+  the base since, and the result is a tree nobody has tested.
+
 ### Fixed
+
+- **On a push, the PHI scan covered only the last commit.** The scan base was
+  `pull_request.base.sha || 'HEAD~1'`, so for a push it was `HEAD~1`: push
+  three linear commits and two went unscanned, with nothing to say so. Merge
+  commits happened to work, since `HEAD~1..HEAD` follows the merged side. The
+  base is now the branch's previous head (`github.event.before`). Where that is
+  not in history -- a new branch reports all zeros, and a force-push can leave
+  the old head unreachable -- it falls back to `HEAD~1` with a visible
+  warning instead of narrowing silently. Run against this repository with the
+  previous head three commits back, the new base covers 8 commits where the
+  old one covered 1.
 
 - **The Linux build, which stopped compiling when `ubuntu-latest` became
   ubuntu-26.04.** That image ships clang/libclang 21, and `rust-htslib`
