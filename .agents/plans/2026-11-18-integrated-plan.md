@@ -33,7 +33,7 @@ Branch: `feature/fragment-model`, off `develop`, per spec §3. Each step is a PR
 | Final run | 16,000+ samples from clinical ACCESS runs | Spec §5 sized storage for 16,000 |
 | BAM access | SLURM jobs read clinical BAMs in place, in parallel. They run as the operator | — |
 | Cluster work | **Everything runs as a SLURM job** — env builds, probes, inventories, measurements. Nothing runs on the login node | — |
-| Healthy donors | Sequenced on the **clinical** side, and used for research too. The final 16,000-sample run therefore shares the PON donors' batch; the IGO test patients do not (§4) | — |
+| Healthy donors | Sequenced on the **clinical** side, and used for research too. Every cohort goes through the **same processing workflow**; the only batch difference is the sequencing site. The final 16,000-sample run therefore shares the PON donors' batch; the IGO test patients do not (§4) | — |
 
 ## 2. Every spec section, and where it lands
 
