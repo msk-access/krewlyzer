@@ -331,9 +331,13 @@ jobs:
         run: |
           mypy src/krewlyzer/ --ignore-missing-imports --no-error-summary
 
+      # --tests matters: without it clippy checks the lib target only and never
+      # lints test code, which is where this repo's invariants are asserted.
+      # Adding it surfaced 17 errors across five files that `cargo test` had
+      # been reporting as warnings while this gate passed.
       - name: Run cargo clippy
         run: |
-          cargo clippy --manifest-path rust/Cargo.toml -- \
+          cargo clippy --manifest-path rust/Cargo.toml --tests -- \
             -D warnings \
             -A clippy::too_many_arguments \
             -A clippy::type_complexity

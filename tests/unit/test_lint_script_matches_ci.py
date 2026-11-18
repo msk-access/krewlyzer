@@ -10,7 +10,7 @@ already happened in this repository:
 
 * mypy 2.3.1 locally against a 1.19.1 pin, which does not report
   `[import-untyped]`, so #71 passed locally and failed CI;
-* running clippy without `-A clippy::too_many_arguments` reports 11 errors CI
+* running clippy without `-A clippy::too_many_arguments` reports 12 errors CI
   does not, which sends you fixing things that are not broken.
 """
 
@@ -31,8 +31,34 @@ _SCRIPT = _ROOT / "scripts" / "lint.sh"
 _WORKFLOW = _ROOT / ".github" / "workflows" / "test.yml"
 
 
-def _script() -> str:
-    return _SCRIPT.read_text(encoding="utf-8")
+def _strip_comment_lines(text: str) -> str:
+    """Drop whole-line comments, so a flag named only in prose cannot pass.
+
+    The checks below are substring tests. Without this, documenting a flag is
+    indistinguishable from passing it: adding `--tests` to the clippy
+    invocation with a comment explaining why left the comment alone sufficient
+    to satisfy the check with the flag itself deleted from the command --
+    verified by deleting it. A guard that a comment can satisfy is not a guard.
+
+    Only whole-line comments are removed, not trailing ones. None of the
+    mirrored tokens contain `#`, so this cannot hide a real flag.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
+def _script(*, strip_comments: bool = True) -> str:
+    """The script's text, comments stripped by default.
+
+    Stripping is right for a check that something *must appear* -- a comment
+    cannot satisfy a requirement -- and wrong for a check that something *must
+    not appear*, because a comment can still violate a prohibition. A version
+    restated in a comment drifts exactly like a hardcoded one, for the next
+    person who reads it. So negative checks pass `strip_comments=False`.
+    """
+    text = _SCRIPT.read_text(encoding="utf-8")
+    return _strip_comment_lines(text) if strip_comments else text
 
 
 def _lint_job_commands() -> str:
@@ -43,7 +69,7 @@ def _lint_job_commands() -> str:
     """
     text = _WORKFLOW.read_text(encoding="utf-8")
     start = text.index("\n  lint:")
-    return text[start:]
+    return _strip_comment_lines(text[start:])
 
 
 #: Tokens that must appear in the script for each command CI runs. Paths and
@@ -54,6 +80,11 @@ _MIRRORED = {
     "mypy": ["src/krewlyzer/", "--ignore-missing-imports", "--no-error-summary"],
     "clippy": [
         "--manifest-path rust/Cargo.toml",
+        # Load-bearing: without --tests clippy lints the lib target only and
+        # never sees test code, where this repo's invariants are asserted.
+        # Listed here so removing it from either the workflow or the script
+        # fails this mirror check instead of silently narrowing the gate.
+        "--tests",
         "-D warnings",
         "-A clippy::too_many_arguments",
         "-A clippy::type_complexity",
@@ -120,9 +151,11 @@ def test_the_script_reads_versions_from_pyproject():
     The failure this whole change is about is two sources of truth for a tool
     version disagreeing; a hardcoded pin here would recreate it one level down.
     """
-    script = _script()
-    assert "pyproject.toml" in script
-    hardcoded = re.findall(r"(black|ruff|mypy)@\d+\.\d+", script)
+    assert "pyproject.toml" in _script()
+    # Raw text, deliberately unlike every positive check in this file: see
+    # `_script`. Stripping comments here let `# CI runs black@26.1 here` pass,
+    # where the guard before comment-stripping correctly refused it.
+    hardcoded = re.findall(r"(black|ruff|mypy)@\d+\.\d+", _script(strip_comments=False))
     assert not hardcoded, (
         f"scripts/lint.sh hardcodes versions {hardcoded}; read them from "
         "pyproject.toml with the `pin` helper instead"

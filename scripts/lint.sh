@@ -94,9 +94,15 @@ else
 fi
 
 # Not pinned in pyproject -- clippy ships with the Rust toolchain. Same flags
-# as the workflow: without the two -A the repo reports 11 errors CI does not.
+# as the workflow: without the two -A the repo reports 12 errors CI does not.
+#
+# --tests is load-bearing, not tidiness. Without it clippy checks the lib
+# target only, so no test code is linted at all -- and in this repo the tests
+# are where the invariants live. It was absent, and hid 17 errors across five
+# files; `cargo test` carried two of them as permanent warning noise while this
+# gate reported clean.
 step "cargo clippy"
-cargo clippy --manifest-path rust/Cargo.toml -- \
+cargo clippy --manifest-path rust/Cargo.toml --tests -- \
     -D warnings \
     -A clippy::too_many_arguments \
     -A clippy::type_complexity || status=1

@@ -985,10 +985,21 @@ mod baseline_tests {
             expected: vec![1.0, 2.0],
             std: vec![],
         };
-        assert!(empty.get_std(120).is_nan());
-        // And the caller's `std > 0.0` gate is false for NaN, so it drops out
-        // of the stability average rather than dominating it.
-        assert!(!(f64::NAN > 0.0));
+        let unmeasured = empty.get_std(120);
+        assert!(unmeasured.is_nan());
+        // And the caller's `std > 0.0` gate is false for it, so it drops out of
+        // the stability average rather than dominating it.
+        //
+        // Stated as unorderedness rather than as `!(x > 0.0)`, for two reasons:
+        // it asserts the reason the gate is false instead of one consequence of
+        // it, and it is asked of the value actually measured above rather than
+        // of `f64::NAN`, which would only have restated a property of the
+        // language. The previous form did the latter and tripped three clippy
+        // lints that the gate could not see (see the clippy --tests change).
+        assert!(
+            unmeasured.partial_cmp(&0.0).is_none(),
+            "an unmeasured spread must be unordered against the gate, not below it"
+        );
     }
 
     #[test]

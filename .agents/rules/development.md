@@ -47,6 +47,33 @@ krewlyzer/
 
 ## Building (Unified Python + Rust)
 
+### `cargo build` is not a gate
+
+A bare `cargo build --manifest-path rust/Cargo.toml` **fails on macOS**, and a
+failure there says nothing about your change:
+
+```
+error: linking with `cc` failed: exit status: 1
+... -o .../libkrewlyzer_core.dylib ... -dynamiclib -nodefaultlibs
+```
+
+`krewlyzer_core` is a pyo3 `extension-module` cdylib, so it deliberately does
+not link libpython. Linking the dylib on its own therefore leaves the `Py*`
+symbols unresolved, and the macOS linker refuses that; maturin supplies the
+extra link arguments that make it work. Verified on macOS on an untouched
+checkout, so it is pre-existing rather than anything you did. Not checked on
+Linux, where the linker is laxer about undefined symbols in a shared library
+and it may well succeed -- which is its own reason not to treat it as a gate:
+its result depends on the host, so it is not a signal either way.
+
+The gates that do mean something are
+`cargo test --manifest-path rust/Cargo.toml --lib`, `cargo clippy`, and
+`maturin develop --release` from the project root.
+
+Note that `cargo clippy` must be run with `--tests`. Without it only the lib
+target is linted and test code is skipped entirely -- which in this repo means
+the invariant assertions are the one place the linter never looks.
+
 ### Toolchain prerequisite: libclang
 
 The Rust build needs **clang and libclang headers** present, not just a Rust
