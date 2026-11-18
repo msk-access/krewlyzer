@@ -511,6 +511,29 @@ impl RegionAccumulator {
         }
     }
 
+    /// Total per-base coverage over `[0, len)`, summed from the difference arrays.
+    ///
+    /// `cov_long`/`cov_short` hold per-base *deltas* -- `add_range` writes `+w` at a
+    /// fragment's start and `-w` one past its end -- so the running sum over `j` is
+    /// the coverage *at* base `j`. A total, and therefore a mean, needs the sum of
+    /// those running sums.
+    ///
+    /// Reading the final running value instead is what shipped through 0.9.2. Every
+    /// fragment that closes before the window ends telescopes out of that value, so
+    /// what remains is floating-point residue of arbitrary sign: `local_depth` came
+    /// out negative on 22-42% of region rows with a median around 1e-17, and the
+    /// companion `== 0.0` emptiness guard could drop a fully covered region whose
+    /// fragments all happened to close early (#79).
+    fn total_coverage(&self, len: usize) -> f64 {
+        let mut running = 0.0;
+        let mut total = 0.0;
+        for j in 0..len {
+            running += self.cov_long[j] + self.cov_short[j];
+            total += running;
+        }
+        total
+    }
+
     fn merge(&mut self, other: &Self) {
         for (a, b) in self.cov_long.iter_mut().zip(other.cov_long.iter()) { *a += *b; }
         for (a, b) in self.cov_short.iter_mut().zip(other.cov_short.iter()) { *a += *b; }
@@ -864,7 +887,6 @@ impl WpsConsumer {
                 let mut curr_end_long = 0.0;
                 let mut curr_span_short = 0.0;
                 let mut curr_end_short = 0.0;
-                let mut curr_cov = 0.0;
                 
                 for j in 0..len {
                     curr_wps_long += acc.wps_long[j];
@@ -873,7 +895,6 @@ impl WpsConsumer {
                     curr_end_long += acc.endpoints_long[j];
                     curr_span_short += acc.spanning_short[j];
                     curr_end_short += acc.endpoints_short[j];
-                    curr_cov += acc.cov_long[j] + acc.cov_short[j];
                     
                     wps_long_raw.push(curr_wps_long);
                     wps_short_raw.push(curr_wps_short);
@@ -883,8 +904,15 @@ impl WpsConsumer {
                     endpoints_short_raw.push(curr_end_short);
                 }
                 
-                // Skip empty regions (no coverage)
-                if curr_cov == 0.0 {
+                // Skip empty regions (no coverage).
+                //
+                // Tests coverage over the whole window, not the last base. The
+                // previous `curr_cov == 0.0` read the running value after the loop,
+                // which is the final base's coverage -- so a region whose fragments
+                // all closed before the window ended was dropped here whenever that
+                // cancellation landed on exactly zero.
+                let total_cov = acc.total_coverage(len);
+                if total_cov <= 0.0 {
                     return None;
                 }
                 
@@ -1014,7 +1042,7 @@ impl WpsConsumer {
                     binned_mask,
                     binned_prot_nuc,
                     binned_prot_tf,
-                    local_depth: (curr_cov / len as f64) as f32,
+                    local_depth: (total_cov / len as f64) as f32,
                 })
             })
             .collect();
@@ -2237,11 +2265,30 @@ mod pon_scoring_tests {
     }
 
     #[test]
-    fn amplitude_is_not_a_coverage_measurement() {
-        // Raw peak-to-trough range measures how deeply the sample was
-        // sequenced. Measured on the real cohort: raw amplitude correlates
-        // +0.512 with local_depth and is skewed 11.6; the log form drops that
-        // to -0.036 and 1.6. A z on the raw scale would rank samples by depth.
+    fn the_log_form_compresses_the_depth_dependence() {
+        // Raw peak-to-trough range tracks how deeply the sample was sequenced,
+        // and the log form compresses that -- but it does not remove it, which
+        // is what this comment used to claim.
+        //
+        // The previous figures ("+0.512 with local_depth ... the log form drops
+        // that to -0.036") were measured against `local_depth` as it shipped,
+        // which was coverage at the window's final base and came out negative on
+        // 22-42% of rows (#79). Re-measured over 12 donors and 4,800 anchors,
+        // against mean coverage recomputed from the fragment BEDs:
+        //
+        //     statistic            pearson   spearman   skew
+        //     raw peak-to-trough     0.799      0.559   13.48
+        //     ln(1 + range)          0.513      0.559    3.11
+        //
+        // The log form is worth having: it halves the Pearson coefficient and
+        // cuts skew from 13.5 to 3.1. But `ln(1 + x)` is monotone, so it cannot
+        // change a rank correlation at all -- both rows share rho = 0.559. The
+        // dependence on depth is rescaled, not removed, and -0.036 is not
+        // reachable by any monotone transform. `wps_log_amplitude` is still
+        // substantially a depth readout; see #80.
+        //
+        // What this test pins is the compression, which is real and is the part
+        // the log scale is actually for.
         let shallow = wps_log_amplitude(&wave(200, 12.0, 0.0, 1.0));
         let deep = wps_log_amplitude(&wave(200, 12.0, 0.0, 100.0));
         assert!(deep > shallow, "a deeper profile must still register larger");
@@ -2908,5 +2955,114 @@ mod bait_mask_tests {
         assert!(!reliable, "but within the trim, so not reliable");
         // Outside every bait: neither.
         assert_eq!(mask.check_position("1", 999_000), (false, false));
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    const LEN: usize = 2000;
+
+    /// What `local_depth` read through 0.9.2: the running sum left standing after
+    /// the integration loop, i.e. coverage at the window's final base.
+    fn final_running_value(acc: &RegionAccumulator, len: usize) -> f64 {
+        let mut running = 0.0;
+        for j in 0..len {
+            running += acc.cov_long[j] + acc.cov_short[j];
+        }
+        running
+    }
+
+    #[test]
+    fn uniform_coverage_averages_to_the_weight() {
+        // One fragment spanning the whole window: every base carries `weight`,
+        // so the mean must be exactly `weight`. This pins the units the column
+        // is documented with -- "mean coverage at the anchor".
+        let mut acc = RegionAccumulator::new(LEN);
+        RegionAccumulator::add_range(&mut acc.cov_long, 0, LEN as i64, 2.5);
+
+        let mean = acc.total_coverage(LEN) / LEN as f64;
+        assert!(
+            (mean - 2.5).abs() < 1e-9,
+            "uniform coverage of 2.5 averaged to {mean}"
+        );
+    }
+
+    #[test]
+    fn coverage_closing_before_the_window_ends_is_still_counted() {
+        // The regression, stated as the contrast that defines it.
+        //
+        // Fragments cover the first half of the window and all close before it
+        // ends. The difference array therefore telescopes to exactly zero at the
+        // last base -- so the shipped expression reported no coverage here, and
+        // the companion `== 0.0` guard dropped the region outright, despite half
+        // the window being covered.
+        let mut acc = RegionAccumulator::new(LEN);
+        RegionAccumulator::add_range(&mut acc.cov_long, 0, (LEN / 2) as i64, 1.0);
+
+        assert_eq!(
+            final_running_value(&acc, LEN),
+            0.0,
+            "precondition: the old reading must be zero for this test to mean anything"
+        );
+
+        let total = acc.total_coverage(LEN);
+        assert!(
+            (total - (LEN / 2) as f64).abs() < 1e-9,
+            "half a window of unit coverage totalled {total}, expected {}",
+            LEN / 2
+        );
+        let mean = total / LEN as f64;
+        assert!(
+            (mean - 0.5).abs() < 1e-9,
+            "half-covered window averaged to {mean}, expected 0.5"
+        );
+    }
+
+    #[test]
+    fn coverage_is_never_negative() {
+        // Many fragments at staggered offsets, every one closing inside the
+        // window -- the arrangement that produced negative `local_depth` on
+        // 22-42% of real region rows. Cancellation can leave the final running
+        // value on either side of zero; a sum of coverages cannot go below it.
+        let mut acc = RegionAccumulator::new(LEN);
+        for i in 0..100 {
+            let start = (10 + i * 15) as i64;
+            RegionAccumulator::add_range(&mut acc.cov_long, start, start + 167, 0.37);
+            RegionAccumulator::add_range(&mut acc.cov_short, start, start + 55, 0.11);
+        }
+
+        let total = acc.total_coverage(LEN);
+        assert!(total > 0.0, "100 fragments totalled {total}");
+        assert!(
+            total / LEN as f64 > 0.0,
+            "mean coverage must be positive when fragments are present"
+        );
+    }
+
+    #[test]
+    fn an_accumulator_with_no_fragments_totals_zero() {
+        // The case the emptiness guard exists for, so `total_cov <= 0.0` keeps
+        // skipping what it should.
+        let acc = RegionAccumulator::new(LEN);
+        assert_eq!(acc.total_coverage(LEN), 0.0);
+    }
+
+    #[test]
+    fn both_length_streams_contribute() {
+        // `cov_long` and `cov_short` are separate difference arrays and the
+        // total is over both; summing only one would halve the column.
+        let mut long_only = RegionAccumulator::new(LEN);
+        RegionAccumulator::add_range(&mut long_only.cov_long, 0, LEN as i64, 1.0);
+
+        let mut both = RegionAccumulator::new(LEN);
+        RegionAccumulator::add_range(&mut both.cov_long, 0, LEN as i64, 1.0);
+        RegionAccumulator::add_range(&mut both.cov_short, 0, LEN as i64, 1.0);
+
+        assert!(
+            both.total_coverage(LEN) > long_only.total_coverage(LEN) * 1.9,
+            "the short stream is not reaching the total"
+        );
     }
 }

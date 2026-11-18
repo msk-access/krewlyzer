@@ -24,8 +24,71 @@ All notable changes to this project will be documented in this file.
   was 2026-08-26: `test.yml` has `paths-ignore` for `docs/**` and `*.md`, and
   `cargo test` runs on macOS, where the Apple-toolchain libclang still parsed
   the headers under bindgen 0.69 (verified locally against Apple clang 21.0.0,
-  which is not upstream LLVM 21). The toolchain coupling and this failure signature are now recorded
-  at the dependency and in `.agents/rules/development.md`.
+  which is not upstream LLVM 21). The toolchain coupling and this failure
+  signature are now recorded at the dependency and in
+  `.agents/rules/development.md`.
+
+- **`local_depth` reported coverage at the window's last base divided by the
+  window length, not mean coverage.** `cov_long`/`cov_short` are difference
+  arrays — `add_range` writes `+w` at a fragment's start and `-w` one past its
+  end — so the running sum over positions is the coverage *at* that position,
+  and a mean needs the sum of those running sums. The per-base path in
+  `rust/src/wps.rs` already did that (`total_cov += curr_cov_long +
+  curr_cov_short`). The binned path, which writes the Parquet product, kept only
+  the running value and divided *it* by the length.
+
+  Every fragment that closes before the window ends telescopes out of that
+  value, so what survived was floating-point residue of arbitrary sign.
+  Measured on 10 samples from each of four cohorts — patient and PON donor,
+  both assays, both variants — the column was **negative on 22–42% of region
+  rows** and below `1e-9` on 44–82%, with medians around `1e-17`. Fewer than 1%
+  of rows carried a value a reader would recognise as a depth. Multiplying back
+  by the window length recovered plausible per-base coverage (an xs2 maximum of
+  29.95 becomes 59,900 reads at one base), which is what confirmed the
+  mechanism.
+
+  The same expression guarded region emptiness: `if curr_cov == 0.0 { return
+  None }`, under a comment reading "Skip empty regions (no coverage)". The
+  quantity tested was the final base's coverage, so a region whose fragments all
+  closed early was discarded whenever that cancellation landed on exactly zero —
+  an exact float comparison on an accumulated sum, the same class of defect as
+  the `sd > 0.0` checks removed in 0.9.0. This is **reproducible**: the new
+  end-to-end test drives the CLI over an anchor whose 20 fragments all close
+  early, and with the old reading restored the region is dropped and the table
+  comes back empty. It went unseen on real cohorts only because dense libraries
+  usually leave something open at the window's final base.
+
+  `docs/reference/output-files.md` has documented the column as "Mean coverage
+  at the anchor" throughout, and `validate/contract.py` declares it
+  `Vary.BOTH` — which it passed, because it did vary. It just varied wrongly.
+  Another case of invariant #1's limit: anti-degeneracy catches constants, not
+  nonsense.
+
+  The arithmetic now lives in `RegionAccumulator::total_coverage`, so it is
+  testable rather than inline in a parallel closure. Five Rust tests pin it,
+  including one that asserts the shipped reading was exactly zero for a
+  half-covered window *in the same test* as the corrected total being half the
+  length — so reverting the semantics fails it. An end-to-end test in
+  `tests/integration/test_wps_cli.py` drives the CLI with fragments that all
+  close early and asserts the region survives and reports a non-negative depth,
+  because the wrong value reached the Parquet that downstream reads. (#79)
+
+- **The amplitude/depth figures that justify `wps_log_amplitude` were measured
+  against that broken column, and are corrected.** The test comment claimed raw
+  amplitude correlates +0.512 with `local_depth` and that "the log form drops
+  that to -0.036". Re-measured over 12 donors and 4,800 anchors against mean
+  coverage recomputed from the fragment BEDs — independent of the column being
+  fixed — raw amplitude gives Pearson 0.799 and `ln(1 + range)` gives 0.513,
+  with skew falling 13.48 to 3.11.
+
+  So the log form is worth having, but it does not remove the dependence and
+  cannot: `ln(1 + x)` is monotone, so it leaves a rank correlation untouched, and
+  both forms share Spearman **0.559** with depth. A near-zero coefficient for a
+  monotone transform of a depth-correlated quantity describes the scale, not
+  independence. The test is renamed from
+  `amplitude_is_not_a_coverage_measurement` to
+  `the_log_form_compresses_the_depth_dependence`, which is what it actually
+  pins; the residual dependence is tracked in #80.
 
 ## [0.9.2] - 2026-08-25
 
