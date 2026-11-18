@@ -60,6 +60,36 @@ All notable changes to this project will be documented in this file.
   the kind the claims registry exists to prevent, found by re-measuring instead
   of by reading.
 
+- **CI is split by cost, and the PHI scan is no longer skipped for prose.**
+  The PHI / secret scan lived in `test.yml`, so it inherited that workflow's
+  `paths-ignore` for markdown. #78, which changed only `CLAUDE.md`, merged with
+  Greptile as its only check -- no scan, no tests -- although the job describes
+  itself as the backstop for contributors who never enabled the git hooks, and
+  prose is where an identifier is most likely to be pasted by hand. It now runs
+  in a new `quick-checks.yml` with no path filter at all, under the same check
+  name.
+
+  `quick-checks.yml` also runs the tests that read markdown, which `test.yml`
+  was skipping on precisely the changes they check. Found by sweeping `tests/`
+  for paths built to markdown rather than by reading docstrings: three files,
+  none needing the Rust extension -- with krewlyzer not installed they ran in
+  0.11 s. A README-only change linking a page mkdocs does not publish now
+  fails; before, it skipped CI entirely. Which tests belong in that job is
+  asserted by a new test that walks every test's AST, so adding a markdown
+  reader without listing it fails rather than relying on someone remembering
+  a comment.
+
+  `test.yml`'s filter is now `'**.md'` instead of `'*.md'`. In a GitHub path
+  filter `*` does not cross `/`, so the old pattern matched root-level markdown
+  only and an edit to `.agents/rules/*.md` ran the whole suite. Both workflows
+  also cancel a superseded run of the same PR; pushes to `develop` and `main`
+  are never cancelled.
+
+  Not changed, deliberately: a PR's path filter is evaluated against the whole
+  PR diff, so resolving a conflict in a PR that changes code still runs the
+  full suite. That run is correct -- the merge brings in whatever landed on
+  the base since, and the result is a tree nobody has tested.
+
 ### Fixed
 
 - **The Linux build, which stopped compiling when `ubuntu-latest` became

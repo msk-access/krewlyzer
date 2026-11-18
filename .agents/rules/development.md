@@ -94,11 +94,42 @@ Two consequences worth knowing before you lose an hour to either:
 
   The fix is `cargo update -p hts-sys`, never a source change. See the comment
   at `rust-htslib` in `rust/Cargo.toml`.
-- **CI only exercises this on Linux**, and `test.yml` has `paths-ignore` for
-  `docs/**` and `*.md`. A docs-only stretch of merges can leave the Linux build
-  untested for months while a runner-image bump breaks it; that is exactly how
-  the clang 21 break reached a release workflow unnoticed. Use
-  `workflow_dispatch` on **Run Unit Tests** after a long docs-only run.
+- **CI only exercises this on Linux**, and `test.yml` skips documentation-only
+  changes (`docs/**`, `**.md`, `mkdocs.yml`). A docs-only stretch of merges can
+  leave the Linux build untested for months while a runner-image bump breaks
+  it; that is exactly how the clang 21 break reached a release workflow
+  unnoticed. Use `workflow_dispatch` on **Run Unit Tests** after a long
+  docs-only run.
+
+### Which CI runs on which change
+
+Two workflows, split by cost rather than by topic:
+
+| workflow | path filter | runs |
+|---|---|---|
+| `quick-checks.yml` | **none** | PHI / secret scan; the tests that read markdown |
+| `test.yml` | skips `docs/**`, `**.md`, `mkdocs.yml` | maturin build, full pytest, wheel, Docker, `cargo test`, lint |
+| `docs.yml` | docs paths on PRs | aggregate check, `mkdocs build --strict` |
+
+The filter on `test.yml` is only safe because `quick-checks.yml` runs everything
+a markdown-only change can break. Two consequences:
+
+- **Never path-filter the PHI scan.** It lived in `test.yml` until it was
+  noticed that #78, which changed only `CLAUDE.md`, merged with no scan at all.
+  Prose is where an identifier is most likely to be pasted by hand.
+- **A test that reads markdown must run in `quick-checks.yml`.** That is
+  asserted, not remembered: `tests/unit/test_quick_checks_cover_markdown_readers.py`
+  walks the AST of every test for paths built to markdown and fails if one is
+  not listed in the workflow. Mentioning a `.md` file in a docstring or a
+  message does not count as reading it.
+
+`*` in a GitHub path filter does not cross `/`, so `'*.md'` matches root-level
+markdown only. Use `'**.md'` for markdown anywhere.
+
+A PR's path filter is evaluated against the **whole PR diff** (a three-dot diff
+against the merge base), not the latest push. Resolving a conflict in a PR that
+changes code reruns the full suite, and should: the merge brought in whatever
+landed on the base since, so the tree is one nobody has tested.
 
 ```bash
 # Development build (editable install with Rust)

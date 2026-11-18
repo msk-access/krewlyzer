@@ -1,0 +1,115 @@
+name: Quick checks
+
+# The checks every change gets, whatever it touches. Deliberately no `paths`
+# filter: the expensive suite in test.yml is path-filtered, and that is only
+# safe because everything a markdown-only change can break runs here instead.
+#
+# What may never be path-filtered, and why:
+#
+# * The PHI / secret scan. The git hooks only protect contributors who ran
+#   `git config core.hooksPath .githooks`; this job is the backstop. It used to
+#   live in test.yml, so it inherited that workflow's `paths-ignore` for
+#   markdown -- and #78, which changed only CLAUDE.md, merged with no scan at
+#   all. Prose is where an identifier is most likely to be pasted by hand.
+#
+# * The tests that read markdown at runtime. Exactly three files do, measured by
+#   sweeping tests/ for path literals rather than by reading docstrings (one
+#   test names fsc.md in its docstring and never opens it):
+#       test_cli_documented     docs/cli/index.md, README.md, docs/**/*.md
+#       test_nextflow_params    docs/nextflow/parameters.md
+#       test_all_docs_generated docs/ against krewlyzer_all_docs.md
+#   None imports the Rust extension, so none needs a maturin build: with
+#   krewlyzer not installed at all they ran 77 tests in 0.11 s.
+#   test_all_docs_generated is left to docs.yml, whose `paths` already cover
+#   every input it has. test_lint_script_matches_ci is here because it guards
+#   the workflow files themselves.
+#
+# If a new test starts reading markdown, it belongs in the list below, or a
+# markdown-only change will be able to break it without anything noticing.
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+concurrency:
+  # One run per PR: a newer push supersedes an older one. Pushes to develop and
+  # main are never cancelled -- those runs are the record of what landed.
+  group: quick-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  phi-secret-scan:
+    name: PHI / secret scan
+    # The git hooks only protect contributors who ran
+    # `git config core.hooksPath .githooks`. This job is the backstop.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need the merge base to scope the scan
+
+      - name: Install gitleaks (pinned)
+        env:
+          GITLEAKS_VERSION: "8.30.1"
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C /usr/local/bin gitleaks
+          gitleaks version
+
+      # Verify the rules still fire before trusting a clean scan. A rule that
+      # silently stopped matching would otherwise look identical to success.
+      - name: Verify the PHI guard itself
+        run: bash scripts/check_phi_guard.sh
+
+      # Scoped to what this branch adds. A full-history scan would flag commits
+      # that predate the guard and cannot be changed without a rewrite, which
+      # would block every push and train everyone to bypass it.
+      - name: Scan the incoming commits
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          echo "scanning ${BASE}..HEAD"
+          gitleaks detect --source . --log-opts="${BASE}..HEAD" \
+            --no-banner --redact --exit-code 1
+
+      # gitleaks scans diffs, never commit messages -- and a message cannot be
+      # edited after a push without rewriting history.
+      - name: Scan the commit messages
+        run: |
+          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          git log "${BASE}..HEAD" --format='%B%n%an %ae' > /tmp/commit-messages.txt
+          gitleaks stdin --config .gitleaks.toml \
+            --no-banner --redact --exit-code 1 < /tmp/commit-messages.txt
+
+  text-checks:
+    name: Markdown and workflow checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          lfs: false  # these read text; the bundled data is never touched
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      # The same floors pyproject.toml declares: pytest and tomli from [test],
+      # pysam from the core dependencies (tests/conftest.py imports it). Not the
+      # package itself -- `pip install .` would run a maturin build, which is
+      # exactly the cost this job exists to avoid.
+      - name: Install the test runner only
+        run: python -m pip install "pytest>=7.0.0" "pysam>=0.22.0" "tomli>=2.0"
+
+      - name: Run the text-only tests
+        run: |
+          python -m pytest -q -p no:cacheprovider \
+            tests/unit/test_cli_documented.py \
+            tests/unit/test_nextflow_params.py \
+            tests/unit/test_lint_script_matches_ci.py
