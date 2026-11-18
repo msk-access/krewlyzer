@@ -109,6 +109,25 @@ All notable changes to this project will be documented in this file.
   previous head three commits back, the new base covers 8 commits where the
   old one covered 1.
 
+- **WPS placed every fragment one base right of where it is (#83).** The
+  anchor window is 0-based -- the anchor is at index 1000 of 2001 -- but the
+  fragment start was converted to 1-based (`start + 1`) before being made
+  relative to it. Coverage lost each fragment's first base, the spanning term
+  sat one base right, and both endpoint windows were one base narrow. There is
+  now one stated convention, in `accumulate_fragment`: fragments are
+  `[start, end)` as in the BED, and the protection window at `x` is the
+  `2p + 1` bases `[x − p, x + p]`. The tests assert two properties that hold
+  under any convention -- a fragment of *L* bases adds exactly *L* bases of
+  coverage, and its contribution is mirror-symmetric about its midpoint --
+  and the shipped code failed both. End to end, `local_depth` on the
+  integration fixture moves from 2200/2001 to 2220/2001.
+
+  The Alu background (`WpsBackgroundConsumer`) had the same convention mix
+  and is fixed with it. The docs quoted the windows as 120 and 16 bp; a window
+  symmetric about one base has an odd width, so they are 121 and 17 bases
+  (`p` = 60 and 8, now in the claims registry). **Changes WPS feature values**,
+  so `MIN_PON_VERSION` moves and the PONs are rebuilt in this release.
+
 - **The Linux build, which stopped compiling when `ubuntu-latest` became
   ubuntu-26.04.** That image ships clang/libclang 21, and `rust-htslib`
   enables `hts-sys/bindgen` unconditionally, so every build regenerates

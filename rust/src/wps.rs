@@ -549,14 +549,41 @@ impl RegionAccumulator {
 
 /// Add one fragment to a region accumulator, in both streams.
 ///
-/// `frag_start`/`frag_end` are the fragment's coordinates exactly as read from
-/// the BED: 0-based, half-open. `region_start` is the genomic position of the
-/// accumulator's index 0. A stream weight of `0.0` means that stream ignores
-/// the fragment; the weights already include the GC factor.
+/// **The coordinate convention**, stated once here and asserted stream by
+/// stream in `coordinate_convention_tests` (#83):
 ///
-/// Extracted unchanged from the region loop so that each stream's interval can
-/// be tested on a single fragment (#83). The arithmetic here is the shipped
-/// behaviour, not yet the corrected one.
+/// - index `i` of every accumulator array is 0-based genomic position
+///   `region_start + i` -- the convention `parse_regions_with_window` already
+///   uses, which puts the anchor at index 1000 of a 2001-base window;
+/// - a fragment occupies `[frag_start, frag_end)`, 0-based half-open, exactly
+///   as read from the BED;
+/// - the protection window at position `x` is the `2p + 1` bases
+///   `[x - p, x + p]`, symmetric about `x`.
+///
+/// With `a = frag_start - region_start` and `z = frag_end - region_start`,
+/// each stream's half-open interval follows:
+///
+/// | stream | interval | why |
+/// |---|---|---|
+/// | coverage | `[a, z)` | the fragment's own bases |
+/// | spanning | `[a + p, z - p)` | `x` whose whole window lies inside the fragment |
+/// | start endpoint | `[a - p, a + p + 1)` | `x` whose window holds the first base `a` |
+/// | end endpoint | `[z - 1 - p, z + p)` | `x` whose window holds the last base `z - 1` |
+///
+/// WPS is spanning minus both endpoints. Every interval is symmetric about the
+/// fragment's midpoint, which matters because minus-strand profiles are
+/// reversed before modelling: an asymmetric kernel would score the two strands
+/// with mirror-image kernels.
+///
+/// Through 0.9.2 this mixed conventions: `a` was computed as
+/// `frag_start + 1 - region_start` -- 1-based -- against a 0-based region, so
+/// every fragment sat one base right of where it is, coverage dropped the
+/// fragment's first base, and both endpoint windows were one base narrow.
+///
+/// A stream weight of `0.0` means that stream ignores the fragment; the weights
+/// already include the GC factor. `!= 0.0` rather than `> 0.0` because the
+/// caller used to test the length weight alone and then multiply in the GC
+/// factor, so a zero, negative or NaN GC factor still reached these calls.
 fn accumulate_fragment(
     acc: &mut RegionAccumulator,
     region_start: u64,
@@ -567,50 +594,52 @@ fn accumulate_fragment(
     nuc_window: i64,
     tf_window: i64,
 ) {
-    let r_start = region_start as i64;
-    // Fragment coords relative to region
-    let f_start = (frag_start + 1) as i64 - r_start;
-    let f_end = frag_end as i64 - r_start; // exclusive
+    let a = frag_start as i64 - region_start as i64;
+    let z = frag_end as i64 - region_start as i64;
 
-    // Nucleosome stream (WPS-Nuc). `!= 0.0`, not `> 0.0`: the loop used to test
-    // the length weight alone and then multiply in the GC factor, so a zero,
-    // negative or NaN GC factor still reached these calls. Kept identical.
+    // One stream: coverage, then WPS (spanning minus endpoints), then the
+    // spanning and endpoint arrays the protection fraction is built from.
+    let stream = |cov: &mut Vec<f64>, wps: &mut Vec<f64>, span: &mut Vec<f64>, ends: &mut Vec<f64>, w: f64, p: i64| {
+        RegionAccumulator::add_range(cov, a, z, w);
+
+        RegionAccumulator::add_range(wps, a + p, z - p, w);
+        RegionAccumulator::add_range(span, a + p, z - p, w);
+
+        for (lo, hi) in [(a - p, a + p + 1), (z - 1 - p, z + p)] {
+            RegionAccumulator::add_range(wps, lo, hi, -w);
+            RegionAccumulator::add_range(ends, lo, hi, w);
+        }
+    };
+
     if nuc_weight != 0.0 {
-        let weight = nuc_weight;
-
-        // Coverage: [start, end)
-        RegionAccumulator::add_range(&mut acc.cov_long, f_start, f_end, weight);
-
-        // WPS: protection window from config
-        let p = nuc_window;
-        RegionAccumulator::add_range(&mut acc.wps_long, f_start + p, f_end - p + 1, weight);
-        RegionAccumulator::add_range(&mut acc.wps_long, f_start - p, f_start + p, -weight);
-        RegionAccumulator::add_range(&mut acc.wps_long, f_end - p + 1, f_end + p + 1, -weight);
-
-        // Protection fraction tracking
-        // Spanning: central window [start+p, end-p]
-        RegionAccumulator::add_range(&mut acc.spanning_long, f_start + p, f_end - p + 1, weight);
-        // Endpoints: flanking windows [start-p, start+p) and [end-p, end+p)
-        RegionAccumulator::add_range(&mut acc.endpoints_long, f_start - p, f_start + p, weight);
-        RegionAccumulator::add_range(&mut acc.endpoints_long, f_end - p + 1, f_end + p + 1, weight);
+        stream(&mut acc.cov_long, &mut acc.wps_long, &mut acc.spanning_long, &mut acc.endpoints_long, nuc_weight, nuc_window);
     }
-
-    // TF stream (WPS-TF)
     if tf_weight != 0.0 {
-        let weight = tf_weight;
-
-        RegionAccumulator::add_range(&mut acc.cov_short, f_start, f_end, weight);
-
-        let p = tf_window;
-        RegionAccumulator::add_range(&mut acc.wps_short, f_start + p, f_end - p + 1, weight);
-        RegionAccumulator::add_range(&mut acc.wps_short, f_start - p, f_start + p, -weight);
-        RegionAccumulator::add_range(&mut acc.wps_short, f_end - p + 1, f_end + p + 1, -weight);
-
-        // Protection fraction tracking for TF
-        RegionAccumulator::add_range(&mut acc.spanning_short, f_start + p, f_end - p + 1, weight);
-        RegionAccumulator::add_range(&mut acc.endpoints_short, f_start - p, f_start + p, weight);
-        RegionAccumulator::add_range(&mut acc.endpoints_short, f_end - p + 1, f_end + p + 1, weight);
+        stream(&mut acc.cov_short, &mut acc.wps_short, &mut acc.spanning_short, &mut acc.endpoints_short, tf_weight, tf_window);
     }
+}
+
+/// The profile positions an Alu-background fragment spans: inclusive
+/// `(lo, hi)`, clipped to the profile, empty when `lo > hi`.
+///
+/// The profile frame puts the Alu start at index `flank`, and the convention is
+/// `accumulate_fragment`'s: with the fragment at profile indices `[a, z)`, it
+/// spans `x` iff its window `[x - p, x + p]` lies inside, i.e. `a + p ..= z - 1 - p`,
+/// centred on the fragment's midpoint.
+///
+/// Through 0.9.2 this computed `a` 1-based (`frag_start + 1`) and took `z - p`
+/// as the inclusive bound -- the same convention mix as #83, one base right.
+fn background_spanning_range(
+    region_start: u64,
+    flank: i64,
+    frag_start: u64,
+    frag_end: u64,
+    p: i64,
+    profile_len: usize,
+) -> (i64, i64) {
+    let a = frag_start as i64 - region_start as i64 + flank;
+    let z = frag_end as i64 - region_start as i64 + flank;
+    ((a + p).max(0), (z - 1 - p).min(profile_len as i64 - 1))
 }
 
 #[derive(Clone)]
@@ -1833,19 +1862,19 @@ impl crate::engine::FragmentConsumer for WpsBackgroundConsumer {
                 let is_minus = region.strand == "-";
                 let subfamily = region.subfamily.clone();
                 let chrom = region.chrom.clone();
-                let r_start = region.start;
-                
-                // Fragment position relative to the Alu, shifted into the
-                // flanked profile frame: index FLANK_BP == Alu start.
-                let f_start = (fragment.start + 1) as i64 - r_start as i64
-                    + Self::FLANK_BP as i64;
-                let f_end = fragment.end as i64 - r_start as i64
-                    + Self::FLANK_BP as i64;
-                
-                let p_nuc = self.config.nuc_window;
-                
-                // Spanning positions
-                for pos in (f_start + p_nuc).max(0)..=(f_end - p_nuc).min(Self::PROFILE_LENGTH as i64 - 1) {
+                // Not `continue` when the range is empty: the overlap is still
+                // counted below whether or not the fragment spans anything.
+                let (lo, hi) = background_spanning_range(
+                    region.start,
+                    Self::FLANK_BP as i64,
+                    fragment.start,
+                    fragment.end,
+                    self.config.nuc_window,
+                    Self::PROFILE_LENGTH,
+                );
+
+                // Spanning positions (none when lo > hi)
+                for pos in lo..=hi {
                     let idx = if is_minus {
                         Self::PROFILE_LENGTH as i64 - 1 - pos
                     } else {
@@ -3108,5 +3137,133 @@ mod coverage_tests {
             both.total_coverage(LEN) > long_only.total_coverage(LEN) * 1.9,
             "the short stream is not reaching the total"
         );
+    }
+}
+
+/// One stated coordinate convention, asserted stream by stream (#83).
+///
+/// Index `i` is 0-based genomic position `region_start + i`; a fragment occupies
+/// `[frag_start, frag_end)`; the protection window at `x` is `[x - p, x + p]`.
+/// One fragment at a known place, each stream's running sum read back.
+#[cfg(test)]
+mod coordinate_convention_tests {
+    use super::*;
+
+    const LEN: usize = 600;
+    const REGION_START: u64 = 1_000;
+    const P: i64 = 60;
+
+    /// Running sum of a difference array over `[0, LEN)`.
+    fn integrate(diff: &[f64]) -> Vec<f64> {
+        let mut running = 0.0;
+        diff[..LEN].iter().map(|d| { running += d; running }).collect()
+    }
+
+    /// A nucleosome-stream fragment occupying region indices `[a, z)`.
+    fn nuc_fragment(a: i64, z: i64) -> RegionAccumulator {
+        let mut acc = RegionAccumulator::new(LEN);
+        let start = (REGION_START as i64 + a) as u64;
+        let end = (REGION_START as i64 + z) as u64;
+        accumulate_fragment(&mut acc, REGION_START, start, end, 1.0, 0.0, P, 8);
+        acc
+    }
+
+    fn ones_exactly_on(v: &[f64], lo: usize, hi_inclusive: usize, what: &str) {
+        for (i, x) in v.iter().enumerate() {
+            let want = if (lo..=hi_inclusive).contains(&i) { 1.0 } else { 0.0 };
+            assert!(
+                (x - want).abs() < 1e-12,
+                "{what}: index {i} is {x}, expected {want} (1.0 exactly on {lo}..={hi_inclusive})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_fragment_covers_exactly_its_own_bases() {
+        let cov = integrate(&nuc_fragment(100, 267).cov_long);
+        ones_exactly_on(&cov, 100, 266, "coverage");
+        assert!((cov.iter().sum::<f64>() - 167.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn spanning_is_where_the_whole_window_is_covered() {
+        // Covers [x-60, x+60] iff 100 <= x-60 and x+60 <= 266.
+        ones_exactly_on(&integrate(&nuc_fragment(100, 267).spanning_long), 160, 206, "spanning");
+    }
+
+    #[test]
+    fn each_endpoint_window_is_centred_on_its_endpoint() {
+        // First base 100 lies in [x-60, x+60] for x in 40..=160; last base 266
+        // for x in 206..=326. The two windows do not overlap here.
+        let ends = integrate(&nuc_fragment(100, 267).endpoints_long);
+        for (i, x) in ends.iter().enumerate() {
+            let want = if (40..=160).contains(&i) || (206..=326).contains(&i) { 1.0 } else { 0.0 };
+            assert!((x - want).abs() < 1e-12, "endpoints: index {i} is {x}, expected {want}");
+        }
+    }
+
+    #[test]
+    fn a_fragments_contribution_is_mirror_symmetric() {
+        // The convention-free property: whatever the boundary rule, a
+        // fragment's contribution must not lean to one side of its own
+        // midpoint. It matters because minus-strand profiles are reversed
+        // before modelling, so an asymmetric kernel scores the two strands
+        // with mirror-image kernels. Midpoint of bases 100..=266 is 183.
+        let mut both = RegionAccumulator::new(LEN);
+        accumulate_fragment(&mut both, REGION_START, REGION_START + 100, REGION_START + 267, 1.0, 1.0, P, 8);
+        let m: usize = 183;
+        for (name, diff) in [
+            ("cov_long", &both.cov_long),
+            ("wps_long", &both.wps_long),
+            ("spanning_long", &both.spanning_long),
+            ("endpoints_long", &both.endpoints_long),
+            ("cov_short", &both.cov_short),
+            ("wps_short", &both.wps_short),
+            ("spanning_short", &both.spanning_short),
+            ("endpoints_short", &both.endpoints_short),
+        ] {
+            let v = integrate(diff);
+            for d in 0..=m {
+                assert!(
+                    (v[m + d] - v[m - d]).abs() < 1e-12,
+                    "{name} is not symmetric about {m}: [{}] = {} but [{}] = {}",
+                    m + d, v[m + d], m - d, v[m - d]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_fragment_straddling_the_window_edge_is_clipped_not_shifted() {
+        // Left edge: 50 bases before index 0 are cut off, the rest kept.
+        ones_exactly_on(&integrate(&nuc_fragment(-50, 117).cov_long), 0, 116, "left-straddle coverage");
+        // Right edge: the left edge alone cannot catch a shift, because
+        // clamping to 0 erases it. At the right edge a shift survives.
+        let l = LEN as i64;
+        ones_exactly_on(&integrate(&nuc_fragment(l - 50, l + 117).cov_long), LEN - 50, LEN - 1, "right-straddle coverage");
+    }
+
+    #[test]
+    fn the_alu_background_spans_under_the_same_convention() {
+        // The second accumulation path in this file. A fragment at profile
+        // indices [950, 1117) -- Alu start 10_000 sits at index 850 -- spans
+        // the positions whose whole 121-base window it covers: 1010..=1056,
+        // centred on the fragment's midpoint, 1033.
+        let range = background_spanning_range(10_000, 850, 10_100, 10_267, P, 2_000);
+        assert_eq!(range, (1010, 1056));
+        assert_eq!((range.0 + range.1) / 2, (950 + 1117 - 1) / 2, "not centred on the fragment");
+        // 121 bases span exactly their midpoint; 120 span nothing.
+        assert_eq!(background_spanning_range(10_000, 850, 10_100, 10_221, P, 2_000), (1010, 1010));
+        let (lo, hi) = background_spanning_range(10_000, 850, 10_100, 10_220, P, 2_000);
+        assert!(lo > hi, "a 2p fragment spans {lo}..={hi}");
+    }
+
+    #[test]
+    fn length_2p_spans_nothing_and_2p_plus_1_spans_its_midpoint() {
+        // 120 bases cannot cover a 121-base window anywhere.
+        let span_120 = integrate(&nuc_fragment(100, 220).spanning_long);
+        assert!(span_120.iter().all(|x| x.abs() < 1e-12), "a 2p fragment spans somewhere");
+        // 121 bases (100..=220) cover it at exactly one position: the midpoint, 160.
+        ones_exactly_on(&integrate(&nuc_fragment(100, 221).spanning_long), 160, 160, "2p+1 spanning");
     }
 }

@@ -262,19 +262,18 @@ def test_local_depth_is_mean_coverage_over_the_window(
     # are 1.0 for 167 bp (nucleosome stream) and 55 bp (TF stream):
     #
     #   window   the anchor centre 1000 expanded +/-1000, so len = 2000-0+1 = 2001
-    #   per frag (length - 1) bases, because wps.rs:1232 converts the start to
-    #            1-based inclusive (`fragment.start + 1`) while leaving the end
-    #            half-open, so each fragment loses its first base
-    #   total    10*(167-1) + 10*(55-1) = 1660 + 540 = 2200
+    #   per frag `length` bases -- a fragment covers exactly its own bases
+    #   total    10*167 + 10*55 = 1670 + 550 = 2220
     #
-    # That (length - 1) is a pre-existing off-by-one and is NOT what #79 fixed.
-    # It is spelled out rather than hidden behind a rounder number so the
-    # arithmetic stays checkable: if it is ever corrected this expectation
-    # becomes 2220/2001, and this test is where that will surface.
-    expected = 2200 / 2001
+    # Through 0.9.2 this read 2200: fragments were placed with a 1-based start
+    # against a 0-based region, so each lost its first base (#83). The per-stream
+    # intervals are pinned on a single fragment in wps.rs
+    # `coordinate_convention_tests`; this test pins the end-to-end consequence.
+    expected = 2220 / 2001
     assert depth.max() == pytest.approx(expected, rel=1e-6), (
         f"local_depth is the wrong scale: got {depth.max():.10g}, expected "
-        f"{expected:.10g} (= 2200/2001). Near 2200 means the total was written "
-        "without dividing by the window length; near zero means the last base's "
+        f"{expected:.10g} (= 2220/2001). Near 2220 means the total was written "
+        "without dividing by the window length; near 2200/2001 means fragments "
+        "are losing a base again (#83); near zero means the last base's "
         "coverage came back instead of the mean."
     )

@@ -40,11 +40,24 @@ Krewlyzer separates fragments into two biological signals:
 
 | Stream | Window | Fragment Size | Weight | Biological Signal |
 |--------|--------|---------------|--------|-------------------|
-| **WPS-Nuc** | 120bp | [160-175bp] | 1.0 (primary) | **Nucleosome positioning** |
+| **WPS-Nuc** | ±60 bp (121 bases) | [160-175bp] | 1.0 (primary) | **Nucleosome positioning** |
 | | | [120-159] ∪ [176-180bp] | 0.5 (secondary) | Flanking nucleosomes |
-| **WPS-TF** | 16bp | [35-80bp] | 1.0 | **Transcription factor footprints** |
+| **WPS-TF** | ±8 bp (17 bases) | [35-80bp] | 1.0 | **Transcription factor footprints** |
 
 The tiered weights for nucleosome fragments prioritize "perfect" mono-nucleosome sizes (~167bp) over edge cases.
+
+**Coordinate convention.** The protection window at position *x* is the `2p + 1`
+bases `[x − p, x + p]`, symmetric about *x* — 121 bases for WPS-Nuc, 17 for
+WPS-TF. A fragment *spans* *x* when the whole window lies inside it, and *ends*
+in it when its first or last base does. Fragments are read from the BED as
+0-based half-open `[start, end)`, and a fragment of *L* bases contributes
+exactly *L* bases of coverage.
+
+Every term is symmetric about the fragment's own midpoint. That is what makes
+plus- and minus-strand profiles comparable after minus-strand anchors are
+reversed. Through 0.9.2 the fragment start was taken as 1-based against a
+0-based window, so each fragment sat one base right, lost its first base of
+coverage, and had endpoint windows one base narrow (#83).
 
 ### Python/Rust Architecture
 

@@ -146,6 +146,26 @@ CLAIMS: Tuple[Claim, ...] = (
         "300bp of Alu body alone admitted exactly one period inside the "
         "nucleosomal band, pinning nrl_bp at 150.0 for every sample",
     ),
+    # -- WPS protection windows ---------------------------------------------
+    # The half-width p of the protection window. The window itself is the
+    # 2p + 1 bases [x - p, x + p] (#83), so docs/features/core/wps.md quotes
+    # 121 and 17 bases; a doc that says 120 or 16 describes the pre-0.9.3
+    # convention.
+    Claim(
+        "wps.nuc_window",
+        "60",
+        RustPattern(
+            "wps.rs", r"nuc_window: (\d+),", "WPS-Nuc protection half-window p"
+        ),
+        "the docs quoted a 120bp window, which no symmetric window around a "
+        "single base can be; the window is 2p + 1 = 121 bases",
+    ),
+    Claim(
+        "wps.tf_window",
+        "8",
+        RustPattern("wps.rs", r"tf_window: (\d+),", "WPS-TF protection half-window p"),
+        "quoted as 16bp; the window is 2p + 1 = 17 bases",
+    ),
     # -- WPS profile binning ------------------------------------------------
     # Three numbers that have to stay consistent or every WPS figure silently
     # rescales. The report plotted the bin index and labelled the axis "bp",
