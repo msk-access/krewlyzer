@@ -225,8 +225,15 @@ def test_local_depth_is_mean_coverage_over_the_window(
             "--no-gc-correct",
         ],
     )
-    if result.exit_code != 0:
-        pytest.skip(f"WPS execution failed (may need Rust backend): {result.output}")
+    # Not pytest.skip. The other tests in this file skip on a non-zero exit, and
+    # that is the wrong call here: this is a regression test for the Rust path
+    # being invoked at all, so a CLI error is precisely the failure it exists to
+    # catch. Skipping would let a broken backend report green -- the same
+    # "absence reads as success" shape as the `== 0.0` guard this test is about.
+    assert result.exit_code == 0, (
+        "the wps CLI failed, so the regression below was never exercised. "
+        f"exit={result.exit_code}\n{result.output}"
+    )
 
     wps_parquet = output_dir / "test_sample.WPS.parquet"
     assert wps_parquet.exists(), f"WPS Parquet missing. Output: {result.output}"
@@ -246,3 +253,28 @@ def test_local_depth_is_mean_coverage_over_the_window(
     assert (
         depth > 0
     ).any(), "every row reports zero depth over a window with 20 fragments in it"
+
+    # The scale, not just the sign. A sign check passes just as happily on
+    # `total_cov` left undivided -- a factor of 2001 out here -- which is the same
+    # class of error as the one being fixed, so the test has to pin the value.
+    #
+    # Derivation. With --no-gc-correct, gc_weight is 1.0, and the length weights
+    # are 1.0 for 167 bp (nucleosome stream) and 55 bp (TF stream):
+    #
+    #   window   the anchor centre 1000 expanded +/-1000, so len = 2000-0+1 = 2001
+    #   per frag (length - 1) bases, because wps.rs:1232 converts the start to
+    #            1-based inclusive (`fragment.start + 1`) while leaving the end
+    #            half-open, so each fragment loses its first base
+    #   total    10*(167-1) + 10*(55-1) = 1660 + 540 = 2200
+    #
+    # That (length - 1) is a pre-existing off-by-one and is NOT what #79 fixed.
+    # It is spelled out rather than hidden behind a rounder number so the
+    # arithmetic stays checkable: if it is ever corrected this expectation
+    # becomes 2220/2001, and this test is where that will surface.
+    expected = 2200 / 2001
+    assert depth.max() == pytest.approx(expected, rel=1e-6), (
+        f"local_depth is the wrong scale: got {depth.max():.10g}, expected "
+        f"{expected:.10g} (= 2200/2001). Near 2200 means the total was written "
+        "without dividing by the window length; near zero means the last base's "
+        "coverage came back instead of the mean."
+    )
