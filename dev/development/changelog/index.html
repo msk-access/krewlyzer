@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3279,14 +3279,62 @@
   the reason <code>std &gt; 0.0</code> rejects it -- asked of the value actually under test
   instead of restating a property of the language.</p>
 <ul>
-<li><strong><code>scripts/lint.sh</code> documented 11 where the number is 12</strong>, describing how
+<li>
+<p><strong><code>scripts/lint.sh</code> documented 11 where the number is 12</strong>, describing how
   many errors appear without the two <code>-A</code> flags. Pre-existing drift of exactly
   the kind the claims registry exists to prevent, found by re-measuring instead
-  of by reading.</li>
+  of by reading.</p>
+</li>
+<li>
+<p><strong>CI is split by cost, and the PHI scan is no longer skipped for prose.</strong>
+  The PHI / secret scan lived in <code>test.yml</code>, so it inherited that workflow's
+  <code>paths-ignore</code> for markdown. #78, which changed only <code>CLAUDE.md</code>, merged with
+  Greptile as its only check -- no scan, no tests -- although the job describes
+  itself as the backstop for contributors who never enabled the git hooks, and
+  prose is where an identifier is most likely to be pasted by hand. It now runs
+  in a new <code>quick-checks.yml</code> with no path filter at all, under the same check
+  name.</p>
+</li>
 </ul>
+<p><code>quick-checks.yml</code> also runs the tests that read markdown, which <code>test.yml</code>
+  was skipping on precisely the changes they check. Found by sweeping <code>tests/</code>
+  for paths built to markdown rather than by reading docstrings: three files,
+  none needing the Rust extension -- with krewlyzer not installed they ran in
+  0.11 s. A README-only change linking a page mkdocs does not publish now
+  fails; before, it skipped CI entirely. Which tests belong in that job is
+  asserted by a new test that walks every test's AST, so adding a markdown
+  reader without listing it fails rather than relying on someone remembering
+  a comment.</p>
+<p><code>test.yml</code>'s filter is now <code>'**.md'</code> instead of <code>'*.md'</code>. In a GitHub path
+  filter <code>*</code> does not cross <code>/</code>, so the old pattern matched root-level markdown
+  only and an edit to <code>.agents/rules/*.md</code> ran the whole suite.</p>
+<p>Both workflows cancel a superseded run of the same PR, and give every branch
+  push a concurrency group of its own (<code>github.run_id</code>). One group per branch
+  looked equivalent and was not: GitHub keeps at most one <em>pending</em> run per
+  group and a new one cancels it, so three quick pushes to <code>develop</code> would
+  have dropped the middle run -- and with each push scanned from its own
+  <code>before</code>, nothing would ever have scanned that push. Caught in review on
+  #86; <code>tests/unit/test_ci_concurrency.py</code> now pins it.</p>
+<p>Not changed, deliberately: a PR's path filter is evaluated against the whole
+  PR diff, so resolving a conflict in a PR that changes code still runs the
+  full suite. That run is correct -- the merge brings in whatever landed on
+  the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
-<li><strong>The Linux build, which stopped compiling when <code>ubuntu-latest</code> became
+<li>
+<p><strong>On a push, the PHI scan covered only the last commit.</strong> The scan base was
+  <code>pull_request.base.sha || 'HEAD~1'</code>, so for a push it was <code>HEAD~1</code>: push
+  three linear commits and two went unscanned, with nothing to say so. Merge
+  commits happened to work, since <code>HEAD~1..HEAD</code> follows the merged side. The
+  base is now the branch's previous head (<code>github.event.before</code>). Where that is
+  not in history -- a new branch reports all zeros, and a force-push can leave
+  the old head unreachable -- it falls back to <code>HEAD~1</code> with a visible
+  warning instead of narrowing silently. Run against this repository with the
+  previous head three commits back, the new base covers 8 commits where the
+  old one covered 1.</p>
+</li>
+<li>
+<p><strong>The Linux build, which stopped compiling when <code>ubuntu-latest</code> became
   ubuntu-26.04.</strong> That image ships clang/libclang 21, and <code>rust-htslib</code>
   enables <code>hts-sys/bindgen</code> unconditionally, so every build regenerates
   htslib's FFI bindings against the host libclang. The bindgen pinned by
@@ -3296,7 +3344,8 @@
   '_address'</code>. <code>hts-sys 2.2.1</code> moves bindgen to 0.72.1; this is a
   <code>rust/Cargo.lock</code> change only. Both hts-sys releases vendor htslib 1.19.1
   byte-identically, with the same feature set, so no C library, API or
-  generated-binding semantics change.</li>
+  generated-binding semantics change.</p>
+</li>
 </ul>
 <p>Three jobs built on an <code>ubuntu-latest</code> host and so all three were broken,
   including <code>release.yml</code>'s "Build package" step -- a release would have
