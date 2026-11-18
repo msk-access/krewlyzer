@@ -2306,10 +2306,17 @@ mod pon_scoring_tests {
         // attainable positive z is ~1.5 and 302 of 400 anchors could not reach
         // +2 however tumour-like the sample. On the Fisher scale there is no
         // bound to run into.
-        assert!(
-            (1.0 - 0.844) / 0.0985 < 2.0,
-            "the raw ceiling should be binding"
-        );
+        // Deliberately an assertion over constants: it is the measured cohort
+        // arithmetic that is being pinned, so that editing those numbers
+        // without re-deriving the conclusion fails the build. clippy reads
+        // "constant" as "pointless"; here it is the point.
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(
+                (1.0 - 0.844) / 0.0985 < 2.0,
+                "the raw ceiling should be binding"
+            );
+        }
         assert!(wps_fisher_z(0.999) > wps_fisher_z(0.99));
         assert!(wps_fisher_z(0.99) > wps_fisher_z(0.9));
     }
@@ -2921,19 +2928,19 @@ mod bait_mask_tests {
         let (_dir, mask) = fixture();
         // Centre of the chr1 bait: reliable on 1, and nowhere else except the
         // chr7 bait that genuinely shares the coordinate.
-        assert_eq!(mask.check_position("1", 1_000_200).1, true);
-        assert_eq!(mask.check_position("7", 1_000_200).1, true);
-        assert_eq!(mask.check_position("2", 1_000_200).1, false, "chr2 has no bait here");
-        assert_eq!(mask.check_position("X", 1_000_200).1, false, "chrX has no bait here");
+        assert!(mask.check_position("1", 1_000_200).1);
+        assert!(mask.check_position("7", 1_000_200).1);
+        assert!(!mask.check_position("2", 1_000_200).1, "chr2 has no bait here");
+        assert!(!mask.check_position("X", 1_000_200).1, "chrX has no bait here");
     }
 
     #[test]
     fn a_bait_on_one_chromosome_does_not_cover_another() {
         let (_dir, mask) = fixture();
         // The X bait must not make the same coordinate reliable on 1 or 7.
-        assert_eq!(mask.check_position("X", 2_000_200).1, true);
-        assert_eq!(mask.check_position("1", 2_000_200).1, false);
-        assert_eq!(mask.check_position("7", 2_000_200).1, false);
+        assert!(mask.check_position("X", 2_000_200).1);
+        assert!(!mask.check_position("1", 2_000_200).1);
+        assert!(!mask.check_position("7", 2_000_200).1);
     }
 
     #[test]
@@ -2941,9 +2948,9 @@ mod bait_mask_tests {
         let (_dir, mask) = fixture();
         // Written as "chr7" in the BED, queried both ways; anchors BEDs use
         // bare names and references often do not.
-        assert_eq!(mask.check_position("chr7", 1_000_200).1, true);
-        assert_eq!(mask.check_position("7", 1_000_200).1, true);
-        assert_eq!(mask.check_position("chr1", 1_000_200).1, true);
+        assert!(mask.check_position("chr7", 1_000_200).1);
+        assert!(mask.check_position("7", 1_000_200).1);
+        assert!(mask.check_position("chr1", 1_000_200).1);
     }
 
     #[test]

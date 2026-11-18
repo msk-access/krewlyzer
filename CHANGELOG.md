@@ -4,6 +4,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **The clippy gate now lints test code (`--tests`).** Without that flag clippy
+  checks the lib target only, so no test code was linted at all -- and in this
+  repo the tests are where the invariants are asserted, which made the
+  assertions the one place the linter never looked. The same blind spot as the
+  unused-dependency warning, one target over: `cargo test` had been carrying
+  two of these warnings as permanent noise while the gate reported clean.
+
+  Enabling it surfaced 17 errors across five files. Eleven were mechanical --
+  ten `assert_eq!(x, true)` in the bait-mask tests, one stray `mut` in
+  `motif_utils`. Six were not, and are worth stating because the obvious fix
+  would have been wrong: `pon_builder`'s two `SIGMA_FLOOR` bounds and `wps`'s
+  correlation-ceiling check are *deliberate* assertions over constants, whose
+  purpose is to fail the build if someone edits a measured constant without
+  re-deriving the conclusion resting on it. clippy reads "constant" as
+  "pointless"; here it is the point. Those carry a scoped `#[allow]` with the
+  reason rather than being deleted.
+
+  `fsd`'s `assert!(!(f64::NAN > 0.0))` tripped three lints at once and was
+  genuinely improved rather than silenced: it now asserts that the measured
+  unmeasurable spread is *unordered* against the gate's threshold -- which is
+  the reason `std > 0.0` rejects it -- asked of the value actually under test
+  instead of restating a property of the language.
+
+- **`scripts/lint.sh` documented 11 where the number is 12**, describing how
+  many errors appear without the two `-A` flags. Pre-existing drift of exactly
+  the kind the claims registry exists to prevent, found by re-measuring instead
+  of by reading.
+
 ### Fixed
 
 - **The Linux build, which stopped compiling when `ubuntu-latest` became

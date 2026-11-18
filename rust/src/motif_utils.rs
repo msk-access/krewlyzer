@@ -160,7 +160,7 @@ mod tests {
         assert_eq!(calculate_mds(&single), 0.0);
 
         // Uniform distribution -> 1.0 (max entropy)
-        let mut uniform = [1u64; 256];
+        let uniform = [1u64; 256];
         let mds = calculate_mds(&uniform);
         assert!((mds - 1.0).abs() < 0.001);
     }

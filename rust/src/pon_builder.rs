@@ -1062,7 +1062,13 @@ mod shape_tests {
         // 1e-12 and 1e-6, the rest above. The floor is the log-space midpoint
         // of six empty decades, so it may move two orders either way without
         // reclassifying a single position. This pins that it stays there.
-        assert!(SIGMA_FLOOR > 1e-12, "floor dropped into the residue population");
-        assert!(SIGMA_FLOOR < 1e-6, "floor rose into the measured population");
+        // Deliberately assertions over a constant: failing the build when
+        // SIGMA_FLOOR leaves the empty decades is the entire purpose, so
+        // clippy::assertions_on_constants is wrong here rather than tolerated.
+        #[allow(clippy::assertions_on_constants)]
+        {
+            assert!(SIGMA_FLOOR > 1e-12, "floor dropped into the residue population");
+            assert!(SIGMA_FLOOR < 1e-6, "floor rose into the measured population");
+        }
     }
 }
