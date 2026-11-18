@@ -66,13 +66,38 @@ jobs:
       - name: Verify the PHI guard itself
         run: bash scripts/check_phi_guard.sh
 
-      # Scoped to what this branch adds. A full-history scan would flag commits
+      # Scoped to what this run adds. A full-history scan would flag commits
       # that predate the guard and cannot be changed without a rewrite, which
       # would block every push and train everyone to bypass it.
+      #
+      # On a push the base is the commit the branch pointed at before it, not
+      # HEAD~1. HEAD~1 scanned only the last commit of a multi-commit push:
+      # push three and two went unscanned, with nothing to say so. (Merge
+      # commits happened to work, since HEAD~1..HEAD follows the merged side.)
+      # When `before` is not in history -- a new branch reports all zeros, and
+      # a force-push can leave the old head unreachable -- this falls back to
+      # HEAD~1 and says so in a warning, rather than narrowing silently.
+      - name: Work out what this run adds
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          case "$EVENT" in
+            pull_request) BASE="$PR_BASE" ;;
+            push)
+              BASE="$PUSH_BEFORE"
+              if ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+                echo "::warning::push base '${BASE}' is not in history (new branch or force-push); scanning HEAD~1..HEAD only"
+                BASE="HEAD~1"
+              fi ;;
+            *) BASE="HEAD~1" ;;
+          esac
+          echo "scanning ${BASE}..HEAD: $(git rev-list --count "${BASE}..HEAD") commit(s)"
+          echo "BASE=${BASE}" >> "$GITHUB_ENV"
+
       - name: Scan the incoming commits
         run: |
-          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
-          echo "scanning ${BASE}..HEAD"
           gitleaks detect --source . --log-opts="${BASE}..HEAD" \
             --no-banner --redact --exit-code 1
 
@@ -80,7 +105,6 @@ jobs:
       # edited after a push without rewriting history.
       - name: Scan the commit messages
         run: |
-          BASE="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
           git log "${BASE}..HEAD" --format='%B%n%an %ae' > /tmp/commit-messages.txt
           gitleaks stdin --config .gitleaks.toml \
             --no-banner --redact --exit-code 1 < /tmp/commit-messages.txt

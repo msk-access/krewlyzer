@@ -92,6 +92,17 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **On a push, the PHI scan covered only the last commit.** The scan base was
+  `pull_request.base.sha || 'HEAD~1'`, so for a push it was `HEAD~1`: push
+  three linear commits and two went unscanned, with nothing to say so. Merge
+  commits happened to work, since `HEAD~1..HEAD` follows the merged side. The
+  base is now the branch's previous head (`github.event.before`). Where that is
+  not in history -- a new branch reports all zeros, and a force-push can leave
+  the old head unreachable -- it falls back to `HEAD~1` with a visible
+  warning instead of narrowing silently. Run against this repository with the
+  previous head three commits back, the new base covers 8 commits where the
+  old one covered 1.
+
 - **The Linux build, which stopped compiling when `ubuntu-latest` became
   ubuntu-26.04.** That image ships clang/libclang 21, and `rust-htslib`
   enables `hts-sys/bindgen` unconditionally, so every build regenerates
