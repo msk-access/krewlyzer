@@ -6,7 +6,6 @@ rust-version = "1.87"  # Required for u64::is_multiple_of (stabilized 1.87)
 authors = ["Ronak Shah <shahr2@mskcc.org>"]
 description = "High-performance Rust backend for krewlyzer cfDNA analysis"
 repository = "https://github.com/msk-access/krewlyzer"
-homepage = "https://github.com/msk-access/krewlyzer"
 license = "AGPL-3.0"
 
 [lib]
@@ -55,7 +54,6 @@ indicatif = "0.17"
 # Numerical
 ndarray = "0.16"
 numpy = "0.23"
-statrs = "0.17"
 
 # Interval Trees
 coitrees = "0.4"

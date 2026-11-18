@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
+  Cargo warned about both on every build of `rust/`, and a build whose output
+  is always two warnings long is a build nobody reads — the ubuntu-26.04
+  libclang-21 break was found in that noise.
+
+  `statrs = "0.17"` was declared under `# Numerical` and referenced nowhere:
+  `grep -rn statrs rust/src/` returns nothing, so `cargo::unused_dependencies`
+  flagged it. It contributed compile time and eleven transitive crates
+  (`nalgebra`, `simba`, `rand`, `rand_distr`, `bytemuck`, `wide`, ...) to
+  every build and nothing to the binary. `rust/Cargo.lock` loses all twelve.
+
+  `package.homepage` duplicated `package.repository` verbatim, which
+  `cargo::redundant_homepage` warns about. One thing did read it, which the
+  obvious check misses: maturin copied it into the wheel's `Home-page`, so
+  that field is now empty where it used to carry the repository URL. It is the
+  *deprecated* metadata field, superseded by `Project-URL` — and
+  `[project.urls]` in `pyproject.toml` still emits
+  `Project-URL: Homepage, https://github.com/msk-access/krewlyzer`, which is
+  what PyPI renders the Homepage link from. So the link survives; only the
+  dead field goes blank. Nothing else read it: the crate is a pyo3
+  `extension-module` cdylib never published to crates.io, mkdocs has its own
+  `repo_url`, Nextflow its own `homePage`, and no test, script or workflow
+  mentions either field. `package.repository` stays, and is what cargo says is
+  sufficient.
+
 ### Fixed
 
 - **The Linux build, which stopped compiling when `ubuntu-latest` became
