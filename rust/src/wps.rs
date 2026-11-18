@@ -642,6 +642,97 @@ fn background_spanning_range(
     ((a + p).max(0), (z - 1 - p).min(profile_len as i64 - 1))
 }
 
+/// Every binned WPS table: 200 bins of 10 bp over the anchor's ±1000 bp.
+/// Pinned in the claims registry; the plots derive the centre from them.
+const NUM_BINS: usize = 200;
+const WINDOW_SIZE: usize = 2000;
+const BIN_SIZE: usize = WINDOW_SIZE / NUM_BINS; // 10bp per bin
+
+/// One region's per-base arrays, integrated from the difference arrays, and
+/// whether each base is reliable under the capture mask.
+struct PerBase<'a> {
+    wps_long: &'a [f64],
+    wps_short: &'a [f64],
+    span_long: &'a [f64],
+    end_long: &'a [f64],
+    span_short: &'a [f64],
+    end_short: &'a [f64],
+    reliable: &'a [bool],
+}
+
+/// One region's 200-bin vectors, oriented 5' to 3' along the anchor's strand.
+struct Binned {
+    wps_nuc: Vec<f32>,
+    wps_tf: Vec<f32>,
+    mask: Vec<i8>,
+    prot_nuc: Vec<f32>,
+    prot_tf: Vec<f32>,
+}
+
+/// Index of the anchor base in its region's arrays.
+fn anchor_index(region: &Region) -> usize {
+    (region.center - region.start) as usize
+}
+
+/// Bin a region's per-base arrays into `NUM_BINS` bins of `BIN_SIZE`, measured
+/// from the anchor base and oriented 5' to 3' along the anchor's strand.
+///
+/// Bin `k` holds the bases at offsets `[BIN_SIZE·(k − c), BIN_SIZE·(k − c) + BIN_SIZE)`
+/// from the anchor, with `c = NUM_BINS / 2`, so the anchor's own base is always
+/// the first base of bin `c`. A minus-strand region is read at `anchor − offset`
+/// instead of `anchor + offset`: reflected about the anchor *before* binning.
+///
+/// Through 0.9.2 bins were cut by array index from 0 and minus-strand bins
+/// reversed afterwards. In a full 2001-base window that reflects about index
+/// 999.5 while the anchor is at 1000, so a minus-strand profile was mirrored
+/// about a point one base from where a plus-strand one was (#83). In a window
+/// truncated by a chromosome start the anchor was not in bin `c` at all, and
+/// the bins past the end of the array kept their initial `0.0` -- a reading of
+/// zero where nothing was read. Bases with no array position are now skipped,
+/// and a bin with none is NaN, with its capture mask unreliable.
+fn bin_by_anchor(pb: &PerBase, anchor_index: usize, minus_strand: bool) -> Binned {
+    let len = pb.wps_long.len() as i64;
+    let anchor = anchor_index as i64;
+    let center_bin = (NUM_BINS / 2) as i64;
+    let mut out = Binned {
+        wps_nuc: vec![f32::NAN; NUM_BINS],
+        wps_tf: vec![f32::NAN; NUM_BINS],
+        mask: vec![0i8; NUM_BINS],
+        prot_nuc: vec![f32::NAN; NUM_BINS],
+        prot_tf: vec![f32::NAN; NUM_BINS],
+    };
+    for bin_idx in 0..NUM_BINS {
+        let first_offset = (bin_idx as i64 - center_bin) * BIN_SIZE as i64;
+        let (mut wn, mut wt, mut sn, mut en, mut st, mut et) = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+        let mut count = 0usize;
+        let mut mask_ok = true;
+        for offset in first_offset..first_offset + BIN_SIZE as i64 {
+            let j = if minus_strand { anchor - offset } else { anchor + offset };
+            if !(0..len).contains(&j) {
+                continue;
+            }
+            let j = j as usize;
+            wn += pb.wps_long[j];
+            wt += pb.wps_short[j];
+            sn += pb.span_long[j];
+            en += pb.end_long[j];
+            st += pb.span_short[j];
+            et += pb.end_short[j];
+            mask_ok &= pb.reliable[j];
+            count += 1;
+        }
+        if count == 0 {
+            continue;
+        }
+        out.wps_nuc[bin_idx] = (wn / count as f64) as f32;
+        out.wps_tf[bin_idx] = (wt / count as f64) as f32;
+        out.mask[bin_idx] = if mask_ok { 1 } else { 0 };
+        out.prot_nuc[bin_idx] = if sn + en > 0.0 { (sn / (sn + en)) as f32 } else { 0.0 };
+        out.prot_tf[bin_idx] = if st + et > 0.0 { (st / (st + et)) as f32 } else { 0.0 };
+    }
+    out
+}
+
 #[derive(Clone)]
 pub struct WpsConsumer {
     // Shared state
@@ -889,9 +980,6 @@ impl WpsConsumer {
         use parquet::file::properties::WriterProperties;
         use std::sync::Arc as StdArc;
         
-        const NUM_BINS: usize = 200;
-        const WINDOW_SIZE: usize = 2000;
-        const BIN_SIZE: usize = WINDOW_SIZE / NUM_BINS; // 10bp per bin
         
         info!("WPS: Writing Parquet with {} bins per region", NUM_BINS);
         
@@ -1012,78 +1100,31 @@ impl WpsConsumer {
                 }
                 
                 // -------------------------------------------------------------
-                // Step 2: Bin aggregation (2000bp → 200 bins of 10bp each)
+                // Step 2-3: Bin aggregation and strand orientation
                 // -------------------------------------------------------------
-                let mut binned_wps_nuc = vec![0.0f32; NUM_BINS];
-                let mut binned_wps_tf = vec![0.0f32; NUM_BINS];
-                let mut binned_mask = vec![1i8; NUM_BINS];
-                let mut binned_prot_nuc = vec![0.0f32; NUM_BINS];
-                let mut binned_prot_tf = vec![0.0f32; NUM_BINS];
-                
-                for bin_idx in 0..NUM_BINS {
-                    let start_pos = bin_idx * BIN_SIZE;
-                    let end_pos = (start_pos + BIN_SIZE).min(len);
-                    
-                    if start_pos >= len {
-                        break;
-                    }
-                    
-                    let mut sum_wps_nuc = 0.0;
-                    let mut sum_wps_tf = 0.0;
-                    let mut sum_span_nuc = 0.0;
-                    let mut sum_end_nuc = 0.0;
-                    let mut sum_span_tf = 0.0;
-                    let mut sum_end_tf = 0.0;
-                    let mut mask_ok = true;
-                    let count = (end_pos - start_pos) as f32;
-                    
-                    for j in start_pos..end_pos {
-                        sum_wps_nuc += wps_long_raw[j];
-                        sum_wps_tf += wps_short_raw[j];
-                        sum_span_nuc += spanning_long_raw[j];
-                        sum_end_nuc += endpoints_long_raw[j];
-                        sum_span_tf += spanning_short_raw[j];
-                        sum_end_tf += endpoints_short_raw[j];
-                        
-                        // Check capture mask for panel edge detection
-                        if let Some(ref mask) = bait_mask {
-                            let pos = region.start + j as u64;
-                            let (_, reliable) = mask.check_position(&region.chrom, pos);
-                            if !reliable {
-                                mask_ok = false;
-                            }
-                        }
-                    }
-                    
-                    binned_wps_nuc[bin_idx] = (sum_wps_nuc / count as f64) as f32;
-                    binned_wps_tf[bin_idx] = (sum_wps_tf / count as f64) as f32;
-                    binned_mask[bin_idx] = if mask_ok { 1 } else { 0 };
-                    
-                    let total_nuc = sum_span_nuc + sum_end_nuc;
-                    let total_tf = sum_span_tf + sum_end_tf;
-                    binned_prot_nuc[bin_idx] = if total_nuc > 0.0 {
-                        (sum_span_nuc / total_nuc) as f32
-                    } else {
-                        0.0
-                    };
-                    binned_prot_tf[bin_idx] = if total_tf > 0.0 {
-                        (sum_span_tf / total_tf) as f32
-                    } else {
-                        0.0
-                    };
-                }
-                
-                // -------------------------------------------------------------
-                // Step 3: Strand reversal for minus strand regions
-                // -------------------------------------------------------------
-                if region.strand == "-" {
-                    binned_wps_nuc.reverse();
-                    binned_wps_tf.reverse();
-                    binned_mask.reverse();
-                    binned_prot_nuc.reverse();
-                    binned_prot_tf.reverse();
-                }
-                
+                let reliable: Vec<bool> = (0..len)
+                    .map(|j| match bait_mask {
+                        Some(ref mask) => mask.check_position(&region.chrom, region.start + j as u64).1,
+                        None => true,
+                    })
+                    .collect();
+                let per_base = PerBase {
+                    wps_long: &wps_long_raw,
+                    wps_short: &wps_short_raw,
+                    span_long: &spanning_long_raw,
+                    end_long: &endpoints_long_raw,
+                    span_short: &spanning_short_raw,
+                    end_short: &endpoints_short_raw,
+                    reliable: &reliable,
+                };
+                let Binned {
+                    wps_nuc: mut binned_wps_nuc,
+                    wps_tf: mut binned_wps_tf,
+                    mask: binned_mask,
+                    prot_nuc: binned_prot_nuc,
+                    prot_tf: binned_prot_tf,
+                } = bin_by_anchor(&per_base, anchor_index(region), region.strand == "-");
+
                 // -------------------------------------------------------------
                 // Step 4: Savitzky-Golay smoothing (window=11, order=3)
                 // Matches scipy.signal.savgol_filter defaults
@@ -3265,5 +3306,78 @@ mod coordinate_convention_tests {
         assert!(span_120.iter().all(|x| x.abs() < 1e-12), "a 2p fragment spans somewhere");
         // 121 bases (100..=220) cover it at exactly one position: the midpoint, 160.
         ones_exactly_on(&integrate(&nuc_fragment(100, 221).spanning_long), 160, 160, "2p+1 spanning");
+    }
+}
+
+/// Binning and strand orientation, measured from the anchor base (#83).
+#[cfg(test)]
+mod binning_tests {
+    use super::*;
+
+    /// Six per-base arrays and a reliability mask, built from one generator so
+    /// a profile and its mirror image are easy to make.
+    struct Profile {
+        arrays: [Vec<f64>; 6],
+        reliable: Vec<bool>,
+    }
+
+    impl Profile {
+        fn new(len: usize, f: impl Fn(usize, usize) -> f64, unreliable: &[usize]) -> Self {
+            let arrays = std::array::from_fn(|k| (0..len).map(|j| f(k, j)).collect());
+            let reliable = (0..len).map(|j| !unreliable.contains(&j)).collect();
+            Self { arrays, reliable }
+        }
+
+        /// The same profile reflected end to end: index j holds index len-1-j.
+        fn mirrored(&self) -> Self {
+            Self {
+                arrays: std::array::from_fn(|k| self.arrays[k].iter().rev().copied().collect()),
+                reliable: self.reliable.iter().rev().copied().collect(),
+            }
+        }
+
+        fn per_base(&self) -> PerBase<'_> {
+            let [a, b, c, d, e, f] = &self.arrays;
+            PerBase { wps_long: a, wps_short: b, span_long: c, end_long: d, span_short: e, end_short: f, reliable: &self.reliable }
+        }
+    }
+
+    #[test]
+    fn opposite_strands_of_a_mirror_profile_bin_identically() {
+        // A full 2001-base window, anchor at index 1000, so the end-to-end
+        // mirror is also the reflection about the anchor. Every array is
+        // asymmetric, so a reflection about the wrong point cannot pass.
+        let plus = Profile::new(2001, |k, j| (j * (k + 1)) as f64 + 0.5 * (k as f64), &[37, 1500]);
+        let minus = plus.mirrored();
+        let a = bin_by_anchor(&plus.per_base(), 1000, false);
+        let b = bin_by_anchor(&minus.per_base(), 1000, true);
+        for (name, x, y) in [
+            ("wps_nuc", &a.wps_nuc, &b.wps_nuc),
+            ("wps_tf", &a.wps_tf, &b.wps_tf),
+            ("prot_nuc", &a.prot_nuc, &b.prot_nuc),
+            ("prot_tf", &a.prot_tf, &b.prot_tf),
+        ] {
+            for k in 0..NUM_BINS {
+                assert!((x[k] - y[k]).abs() <= 1e-6 * x[k].abs().max(1.0), "{name} bin {k}: plus {} vs minus {}", x[k], y[k]);
+            }
+        }
+        assert_eq!(a.mask, b.mask, "capture mask differs between strands");
+    }
+
+    #[test]
+    fn an_anchor_near_a_chromosome_start_keeps_its_bin() {
+        // center = 500 truncates the window to [0, 1500]: 1501 bases, anchor
+        // at index 500. A spike on the anchor base alone.
+        let spike = Profile::new(1501, |k, j| if k == 0 && j == 500 { 1000.0 } else { 0.0 }, &[]);
+        for (strand, minus, missing) in [("plus", false, 0..=49), ("minus", true, 151..=199)] {
+            let b = bin_by_anchor(&spike.per_base(), 500, minus);
+            assert!((b.wps_nuc[100] - 100.0).abs() < 1e-6, "{strand}: anchor not in bin 100 (bin 100 = {})", b.wps_nuc[100]);
+            for k in missing.clone() {
+                assert!(b.wps_nuc[k].is_nan(), "{strand}: bin {k} lies before the chromosome start and is {}, not NaN", b.wps_nuc[k]);
+            }
+            for k in (0..NUM_BINS).filter(|k| *k != 100 && !missing.contains(k)) {
+                assert!(b.wps_nuc[k] == 0.0, "{strand}: bin {k} = {}", b.wps_nuc[k]);
+            }
+        }
     }
 }

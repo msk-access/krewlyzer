@@ -125,8 +125,21 @@ All notable changes to this project will be documented in this file.
   The Alu background (`WpsBackgroundConsumer`) had the same convention mix
   and is fixed with it. The docs quoted the windows as 120 and 16 bp; a window
   symmetric about one base has an odd width, so they are 121 and 17 bases
-  (`p` = 60 and 8, now in the claims registry). **Changes WPS feature values**,
-  so `MIN_PON_VERSION` moves and the PONs are rebuilt in this release.
+  (`p` = 60 and 8, now in the claims registry).
+
+  Binning had the same problem one step later. Bins were cut by array index
+  and minus-strand bins reversed afterwards, which reflects a 2001-base window
+  about index 999.5 while the anchor is at 1000 -- so minus-strand profiles
+  were mirrored about a point one base from plus-strand ones. Bins are now
+  measured from the anchor base and minus-strand regions are reflected about
+  it before binning; a test bins a profile and its mirror image on opposite
+  strands and requires identical vectors. In a window truncated by a
+  chromosome start the anchor used to land outside its bin and the bins past
+  the array kept their initial `0.0`, a reading where nothing was read; they
+  are now NaN, with an unreliable capture mask.
+
+  **Changes WPS feature values**, so `MIN_PON_VERSION` moves and the PONs are
+  rebuilt in this release.
 
 - **The Linux build, which stopped compiling when `ubuntu-latest` became
   ubuntu-26.04.** That image ships clang/libclang 21, and `rust-htslib`
