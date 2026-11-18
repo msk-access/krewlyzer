@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The Linux build, which stopped compiling when `ubuntu-latest` became
+  ubuntu-26.04.** That image ships clang/libclang 21, and `rust-htslib`
+  enables `hts-sys/bindgen` unconditionally, so every build regenerates
+  htslib's FFI bindings against the host libclang. The bindgen pinned by
+  `hts-sys 2.2.0` (0.69.5) predates libclang 21 and, rather than failing,
+  emitted *opaque* structs -- so the error landed in rust-htslib's own source
+  as `no field 'n_targets' on type 'sam_hdr_t' ... available field is:
+  '_address'`. `hts-sys 2.2.1` moves bindgen to 0.72.1; this is a
+  `rust/Cargo.lock` change only. Both hts-sys releases vendor htslib 1.19.1
+  byte-identically, with the same feature set, so no C library, API or
+  generated-binding semantics change.
+
+  Three jobs built on an `ubuntu-latest` host and so all three were broken,
+  including `release.yml`'s "Build package" step -- a release would have
+  failed. The break went unnoticed for ~3 months because the last Linux run
+  was 2026-08-26: `test.yml` has `paths-ignore` for `docs/**` and `*.md`, and
+  `cargo test` runs on macOS, where the Apple-toolchain libclang still parsed
+  the headers under bindgen 0.69 (verified locally against Apple clang 21.0.0,
+  which is not upstream LLVM 21). The toolchain coupling and this failure signature are now recorded
+  at the dependency and in `.agents/rules/development.md`.
+
 ## [0.9.2] - 2026-08-25
 
 ### Added
