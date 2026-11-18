@@ -48,8 +48,17 @@ def _strip_comment_lines(text: str) -> str:
     )
 
 
-def _script() -> str:
-    return _strip_comment_lines(_SCRIPT.read_text(encoding="utf-8"))
+def _script(*, strip_comments: bool = True) -> str:
+    """The script's text, comments stripped by default.
+
+    Stripping is right for a check that something *must appear* -- a comment
+    cannot satisfy a requirement -- and wrong for a check that something *must
+    not appear*, because a comment can still violate a prohibition. A version
+    restated in a comment drifts exactly like a hardcoded one, for the next
+    person who reads it. So negative checks pass `strip_comments=False`.
+    """
+    text = _SCRIPT.read_text(encoding="utf-8")
+    return _strip_comment_lines(text) if strip_comments else text
 
 
 def _lint_job_commands() -> str:
@@ -142,9 +151,11 @@ def test_the_script_reads_versions_from_pyproject():
     The failure this whole change is about is two sources of truth for a tool
     version disagreeing; a hardcoded pin here would recreate it one level down.
     """
-    script = _script()
-    assert "pyproject.toml" in script
-    hardcoded = re.findall(r"(black|ruff|mypy)@\d+\.\d+", script)
+    assert "pyproject.toml" in _script()
+    # Raw text, deliberately unlike every positive check in this file: see
+    # `_script`. Stripping comments here let `# CI runs black@26.1 here` pass,
+    # where the guard before comment-stripping correctly refused it.
+    hardcoded = re.findall(r"(black|ruff|mypy)@\d+\.\d+", _script(strip_comments=False))
     assert not hardcoded, (
         f"scripts/lint.sh hardcodes versions {hardcoded}; read them from "
         "pyproject.toml with the `pin` helper instead"
