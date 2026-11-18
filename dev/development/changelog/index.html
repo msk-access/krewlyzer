@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3214,8 +3214,68 @@
   was 2026-08-26: <code>test.yml</code> has <code>paths-ignore</code> for <code>docs/**</code> and <code>*.md</code>, and
   <code>cargo test</code> runs on macOS, where the Apple-toolchain libclang still parsed
   the headers under bindgen 0.69 (verified locally against Apple clang 21.0.0,
-  which is not upstream LLVM 21). The toolchain coupling and this failure signature are now recorded
-  at the dependency and in <code>.agents/rules/development.md</code>.</p>
+  which is not upstream LLVM 21). The toolchain coupling and this failure
+  signature are now recorded at the dependency and in
+  <code>.agents/rules/development.md</code>.</p>
+<ul>
+<li><strong><code>local_depth</code> reported coverage at the window's last base divided by the
+  window length, not mean coverage.</strong> <code>cov_long</code>/<code>cov_short</code> are difference
+  arrays — <code>add_range</code> writes <code>+w</code> at a fragment's start and <code>-w</code> one past its
+  end — so the running sum over positions is the coverage <em>at</em> that position,
+  and a mean needs the sum of those running sums. The per-base path in
+  <code>rust/src/wps.rs</code> already did that (<code>total_cov += curr_cov_long +
+  curr_cov_short</code>). The binned path, which writes the Parquet product, kept only
+  the running value and divided <em>it</em> by the length.</li>
+</ul>
+<p>Every fragment that closes before the window ends telescopes out of that
+  value, so what survived was floating-point residue of arbitrary sign.
+  Measured on 10 samples from each of four cohorts — patient and <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> donor,
+  both assays, both variants — the column was <strong>negative on 22–42% of region
+  rows</strong> and below <code>1e-9</code> on 44–82%, with medians around <code>1e-17</code>. Fewer than 1%
+  of rows carried a value a reader would recognise as a depth. Multiplying back
+  by the window length recovered plausible per-base coverage (an xs2 maximum of
+  29.95 becomes 59,900 reads at one base), which is what confirmed the
+  mechanism.</p>
+<p>The same expression guarded region emptiness: <code>if curr_cov == 0.0 { return
+  None }</code>, under a comment reading "Skip empty regions (no coverage)". The
+  quantity tested was the final base's coverage, so a region whose fragments all
+  closed early was discarded whenever that cancellation landed on exactly zero —
+  an exact float comparison on an accumulated sum, the same class of defect as
+  the <code>sd &gt; 0.0</code> checks removed in 0.9.0. This is <strong>reproducible</strong>: the new
+  end-to-end test drives the CLI over an anchor whose 20 fragments all close
+  early, and with the old reading restored the region is dropped and the table
+  comes back empty. It went unseen on real cohorts only because dense libraries
+  usually leave something open at the window's final base.</p>
+<p><code>docs/reference/output-files.md</code> has documented the column as "Mean coverage
+  at the anchor" throughout, and <code>validate/contract.py</code> declares it
+  <code>Vary.BOTH</code> — which it passed, because it did vary. It just varied wrongly.
+  Another case of invariant #1's limit: anti-degeneracy catches constants, not
+  nonsense.</p>
+<p>The arithmetic now lives in <code>RegionAccumulator::total_coverage</code>, so it is
+  testable rather than inline in a parallel closure. Five Rust tests pin it,
+  including one that asserts the shipped reading was exactly zero for a
+  half-covered window <em>in the same test</em> as the corrected total being half the
+  length — so reverting the semantics fails it. An end-to-end test in
+  <code>tests/integration/test_wps_cli.py</code> drives the CLI with fragments that all
+  close early and asserts the region survives and reports a non-negative depth,
+  because the wrong value reached the Parquet that downstream reads. (#79)</p>
+<ul>
+<li><strong>The amplitude/depth figures that justify <code>wps_log_amplitude</code> were measured
+  against that broken column, and are corrected.</strong> The test comment claimed raw
+  amplitude correlates +0.512 with <code>local_depth</code> and that "the log form drops
+  that to -0.036". Re-measured over 12 donors and 4,800 anchors against mean
+  coverage recomputed from the fragment BEDs — independent of the column being
+  fixed — raw amplitude gives Pearson 0.799 and <code>ln(1 + range)</code> gives 0.513,
+  with skew falling 13.48 to 3.11.</li>
+</ul>
+<p>So the log form is worth having, but it does not remove the dependence and
+  cannot: <code>ln(1 + x)</code> is monotone, so it leaves a rank correlation untouched, and
+  both forms share Spearman <strong>0.559</strong> with depth. A near-zero coefficient for a
+  monotone transform of a depth-correlated quantity describes the scale, not
+  independence. The test is renamed from
+  <code>amplitude_is_not_a_coverage_measurement</code> to
+  <code>the_log_form_compresses_the_depth_dependence</code>, which is what it actually
+  pins; the residual dependence is tracked in #80.</p>
 <h2 id="092-2026-08-25">[0.9.2] - 2026-08-25</h2>
 <h3 id="added">Added</h3>
 <ul>
