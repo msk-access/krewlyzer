@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`krewlyzer.pon.support`: where a WPS baseline can serve as a yardstick (#77).**
+  Pure functions over arrays that measure, per anchor, how much donor support a
+  WPS z-score needs before its cross-patient spread falls to the plateau: support
+  keys (median donor `local_depth` over the full donor list, a donor with no row
+  counting as 0; donors present; donor σ against single-sample noise),
+  half-decade support bins with zero support as its own bin, cell spread over a
+  fixed 10 patients, an off-target plateau, a pooled tail that drops nothing,
+  the threshold rule ("this bin and every higher one"), a bootstrap over
+  patients, the PON donor identity `RMS(z) = sqrt(Σ(n_c − 1)/Σ n_c)`, and the
+  granularity and affordability checks. Used by the Step 0b pilot and, unchanged,
+  by the 6c decision, so the threshold and the check that later asserts it cannot
+  drift apart. Each rule is pinned by a test verified to fail when the rule is
+  removed -- including #77's own shape, a single patient with a trace of
+  coverage in cells nobody else covers, which only the pooled tail can see.
+
 ### Removed
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
