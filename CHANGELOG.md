@@ -109,6 +109,24 @@ All notable changes to this project will be documented in this file.
   previous head three commits back, the new base covers 8 commits where the
   old one covered 1.
 
+- **WPS protection fractions outside [0, 1], different on every run.** In a
+  bin no fragment reached, `prot_frac_nuc` and `prot_frac_tf` were computed as
+  `spanning / (spanning + endpoints)` from running sums that should have been
+  0.0 but were +-1e-16 of floating-point residue: the difference arrays add a
+  GC-weighted fragment at one index and subtract it at another, and those
+  weights rarely have an exact binary form. The `> 0.0` guard let the
+  residue through, so an empty bin reported a ratio of noise. Across the 228
+  samples of the fragment-model test set, 1.3% (XS1) and 5.4% (XS2) of
+  `prot_frac_nuc` bins fell outside [0, 1], in every sample, with magnitudes up
+  to 2,840; and because the residue depends on the order of parallel additions,
+  rerunning the same BAM gave different values. Found by comparing two runs of
+  the same inputs. The running sums now snap residue to exactly zero where they
+  are integrated, so an empty bin's protection fraction is 0.0 and every bin is
+  in [0, 1]. The same residue had made 8.0% (XS1) and 17.1% (XS2) of `wps_nuc`
+  bins tiny non-zero values instead of 0.0. The per-sample PONs never read
+  these columns, so z-scores are unaffected; the columns in `WPS.parquet` and
+  `features.json` change.
+
 - **WPS placed every fragment one base right of where it is (#83).** The
   anchor window is 0-based -- the anchor is at index 1000 of 2001 -- but the
   fragment start was converted to 1-based (`start + 1`) before being made

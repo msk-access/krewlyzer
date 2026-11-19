@@ -537,8 +537,8 @@ Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene 
 | `wps_nuc` | list[float] | Nucleosomal WPS per position (120–180 bp fragments) |
 | `wps_tf` | list[float] | TF-footprint WPS per position (35–80 bp fragments) |
 | `capture_mask` | list[int8] | Per-position flag for panel capture overlap |
-| `prot_frac_nuc` | list[float] | Per-position protected fraction, nucleosomal |
-| `prot_frac_tf` | list[float] | Per-position protected fraction, TF |
+| `prot_frac_nuc` | list[float] | Per-bin protected fraction, nucleosomal: spanning / (spanning + endpoints), in [0, 1]; 0.0 where no fragment reaches the bin |
+| `prot_frac_tf` | list[float] | Per-bin protected fraction, TF; same definition and range |
 | `local_depth` | float | Weighted mean coverage over the anchor window |
 
 **With `--pon-model`, seven more.** Absent from a `--skip-pon` run, and absent

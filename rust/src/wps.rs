@@ -642,6 +642,38 @@ fn background_spanning_range(
     ((a + p).max(0), (z - 1 - p).min(profile_len as i64 - 1))
 }
 
+/// Below this magnitude a running sum is cancellation residue, not signal.
+///
+/// Every stream adds a fragment's weight at one index and subtracts it at
+/// another. Weights carry the GC factor, so they rarely have an exact binary
+/// form, and past the last fragment the sum lands on +-1e-16 instead of 0.0.
+/// The smallest real value is one fragment's weight, many orders above this.
+const RESIDUE: f64 = 1e-9;
+
+/// Per-base values over `[0, len)`, integrated from a difference array, with
+/// cancellation residue snapped to exactly zero.
+///
+/// The running value itself is snapped, not just the output, so residue
+/// cannot accumulate across a run of empty bases. Through 0.9.x it was not:
+/// an empty bin's protection fraction was `residue / (residue + residue)`,
+/// magnitudes up to 2,840 in the Step 0 baseline, outside [0, 1] in
+/// 1.3% (XS1) and 5.4% (XS2) of bins, and different on every run because the
+/// residue depends on the order of parallel additions. The `> 0.0` guard in
+/// `bin_by_anchor` was correct; its input was not.
+fn running_sum(diff: &[f64], len: usize) -> Vec<f64> {
+    let mut running = 0.0;
+    diff[..len]
+        .iter()
+        .map(|d| {
+            running += d;
+            if running.abs() < RESIDUE {
+                running = 0.0;
+            }
+            running
+        })
+        .collect()
+}
+
 /// Every binned WPS table: 200 bins of 10 bp over the anchor's ±1000 bp.
 /// Pinned in the claims registry; the plots derive the centre from them.
 const NUM_BINS: usize = 200;
@@ -1057,35 +1089,12 @@ impl WpsConsumer {
                 // Step 1: Integrate difference arrays to get raw WPS values
                 // This is O(len) per region, ~2000 iterations for standard windows
                 // -------------------------------------------------------------
-                let mut wps_long_raw = Vec::with_capacity(len);
-                let mut wps_short_raw = Vec::with_capacity(len);
-                let mut spanning_long_raw = Vec::with_capacity(len);
-                let mut endpoints_long_raw = Vec::with_capacity(len);
-                let mut spanning_short_raw = Vec::with_capacity(len);
-                let mut endpoints_short_raw = Vec::with_capacity(len);
-                
-                let mut curr_wps_long = 0.0;
-                let mut curr_wps_short = 0.0;
-                let mut curr_span_long = 0.0;
-                let mut curr_end_long = 0.0;
-                let mut curr_span_short = 0.0;
-                let mut curr_end_short = 0.0;
-                
-                for j in 0..len {
-                    curr_wps_long += acc.wps_long[j];
-                    curr_wps_short += acc.wps_short[j];
-                    curr_span_long += acc.spanning_long[j];
-                    curr_end_long += acc.endpoints_long[j];
-                    curr_span_short += acc.spanning_short[j];
-                    curr_end_short += acc.endpoints_short[j];
-                    
-                    wps_long_raw.push(curr_wps_long);
-                    wps_short_raw.push(curr_wps_short);
-                    spanning_long_raw.push(curr_span_long);
-                    endpoints_long_raw.push(curr_end_long);
-                    spanning_short_raw.push(curr_span_short);
-                    endpoints_short_raw.push(curr_end_short);
-                }
+                let wps_long_raw = running_sum(&acc.wps_long, len);
+                let wps_short_raw = running_sum(&acc.wps_short, len);
+                let spanning_long_raw = running_sum(&acc.spanning_long, len);
+                let endpoints_long_raw = running_sum(&acc.endpoints_long, len);
+                let spanning_short_raw = running_sum(&acc.spanning_short, len);
+                let endpoints_short_raw = running_sum(&acc.endpoints_short, len);
                 
                 // Skip empty regions (no coverage).
                 //
@@ -3194,10 +3203,9 @@ mod coordinate_convention_tests {
     const REGION_START: u64 = 1_000;
     const P: i64 = 60;
 
-    /// Running sum of a difference array over `[0, LEN)`.
+    /// The production integration, over the test region.
     fn integrate(diff: &[f64]) -> Vec<f64> {
-        let mut running = 0.0;
-        diff[..LEN].iter().map(|d| { running += d; running }).collect()
+        running_sum(diff, LEN)
     }
 
     /// A nucleosome-stream fragment occupying region indices `[a, z)`.
@@ -3379,5 +3387,72 @@ mod binning_tests {
                 assert!(b.wps_nuc[k] == 0.0, "{strand}: bin {k} = {}", b.wps_nuc[k]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod residue_tests {
+    use super::*;
+
+    const LEN: usize = 2001;
+    const REGION_START: u64 = 10_000;
+
+    /// Overlapping nucleosome- and TF-stream fragments in the first third of a
+    /// 2001-base window, with GC-style weights that have no exact binary form.
+    /// Every interval closes by index ~760, so the rest of the window is empty.
+    fn awkward() -> RegionAccumulator {
+        let mut acc = RegionAccumulator::new(LEN);
+        let weights = [0.1, 0.2, 0.3, 0.7, 0.1, 0.2, 0.3, 0.7, 1.3, 0.9];
+        for (i, w) in weights.iter().enumerate() {
+            let a = 100 + 37 * i as u64;
+            let len = if i % 2 == 0 { 167 } else { 143 };
+            accumulate_fragment(&mut acc, REGION_START, REGION_START + a, REGION_START + a + len, *w, 0.0, 60, 8);
+            accumulate_fragment(&mut acc, REGION_START, REGION_START + a + 5, REGION_START + a + 60, 0.0, *w * 1.1, 60, 8);
+        }
+        acc
+    }
+
+    #[test]
+    fn integration_is_exactly_zero_where_nothing_is_covered() {
+        // The running sum of a difference array is a cancellation: past the
+        // last fragment it should be 0.0, and in floating point it lands on
+        // +-1e-17 of residue unless snapped. That residue is what made the
+        // binned protection fraction a ratio of noise (values of 1,490 and
+        // 2,840 in the Step 0 baseline, and different on every run).
+        let acc = awkward();
+        for (name, diff) in [
+            ("wps_long", &acc.wps_long), ("spanning_long", &acc.spanning_long),
+            ("endpoints_long", &acc.endpoints_long), ("wps_short", &acc.wps_short),
+            ("spanning_short", &acc.spanning_short), ("endpoints_short", &acc.endpoints_short),
+        ] {
+            let v = running_sum(diff, LEN);
+            let bad: Vec<(usize, f64)> = v.iter().copied().enumerate().skip(900).filter(|(_, x)| *x != 0.0).take(3).collect();
+            assert!(bad.is_empty(), "{name}: empty bases carry residue, e.g. {bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_protection_fraction_is_a_fraction_and_exactly_zero_where_empty() {
+        let acc = awkward();
+        let arrays: Vec<Vec<f64>> = [&acc.wps_long, &acc.wps_short, &acc.spanning_long, &acc.endpoints_long, &acc.spanning_short, &acc.endpoints_short]
+            .iter().map(|d| running_sum(d, LEN)).collect();
+        let reliable = vec![true; LEN];
+        let pb = PerBase {
+            wps_long: &arrays[0], wps_short: &arrays[1], span_long: &arrays[2],
+            end_long: &arrays[3], span_short: &arrays[4], end_short: &arrays[5], reliable: &reliable,
+        };
+        let b = bin_by_anchor(&pb, 1000, false);
+        for (name, v) in [("prot_nuc", &b.prot_nuc), ("prot_tf", &b.prot_tf)] {
+            for (k, x) in v.iter().enumerate() {
+                assert!((0.0..=1.0).contains(x), "{name} bin {k} = {x}: a protection fraction outside [0, 1]");
+            }
+            // Bins 100.. hold bases 1000.., far past every fragment.
+            for (k, x) in v.iter().enumerate().skip(100) {
+                assert!(*x == 0.0, "{name} bin {k} = {x}: an empty bin reports a ratio of residue");
+            }
+        }
+        // And the populated bins are not degenerate: protection varies along them.
+        let populated: Vec<f32> = b.prot_nuc[10..60].to_vec();
+        assert!(populated.iter().any(|x| *x != populated[0]), "prot_nuc is constant across the covered bins");
     }
 }
