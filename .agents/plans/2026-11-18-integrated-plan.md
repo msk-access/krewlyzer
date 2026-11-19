@@ -194,8 +194,7 @@ Each step's task-level plan is written when the step starts, against the spec se
 ## 7. Decision log
 
 **Open, from the spec (§6):** each stringency or judgment policy on its §2f evidence; the storage
-allocation before any cohort-wide export; the runtime and memory budget after Step 0; the
-penumbra map's thresholds, or a null result.
+allocation before any cohort-wide export; the penumbra map's thresholds, or a null result.
 
 **Open, new:**
 
@@ -222,6 +221,26 @@ unaffected. The XS1 residual is real but cannot be separated from chance matches
 one-mismatch collapse's on-target removals would be distinct molecules. The gain does not justify
 re-doing the upstream collapse, and without a collapse a flag column has no consumer. Residual per BAM
 is 0.9–6.0% (XS1) and 0.13–1.0% (XS2); the output documentation states it.
+
+**Decided (18 Nov), from Step 0: the §2i budget is confirmed at the spec's starting values** —
+wall time ≤ 1.5× baseline and peak RSS ≤ baseline — measured on four fixed benchmark samples, the
+median-memory sample of each assay × sequencing site, always at a 64 GB limit: the reported peak
+grows with the limit it is given (file cache), so a comparison at different limits measures the
+limit. Memory is a guard against regression, not an optimisation target.
+
+| benchmark sample | wall time | peak RSS at 64 GB |
+|---|---|---|
+| XS1 clinical | 35 min | 23.1 GB |
+| XS1 IGO | 33 min | 27.1 GB |
+| XS2 clinical | 49 min | 27.7 GB |
+| XS2 IGO | 53 min | 35.0 GB |
+
+At production's 32 GB first attempt the XS2 IGO median sat on the limit (31.9 GB) yet completed.
+Extraction is 2% (XS1) and 5% (XS2) of `run-all` wall time, so mate pairing moves little of it; the
+largest single stage is writing the TFBS region-entropy QC table, 17–22 min, through an unbuffered
+writer. If that is fixed first, the wall-time baseline is re-measured before Step 2. Run-to-run,
+141 of 160 tables are bit-identical and FSD/MDS differ at ~1e-16, so Step 1's diff against the
+oracle uses a relative tolerance of 1e-12, not equality.
 
 **Settled:** everything in §1.
 
