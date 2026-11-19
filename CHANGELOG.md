@@ -32,6 +32,22 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **Region-entropy tables are written through a buffer, removing the slowest `run-all` stage.**
+  Both writers in `region_entropy.rs` called `writeln!` on a bare `File`, and
+  that makes one write system call per formatted piece -- 9 per row of the
+  sync table, against 4 per 1,000 rows through a `BufWriter`. The TFBS sync
+  table is ~520,000 rows, so about 4.7 million calls on network storage: on a
+  228-sample test set that one write took a median 17 (XS1) to 22 (XS2)
+  minutes of a 38 to 52 minute `run-all`, more than every other stage after
+  extraction. Measured on the same storage, 520,000 rows written piece by
+  piece, as `writeln!` does, take 622 s; one call per row, 79 s; buffered,
+  0.4 s. Output is byte-identical, pinned by two
+  byte-exact tests (verified to fail on a one-character format change), and
+  each writer now flushes explicitly, so a failed final write is an error
+  instead of being lost when the buffer is dropped. A change to run time
+  only, but it moves the runtime baseline the fragment-model release's
+  wall-time budget is measured against.
+
 - **The clippy gate now lints test code (`--tests`).** Without that flag clippy
   checks the lib target only, so no test code was linted at all -- and in this
   repo the tests are where the invariants are asserted, which made the
