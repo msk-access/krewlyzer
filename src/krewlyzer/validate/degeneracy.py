@@ -104,6 +104,9 @@ class Observation:
     n_distinct: int
     n_rows: int
     constant_value: Optional[float]
+    #: Whether the sampled rows hold any finite value. Defaulted so that
+    #: observations serialised before the field existed still load.
+    has_value: bool = True
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -116,7 +119,21 @@ class Observation:
             n_distinct=int(raw["n_distinct"]),
             n_rows=int(raw["n_rows"]),
             constant_value=raw.get("constant_value"),
+            has_value=bool(raw.get("has_value", True)),
         )
+
+
+def _has_value(series: pd.Series, kind: Kind) -> bool:
+    """Whether the sampled rows hold any finite value."""
+    head = series.iloc[:_SIGNATURE_ROWS]
+    if kind is Kind.STRING:
+        return bool(head.notna().any())
+    reduced = (
+        _reduce_lists(head)
+        if kind is Kind.LIST
+        else pd.to_numeric(head, errors="coerce")
+    )
+    return bool(reduced.notna().any())
 
 
 def observe(sample: str, series: pd.Series, kind: Kind) -> Observation:
@@ -126,6 +143,7 @@ def observe(sample: str, series: pd.Series, kind: Kind) -> Observation:
         n_distinct=_nunique(series, kind),
         n_rows=len(series),
         constant_value=_constant_value(series),
+        has_value=_has_value(series, kind),
     )
 
 
@@ -141,6 +159,29 @@ def evaluate(
 
     findings: List[Finding] = []
     family = suffix.lstrip(".").replace(".parquet", "")
+
+    if rule.sparse_reason:
+        # Empty by design: an all-NaN sample says nothing about variation, so
+        # judge on the samples with values, and say so when there are none.
+        with_values = [o for o in per_sample if o.has_value]
+        if not with_values:
+            return [
+                Finding(
+                    id=f"{family}.DEGENERACY.{rule.name}",
+                    severity=Severity.SKIP,
+                    category=Category.DEGENERACY,
+                    message=(
+                        f"variation not evaluated: '{rule.name}' has no finite value "
+                        f"in the sampled rows of any of {len(per_sample)} sample(s); "
+                        f"expected to be mostly empty: {rule.sparse_reason}"
+                    ),
+                    table=suffix,
+                    column=rule.name,
+                    samples=[o.sample for o in per_sample],
+                    evidence={"n_samples": len(per_sample), "n_with_values": 0},
+                )
+            ]
+        per_sample = with_values
     wants_cross = rule.vary in (Vary.CROSS, Vary.BOTH)
     wants_within = rule.vary in (Vary.WITHIN, Vary.BOTH)
 

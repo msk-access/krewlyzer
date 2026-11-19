@@ -10125,7 +10125,7 @@ Per-anchor nucleosome protection profiles. Each row is one genomic anchor (gene 
 | `wps_tf` | list[float] | TF-footprint WPS per position (35–80 bp fragments) |
 | `capture_mask` | list[int8] | Per-position flag for panel capture overlap |
 | `prot_frac_nuc` | list[float] | Per-bin protected fraction, nucleosomal: spanning / (spanning + endpoints), in [0, 1]; NaN where no fragment reaches the bin (0/0) |
-| `prot_frac_tf` | list[float] | Per-bin protected fraction, TF; same definition and range |
+| `prot_frac_tf` | list[float] | Per-bin protected fraction, TF; same definition and range. Mostly NaN on panel data (~99.5% of bins on an XS2 sample): few 35–80 bp fragments reach the anchors |
 | `local_depth` | float | Weighted mean coverage over the anchor window |
 
 **With `--pon-model`, seven more.** Absent from a `--skip-pon` run, and absent
@@ -10173,8 +10173,9 @@ nuc = np.vstack(df["wps_nuc"].to_numpy())          # (n_anchors, 200)
 features = {
     "wps_nuc_global_mean": float(np.nanmean(nuc)),
     "wps_nuc_global_std":  float(np.nanstd(nuc)),
-    "prot_frac_nuc_mean":  df["prot_frac_nuc"].mean(),
-    "prot_frac_tf_mean":   df["prot_frac_tf"].mean(),
+    # NaN-aware: a bin no fragment reaches has a NaN protection fraction.
+    "prot_frac_nuc_mean":  float(np.nanmean(np.vstack(df["prot_frac_nuc"].to_numpy()))),
+    "prot_frac_tf_mean":   float(np.nanmean(np.vstack(df["prot_frac_tf"].to_numpy()))),
 }
 
 # Per-anchor feature matrix for gene-level models.
@@ -10223,8 +10224,8 @@ import numpy as np
 X = np.column_stack([
     np.vstack(df["wps_nuc"].to_numpy()).mean(axis=1),
     np.vstack(df["wps_tf"].to_numpy()).mean(axis=1),
-    np.vstack(df["prot_frac_nuc"].to_numpy()).mean(axis=1),
-    np.vstack(df["prot_frac_tf"].to_numpy()).mean(axis=1),
+    np.nanmean(np.vstack(df["prot_frac_nuc"].to_numpy()), axis=1),
+    np.nanmean(np.vstack(df["prot_frac_tf"].to_numpy()), axis=1),   # NaN for anchors with no TF fragment
 ])
 
 # Gene-indexed lookup — the profile itself, not a scalar

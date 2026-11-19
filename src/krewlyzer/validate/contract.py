@@ -63,6 +63,13 @@ class ColumnRule:
     #: extreme: PON scoring could vanish entirely and the gate would pass.
     #: `{sample}.metadata.pon_applied` is what tells the two apart.
     requires_pon: bool = False
+    #: Why this column is expected to be mostly NaN. A column empty almost
+    #: everywhere gives every sample the same all-NaN fingerprint, which the
+    #: degeneracy gate would read as "identical in every sample". Declaring
+    #: the emptiness -- in writing, like `constant_reason` -- makes the gate
+    #: judge the column only on samples that have values, and report a SKIP
+    #: quoting this reason, never a pass, when none do.
+    sparse_reason: Optional[str] = None
 
     def __post_init__(self) -> None:
         # The whole point of the gate. Silencing a degeneracy finding must cost
@@ -207,7 +214,16 @@ _WPS_COLS = (
     ColumnRule("wps_nuc", Kind.LIST, Vary.BOTH),
     ColumnRule("wps_tf", Kind.LIST, Vary.BOTH),
     ColumnRule("prot_frac_nuc", Kind.LIST, Vary.BOTH),
-    ColumnRule("prot_frac_tf", Kind.LIST, Vary.BOTH),
+    ColumnRule(
+        "prot_frac_tf",
+        Kind.LIST,
+        Vary.BOTH,
+        sparse_reason=(
+            "NaN wherever no TF-length (35-80 bp) fragment reaches the bin, and on "
+            "panel data almost none reach the WPS anchors: ~99.5% NaN on an XS2 "
+            "sample in Step 0 of the fragment-model release"
+        ),
+    ),
 )
 
 #: What FSD PON scoring produces, by fixed name. The 67 per-bin `{bin}_logR`

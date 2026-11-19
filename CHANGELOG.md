@@ -130,7 +130,21 @@ All notable changes to this project will be documented in this file.
   that varies would have been reported as constant across the cohort. The same residue had made 8.0% (XS1) and 17.1% (XS2) of `wps_nuc`
   bins tiny non-zero values instead of 0.0. The per-sample PONs never read
   these columns, so z-scores are unaffected; the columns in `WPS.parquet` and
-  `features.json` change.
+  `features.json` change. On panel data most bins are empty: on an XS2 sample
+  `prot_frac_nuc` is NaN in 61% of bins and `prot_frac_tf` in 99.5%, so a
+  plain mean of either vector is NaN; the examples in the output docs now use
+  NaN-aware means. The contract declares `prot_frac_tf` mostly empty with a
+  new `sparse_reason` (below).
+
+- **`validate-output` would have reported a mostly-empty column as degenerate.**
+  It fingerprints each sample's first rows, and a column that is NaN almost
+  everywhere gives every sample the same all-NaN fingerprint -- "identical in
+  every sample", an error, for `prot_frac_tf` behaving exactly as it should.
+  A `ColumnRule` can now carry a written `sparse_reason`, like
+  `constant_reason`: the gate then judges the column only on samples whose
+  sampled rows have a value, and reports a SKIP quoting the reason, never a
+  pass, when none do. A column without one is unchanged: all-NaN everywhere is
+  still an error.
 
 - **WPS placed every fragment one base right of where it is (#83).** The
   anchor window is 0-based -- the anchor is at index 1000 of 2001 -- but the

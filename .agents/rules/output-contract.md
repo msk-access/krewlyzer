@@ -31,7 +31,10 @@ declares it, and `krewlyzer validate-output` checks it.
 - **Adding a numeric column** requires a `must_vary` setting. If it is
   legitimately constant, `Vary.NEVER` demands a written `constant_reason` —
   silencing a degeneracy finding should cost a sentence the next person can
-  judge.
+  judge. A column that is legitimately **mostly NaN** (WPS `prot_frac_tf` on
+  panel data) takes a written `sparse_reason` instead: the gate then judges it
+  only on samples that have values, and reports a SKIP quoting the reason when
+  none do. Without one, an all-NaN column is identical in every sample — an error.
 - **Changing a value's semantics** (a boundary, a denominator, a units change)
   is a release-note event. Precedent: the region-MDS E1 entry, which carries an
   explicit "values are not comparable" warning.
