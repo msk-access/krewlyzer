@@ -228,17 +228,22 @@ median-memory sample of each assay × sequencing site, always at a 64 GB limit: 
 grows with the limit it is given (file cache), so a comparison at different limits measures the
 limit. Memory is a guard against regression, not an optimisation target.
 
-| benchmark sample | wall time | peak RSS at 64 GB |
+| benchmark sample | wall time, `0abb037` → **`develop` with #87** | peak RSS at 64 GB |
 |---|---|---|
-| XS1 clinical | 35 min | 23.1 GB |
-| XS1 IGO | 33 min | 27.1 GB |
-| XS2 clinical | 49 min | 27.7 GB |
-| XS2 IGO | 53 min | 35.0 GB |
+| XS1 clinical | 35 → **8 min** | 23.1 → **21.7 GB** |
+| XS1 IGO | 33 → **8 min** | 27.1 → **25.9 GB** |
+| XS2 clinical | 49 → **16 min** | 27.7 → **27.4 GB** |
+| XS2 IGO | 53 → **18 min** | 35.0 → **24.2 GB** |
+
+**The bold `develop` figures are the baseline** (19 Nov): #87 buffered the region-entropy writers,
+which wrote one system call per formatted piece and took 25–35 min of every panel run, with
+output byte-identical. Steps 2 and 5 compare against these. Extraction is now ~15% of an XS2 run
+rather than ~5%, so a slowdown from mate pairing shows plainly.
 
 At production's 32 GB first attempt the XS2 IGO median sat on the limit (31.9 GB) yet completed.
-Extraction is 2% (XS1) and 5% (XS2) of `run-all` wall time, so mate pairing moves little of it; the
-largest single stage is writing the TFBS region-entropy QC table, 17–22 min, through an unbuffered
-writer. If that is fixed first, the wall-time baseline is re-measured before Step 2. Run-to-run,
+Before #87, extraction was 2% (XS1) and 5% (XS2) of `run-all` wall time; the
+largest single stage was writing the region-entropy QC tables through unbuffered writers, fixed in
+#87 before Step 2. Run-to-run,
 141 of 160 tables are bit-identical and FSD/MDS differ at ~1e-16, so Step 1's diff against the
 oracle uses a relative tolerance of 1e-12, not equality.
 
