@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3257,12 +3257,31 @@
   sufficient.</p>
 <h3 id="changed">Changed</h3>
 <ul>
-<li><strong>The clippy gate now lints test code (<code>--tests</code>).</strong> Without that flag clippy
+<li>
+<p><strong>Region-entropy tables are written through a buffer, removing the slowest <code>run-all</code> stage.</strong>
+  Both writers in <code>region_entropy.rs</code> called <code>writeln!</code> on a bare <code>File</code>, and
+  that makes one write system call per formatted piece -- 9 per row of the
+  sync table, against 4 per 1,000 rows through a <code>BufWriter</code>. The <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> sync
+  table is ~520,000 rows, so about 4.7 million calls on network storage: on a
+  228-sample test set that one write took a median 17 (XS1) to 22 (XS2)
+  minutes of a 38 to 52 minute <code>run-all</code>, more than every other stage after
+  extraction. Measured on the same storage, 520,000 rows written piece by
+  piece, as <code>writeln!</code> does, take 622 s; one call per row, 79 s; buffered,
+  0.4 s. Output is byte-identical, pinned by two
+  byte-exact tests (verified to fail on a one-character format change), and
+  each writer now flushes explicitly, so a failed final write is an error
+  instead of being lost when the buffer is dropped. A change to run time
+  only, but it moves the runtime baseline the fragment-model release's
+  wall-time budget is measured against.</p>
+</li>
+<li>
+<p><strong>The clippy gate now lints test code (<code>--tests</code>).</strong> Without that flag clippy
   checks the lib target only, so no test code was linted at all -- and in this
   repo the tests are where the invariants are asserted, which made the
   assertions the one place the linter never looked. The same blind spot as the
   unused-dependency warning, one target over: <code>cargo test</code> had been carrying
-  two of these warnings as permanent noise while the gate reported clean.</li>
+  two of these warnings as permanent noise while the gate reported clean.</p>
+</li>
 </ul>
 <p>Enabling it surfaced 17 errors across five files. Eleven were mechanical --
   ten <code>assert_eq!(x, true)</code> in the bait-mask tests, one stray <code>mut</code> in
