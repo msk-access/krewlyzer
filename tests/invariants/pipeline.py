@@ -31,12 +31,20 @@ class PipelineRun:
 
 def extract_to_bedgz(sample: SynthSample, directory: Path) -> Path:
     """Extract fragments and leave a tabix-indexed BED where features can read it."""
+    return extract_bam_to_bedgz(sample.bam, sample.reference, directory)
+
+
+def extract_bam_to_bedgz(
+    bam: Path, reference: Path, directory: Path, require_proper_pair: bool = True
+) -> Path:
+    """The real extractor on any BAM. ``require_proper_pair=False`` is what
+    production runs (``nextflow.config``); the default keeps the CLI's."""
     directory.mkdir(parents=True, exist_ok=True)
     raw = directory / "fragments.bed"
 
     _core.extract_motif.process_bam_parallel(
-        str(sample.bam),
-        str(sample.reference),
+        str(bam),
+        str(reference),
         20,  # mapq
         65,  # min_len
         1000,  # max_len
@@ -47,7 +55,7 @@ def extract_to_bedgz(sample: SynthSample, directory: Path) -> Path:
         None,  # exclude
         None,  # target regions
         True,  # skip duplicates
-        True,  # require proper pair
+        require_proper_pair,
         True,  # silent
     )
 

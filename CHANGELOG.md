@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A simulated-truth BAM generator for the fragment model** (`tests/invariants/truth.py`,
+  spec §2f test 1). Each fragment is one named case from the spec's list -- soft clips at
+  the fragment end and inner end, a hard clip, an insertion and a deletion inside a mate,
+  overlapping mates, a missing mate, a mate across the extractor's 10 Mb chunk boundary,
+  low mate MAPQ, an N and a mismatch in the end 8-mers, a 450 bp fragment, a supplementary
+  alignment, fgbio tags, Marianas duplex/simplex/singleton read names, a fragment
+  overlapping, abutting and far from a target, two overlapping fragments, two distinct
+  fragments at identical coordinates, an all-N insert, and a contig missing from the FASTA
+  -- each with the record extraction should produce, in the §2a column names, computed from
+  the case and never read back from the BAM. `test_truth_generator.py` reads the BAM back
+  independently and checks the truth against it (each check verified to fail on a mutated
+  truth). `test_truth_baseline.py` scores today's extractor and pins the exact set of
+  deviations, so a change that fixes or breaks a case fails until the record is updated
+  with its evidence. Today: coordinates correct in all 29 cases; `gc` is 0.0, not null,
+  for the two fragments whose GC cannot be resolved.
+
 ### Removed
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
