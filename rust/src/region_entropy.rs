@@ -19,7 +19,7 @@
 use pyo3::prelude::*;
 use std::path::Path;
 use std::fs::File;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, BufWriter, Write};
 use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{Result, Context};
@@ -188,8 +188,13 @@ impl RegionEntropyConsumer {
     pub fn write_output(&self, output_path: &Path) -> Result<()> {
         use std::time::Instant;
         
-        let mut f = File::create(output_path)
-            .with_context(|| format!("Failed to create output file: {:?}", output_path))?;
+        // Buffered: `writeln!` on a bare `File` makes one write call per
+        // formatted piece -- 9 per row here -- which on network storage made
+        // the sync table below take 17-22 minutes of a 40-55 minute run-all.
+        let mut f = BufWriter::new(
+            File::create(output_path)
+                .with_context(|| format!("Failed to create output file: {:?}", output_path))?,
+        );
         writeln!(f, "label\tcount\tmean_size\tentropy")?;
 
         // Sort indices by label name for deterministic output order
@@ -282,6 +287,8 @@ impl RegionEntropyConsumer {
             n_written += 1;
         }
 
+        // Explicit, so a failed final write is an error rather than lost in drop.
+        f.flush().with_context(|| format!("Failed to flush output file: {:?}", output_path))?;
         log::info!("RegionEntropy: Wrote {} labels to {:?}", n_written, output_path);
         Ok(())
     }
@@ -291,8 +298,11 @@ impl RegionEntropyConsumer {
     /// Format: label, size, count, proportion
     /// This enables downstream QC of fragment size distributions per label.
     pub fn write_sync_output(&self, output_path: &Path) -> Result<()> {
-        let mut f = File::create(output_path)
-            .with_context(|| format!("Failed to create sync output file: {:?}", output_path))?;
+        // Buffered for the reason given in `write_output`: ~520k rows for TFBS.
+        let mut f = BufWriter::new(
+            File::create(output_path)
+                .with_context(|| format!("Failed to create sync output file: {:?}", output_path))?,
+        );
         writeln!(f, "label\tsize\tcount\tproportion")?;
 
         // Sort output by label name for consistency
@@ -321,6 +331,7 @@ impl RegionEntropyConsumer {
             }
         }
 
+        f.flush().with_context(|| format!("Failed to flush sync output file: {:?}", output_path))?;
         log::info!("RegionEntropy: Wrote {} sync rows to {:?}", n_written, output_path);
         Ok(())
     }
@@ -691,7 +702,6 @@ impl FragmentConsumer for TripleRegionEntropyConsumer {
 
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use parquet::record::RowAccessor;
-use std::io::BufWriter;
 use std::path::PathBuf;
 
 /// Baseline statistics for a single label.
@@ -904,4 +914,55 @@ pub fn apply_pon_zscore(
     );
     
     Ok(n_matched)
+}
+
+#[cfg(test)]
+mod writer_tests {
+    use super::*;
+
+    /// Two labels with data and one without, out of alphabetical order.
+    fn consumer() -> RegionEntropyConsumer {
+        let mut b = EntropyStats::new();
+        b.len_counts[150] = 1.0;
+        b.len_counts[167] = 2.0;
+        b.total_count = 3.0;
+        let mut a = EntropyStats::new();
+        a.len_counts[100] = 4.0;
+        a.total_count = 4.0;
+        RegionEntropyConsumer {
+            trees: Arc::new(HashMap::new()),
+            labels: Arc::new(vec!["TFBS_B".to_string(), "TFBS_A".to_string(), "TFBS_EMPTY".to_string()]),
+            factors: None,
+            stats: vec![b, a, EntropyStats::new()],
+        }
+    }
+
+    // Byte-for-byte, so buffering the writers (or any later change to them)
+    // cannot alter what downstream reads without failing here.
+    #[test]
+    fn the_sync_table_is_byte_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.sync.tsv");
+        consumer().write_sync_output(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "label\tsize\tcount\tproportion\n\
+             TFBS_A\t100\t4.0\t1.000000\n\
+             TFBS_B\t150\t1.0\t0.333333\n\
+             TFBS_B\t167\t2.0\t0.666667\n"
+        );
+    }
+
+    #[test]
+    fn the_label_table_is_byte_exact() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("x.tsv");
+        consumer().write_output(&path).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "label\tcount\tmean_size\tentropy\n\
+             TFBS_A\t4.0\t100.00\t0.0000\n\
+             TFBS_B\t3.0\t161.33\t0.9183\n"
+        );
+    }
 }
