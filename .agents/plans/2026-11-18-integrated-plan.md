@@ -205,6 +205,24 @@ None beyond the spec's.
 cohort is krewlyzer output from clinical ACCESS BAMs mirrored for research, so also clinical-side.
 See §4 for what that changes.
 
+**Decided (18 Nov), from Step 0: identical-coordinate fragments stay distinct rows** — no
+collapse and no flag column. Closes the spec's §2d row "Identical-coordinate fragments". Measured on
+the 228 test-set All Unique BAMs, comparing UMIs among fragments that share exact coordinates, against
+a chance control built from UMIs at other coordinates in the same BAM:
+
+| | XS1 (Marianas, read-name UMI) | XS2 (fgbio, `RX`) |
+|---|---|---|
+| UMI pairs within one mismatch, on-target (chance) | 6.1% (1.9%) | 1.0% (1.1%) |
+| identical-UMI pairs, off-target | 0.2% | 3.3% |
+| fragments a collapse would remove: exact / within one mismatch | 0.01% / 2.6% | 0.20% / 0.34% |
+| share of those that are singletons (one mismatch) | 76% | 63% |
+
+Duplex BAMs sit at the chance level in both assays (1.0–1.1%), so mFSD, which reads them, is
+unaffected. The XS1 residual is real but cannot be separated from chance matches: roughly a third of a
+one-mismatch collapse's on-target removals would be distinct molecules. The gain does not justify
+re-doing the upstream collapse, and without a collapse a flag column has no consumer. Residual per BAM
+is 0.9–6.0% (XS1) and 0.13–1.0% (XS2); the output documentation states it.
+
 **Settled:** everything in §1.
 
 ## 8. Consequences, stated before starting (spec §5)
