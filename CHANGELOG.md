@@ -121,8 +121,13 @@ All notable changes to this project will be documented in this file.
   to 2,840; and because the residue depends on the order of parallel additions,
   rerunning the same BAM gave different values. Found by comparing two runs of
   the same inputs. The running sums now snap residue to exactly zero where they
-  are integrated, so an empty bin's protection fraction is 0.0 and every bin is
-  in [0, 1]. The same residue had made 8.0% (XS1) and 17.1% (XS2) of `wps_nuc`
+  are integrated, and a bin no fragment reaches reports NaN -- 0/0 is not a
+  protection fraction, and 0.0 would read as "nothing protected" -- so every
+  value is in [0, 1] or NaN. Its capture mask is unchanged (empty is not
+  unreliable) and its WPS stays 0.0, a real zero. `validate-output` now
+  reduces list columns with a mean of their finite values: with a plain mean
+  one NaN bin made the whole row NaN, every sample hashed alike, and a column
+  that varies would have been reported as constant across the cohort. The same residue had made 8.0% (XS1) and 17.1% (XS2) of `wps_nuc`
   bins tiny non-zero values instead of 0.0. The per-sample PONs never read
   these columns, so z-scores are unaffected; the columns in `WPS.parquet` and
   `features.json` change.

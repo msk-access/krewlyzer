@@ -721,7 +721,9 @@ fn anchor_index(region: &Region) -> usize {
 /// truncated by a chromosome start the anchor was not in bin `c` at all, and
 /// the bins past the end of the array kept their initial `0.0` -- a reading of
 /// zero where nothing was read. Bases with no array position are now skipped,
-/// and a bin with none is NaN, with its capture mask unreliable.
+/// and a bin with none is NaN, with its capture mask unreliable. A bin with
+/// bases but no fragment keeps its mask and a WPS of 0.0, and its protection
+/// fraction is NaN: 0/0, not "nothing protected".
 fn bin_by_anchor(pb: &PerBase, anchor_index: usize, minus_strand: bool) -> Binned {
     let len = pb.wps_long.len() as i64;
     let anchor = anchor_index as i64;
@@ -759,8 +761,11 @@ fn bin_by_anchor(pb: &PerBase, anchor_index: usize, minus_strand: bool) -> Binne
         out.wps_nuc[bin_idx] = (wn / count as f64) as f32;
         out.wps_tf[bin_idx] = (wt / count as f64) as f32;
         out.mask[bin_idx] = if mask_ok { 1 } else { 0 };
-        out.prot_nuc[bin_idx] = if sn + en > 0.0 { (sn / (sn + en)) as f32 } else { 0.0 };
-        out.prot_tf[bin_idx] = if st + et > 0.0 { (st / (st + et)) as f32 } else { 0.0 };
+        // No fragment reached the bin: spanning and endpoints are both exactly
+        // zero (`running_sum` snaps residue), and 0/0 is not a protection
+        // fraction. NaN, not 0.0, which would read as "nothing protected".
+        out.prot_nuc[bin_idx] = if sn + en > 0.0 { (sn / (sn + en)) as f32 } else { f32::NAN };
+        out.prot_tf[bin_idx] = if st + et > 0.0 { (st / (st + et)) as f32 } else { f32::NAN };
     }
     out
 }
@@ -3432,7 +3437,7 @@ mod residue_tests {
     }
 
     #[test]
-    fn the_protection_fraction_is_a_fraction_and_exactly_zero_where_empty() {
+    fn the_protection_fraction_is_a_fraction_and_nan_where_empty() {
         let acc = awkward();
         let arrays: Vec<Vec<f64>> = [&acc.wps_long, &acc.wps_short, &acc.spanning_long, &acc.endpoints_long, &acc.spanning_short, &acc.endpoints_short]
             .iter().map(|d| running_sum(d, LEN)).collect();
@@ -3443,14 +3448,19 @@ mod residue_tests {
         };
         let b = bin_by_anchor(&pb, 1000, false);
         for (name, v) in [("prot_nuc", &b.prot_nuc), ("prot_tf", &b.prot_tf)] {
-            for (k, x) in v.iter().enumerate() {
+            for (k, x) in v.iter().enumerate().filter(|(_, x)| !x.is_nan()) {
                 assert!((0.0..=1.0).contains(x), "{name} bin {k} = {x}: a protection fraction outside [0, 1]");
             }
-            // Bins 100.. hold bases 1000.., far past every fragment.
+            // Bins 100.. hold bases 1000.., far past every fragment. 0/0 is not
+            // a measurement: 0.0 would read as "nothing protected here".
             for (k, x) in v.iter().enumerate().skip(100) {
-                assert!(*x == 0.0, "{name} bin {k} = {x}: an empty bin reports a ratio of residue");
+                assert!(x.is_nan(), "{name} bin {k} = {x}: an empty bin must be NaN, not a value");
             }
         }
+        // Empty is not unreliable: the capture mask still describes capture.
+        assert!(b.mask[100..].iter().all(|m| *m == 1), "empty bins must keep their capture mask");
+        // WPS of no fragments is a real zero, unlike their protection fraction.
+        assert!(b.wps_nuc[100..].iter().all(|x| *x == 0.0), "empty bins' wps_nuc must be 0.0");
         // And the populated bins are not degenerate: protection varies along them.
         let populated: Vec<f32> = b.prot_nuc[10..60].to_vec();
         assert!(populated.iter().any(|x| *x != populated[0]), "prot_nuc is constant across the covered bins");

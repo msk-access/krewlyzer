@@ -277,7 +277,7 @@ Nucleosome positioning profiles. Stored as **columnar arrays** (one value per re
 | `wps_tf` | float[] | TF footprint WPS (35–80 bp fragments) |
 | `wps_*_smooth` | float[] | Savitzky-Golay smoothed profiles |
 | `wps_*_z` | float[] | Z-scores vs PON baseline |
-| `prot_frac_*` | float[] | Protected fraction, in [0, 1]; 0.0 where no fragment reaches the bin |
+| `prot_frac_*` | float[] | Protected fraction, in [0, 1]; NaN where no fragment reaches the bin |
 
 !!! tip "Reconstructing a DataFrame"
     ```python

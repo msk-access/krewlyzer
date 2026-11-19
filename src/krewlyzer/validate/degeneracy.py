@@ -41,11 +41,22 @@ def _reduce_lists(head: pd.Series) -> pd.Series:
     raises on the numpy arrays backing the WPS vectors -- and hashing millions
     of floats to compare two samples is wasteful. The mean moves whenever any
     position in the vector moves, which is all either caller needs.
+
+    The mean of the finite values, not a plain mean: WPS vectors carry NaN bins by design (no base
+    in the window, or 0/0 for a protection fraction), and with a plain mean
+    one NaN bin makes the whole row NaN -- every sample then hashes to the same
+    sentinel and a varying column reads as constant. A row that is NaN
+    throughout still reduces to NaN.
     """
-    return pd.Series(
-        [float(np.mean(v)) if v is not None and len(v) else np.nan for v in head],
-        dtype=float,
-    )
+
+    def reduce(v: Any) -> float:
+        if v is None or not len(v):
+            return np.nan
+        arr = np.asarray(v, dtype=float)
+        finite = arr[~np.isnan(arr)]
+        return float(finite.mean()) if finite.size else np.nan
+
+    return pd.Series([reduce(v) for v in head], dtype=float)
 
 
 def column_signature(series: pd.Series, kind: Kind) -> str:
