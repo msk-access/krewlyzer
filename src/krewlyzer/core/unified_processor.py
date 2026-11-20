@@ -33,7 +33,11 @@ import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import resolve_gc_assets
+from .gc_assets import (
+    remove_factor_tables,
+    resolve_feature_gc_tables,
+    resolve_gc_assets,
+)
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
@@ -83,6 +87,11 @@ class FeatureOutputs:
     ocf_offtarget: Optional[Path] = None  # Off-target OCF (panel mode)
     ocf_sync_offtarget: Optional[Path] = None  # Off-target OCF sync data
     gc_factors: Optional[Path] = None  # GC correction factors
+    # Which factor table each population used, or why none (recorded in metadata)
+    gc_factors_choice: Optional[dict] = None
+    panel_mode: bool = (
+        False  # on/off-target split active (targets given or resolved from assay)
+    )
     # Region Entropy (TFBS/ATAC size entropy)
     tfbs: Optional[Path] = None  # TFBS entropy (all fragments - genome-wide)
     tfbs_ontarget: Optional[Path] = None  # TFBS entropy (panel-specific regions)
@@ -397,6 +406,11 @@ def run_features(
     # 4. RUN RUST UNIFIED PIPELINE
     # =========================================================================
 
+    if gc.factors_out:
+        # Refitting from the BED into output_dir: an older table there, in any format, would win
+        # the next lookup over the one written now (or stand in for none, if nothing fits).
+        remove_factor_tables(output_dir, sample_name, ("off_target",))
+
     logger.info("Running Rust unified pipeline...")
     rust_start = time.time()
 
@@ -600,13 +614,45 @@ def run_features(
                 f"fsc_counts.ontarget format conversion: {out_fsc_counts_on.name}"
             )
 
+    # =========================================================================
+    # 4b. RESOLVE GC FACTOR TABLES (every Python-side consumer)
+    # =========================================================================
+    # One resolver (core.gc_assets.resolve_gc_factors) for gene FSC, panel WPS, TFBS and ATAC.
+    # Each call site used to build its own `.correction_factors[.ontarget].tsv` path; production
+    # (`--output-format both --compress`) writes only `.tsv.gz` and `.parquet`, so these features
+    # ran uncorrected against PON donors that were corrected (TSV is forced for PON builds).
+    gc_off, gc_on = resolve_feature_gc_tables(
+        bed_path,
+        output_dir,
+        sample_name,
+        gc_correct=gc_correct,
+        panel_mode=bool(is_panel_mode),
+        refitted=gc.factors_input is None,
+    )
+    gc_str = str(gc_off.path) if gc_off.found else None
+    gc_ontarget_str = str(gc_on.path) if gc_on.found else None
+    if gc_correct and not gc_off.found:
+        logger.warning(
+            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)}); "
+            "panel WPS, TFBS and ATAC run without GC correction"
+        )
+    if gc_correct and is_panel_mode and not gc_on.found:
+        logger.warning(
+            f"GC factors (on-target) {gc_on.reason} (looked for {', '.join(gc_on.searched)}); "
+            "on-target features fall back to the off-target table and gene FSC runs uncorrected"
+        )
+    for _label, _c in (("off-target", gc_off), ("on-target", gc_on)):
+        if _c.path is not None:
+            logger.info(f"  GC factors ({_label}): {_c.path.name} [{_c.kind}]")
+    outputs.gc_factors_choice = {"off_target": gc_off, "on_target": gc_on}
+    outputs.panel_mode = bool(is_panel_mode)
+
     # Gene-centric FSC (if assay provided)
     # Uses on-target GC correction factors for accurate copy number analysis
     if resolved_assay and enable_fsc:
         try:
             from .fsc_processor import (
                 aggregate_by_gene,
-                load_correction_factors,
                 apply_fsc_gene_pon,
                 apply_fsc_region_pon,
             )
@@ -621,23 +667,13 @@ def run_features(
             genes = load_gene_bed(assay=resolved_assay, genome=gene_genome)
             outputs.fsc_gene = output_dir / f"{sample_name}.FSC.gene.tsv"
 
-            # Load GC correction factors (prefer on-target for panel mode)
-            # On-target factors match the capture bias of gene regions
-            gene_fsc_factors = None
-            if is_panel_mode:
-                ontarget_path = (
-                    output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
+            # Gene regions are on-target: use the on-target table (resolved in 4b). Rust loads it
+            # from the path; the Python dict path it replaces loaded zero factors.
+            gene_fsc_factors = gc_ontarget_str
+            if gene_fsc_factors:
+                logger.info(
+                    f"Gene FSC: on-target GC factors ({Path(gene_fsc_factors).name})"
                 )
-                if ontarget_path.exists():
-                    gene_fsc_factors = load_correction_factors(ontarget_path)
-                    if gene_fsc_factors:
-                        logger.info(
-                            f"Gene FSC: Using on-target GC factors ({ontarget_path.name})"
-                        )
-                else:
-                    logger.debug(
-                        "Gene FSC: No on-target factors found, using raw counting"
-                    )
 
             outputs.fsc_gene = aggregate_by_gene(
                 bed_path,
@@ -804,31 +840,6 @@ def run_features(
                 f"{out_fsd_on.name} in any format); it will carry no PON "
                 "log-ratios."
             )
-
-    # =========================================================================
-    # 5a. RESOLVE GC CORRECTION FACTOR PATHS
-    # =========================================================================
-    # Resolve once, used by: panel WPS, TFBS, ATAC
-    # Off-target: WGS-like GC bias model (global/off-target fragments)
-    # On-target: capture-specific GC bias model (on-target fragments in panel mode)
-    gc_factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
-    gc_factors_ontarget_path = (
-        output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
-    )
-
-    gc_str = str(gc_factors_path) if gc_factors_path.exists() else None
-    gc_ontarget_str = (
-        str(gc_factors_ontarget_path) if gc_factors_ontarget_path.exists() else None
-    )
-
-    if gc_str:
-        logger.debug(f"  GC factors (off-target): {gc_factors_path.name}")
-    if is_panel_mode and gc_ontarget_str:
-        logger.debug(f"  GC factors (on-target): {gc_factors_ontarget_path.name}")
-    elif is_panel_mode and not gc_ontarget_str:
-        logger.debug(
-            "  GC factors (on-target): not available, using off-target fallback"
-        )
 
     # Process WPS
     if enable_wps and outputs.wps and outputs.wps.exists():
@@ -1116,7 +1127,7 @@ def run_features(
         from .region_entropy_processor import process_region_entropy
 
         # Note: load_pon_model is imported at module level (line 41)
-        # Note: gc_str and gc_ontarget_str are resolved above (section 5a)
+        # Note: gc_str and gc_ontarget_str are resolved above (section 4b)
 
         # Use pon_parquet directly for Z-score normalization (Rust implementation)
         entropy_pon_parquet = (
@@ -1447,6 +1458,7 @@ def run_features(
         pon_path=pon_parquet if pon_for_zscore is not None else None,
         output_format=resolved_output_format,
         compress=resolved_compress,
+        gc_factors=outputs.gc_factors_choice,
     )
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

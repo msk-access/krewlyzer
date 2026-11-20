@@ -167,3 +167,50 @@ def test_run_features_stamps_the_marker():
         "must record the PON that was *used for scoring*; `pon` alone is still "
         "set under --skip-pon and would claim a scoring that did not happen"
     )
+
+
+# -- which GC factor table each population used (redesign item 0) ------------
+#
+# Production wrote `.tsv.gz` and `.parquet` factor tables while three consumers looked for a
+# plain `.tsv`, so panel WPS, TFBS and ATAC ran uncorrected in every cohort sample and nothing
+# in the product said so. The completion marker now records it, by *kind* (never a filename,
+# which would carry the sample ID and make the column vary for no reason).
+
+
+def test_the_gc_tables_used_are_recorded(tmp_path):
+    from krewlyzer.core.gc_assets import GcFactorsChoice
+
+    marker = _marker(tmp_path)
+    choices = {
+        "off_target": GcFactorsChoice(
+            tmp_path / "S1.correction_factors.parquet", "parquet"
+        ),
+        "on_target": GcFactorsChoice(
+            None, "none", "not found beside the BED or in the output directory"
+        ),
+    }
+    assert stamp_metadata(tmp_path, "S1", output_format="parquet", gc_factors=choices)
+    row = pd.read_parquet(marker).iloc[0]
+    assert row["gc_factors_offtarget"] == "parquet"
+    assert (
+        row["gc_factors_ontarget"]
+        == "none:not found beside the BED or in the output directory"
+    )
+    assert bool(row["gc_correction_applied_offtarget"]) is True
+    assert bool(row["gc_correction_applied_ontarget"]) is False
+    assert "S1" not in row["gc_factors_offtarget"] + row["gc_factors_ontarget"]
+
+
+def test_the_contract_declares_the_gc_columns():
+    from krewlyzer.validate.contract import CONTRACT, Vary
+
+    rule = next(t for t in CONTRACT if t.suffix == ".metadata.parquet")
+    by_name = {c.name: c for c in rule.columns}
+    for name in (
+        "gc_factors_offtarget",
+        "gc_factors_ontarget",
+        "gc_correction_applied_offtarget",
+        "gc_correction_applied_ontarget",
+    ):
+        assert name in by_name, name
+        assert by_name[name].vary is Vary.NEVER and by_name[name].constant_reason

@@ -501,7 +501,7 @@ This enables cross-sample depth comparisons independent of library size and regi
 
 ### GC Correction for Gene FSC
 
-In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.tsv`) for accurate copy number estimates.
+In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.*`, any format) for accurate copy number estimates.
 
 **Why this matters:**
 - Different genes have different GC content

@@ -96,11 +96,13 @@ class extract_motif:
         dict[str, int],  # end_motifs_on (on-target)
         dict[str, int],  # bp_motifs_on (on-target)
         dict[tuple[int, int], int],  # gc_observations_ontarget (on-target)
+        dict[str, int],  # contig guard: fragments_on_missing_contig, gc_fetch_failed
     ]:
         """Extract fragments and motifs from a BAM in parallel.
 
-        Returns a 7-tuple of (fragment_count, end_motifs, bp_motifs,
-        gc_obs, end_motifs_on, bp_motifs_on, gc_obs_on).
+        Returns an 8-tuple of (fragment_count, end_motifs, bp_motifs, gc_obs, end_motifs_on,
+        bp_motifs_on, gc_obs_on, contig_guard). Target regions match with or without a
+        leading `chr`.
         """
         ...
 
@@ -121,7 +123,14 @@ class gc:
         """Compute LOESS GC correction factors and write TSV/Parquet output.
 
         Returns:
-            Number of correction factor bins written.
+            Number of correction factor bins written (0, and no file, when nothing could be fitted).
+        """
+        ...
+
+    @staticmethod
+    def validate_factor_table(path: str) -> int:
+        """Load a GC factor table exactly as consumers do (.parquet, .tsv.gz or .tsv; columns by
+        name; strict) and return its row count. Raises ValueError when it cannot be loaded.
         """
         ...
 

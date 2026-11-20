@@ -53,6 +53,8 @@ def processed_sample(tmp_path, real_bam, real_reference):
         enable_fsd=False,
         enable_wps=False,
         enable_ocf=False,
+        enable_tfbs=False,  # also GC-weighted; off, as the comment above intends
+        enable_atac=False,
         pon_mode=True,
         output_format="tsv",
         compress=False,
@@ -112,6 +114,8 @@ def test_writing_them_is_off_by_default(tmp_path, real_bam, real_reference):
         enable_fsd=False,
         enable_wps=False,
         enable_ocf=False,
+        enable_tfbs=False,  # also GC-weighted; off, as the comment above intends
+        enable_atac=False,
         pon_mode=True,
         output_format="tsv",
         compress=False,

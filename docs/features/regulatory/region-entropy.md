@@ -127,7 +127,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 | `--tfbs-regions` | | PATH | | Custom TFBS regions BED.gz |
 | `--atac-regions` | | PATH | | Custom ATAC regions BED.gz |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
-| `--gc-factors` | `-F` | PATH | | GC correction factors TSV |
+| `--gc-correct/--no-gc-correct` | | FLAG | `--gc-correct` | Apply GC bias correction |
+| `--gc-factors` | `-F` | PATH | | Off-target GC factor table (`.parquet`/`.tsv.gz`/`.tsv`); default: the tables `extract` wrote beside the BED, as `run-all` uses |
 | `--pon-model` | `-P` | PATH | | PON model for z-score normalization |
 | `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization (for ML negatives) |

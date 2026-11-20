@@ -15,6 +15,7 @@ use anyhow::{Result, Context};
 use log::info;
 use pyo3::prelude::*;
 use rust_htslib::faidx;
+use crate::contigs::{norm_chrom, ContigNames};
 
 /// Length bins for GC correction (5bp bins from 60-1000bp = 188 bins)
 /// 
@@ -194,7 +195,7 @@ fn parse_bed_line(line: &str) -> Option<ValidRegion> {
         return None;
     }
     
-    let chrom = fields[0].trim_start_matches("chr").to_string();
+    let chrom = norm_chrom(fields[0]).to_string();
     let start: u64 = fields[1].parse().ok()?;
     let end: u64 = fields[2].parse().ok()?;
     
@@ -244,7 +245,7 @@ pub fn generate_valid_regions_ontarget(
     let mut ontarget_regions = Vec::new();
     
     for region in &valid_regions {
-        let chrom_key = region.chrom.trim_start_matches("chr").to_string();
+        let chrom_key = norm_chrom(&region.chrom).to_string();
         
         if let Some(targets) = target_regions.get(&chrom_key) {
             // Check if this valid region overlaps any target region
@@ -333,7 +334,7 @@ pub fn generate_valid_regions(
     for i in 0..n_seqs {
         if let Ok(name) = faidx.seq_name(i as i32) {
             // Normalize chromosome name (remove "chr" prefix if present)
-            let normalized = name.trim_start_matches("chr").to_string();
+            let normalized = norm_chrom(&name).to_string();
             
             // Only include valid chromosomes
             if valid_chroms.contains(&normalized) {
@@ -436,7 +437,7 @@ fn load_exclude_regions(path: &Path) -> Result<HashMap<String, Vec<(u64, u64)>>>
             continue;
         }
         
-        let chrom = fields[0].trim_start_matches("chr").to_string();
+        let chrom = norm_chrom(fields[0]).to_string();
         let start: u64 = fields[1].parse().unwrap_or(0);
         let end: u64 = fields[2].parse().unwrap_or(0);
         
@@ -483,6 +484,7 @@ pub fn generate_ref_genome_gc(
         .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(
             format!("Failed to open reference FASTA: {}", e)
         ))?;
+    let contig_names = ContigNames::from_faidx(&faidx);
     
     // Load valid regions
     let regions = load_valid_regions(Path::new(valid_regions_path))
@@ -503,26 +505,19 @@ pub fn generate_ref_genome_gc(
     
     // For each valid region, scan for GC content at each position for each length
     for region in &regions {
-        // Convert chromosome name to the format expected by the FASTA
-        // Try both with and without "chr" prefix
-        let chrom_name = region.chrom.clone();
-        let chrom_with_chr = format!("chr{}", region.chrom);
-        
-        // Try to fetch the sequence for this region
-        let seq_result = faidx.fetch_seq(&chrom_name, region.start as usize, region.end as usize - 1);
-        let seq = match seq_result {
-            Ok(s) => s,
-            Err(_) => {
-                // Try with chr prefix
-                match faidx.fetch_seq(&chrom_with_chr, region.start as usize, region.end as usize - 1) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        // Skip this region if we can't fetch it
-                        continue;
-                    }
-                }
-            }
-        };
+        // Valid regions name contigs without `chr`; fetch under the reference's own name
+        // (contigs.rs). Every region must resolve: the expected-GC table is only right if each
+        // contributes, and a region the reference lacks means the valid-regions file was built
+        // from another reference. (The try-both-spellings fallback this replaced never fell
+        // through: rust-htslib's `fetch_seq` returns a `Vec` over a null pointer, not `Err`.)
+        let fasta_name = contig_names.resolve(&region.chrom, 0).name().map(str::to_string).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "valid region on contig {} is not in the reference FASTA under either spelling; \
+                 the valid-regions file was built from another reference", region.chrom))
+        })?;
+        let seq = faidx.fetch_seq(&fasta_name, region.start as usize, region.end as usize - 1)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "cannot fetch {}:{}-{} from the reference: {}", fasta_name, region.start, region.end, e)))?;
         
         let seq_len = seq.len();
         

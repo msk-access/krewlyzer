@@ -323,6 +323,12 @@ CLAIMS: Tuple[Claim, ...] = (
         "refused rather than silently scored against",
     ),
     Claim(
+        "gc.contig_mismatch_warn_share",
+        "0.01",
+        PyConst("krewlyzer.core.gc_assets", "CONTIG_MISMATCH_WARN_SHARE"),
+        "extract warns and records above this share; their GC is unresolved",
+    ),
+    Claim(
         "pon.allow_old_env",
         "KREWLYZER_ALLOW_OLD_PON",
         PyConst("krewlyzer.pon.provenance", "ALLOW_OLD_PON_ENV"),

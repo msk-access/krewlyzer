@@ -33,9 +33,10 @@ process KREWLYZER_MFSD {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     
-    // GC correction: prefer pre-computed factors, fallback to FASTA
+    // GC correction: factors are looked up by each fragment's GC, which mFSD computes from the
+    // reference, so the reference goes with them (without it, factors were silently ignored).
     def gc_factors_arg = correction_factors ? "--correction-factors ${correction_factors}" : ""
-    def ref_arg = (!correction_factors && fasta) ? "--reference ${fasta}" : ""
+    def ref_arg = fasta ? "--reference ${fasta}" : ""
     
     // Filter and algorithm settings (use pipeline params with defaults)
     def mapq_arg = params.mapq != 20 ? "--mapq ${params.mapq}" : ""
