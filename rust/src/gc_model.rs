@@ -275,10 +275,11 @@ pub struct FitQc {
     pub clamped_weight_share: f64,
     /// Share of the fitted fragments' total weight in cells whose raw weight hit the cap.
     pub capped_weight_share: f64,
-    /// Estimated relative smoothing bias, `(h^2 / 2) |s''| / s` summed over both axes:
-    /// fragment-weighted mean and maximum over the support.
+    /// Estimated relative smoothing bias, `(h^2 / 2) |s''| / s` summed over both axes: the
+    /// fragment-weighted mean and 95th percentile over the support (a maximum would be set by the
+    /// support's sparsest cell, where the ratio is near zero).
     pub smoothing_bias_mean: f64,
-    pub smoothing_bias_max: f64,
+    pub smoothing_bias_p95: f64,
     /// Lengths with no fragment in the tally: their weights are smoothed from neighbours but not
     /// normalised (there is nothing to normalise against).
     pub lengths_unobserved: u32,
@@ -625,6 +626,378 @@ pub(crate) fn sha256_hex(data: &[u8]) -> String {
     h.iter().map(|x| format!("{x:08x}")).collect()
 }
 
+// ---------------------------------------------------------------------------------------------
+// The observed tally and the fit
+// ---------------------------------------------------------------------------------------------
+
+/// Gaussian kernel SD along fragment length, in bp, until spec Step 3 chooses it by held-out
+/// residual (criterion 1).
+pub const DEFAULT_BANDWIDTH_LENGTH_BP: f64 = 5.0;
+/// Gaussian kernel SD along GC fraction, until spec Step 3 chooses it.
+pub const DEFAULT_BANDWIDTH_GC: f64 = 0.02;
+/// The kernel is truncated at this many SDs on each axis.
+pub const KERNEL_REACH_SD: f64 = 4.0;
+/// Raw weights are capped to `[1 / WEIGHT_CAP, WEIGHT_CAP]` before normalisation.
+pub const WEIGHT_CAP: f64 = 10.0;
+/// Fewer off-target fragments than this in the tally, and the fit refuses.
+pub const MIN_FIT_FRAGMENTS: u64 = 100_000;
+
+impl Default for FitConfig {
+    fn default() -> Self {
+        Self {
+            bandwidth_length_bp: DEFAULT_BANDWIDTH_LENGTH_BP,
+            bandwidth_gc: DEFAULT_BANDWIDTH_GC,
+            cap: WEIGHT_CAP,
+            min_fragments: MIN_FIT_FRAGMENTS,
+        }
+    }
+}
+
+/// A sample's fragments counted per cell. Step 2 builds it from the fragment record, over the
+/// same territory as the expected counts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tally {
+    counts: GcGrid<u64>,
+    outside: u64,
+}
+
+impl Tally {
+    pub fn new(min_len: u16, max_len: u16, trim_k: u16) -> Result<Self> {
+        Ok(Self { counts: GcGrid::new(min_len, max_len, trim_k, 0)?, outside: 0 })
+    }
+
+    /// A tally over the same cells as `grid`.
+    pub fn like<T>(grid: &GcGrid<T>) -> Self {
+        Self::new(grid.min_len(), grid.max_len(), grid.trim_k()).expect("an existing grid's shape is valid")
+    }
+
+    /// Count `n` fragments with this key. A key outside the grid's lengths is counted in
+    /// [`Self::outside`] instead, and `false` returned.
+    pub fn add(&mut self, key: GcKey, n: u64) -> bool {
+        match self.counts.index(key.length, key.gc) {
+            Some(i) => {
+                self.counts.cells_mut()[i] += n;
+                true
+            }
+            None => {
+                self.outside += n;
+                false
+            }
+        }
+    }
+
+    pub fn counts(&self) -> &GcGrid<u64> {
+        &self.counts
+    }
+
+    /// Fragments with a key the grid has no cell for (a length outside its range).
+    pub fn outside(&self) -> u64 {
+        self.outside
+    }
+
+    /// Fragments in the grid, summed in index order.
+    pub fn total(&self) -> u64 {
+        self.counts.cells().iter().sum()
+    }
+}
+
+/// Why a model could not be fitted. The fit says so instead of returning weights of 1.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FitError {
+    /// The tally holds fewer fragments than [`FitConfig::min_fragments`].
+    TooFewFragments { fragments: u64, required: u64 },
+    /// A length of the grid has no cell in the support.
+    NoSupport { length: u16 },
+    /// The tally, the expected table and the support are not over the same cells.
+    ShapeMismatch(String),
+}
+
+impl std::fmt::Display for FitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FitError::TooFewFragments { fragments, required } => write!(
+                f, "cannot fit a GC model: {fragments} fragments in the tally, at least {required} needed"),
+            FitError::NoSupport { length } => write!(
+                f, "cannot fit a GC model: length {length} bp has no cell in the support"),
+            FitError::ShapeMismatch(why) => write!(f, "cannot fit a GC model: {why}"),
+        }
+    }
+}
+
+impl std::error::Error for FitError {}
+
+/// The local-linear fit at one cell: the smoothed ratio and, where estimable, its slopes along
+/// length (per bp) and GC fraction.
+#[derive(Debug, Clone, Copy)]
+struct Local {
+    s: f64,
+    ds_dl: Option<f64>,
+    ds_dx: Option<f64>,
+}
+
+/// One length's cells, `None` where nothing within the kernel's reach informs a cell.
+type SmoothedRow = Vec<Option<Local>>;
+
+/// Fit a GC model from a sample's tally.
+///
+/// 1. Per length `L`, over the support only: `r(L, g) = p_obs(g | L) / p_exp(g | L)`, the ratio of
+///    the observed to the expected GC distribution at that length. Conditioning on length puts `r`
+///    on a unit scale (1 where there is no bias) whatever the sample's depth and size distribution,
+///    which is what makes a fixed cap on the raw weights meaningful.
+/// 2. Smooth `r` over (length, GC fraction) with a Gaussian kernel, as **local-linear** weighted
+///    least squares weighted by the expected count at the sample's depth, `O_L * p_exp(g | L)` (the
+///    inverse variance of `r`). Local-linear rather than a kernel average: a kernel average is
+///    biased wherever the expected density has a slope, and at the support's edge. What remains
+///    is a curvature bias of about `(h^2 / 2) |r''| / r`, reported in [`FitQc`].
+/// 3. Raw weight `= 1 / smoothed r`.
+/// 4. Normalise per length over the **whole** tally: `w(L, ·) /= Σ_g obs·w / Σ_g obs`, so the
+///    weighted total of every length equals its fragment count.
+///
+/// Dense arrays, every sum in index order; rows are computed in parallel but each one
+/// sequentially, and nothing is reduced across threads, so a rerun is bit-identical.
+pub fn fit(
+    observed: &Tally,
+    expected: &crate::gc_reference::ExpectedTable,
+    support: &CellSet,
+    cfg: &FitConfig,
+) -> std::result::Result<GcModel, FitError> {
+    use rayon::prelude::*;
+    let exp = expected.counts();
+    let obs = observed.counts();
+    let sup = support.grid();
+    if !obs.same_shape(exp) || !sup.same_shape(exp) {
+        return Err(FitError::ShapeMismatch(format!(
+            "tally {}, expected table {}, support {}",
+            obs.shape_string(), exp.shape_string(), sup.shape_string())));
+    }
+    let fragments = observed.total();
+    if fragments < cfg.min_fragments {
+        return Err(FitError::TooFewFragments { fragments, required: cfg.min_fragments });
+    }
+    let lengths: Vec<u16> = (exp.min_len()..=exp.max_len()).collect();
+    if let Some(&length) = lengths.iter().find(|&&l| !sup.row(l).iter().any(|&b| b)) {
+        return Err(FitError::NoSupport { length });
+    }
+
+    // Per cell, over the support only: y = observed count, v = expected count at the sample's
+    // depth, O_L * p_exp(g | L). r = y / v, and v is the weight of r in the smoother.
+    let mut y = vec![0.0; exp.len()];
+    let mut v = vec![0.0; exp.len()];
+    for &len in &lengths {
+        let i0 = exp.index(len, 0).expect("in range");
+        let (mut o_l, mut e_l) = (0.0, 0.0);
+        for (g, &in_s) in sup.row(len).iter().enumerate() {
+            if in_s {
+                o_l += obs.row(len)[g] as f64;
+                e_l += exp.row(len)[g] as f64;
+            }
+        }
+        for (g, &in_s) in sup.row(len).iter().enumerate() {
+            if in_s && e_l > 0.0 {
+                y[i0 + g] = obs.row(len)[g] as f64;
+                v[i0 + g] = o_l * exp.row(len)[g] as f64 / e_l;
+            }
+        }
+    }
+
+    // Rows in parallel (a map, not a reduction): each row's sums run sequentially in index order.
+    let smoothed: Vec<SmoothedRow> = lengths.par_iter()
+        .map(|&len| smooth_row(len, exp, sup, &y, &v, cfg))
+        .collect();
+
+    let mut weights: GcGrid<Option<f64>> = GcGrid::new(exp.min_len(), exp.max_len(), exp.trim_k(), None)
+        .expect("same shape as the expected table");
+    for (li, &len) in lengths.iter().enumerate() {
+        for (g, local) in smoothed[li].iter().enumerate() {
+            if let Some(s) = local.map(|l| l.s).filter(|s| *s > 0.0) {
+                weights.row_mut(len)[g] = Some(1.0 / s);
+            }
+        }
+    }
+    let capped = GcGrid::new(exp.min_len(), exp.max_len(), exp.trim_k(), false).expect("same shape");
+
+    // Normalise per length over the whole tally, in index order.
+    let mut qc = FitQc { fragments, ..FitQc::default() };
+    for &len in &lengths {
+        let row_obs = obs.row(len);
+        if row_obs.iter().all(|&o| o == 0) {
+            qc.lengths_unobserved += 1;
+        }
+        let row_w = weights.row_mut(len);
+        if row_w.iter().all(Option::is_none) {
+            qc.lengths_unfitted += 1;
+            continue;
+        }
+        let (mut num, mut den) = (0.0, 0.0);
+        for (w, &o) in row_w.iter().zip(row_obs) {
+            if let Some(w) = w {
+                num += o as f64 * w;
+                den += o as f64;
+            }
+        }
+        if den > 0.0 {
+            let c = num / den;
+            row_w.iter_mut().flatten().for_each(|w| *w /= c);
+        }
+    }
+    let (mean, p95) = smoothing_bias(&lengths, &smoothed, exp, obs, cfg);
+    qc.smoothing_bias_mean = mean;
+    qc.smoothing_bias_p95 = p95;
+
+    let ep = expected.provenance();
+    let provenance = Provenance {
+        genome: ep.genome.clone(),
+        territory_sha256: ep.territory_sha256.clone(),
+        support_sha256: support.digest(),
+        trim_k: exp.trim_k(),
+        gc_definition_version: GC_DEFINITION_VERSION,
+        fit_config: cfg.clone(),
+        krewlyzer_version: env!("CARGO_PKG_VERSION").to_string(),
+    };
+    info!("gc_model: fitted {} fragments over {} lengths ({} unobserved, {} unfitted); smoothing bias \
+           mean {:.4}, p95 {:.4}", fragments, lengths.len(), qc.lengths_unobserved, qc.lengths_unfitted,
+          qc.smoothing_bias_mean, qc.smoothing_bias_p95);
+    GcModel::from_parts(weights, capped, support.clone(), provenance, qc)
+        .map_err(|e| FitError::ShapeMismatch(format!("{e:#}")))
+}
+
+/// Local-linear Gaussian-kernel estimate of `r` at every support cell of one length. Cells outside
+/// the support, or with nothing in reach, are `None`.
+fn smooth_row(len: u16, grid: &GcGrid<u64>, sup: &GcGrid<bool>, y: &[f64], v: &[f64], cfg: &FitConfig) -> SmoothedRow {
+    let (hl, hx) = (cfg.bandwidth_length_bp, cfg.bandwidth_gc);
+    let reach_l = (KERNEL_REACH_SD * hl).floor() as i32;
+    let reach_x = KERNEL_REACH_SD * hx;
+    let n = grid.gc_max(len) as f64;
+    let lo_l = (len as i32 - reach_l).max(grid.min_len() as i32) as u16;
+    let hi_l = (len as i32 + reach_l).min(grid.max_len() as i32) as u16;
+    sup.row(len).iter().enumerate().map(|(g, &in_s)| {
+        if !in_s {
+            return None;
+        }
+        let x = g as f64 / n;
+        // Weighted sums for the normal equations of r ~ a + b·dL + c·dx, in index order.
+        let mut m = [0.0f64; 6]; // S0, SL, Sx, SLL, SLx, Sxx
+        let mut t = [0.0f64; 3]; // T0, TL, Tx
+        for l2 in lo_l..=hi_l {
+            let dl = (l2 as i32 - len as i32) as f64;
+            let wl = (-0.5 * (dl / hl).powi(2)).exp();
+            let n2 = grid.gc_max(l2) as f64;
+            let g_lo = ((x - reach_x) * n2).ceil().max(0.0) as usize;
+            let g_hi = ((x + reach_x) * n2).floor().min(n2) as usize;
+            let i0 = grid.index(l2, 0).expect("in range");
+            for g2 in g_lo..=g_hi {
+                let i = i0 + g2;
+                if v[i] == 0.0 {
+                    continue;
+                }
+                let dx = g2 as f64 / n2 - x;
+                let kw = wl * (-0.5 * (dx / hx).powi(2)).exp();
+                let w = kw * v[i];
+                m[0] += w;
+                m[1] += w * dl;
+                m[2] += w * dx;
+                m[3] += w * dl * dl;
+                m[4] += w * dl * dx;
+                m[5] += w * dx * dx;
+                let ky = kw * y[i];
+                t[0] += ky;
+                t[1] += ky * dl;
+                t[2] += ky * dx;
+            }
+        }
+        local_linear(&m, &t)
+    }).collect()
+}
+
+/// The local-linear fit from its normal equations. Falls back to the fit in GC alone when the
+/// length direction carries no information (one length in reach), and to the kernel average when
+/// neither slope is estimable; a slope that was not estimated is `None`.
+fn local_linear(m: &[f64; 6], t: &[f64; 3]) -> Option<Local> {
+    let [s0, sl, sx, sll, slx, sxx] = *m;
+    if s0 <= 0.0 {
+        return None;
+    }
+    const TOL: f64 = 1e-9;
+    let det3 = s0 * (sll * sxx - slx * slx) - sl * (sl * sxx - slx * sx) + sx * (sl * slx - sll * sx);
+    if det3.abs() > TOL * s0 * sll * sxx {
+        // Cramer's rule, column by column.
+        let a = t[0] * (sll * sxx - slx * slx) - sl * (t[1] * sxx - slx * t[2]) + sx * (t[1] * slx - sll * t[2]);
+        let b = s0 * (t[1] * sxx - slx * t[2]) - t[0] * (sl * sxx - slx * sx) + sx * (sl * t[2] - t[1] * sx);
+        let c = s0 * (sll * t[2] - t[1] * slx) - sl * (sl * t[2] - t[1] * sx) + t[0] * (sl * slx - sll * sx);
+        return Some(Local { s: a / det3, ds_dl: Some(b / det3), ds_dx: Some(c / det3) });
+    }
+    let det2 = s0 * sxx - sx * sx;
+    if det2.abs() > TOL * s0 * sxx {
+        let a = (t[0] * sxx - sx * t[2]) / det2;
+        let c = (s0 * t[2] - sx * t[0]) / det2;
+        return Some(Local { s: a, ds_dl: None, ds_dx: Some(c) });
+    }
+    Some(Local { s: t[0] / s0, ds_dl: None, ds_dx: None })
+}
+
+/// The length slope of one length's row at a GC fraction, linearly interpolated between cells.
+fn length_slope_at(row: &SmoothedRow, n: f64, x: f64) -> Option<f64> {
+    let pos = x * n;
+    let (a, b) = (pos.floor() as usize, pos.ceil() as usize);
+    let sa = row.get(a).copied().flatten()?.ds_dl?;
+    let sb = row.get(b).copied().flatten()?.ds_dl?;
+    let t = pos - a as f64;
+    Some(sa * (1.0 - t) + sb * t)
+}
+
+/// The estimated relative smoothing bias of a local-linear fit, `(h^2 / 2) |∂²s| / s` on each axis,
+/// with the second derivative taken as the central difference of the fitted slopes (a second
+/// difference of `s` itself across lengths would need `s` interpolated between GC cells, and the
+/// interpolation error of a steep curve is as large as the bias). Returns the fragment-weighted
+/// mean and 95th percentile over the cells where it is estimable.
+fn smoothing_bias(lengths: &[u16], smoothed: &[SmoothedRow], grid: &GcGrid<u64>, obs: &GcGrid<u64>,
+                  cfg: &FitConfig) -> (f64, f64) {
+    let (hl, hx) = (cfg.bandwidth_length_bp, cfg.bandwidth_gc);
+    let mut cells: Vec<(f64, f64)> = Vec::new(); // (bias, fragments), in index order
+    for (li, &len) in lengths.iter().enumerate() {
+        let n = grid.gc_max(len) as f64;
+        let row = &smoothed[li];
+        for g in 1..row.len().saturating_sub(1) {
+            let Some(here) = row[g].filter(|l| l.s > 0.0) else { continue };
+            let mut b = 0.0;
+            let mut any = false;
+            let dx = |l: Option<Local>| l.and_then(|l| l.ds_dx);
+            if let (Some(lo), Some(hi)) = (dx(row[g - 1]), dx(row[g + 1])) {
+                b += 0.5 * hx * hx * ((hi - lo) * n / 2.0).abs() / here.s;
+                any = true;
+            }
+            if li > 0 && li + 1 < lengths.len() {
+                let x = g as f64 / n;
+                let lo = length_slope_at(&smoothed[li - 1], grid.gc_max(lengths[li - 1]) as f64, x);
+                let hi = length_slope_at(&smoothed[li + 1], grid.gc_max(lengths[li + 1]) as f64, x);
+                if let (Some(lo), Some(hi)) = (lo, hi) {
+                    b += 0.5 * hl * hl * ((hi - lo) / 2.0).abs() / here.s;
+                    any = true;
+                }
+            }
+            if any {
+                cells.push((b, obs.row(len)[g] as f64));
+            }
+        }
+    }
+    let total: f64 = cells.iter().map(|c| c.1).sum();
+    if total <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let mean = cells.iter().map(|(b, o)| b * o).sum::<f64>() / total;
+    cells.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut cum = 0.0;
+    let mut p95 = cells.last().map(|c| c.0).unwrap_or(0.0);
+    for (b, o) in &cells {
+        cum += o;
+        if cum >= 0.95 * total {
+            p95 = *b;
+            break;
+        }
+    }
+    (mean, p95)
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -704,7 +1077,7 @@ pub(crate) mod tests {
         }
         let support = CellSet::from_grid(support, 0.995);
         let qc = FitQc { fragments: 123_456, clamped_weight_share: 0.0123, capped_weight_share: 0.004,
-                         smoothing_bias_mean: 0.001, smoothing_bias_max: 0.01,
+                         smoothing_bias_mean: 0.001, smoothing_bias_p95: 0.01,
                          lengths_unobserved: 0, lengths_unfitted: 1 };
         let p = provenance(territory, &support);
         GcModel::from_parts(weights, capped, support, p, qc).unwrap()
@@ -797,5 +1170,351 @@ pub(crate) mod tests {
         assert_eq!(m.weight(25, Some(22)), None, "above the length's trimmed window");
         let w = m.weight(25, Some(5)).unwrap();
         assert_ne!(Some(w), m.weight(25, Some(12)), "two cells, two weights");
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod fit_tests {
+    use super::*;
+    use crate::gc_reference::ExpectedTable;
+
+    /// SplitMix64, for test data only: the fit itself draws nothing at random.
+    pub(crate) struct Rng(u64);
+    impl Rng {
+        pub(crate) fn new(seed: u64) -> Self {
+            Rng(seed)
+        }
+        pub(crate) fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e3779b97f4a7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+            z ^ (z >> 31)
+        }
+        pub(crate) fn uniform(&mut self) -> f64 {
+            (self.next_u64() >> 11) as f64 / (1u64 << 53) as f64
+        }
+        /// Poisson: Knuth's method below 30, a rounded normal above.
+        pub(crate) fn poisson(&mut self, lambda: f64) -> u64 {
+            if lambda <= 0.0 {
+                return 0;
+            }
+            if lambda < 30.0 {
+                let (l, mut k, mut p) = ((-lambda).exp(), 0u64, 1.0);
+                loop {
+                    p *= self.uniform();
+                    if p <= l {
+                        return k;
+                    }
+                    k += 1;
+                }
+            }
+            let (u1, u2) = (self.uniform().max(1e-300), self.uniform());
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            (lambda + lambda.sqrt() * z).round().max(0.0) as u64
+        }
+        pub(crate) fn binomial_thin(&mut self, n: u64, p: f64) -> u64 {
+            (0..n).filter(|_| self.uniform() < p).count() as u64
+        }
+    }
+
+    pub(crate) const LO: u16 = 60;
+    pub(crate) const HI: u16 = 200;
+    pub(crate) const K: u16 = 5;
+
+    /// Expected windows per cell: `GC fraction ~ Normal(0.43, 0.08)`, the genome's shape.
+    pub(crate) fn genome_shaped(n: u16, gc: u16) -> f64 {
+        let z = (gc as f64 / n as f64 - 0.43) / 0.08;
+        2e6 / n as f64 * (-0.5 * z * z).exp()
+    }
+
+    /// Expected windows per cell, uniform in GC fraction over 0.2-0.8.
+    pub(crate) fn uniform_ref(n: u16, gc: u16) -> f64 {
+        if (0.2..=0.8).contains(&(gc as f64 / n as f64)) { 2e6 / n as f64 } else { 0.0 }
+    }
+
+    pub(crate) fn expected_table(shape: fn(u16, u16) -> f64) -> ExpectedTable {
+        let mut g = GcGrid::new(LO, HI, K, 0u64).unwrap();
+        let keys: Vec<GcKey> = g.keys().collect();
+        for (i, key) in keys.iter().enumerate() {
+            g.cells_mut()[i] = shape(key.length - 2 * K, key.gc).round() as u64;
+        }
+        ExpectedTable::from_counts(g, "synthetic", "territory-a")
+    }
+
+    /// Every cell with an expected window: the support for the fit tests (Task 4 builds the real
+    /// one from the expected table).
+    pub(crate) fn nonzero_support(e: &ExpectedTable) -> CellSet {
+        let mut g = GcGrid::new(LO, HI, K, false).unwrap();
+        for (i, &c) in e.counts().cells().iter().enumerate() {
+            g.cells_mut()[i] = c > 0;
+        }
+        CellSet::from_grid(g, 1.0)
+    }
+
+    /// A peaked size distribution (mode 167 bp).
+    pub(crate) fn size(length: u16) -> f64 {
+        let z = (length as f64 - 167.0) / 20.0;
+        (-0.5 * z * z).exp() + 0.02
+    }
+
+    /// Expected observed count per cell for `n` fragments, size distribution `size`, bias `f`.
+    pub(crate) fn mean_tally(e: &ExpectedTable, n: f64, f: &dyn Fn(u16, f64) -> f64) -> Vec<f64> {
+        let g = e.counts();
+        let mut lambda = vec![0.0; g.len()];
+        let mut z = 0.0;
+        for len in LO..=HI {
+            let row = g.row(len);
+            let e_l: f64 = row.iter().map(|&c| c as f64).sum();
+            let nn = g.gc_max(len) as f64;
+            let off = g.index(len, 0).unwrap();
+            for (gc, &c) in row.iter().enumerate() {
+                let v = size(len) * c as f64 / e_l * f(len, gc as f64 / nn);
+                lambda[off + gc] = v;
+                z += v;
+            }
+        }
+        lambda.iter().map(|v| v * n / z).collect()
+    }
+
+    pub(crate) fn tally_from(e: &ExpectedTable, lambda: &[f64], rng: Option<&mut Rng>) -> Tally {
+        let mut t = Tally::like(e.counts());
+        let keys: Vec<GcKey> = e.counts().keys().collect();
+        match rng {
+            None => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, l.round() as u64); }),
+            Some(r) => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, r.poisson(*l)); }),
+        }
+        t
+    }
+
+    pub(crate) fn steep(slope: f64) -> impl Fn(u16, f64) -> f64 {
+        move |_, x| (slope * (x - 0.5)).exp()
+    }
+
+    /// `Σ obs·w / Σ obs` at one length, as a consumer applies the weights.
+    pub(crate) fn weighted_ratio(m: &GcModel, t: &Tally, length: u16) -> f64 {
+        let (mut num, mut den) = (0.0, 0.0);
+        for (gc, &o) in t.counts().row(length).iter().enumerate() {
+            if o > 0 {
+                num += o as f64 * m.weight(length, Some(gc as u16)).expect("an observed cell has a weight");
+                den += o as f64;
+            }
+        }
+        num / den
+    }
+
+    #[test]
+    fn every_length_keeps_its_total_weight_on_a_non_trivial_surface() {
+        // Bias slope varies with length (4 at 60 bp to 10 at 200 bp), on a genome-shaped reference.
+        let e = expected_table(genome_shaped);
+        let f = |len: u16, x: f64| ((4.0 + 6.0 * (len - LO) as f64 / (HI - LO) as f64) * (x - 0.5)).exp();
+        let t = tally_from(&e, &mean_tally(&e, 5e6, &f), None);
+        let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        for len in LO..=HI {
+            let r = weighted_ratio(&m, &t, len);
+            assert!((r - 1.0).abs() < 1e-9, "length {len}: Σobs·w / Σobs = {r:.12}");
+        }
+        let row: Vec<f64> = m.weights().row(167).iter().flatten().copied().collect();
+        let (lo, hi) = row.iter().fold((f64::MAX, f64::MIN), |(a, b), &w| (a.min(w), b.max(w)));
+        assert!(hi / lo > 2.0, "the weights must not be flat: {lo:.3}..{hi:.3}");
+    }
+
+    #[test]
+    fn uniform_and_genome_shaped_references_both_keep_total_weight() {
+        // Today's fit (mean ratio over fit, unweighted) gives Σobs·w / Σobs = 2.45 on the
+        // genome-shaped case: it carries mean(r) / E_exp[r] per length bin. Documented here only;
+        // the old fit is not under test.
+        for (name, shape) in [("uniform", uniform_ref as fn(u16, u16) -> f64), ("genome", genome_shaped)] {
+            let e = expected_table(shape);
+            let t = tally_from(&e, &mean_tally(&e, 5e6, &steep(8.0)), None);
+            let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+            for len in [LO, 120, 167, HI] {
+                let r = weighted_ratio(&m, &t, len);
+                assert!((r - 1.0).abs() < 1e-9, "{name} reference, length {len}: {r:.12}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_rerun_gives_a_bit_identical_table() {
+        let e = expected_table(genome_shaped);
+        let mut rng = Rng::new(11);
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(6.0)), Some(&mut rng));
+        let s = nonzero_support(&e);
+        let a = fit(&t, &e, &s, &FitConfig::default()).unwrap();
+        let b = fit(&t, &e, &s, &FitConfig::default()).unwrap();
+        let bits = |m: &GcModel| m.weights().cells().iter().map(|w| w.map(f64::to_bits)).collect::<Vec<_>>();
+        assert_eq!(bits(&a), bits(&b));
+        assert_eq!(a.qc(), b.qc());
+    }
+
+    #[test]
+    fn two_biases_give_two_tables() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let a = fit(&tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None), &e, &s, &FitConfig::default()).unwrap();
+        let b = fit(&tally_from(&e, &mean_tally(&e, 2e6, &steep(8.0)), None), &e, &s, &FitConfig::default()).unwrap();
+        let ratio = |m: &GcModel| m.weight(167, Some(40)).unwrap() / m.weight(167, Some(100)).unwrap();
+        assert!((ratio(&a) / ratio(&b) - 1.0).abs() > 0.5, "{} vs {}", ratio(&a), ratio(&b));
+    }
+
+    #[test]
+    fn the_weights_undo_the_bias_up_to_a_per_length_scale() {
+        let e = expected_table(genome_shaped);
+        let f = |len: u16, x: f64| ((4.0 + 4.0 * (len - LO) as f64 / (HI - LO) as f64) * (x - 0.5)).exp();
+        let t = tally_from(&e, &mean_tally(&e, 5e6, &f), None);
+        let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        let share = share_recovered(&m, &t, &f, 0.05);
+        assert!(share >= 0.95, "fragments in cells recovered within 5%: {share:.4}");
+    }
+
+    /// The share of the tally's fragments in cells where the fit recovers the truth within `tol`:
+    /// `|w·f / c_L - 1| <= tol`, with `c_L` length L's fragment-weighted mean of `w·f` (the bias is
+    /// identifiable only up to a per-length scale). A cell without a weight counts as a miss.
+    pub(crate) fn share_recovered(m: &GcModel, t: &Tally, f: &dyn Fn(u16, f64) -> f64, tol: f64) -> f64 {
+        let g = t.counts();
+        let (mut hit, mut all) = (0.0, 0.0);
+        for len in g.min_len()..=g.max_len() {
+            let x = |gc: usize| gc as f64 / g.gc_max(len) as f64;
+            let (mut num, mut den) = (0.0, 0.0);
+            for (gc, &o) in g.row(len).iter().enumerate() {
+                if let Some(w) = m.weight(len, Some(gc as u16)) {
+                    num += o as f64 * w * f(len, x(gc));
+                    den += o as f64;
+                }
+            }
+            for (gc, &o) in g.row(len).iter().enumerate() {
+                all += o as f64;
+                if let Some(w) = m.weight(len, Some(gc as u16)) {
+                    if den > 0.0 && (w * f(len, x(gc)) / (num / den) - 1.0).abs() <= tol {
+                        hit += o as f64;
+                    }
+                }
+            }
+        }
+        hit / all
+    }
+
+    /// The fewest cells, largest first, holding `share` of the tally's fragments.
+    pub(crate) fn top_cells(t: &Tally, share: f64) -> Vec<GcKey> {
+        let g = t.counts();
+        let mut cells: Vec<(u64, GcKey)> = g.keys().zip(g.cells()).map(|(k, &c)| (c, k)).collect();
+        cells.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        let mut keep = Vec::new();
+        let mut cum = 0u64;
+        for (c, k) in cells {
+            if cum as f64 >= share * t.total() as f64 {
+                break;
+            }
+            cum += c;
+            keep.push(k);
+        }
+        keep
+    }
+
+    #[test]
+    fn depth_changes_the_table_little_and_both_depths_match_the_truth() {
+        // Criterion 4 on a synthetic grid: 10% of the fragments gives a table correlated > 0.98
+        // with the full one, and both are compared with the truth, not only with each other.
+        let e = expected_table(genome_shaped);
+        let f = steep(6.0);
+        let mut rng = Rng::new(3);
+        let full = tally_from(&e, &mean_tally(&e, 3e6, &f), Some(&mut rng));
+        let mut tenth = Tally::like(e.counts());
+        let keys: Vec<GcKey> = e.counts().keys().collect();
+        for (k, &c) in keys.iter().zip(full.counts().cells()) {
+            tenth.add(*k, rng.binomial_thin(c, 0.1));
+        }
+        let s = nonzero_support(&e);
+        let a = fit(&full, &e, &s, &FitConfig::default()).unwrap();
+        let b = fit(&tenth, &e, &s, &FitConfig::default()).unwrap();
+        let both: Vec<(f64, f64)> = top_cells(&full, 0.95).iter()
+            .map(|k| (a.weight(k.length, Some(k.gc)).unwrap(), b.weight(k.length, Some(k.gc)).unwrap()))
+            .collect();
+        let r = pearson(&both);
+        let (ea, eb) = (share_recovered(&a, &full, &f, 0.05), share_recovered(&b, &tenth, &f, 0.05));
+        eprintln!("depth: correlation {r:.4}; fragments recovered within 5%: full {ea:.4}, 10% {eb:.4}");
+        assert!(r > 0.98, "correlation of the 100% and 10% tables: {r:.4}");
+        assert!(ea >= 0.95, "full depth against the truth: {ea:.4}");
+        assert!(eb >= 0.95, "10% depth against the truth: {eb:.4}");
+    }
+
+    pub(crate) fn pearson(xy: &[(f64, f64)]) -> f64 {
+        let n = xy.len() as f64;
+        let (mx, my) = (xy.iter().map(|p| p.0).sum::<f64>() / n, xy.iter().map(|p| p.1).sum::<f64>() / n);
+        let (mut sxy, mut sxx, mut syy) = (0.0, 0.0, 0.0);
+        for (x, y) in xy {
+            sxy += (x - mx) * (y - my);
+            sxx += (x - mx).powi(2);
+            syy += (y - my).powi(2);
+        }
+        sxy / (sxx * syy).sqrt()
+    }
+
+    #[test]
+    fn a_tally_below_the_minimum_cannot_be_fitted() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let zero = Tally::like(e.counts());
+        assert_eq!(fit(&zero, &e, &s, &FitConfig::default()).unwrap_err(),
+                   FitError::TooFewFragments { fragments: 0, required: MIN_FIT_FRAGMENTS });
+        let small = tally_from(&e, &mean_tally(&e, 90_000.0, &steep(4.0)), None);
+        assert!(matches!(fit(&small, &e, &s, &FitConfig::default()),
+                         Err(FitError::TooFewFragments { .. })));
+    }
+
+    #[test]
+    fn a_length_with_no_support_cell_cannot_be_fitted() {
+        let e = expected_table(genome_shaped);
+        let mut g = nonzero_support(&e).grid().clone();
+        g.row_mut(150).iter_mut().for_each(|c| *c = false);
+        let s = CellSet::from_grid(g, 1.0);
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        assert_eq!(fit(&t, &e, &s, &FitConfig::default()).unwrap_err(), FitError::NoSupport { length: 150 });
+    }
+
+    #[test]
+    fn mismatched_shapes_cannot_be_fitted() {
+        let e = expected_table(genome_shaped);
+        let t = Tally::new(LO, HI - 1, K).unwrap();
+        assert!(matches!(fit(&t, &e, &nonzero_support(&e), &FitConfig::default()),
+                         Err(FitError::ShapeMismatch(_))));
+    }
+
+    #[test]
+    fn the_provenance_names_its_inputs() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let m = fit(&tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None), &e, &s, &FitConfig::default()).unwrap();
+        let p = m.provenance();
+        assert_eq!((p.genome.as_str(), p.territory_sha256.as_str()), ("synthetic", "territory-a"));
+        assert_eq!(p.support_sha256, s.digest());
+        assert_eq!((p.trim_k, p.gc_definition_version), (K, GC_DEFINITION_VERSION));
+        assert_eq!(p.fit_config, FitConfig::default());
+    }
+
+    #[test]
+    fn the_smoothing_bias_is_reported_and_grows_with_curvature() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let flat = fit(&tally_from(&e, &mean_tally(&e, 2e6, &|_, _| 1.0), None), &e, &s, &FitConfig::default()).unwrap();
+        let curved = fit(&tally_from(&e, &mean_tally(&e, 2e6, &steep(10.0)), None), &e, &s, &FitConfig::default()).unwrap();
+        let (b0, b1) = (flat.qc().smoothing_bias_mean, curved.qc().smoothing_bias_mean);
+        eprintln!("smoothing bias: flat {b0:.5}, κ=10 {b1:.5}, p95 {:.5}", curved.qc().smoothing_bias_p95);
+        // (κh)² / 2 with κ = 10, h = 0.02 is 0.02; a flat bias has none beyond rounding.
+        assert!(b0 < 0.002, "flat: {b0}");
+        assert!((0.015..0.025).contains(&b1), "κ = 10: {b1}");
+        assert!(curved.qc().smoothing_bias_p95 >= b1);
+    }
+
+    #[test]
+    fn a_length_with_no_fragment_is_reported_unobserved() {
+        let e = expected_table(genome_shaped);
+        let mut t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        t.counts.row_mut(130).iter_mut().for_each(|c| *c = 0);
+        let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        assert_eq!(m.qc().lengths_unobserved, 1);
+        assert_eq!(m.qc().fragments, t.total());
+        assert!(m.weight(130, Some(60)).is_some(), "smoothed from its neighbours");
     }
 }

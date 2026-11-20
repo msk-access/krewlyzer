@@ -48,6 +48,18 @@ All notable changes to this project will be documented in this file.
     table is written as Parquet with its provenance and refused on load without it. Additive:
     `generate_ref_genome_gc`, `LENGTH_BINS` and `get_length_bin_index` are unchanged, because
     today's fit still reads the shipped `ref_genome_GC` asset.
+  - **The fit** (`gc_model::fit`), deterministic and with no subsampling: per length, the ratio of
+    the observed to the expected GC distribution over the support; a Gaussian-kernel
+    **local-linear** smoother over (length, GC fraction), weighted by the expected count at the
+    sample's depth; raw weight = 1 / smoothed ratio; then each length's weights are divided by
+    their fragment-weighted mean over the whole tally, so every length keeps its total weight
+    (the at-source fix for the scale defect of #92, where today's fit carries
+    `mean(r) / E_expected[r]` per length bin). Local-linear rather than a kernel average, which is
+    biased wherever the expected density has a slope; the remaining curvature bias, about
+    `(κh)²/2`, is estimated and reported. Bandwidths are configuration (defaults 5 bp and 0.02 GC
+    fraction, kernel truncated at 4 SD) until spec Step 3 chooses them. Below 100,000 fragments,
+    or with a length that has no support cell, the fit returns an explicit "cannot fit", never
+    weights of 1. Dense arrays and index-order sums make a rerun bit-identical.
 
 ### Removed
 

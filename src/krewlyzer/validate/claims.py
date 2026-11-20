@@ -219,6 +219,34 @@ CLAIMS: Tuple[Claim, ...] = (
         "gc-correction.md); the tally, the expected counts and the lookup all "
         "use this one rule",
     ),
+    Claim(
+        "gc_model.min_fit_fragments",
+        "100_000",
+        RustConst("gc_model.rs", "MIN_FIT_FRAGMENTS"),
+        "below this many fragments the fit reports that it cannot fit rather than "
+        "returning weights of 1 (CHANGELOG, gc-correction.md)",
+    ),
+    Claim(
+        "gc_model.default_bandwidth_length_bp",
+        "5.0",
+        RustConst("gc_model.rs", "DEFAULT_BANDWIDTH_LENGTH_BP"),
+        "the kernel SD along length until spec Step 3 chooses it by held-out "
+        "residual; quoted in the CHANGELOG and gc-correction.md",
+    ),
+    Claim(
+        "gc_model.default_bandwidth_gc",
+        "0.02",
+        RustConst("gc_model.rs", "DEFAULT_BANDWIDTH_GC"),
+        "the kernel SD along GC fraction until spec Step 3 chooses it; with "
+        "kappa = 10 it puts the curvature bias near (kappa h)^2 / 2 = 0.02",
+    ),
+    Claim(
+        "gc_model.kernel_reach_sd",
+        "4.0",
+        RustConst("gc_model.rs", "KERNEL_REACH_SD"),
+        "the kernel is truncated at this many SDs; a cell with nothing in reach "
+        "has no weight rather than an extrapolated one",
+    ),
     # -- PON sigma floor --------------------------------------------------
     Claim(
         "pon.sigma_floor",

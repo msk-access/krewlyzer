@@ -820,6 +820,19 @@ impl ExpectedTable {
         &self.counts
     }
 
+    /// A table from counts made by hand, for tests of the fit (which needs no sequence).
+    #[cfg(test)]
+    pub(crate) fn from_counts(counts: GcGrid<u64>, genome: &str, territory_sha256: &str) -> Self {
+        let provenance = ExpectedProvenance {
+            genome: genome.to_string(),
+            territory_sha256: territory_sha256.to_string(),
+            trim_k: counts.trim_k(),
+            gc_definition_version: GC_DEFINITION_VERSION,
+            krewlyzer_version: env!("CARGO_PKG_VERSION").to_string(),
+        };
+        Self { counts, provenance }
+    }
+
     pub fn provenance(&self) -> &ExpectedProvenance {
         &self.provenance
     }
