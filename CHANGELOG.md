@@ -84,8 +84,12 @@ All notable changes to this project will be documented in this file.
   - **Truth tests on injected bias** (criterion 3, in Rust): a 600 kb reference of 3 kb blocks at
     35-65% GC, expected counts from the real builder, and a million fragments drawn from it with
     a peaked size distribution, keyed by `gc_key` and thinned by a known bias that steepens with
-    length. Cells where the bias is recovered within 5% (up to a per-length scale) hold 98.8% of
-    the fragments; in the no-bias control, cells with |w - 1| < 0.05 hold 99.7%. A test shows
+    length. The pass rule (operator, matching validation criterion 1) is that cells within 5% of
+    the true correction (up to a per-length scale) hold at least 98% of fragments, at full and
+    at 10% depth. At 2,000,000 fragments they hold 99.2%; in the no-bias control, cells with
+    |w - 1| < 0.05 hold 99.7%. **At 10% depth (about 200,000 fragments) they hold 97.7%, short
+    of the rule**; the shortfall is pinned by a test that fails once it is closed. (On the
+    synthetic grid, 10% of 3,000,000 fragments reaches 98.2%.) A test shows
     that the injected-bias check rejects weights of 1 and a fit with four times the GC
     bandwidth, and that the control rejects a curve fitted to unbiased data. That a kernel
     average in place of local-linear also fails was checked by mutating the code once; it is

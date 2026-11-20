@@ -276,6 +276,20 @@ CLAIMS: Tuple[Claim, ...] = (
         "S5; the proposal allowed 10-20)",
     ),
     Claim(
+        "gc_model.gc_definition_version",
+        "1",
+        RustConst("gc_model.rs", "GC_DEFINITION_VERSION"),
+        "gc-correction.md names version 1 as the rule that an N voids the key only "
+        "inside the trimmed window; changing the rule must bump it",
+    ),
+    Claim(
+        "gc_model.truth_share",
+        "0.98",
+        RustConst("gc_model.rs", "TRUTH_SHARE"),
+        "the truth-test pass rule (operator, criterion 1): cells within 5% of the "
+        "true correction hold at least 98% of fragments, at full and 10% depth",
+    ),
+    Claim(
         "gc_model.kernel_reach_sd",
         "4.0",
         RustConst("gc_model.rs", "KERNEL_REACH_SD"),

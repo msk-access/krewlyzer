@@ -67,8 +67,11 @@ pub struct GcKey {
 /// The window is the insert without its first and last `trim_k` bases. A, C, G and T count in
 /// either case; **any other base in the window** (N, or an IUPAC code) makes the key `None`, as
 /// does an insert shorter than `2 * trim_k + MIN_TRIMMED_WINDOW`. The trimmed-off ends are not
-/// read at all. This is the one definition: the observed tally, the expected counts and the lookup
-/// all use it, so they cannot disagree about what a cell is.
+/// read at all: **an N in a trimmed-off end does not void the key; an N in the counted window
+/// does** (operator decision, 20 Nov). This is GC definition version 1
+/// ([`GC_DEFINITION_VERSION`]); changing the rule means a new version. It is the one definition:
+/// the observed tally, the expected counts and the lookup all use it, so they cannot disagree
+/// about what a cell is.
 pub fn gc_key(insert: &[u8], trim_k: u16) -> Option<GcKey> {
     let k = trim_k as usize;
     let length = u16::try_from(insert.len()).ok()?;
@@ -1233,6 +1236,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_n_rule_of_gc_definition_version_1_is_pinned() {
+        // Version 1: a non-ACGT base voids the key only inside the counted (trimmed) window.
+        assert_eq!(GC_DEFINITION_VERSION, 1, "a changed rule needs a new version and this test");
+        let clean = [b'A'; 50];
+        let mut in_end = clean;
+        in_end[0] = b'N';
+        in_end[49] = b'N';
+        in_end[9] = b'N'; // the last base of the 10 bp trimmed-off start
+        assert_eq!(gc_key(&in_end, 10), Some(GcKey { length: 50, gc: 0 }), "an N in a trimmed end gives a key");
+        let mut in_window = clean;
+        in_window[10] = b'N'; // the first base of the counted window
+        assert_eq!(gc_key(&in_window, 10), None, "an N in the window gives no key");
+        let mut last = clean;
+        last[39] = b'N'; // the last base of the counted window
+        assert_eq!(gc_key(&last, 10), None);
+    }
+
+    #[test]
     fn a_fragment_shorter_than_2k_plus_20_has_no_key() {
         let s = vec![b'A'; 39];
         assert_eq!(gc_key(&s, 10), None);
@@ -1494,6 +1515,10 @@ pub(crate) mod fit_tests {
         }
     }
 
+    /// The truth-test pass rule (operator, 20 Nov; validation criterion 1): cells within 5% of the
+    /// true correction must hold at least this share of the fragments, at full and at 10% depth.
+    pub(crate) const TRUTH_SHARE: f64 = 0.98;
+
     pub(crate) const LO: u16 = 60;
     pub(crate) const HI: u16 = 200;
     pub(crate) const K: u16 = 5;
@@ -1641,7 +1666,7 @@ pub(crate) mod fit_tests {
         let t = tally_from(&e, &mean_tally(&e, 5e6, &f), None);
         let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
         let share = share_recovered(&m, &t, &f, 0.05);
-        assert!(share >= 0.95, "fragments in cells recovered within 5%: {share:.4}");
+        assert!(share >= TRUTH_SHARE, "fragments in cells recovered within 5%: {share:.4}");
     }
 
     /// The share of the tally's fragments in cells where the fit recovers the truth within `tol`:
@@ -1711,8 +1736,8 @@ pub(crate) mod fit_tests {
         let (ea, eb) = (share_recovered(&a, &full, &f, 0.05), share_recovered(&b, &tenth, &f, 0.05));
         eprintln!("depth: correlation {r:.4}; fragments recovered within 5%: full {ea:.4}, 10% {eb:.4}");
         assert!(r > 0.98, "correlation of the 100% and 10% tables: {r:.4}");
-        assert!(ea >= 0.95, "full depth against the truth: {ea:.4}");
-        assert!(eb >= 0.95, "10% depth against the truth: {eb:.4}");
+        assert!(ea >= TRUTH_SHARE, "full depth against the truth: {ea:.4}");
+        assert!(eb >= TRUTH_SHARE, "10% depth against the truth: {eb:.4}");
     }
 
     pub(crate) fn pearson(xy: &[(f64, f64)]) -> f64 {
@@ -2054,7 +2079,7 @@ mod sparse_tests {
 /// thinned by a known `f(length, GC)`. Obs/exp then mixes size and GC as real data does.
 #[cfg(test)]
 mod truth_tests {
-    use super::fit_tests::{share_recovered, Rng};
+    use super::fit_tests::{share_recovered, Rng, TRUTH_SHARE};
     use super::*;
     use crate::gc_reference::{ExpectedTable, Territory};
     use crate::contigs::ContigNames;
@@ -2144,16 +2169,41 @@ mod truth_tests {
         (slope * (x - 0.5)).exp()
     }
 
+    /// The injected-bias sample (2,000,000 fragments) and its 10% thinning (about 200,000).
+    fn injected_full_and_tenth(c: &Case) -> (Tally, Tally) {
+        // GC fraction stays below 0.9 for windows of 40 bp or more in 35-65% blocks.
+        let ceiling = |len: u16| injected(len, 0.9);
+        let t = sample(c, 2_000_000, &injected, &ceiling, 1);
+        let mut rng = Rng::new(5);
+        let mut tenth = Tally::for_expected(&c.expected);
+        for (k, &n) in t.counts().keys().zip(t.counts().cells()) {
+            tenth.add(k, rng.binomial_thin(n, 0.1)).unwrap();
+        }
+        (t, tenth)
+    }
+
+    #[test]
+    fn at_ten_percent_depth_the_injected_bias_falls_short_of_the_rule() {
+        // KNOWN SHORTFALL, pinned like a strict xfail: at 10% depth (~200,000 fragments) cells
+        // within 5% hold 0.977 of fragments, under the operator's 98% rule. When a change brings
+        // it to 98%, this fails: move the assertion into the test below and delete this one.
+        let c = case();
+        let (_, tenth) = injected_full_and_tenth(&c);
+        let m = fit(&tenth, &c.expected, &c.support, &FitConfig::default()).unwrap();
+        let share = share_recovered(&m, &tenth, &injected, 0.05);
+        eprintln!("injected bias at 10% depth: {share:.4} of fragments recovered within 5%");
+        assert!(share < TRUTH_SHARE, "10% depth now meets the rule ({share:.4}): un-pin it");
+        assert!(share > 0.95, "10% depth got worse than when pinned: {share:.4}");
+    }
+
     #[test]
     fn an_injected_bias_is_recovered_within_five_percent() {
         let c = case();
-        // GC fraction stays below 0.9 for windows of 40 bp or more in 35-65% blocks.
-        let ceiling = |len: u16| injected(len, 0.9);
-        let t = sample(&c, 1_000_000, &injected, &ceiling, 1);
+        let (t, _) = injected_full_and_tenth(&c);
         let m = fit(&t, &c.expected, &c.support, &FitConfig::default()).unwrap();
         let share = share_recovered(&m, &t, &injected, 0.05);
         eprintln!("injected bias: {share:.4} of fragments recovered within 5%; qc {:?}", m.qc());
-        assert!(share >= 0.95, "fragments in cells where the injected bias is recovered within 5%: {share:.4}");
+        assert!(share >= TRUTH_SHARE, "fragments in cells where the injected bias is recovered within 5%: {share:.4}");
         // And the correction is not flat: at 200 bp the weights span the bias they undo.
         let w = |gc| m.weight(200, Some(gc)).unwrap();
         let (lo, hi) = (w(65), w(110)); // GC fraction 0.36 and 0.61
@@ -2184,17 +2234,17 @@ mod truth_tests {
         // Weights of 1 on a biased sample.
         let flat = model_with(&c, |_, _| 1.0);
         let share = share_recovered(&flat, &biased, &injected, 0.05);
-        assert!(share < 0.95, "weights of 1 pass the injected-bias test: {share:.4}");
+        assert!(share < TRUTH_SHARE, "weights of 1 pass the injected-bias test: {share:.4}");
         // Four times the GC bandwidth.
         let wide = FitConfig { bandwidth_gc: 4.0 * DEFAULT_BANDWIDTH_GC, ..FitConfig::default() };
         let m = fit(&biased, &c.expected, &c.support, &wide).unwrap();
         let share = share_recovered(&m, &biased, &injected, 0.05);
-        assert!(share < 0.95, "a 4x GC bandwidth passes the injected-bias test: {share:.4}");
+        assert!(share < TRUTH_SHARE, "a 4x GC bandwidth passes the injected-bias test: {share:.4}");
         // A curve on an unbiased sample.
         let unbiased = sample(&c, 1_000_000, &|_, _| 1.0, &|_| 1.0, 2);
         let curve = model_with(&c, |len, gc| (1.5 * (gc as f64 / (len - 2 * DEFAULT_TRIM_K) as f64 - 0.45)).exp());
         let near = share_near_one(&curve, &unbiased);
-        assert!(near < 0.95, "a curve passes the no-bias control: {near:.4}");
+        assert!(near < TRUTH_SHARE, "a curve passes the no-bias control: {near:.4}");
     }
 
     /// The share of fragments in cells with `|w - 1| < 0.05`.
@@ -2226,7 +2276,7 @@ mod truth_tests {
             }
         }
         eprintln!("no-bias control: {:.4} of fragments in cells with |w - 1| < 0.05", near / all);
-        assert!(near / all >= 0.95, "fragments in cells with |w - 1| < 0.05: {:.4}", near / all);
+        assert!(near / all >= TRUTH_SHARE, "fragments in cells with |w - 1| < 0.05: {:.4}", near / all);
         assert_eq!(m.qc().capped_weight_share, 0.0, "no bias reaches the cap");
     }
 }

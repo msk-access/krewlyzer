@@ -238,7 +238,9 @@ _core.gc.compute_and_write_gc_factors(
 **One GC definition.** A fragment's cell is its exact length and the integer GC count of its
 insert with `k` bp trimmed from each end (`gc_key`; `k` defaults to 10 until Step 3 chooses it
 from {0, 2, 5, 10}). A, C, G and T count in either case. Any other base in the trimmed window
-(N, IUPAC) means no key, and so does a fragment shorter than `2k + 20` bp. The observed tally,
+(N, IUPAC) means no key, and so does a fragment shorter than `2k + 20` bp. An N in the `k` bp
+trimmed off either end does **not** void the key: those bases are never read. This is GC
+definition version 1; a model or expected table written under another version is refused. The observed tally,
 the expected counts and the lookup all use this one rule. Lengths run from max(20, 2k + 20) to
 600 bp: 40 to 600 bp at the default trim of 10.
 
