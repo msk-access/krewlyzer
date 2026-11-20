@@ -67,6 +67,13 @@ All notable changes to this project will be documented in this file.
     in-support value, and its fragments never enter the smoother, so an outlier moves only its own
     length's normalising scale. The share of the final weight in clamped cells and in capped cells
     are each reported (`FitQc`), never hidden (AGENTS invariant #3).
+  - **Truth tests on injected bias** (criterion 3, in Rust): a 600 kb reference of 3 kb blocks at
+    35-65% GC, expected counts from the real builder, and a million fragments drawn from it with
+    a peaked size distribution, keyed by `gc_key` and thinned by a known bias that steepens with
+    length. Cells where the bias is recovered within 5% (up to a per-length scale) hold 98.8% of
+    the fragments; in the no-bias control, cells with |w - 1| < 0.05 hold 99.7%. Each is shown to
+    fail when the fit returns weights of 1, always returns a curve, uses a kernel average instead
+    of local-linear, or uses four times the GC bandwidth.
 
 ### Removed
 

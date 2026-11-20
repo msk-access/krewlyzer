@@ -1710,3 +1710,137 @@ mod sparse_tests {
         }
     }
 }
+
+/// Truth tests on injected bias (criterion 3). Unlike the fit tests, nothing here is a grid made
+/// by hand: a reference sequence with GC blocks, the expected counts built from it by the real
+/// builder, and fragments drawn from it with a peaked size distribution, keyed by `gc_key`, and
+/// thinned by a known `f(length, GC)`. Obs/exp then mixes size and GC as real data does.
+#[cfg(test)]
+mod truth_tests {
+    use super::fit_tests::{share_recovered, Rng};
+    use super::*;
+    use crate::gc_reference::{ExpectedTable, Territory};
+    use crate::contigs::ContigNames;
+
+    const GENOME_BP: usize = 600_000;
+    const BLOCK_BP: usize = 3_000;
+    const LO: u16 = 60;
+    const HI: u16 = 250;
+
+    /// Blocks of 3 kb whose GC probability cycles through 35-65%.
+    fn genome() -> Vec<u8> {
+        let mut rng = Rng::new(42);
+        (0..GENOME_BP).map(|i| {
+            let p_gc = 0.35 + 0.05 * ((i / BLOCK_BP * 3) % 7) as f64;
+            let gc = rng.uniform() < p_gc;
+            let pick = rng.uniform() < 0.5;
+            match (gc, pick) { (true, true) => b'G', (true, false) => b'C', (false, true) => b'A', (false, false) => b'T' }
+        }).collect()
+    }
+
+    /// A peaked size distribution: mode 167 bp, with a shoulder of short fragments.
+    fn draw_length(rng: &mut Rng) -> u16 {
+        loop {
+            let (u1, u2) = (rng.uniform().max(1e-300), rng.uniform());
+            let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
+            let len = if rng.uniform() < 0.15 { 110.0 + 15.0 * z } else { 167.0 + 20.0 * z };
+            let len = len.round();
+            if (LO as f64..=HI as f64).contains(&len) {
+                return len as u16;
+            }
+        }
+    }
+
+    struct Case {
+        expected: ExpectedTable,
+        support: CellSet,
+        seq: Vec<u8>,
+    }
+
+    fn case() -> Case {
+        let seq = genome();
+        let names = ContigNames::new([("1".to_string(), GENOME_BP as u64)]);
+        let territory = Territory::resolve(&[("1".to_string(), 0, GENOME_BP as u64)], &names).unwrap();
+        let expected = ExpectedTable::count(&territory, "synthetic", LO, HI, DEFAULT_TRIM_K, |iv| {
+            Ok(seq[iv.start as usize..iv.end as usize].to_vec())
+        }).unwrap();
+        let support = CellSet::from_expected(&expected, SUPPORT_SHARE).unwrap();
+        Case { expected, support, seq }
+    }
+
+    /// Draw fragments uniformly over the territory and keep each with probability
+    /// `f / f_max(length)`. Keys come from a GC prefix sum (the genome has no N), checked against
+    /// `gc_key` on the first draws; a per-length ceiling keeps the acceptance rate workable, and
+    /// is asserted to bound `f`.
+    fn sample(c: &Case, n_keep: u64, f: &dyn Fn(u16, f64) -> f64, f_max: &dyn Fn(u16) -> f64, seed: u64) -> Tally {
+        let mut prefix = Vec::with_capacity(c.seq.len() + 1);
+        prefix.push(0u32);
+        for &b in &c.seq {
+            prefix.push(prefix[prefix.len() - 1] + matches!(b, b'G' | b'C') as u32);
+        }
+        let k = DEFAULT_TRIM_K as usize;
+        let mut rng = Rng::new(seed);
+        let mut t = Tally::like(c.expected.counts());
+        let (mut kept, mut drawn) = (0, 0u64);
+        while kept < n_keep {
+            let len = draw_length(&mut rng);
+            let start = (rng.uniform() * (GENOME_BP - len as usize + 1) as f64) as usize;
+            let gc = (prefix[start + len as usize - k] - prefix[start + k]) as u16;
+            let key = GcKey { length: len, gc };
+            drawn += 1;
+            if drawn <= 1_000 {
+                assert_eq!(gc_key(&c.seq[start..start + len as usize], DEFAULT_TRIM_K), Some(key));
+            }
+            let p = f(len, gc as f64 / (len - 2 * DEFAULT_TRIM_K) as f64) / f_max(len);
+            assert!(p <= 1.0, "the acceptance ceiling must bound f (length {len}, gc {gc})");
+            if rng.uniform() < p {
+                t.add(key, 1);
+                kept += 1;
+            }
+        }
+        t
+    }
+
+    /// GC bias steepening with length (slope 3 at 60 bp to 8 at 250 bp).
+    fn injected(len: u16, x: f64) -> f64 {
+        let slope = 3.0 + 5.0 * (len - LO) as f64 / (HI - LO) as f64;
+        (slope * (x - 0.5)).exp()
+    }
+
+    #[test]
+    fn an_injected_bias_is_recovered_within_five_percent() {
+        let c = case();
+        // GC fraction stays below 0.9 for windows of 40 bp or more in 35-65% blocks.
+        let ceiling = |len: u16| injected(len, 0.9);
+        let t = sample(&c, 1_000_000, &injected, &ceiling, 1);
+        let m = fit(&t, &c.expected, &c.support, &FitConfig::default()).unwrap();
+        let share = share_recovered(&m, &t, &injected, 0.05);
+        eprintln!("injected bias: {share:.4} of fragments recovered within 5%; qc {:?}", m.qc());
+        assert!(share >= 0.95, "fragments in cells where the injected bias is recovered within 5%: {share:.4}");
+        // And the correction is not flat: at 200 bp the weights span the bias they undo.
+        let w = |gc| m.weight(200, Some(gc)).unwrap();
+        let (lo, hi) = (w(65), w(110)); // GC fraction 0.36 and 0.61
+        let want = injected(200, 110.0 / 180.0) / injected(200, 65.0 / 180.0);
+        assert!((lo / hi / want - 1.0).abs() < 0.05, "weight ratio {:.3} vs injected {:.3}", lo / hi, want);
+    }
+
+    #[test]
+    fn a_sample_with_no_bias_gets_weights_within_five_percent_of_one() {
+        // The control: a fit that always returns a curve fails here.
+        let c = case();
+        let flat = |_: u16, _: f64| 1.0;
+        let t = sample(&c, 1_000_000, &flat, &|_| 1.0, 2);
+        let m = fit(&t, &c.expected, &c.support, &FitConfig::default()).unwrap();
+        let (mut near, mut all) = (0.0, 0.0);
+        for k in t.counts().keys() {
+            let o = *t.counts().get(k.length, k.gc).unwrap() as f64;
+            all += o;
+            if (m.weight(k.length, Some(k.gc)).unwrap() - 1.0).abs() < 0.05 {
+                near += o;
+            }
+        }
+        eprintln!("no-bias control: {:.4} of fragments in cells with |w - 1| < 0.05", near / all);
+        assert!(near / all >= 0.95, "fragments in cells with |w - 1| < 0.05: {:.4}", near / all);
+        assert_eq!(m.qc().capped_weight_share, 0.0, "no bias reaches the cap");
+    }
+}
