@@ -1802,11 +1802,18 @@ H = -\sum_{i} p_i \log_2(p_i)
 <td>Genome build (hg19/GRCh37/hg38/GRCh38)</td>
 </tr>
 <tr>
+<td><code>--gc-correct/--no-gc-correct</code></td>
+<td></td>
+<td>FLAG</td>
+<td><code>--gc-correct</code></td>
+<td>Apply <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction</td>
+</tr>
+<tr>
 <td><code>--gc-factors</code></td>
 <td><code>-F</code></td>
 <td>PATH</td>
 <td></td>
-<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></td>
+<td>Off-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table (<code>.parquet</code>/<code>.tsv.gz</code>/<code>.tsv</code>); default: the tables <code>extract</code> wrote beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, as <code>run-all</code> uses</td>
 </tr>
 <tr>
 <td><code>--pon-model</code></td>
@@ -2233,7 +2240,7 @@ comparable across labels or samples on its own. <strong>Interpret the <abbr titl
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="August 1, 2026 03:27:49 UTC"><span class="timeago" datetime="2026-08-01T03:27:49+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="August 1, 2026 03:27:49 UTC">2026-08-01</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 20, 2026 03:57:14 UTC"><span class="timeago" datetime="2026-11-20T03:57:14+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 20, 2026 03:57:14 UTC">2026-11-20</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

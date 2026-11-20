@@ -1530,10 +1530,11 @@
 <div class="highlight"><pre><span></span><code><a href="#__codelineno-2-1" id="__codelineno-2-1" name="__codelineno-2-1"></a>krewlyzer<span class="w"> </span>fsc<span class="w"> </span>-i<span class="w"> </span>sample.bed.gz<span class="w"> </span>--no-gc-correct<span class="w"> </span>-o<span class="w"> </span>output/
 </code></pre></div>
 <h3 id="using-pre-computed-factors">Using Pre-computed Factors</h3>
-<div class="highlight"><pre><span></span><code><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a><span class="c1"># mFSD can use factors from extract</span>
-<a href="#__codelineno-3-2" id="__codelineno-3-2" name="__codelineno-3-2"></a>krewlyzer<span class="w"> </span>mfsd<span class="w"> </span>-i<span class="w"> </span>sample.bam<span class="w"> </span>-V<span class="w"> </span>variants.vcf<span class="w"> </span><span class="se">\</span>
-<a href="#__codelineno-3-3" id="__codelineno-3-3" name="__codelineno-3-3"></a><span class="w">    </span>--correction-factors<span class="w"> </span>output/sample.correction_factors.tsv<span class="w"> </span><span class="se">\</span>
-<a href="#__codelineno-3-4" id="__codelineno-3-4" name="__codelineno-3-4"></a><span class="w">    </span>-o<span class="w"> </span>output/
+<div class="highlight"><pre><span></span><code><a href="#__codelineno-3-1" id="__codelineno-3-1" name="__codelineno-3-1"></a><span class="c1"># mFSD can use factors from extract. It computes each fragment's GC from the</span>
+<a href="#__codelineno-3-2" id="__codelineno-3-2" name="__codelineno-3-2"></a><span class="c1"># reference, so the reference is required with them.</span>
+<a href="#__codelineno-3-3" id="__codelineno-3-3" name="__codelineno-3-3"></a>krewlyzer<span class="w"> </span>mfsd<span class="w"> </span>-i<span class="w"> </span>sample.bam<span class="w"> </span>-V<span class="w"> </span>variants.vcf<span class="w"> </span>-g<span class="w"> </span>reference.fa<span class="w"> </span><span class="se">\</span>
+<a href="#__codelineno-3-4" id="__codelineno-3-4" name="__codelineno-3-4"></a><span class="w">    </span>--correction-factors<span class="w"> </span>output/sample.correction_factors.tsv<span class="w"> </span><span class="se">\</span>
+<a href="#__codelineno-3-5" id="__codelineno-3-5" name="__codelineno-3-5"></a><span class="w">    </span>-o<span class="w"> </span>output/
 </code></pre></div>
 <hr>
 <h2 id="per-tool-gc-correction">Per-Tool <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Correction</h2>
@@ -1585,7 +1586,7 @@
 </tr>
 <tr>
 <td><strong>Region Entropy</strong></td>
-<td><code>--gc-factors</code></td>
+<td><code>--gc-correct</code>, <code>--gc-factors</code></td>
 <td>From extract</td>
 <td><abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> fragment weighting</td>
 </tr>
@@ -1619,7 +1620,21 @@
 <p>When <code>--target-regions</code> is provided to <code>extract</code>:
 - <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> model is built from <strong>off-target</strong> fragments only
 - Avoids capture bias contamination
-- Generates both <code>.correction_factors.tsv</code> (off-target) and <code>.correction_factors.ontarget.tsv</code> (on-target)</p>
+- Generates both <code>.correction_factors.*</code> (off-target) and <code>.correction_factors.ontarget.*</code> (on-target), in the run's <code>--output-format</code></p>
+<p><strong>Which table a feature uses.</strong> Every consumer finds its table through one resolver
+(<code>core.gc_assets.resolve_gc_factors</code>): beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> first, then in the output directory;
+Parquet, then <code>.tsv.gz</code>, then <code>.tsv</code>. <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> keeps full precision, so all three carry identical
+factors and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction does not depend on the output format. Each sample's metadata records
+the kind of table each population used (<code>gc_factors_offtarget</code>, <code>gc_factors_ontarget</code>).</p>
+<div class="admonition warning">
+<p class="admonition-title">0.9.x cohorts</p>
+<p>Up to 0.9.2, panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, every <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> table, and gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> looked only for a plain
+<code>.tsv</code> factor table. Runs with <code>--output-format parquet</code>, or with <code>--compress</code> (the Nextflow
+default), write none, so those features ran <strong>without <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction</strong>, while <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> donors
+(built with <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> forced) were corrected. Gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> was uncorrected for samples and donors
+alike. Re-run those cohorts; <code>build-pon --from-outputs</code> refuses sample directories from
+before the fix.</p>
+</div>
 <hr>
 <h2 id="building-gc-reference-assets">Building <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Reference Assets</h2>
 <p>The <code>build-gc-reference</code> command pre-computes reference <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> data:</p>
@@ -1818,7 +1833,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="March 14, 2026 04:35:04 UTC"><span class="timeago" datetime="2026-03-14T04:35:04+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="March 14, 2026 04:35:04 UTC">2026-03-14</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 20, 2026 17:59:34 UTC"><span class="timeago" datetime="2026-11-20T17:59:34+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 20, 2026 17:59:34 UTC">2026-11-20</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

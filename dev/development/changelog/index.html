@@ -3349,6 +3349,99 @@
   had broken every byte-identical comparison between two runs, and <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> baselines shared it.</p>
 </li>
 <li>
+<p><strong>One rule matches <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> contigs to the reference, and a wrong reference is refused.</strong> Each place a
+  <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> contig met the reference FASTA had its own rule: extract matched names exactly, so a
+  <code>chr1</code>-named <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> read with a <code>1</code>-named FASTA gave every fragment <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> 0.0 and nothing was
+  corrected; <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> and the expected-<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> builder tried the other spelling after a miss, and that
+  fallback <strong>crashed</strong> instead (rust-htslib's <code>fetch_seq</code> returns a <code>Vec</code> over a null pointer, not
+  <code>Err</code>, for a name the FASTA lacks: <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> with <code>chr1</code> variants against a <code>1</code>-named FASTA, and
+  <code>generate_ref_genome_gc</code> with <code>chr</code>-less regions against a <code>chr</code>-named FASTA, both segfaulted).
+  <code>rust/src/contigs.rs</code> now resolves every <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> contig once, from the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> header and the FASTA
+  index: the exact name first, then the other <code>chr</code> spelling, and the lengths must agree.</p>
+</li>
+<li><strong>Refused before any read is processed:</strong> a primary contig (1-22, X, Y) the reference lacks, or
+    one whose length differs (another assembly, such as hg38 against hg19, which no name rule can
+    see). <code>chrM</code> (16,571 bp) and <code>MT</code> (16,569 bp) stay apart by length.</li>
+<li><strong>Counted, not refused:</strong> fragments on contigs the reference lacks (decoys, alts) or has at
+    another length (a non-primary contig such as chrM against rCRS; warned about), in
+    <code>fragments_on_missing_contig</code>; warned about above 1%. They are left out of the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>
+    observations instead of entering the lowest <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bin at 0%. Any failed <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> fetch is warned about.</li>
+<li>The counts are filled when no <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> is written too (<code>krewlyzer motif</code> reported 0 fragments).</li>
+<li>extract fetches <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> and breakpoint-motif context under the resolved name; <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> resolves a
+    variant's contig against the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> the same way, and with <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factors but no reference is now an
+    error (it ran uncorrected, and the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-correction guide's own example and the Nextflow module
+    did exactly that: both now pass the reference); <code>generate_ref_genome_gc</code> errors on a region the reference lacks
+    (it skipped it). A reference that cannot be opened is an error in extract (every fragment got
+    <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> 0.0).</li>
+<li>This replaces the 50% share at which extract failed, which detected the naming mismatch rather
+    than resolving it. A run whose <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> and reference already matched by name, with no fragments on
+    contigs the reference lacks, is unaffected.</li>
+<li>
+<p>The real-data test fixture (<code>tests/data/fixtures/test_sample.bam</code>) named 290 full-length
+    contigs against its 2 Mb, one-contig reference, which this now refuses. Its header names only
+    that contig; the 2 reads whose mates lay on other contigs are dropped (3,142 remain).</p>
+</li>
+<li>
+<p><strong>The blacklist is applied whatever the contig naming.</strong> Extract compared contig names exactly
+  when excluding blacklisted regions. The bundled hg19 blacklist (<code>hg19-blacklist.v2.bed.gz</code>, 834
+  regions) names contigs <code>chr1</code>, while MSK-ACCESS BAMs name them <code>1</code>, and Nextflow passes no
+  blacklist of its own (<code>exclude_regions = ''</code>). So in production the blacklist matched nothing
+  and <strong>was never applied</strong>. Extract now matches the blacklist, like target regions, with or
+  without a leading <code>chr</code>. On four evidence samples (both assays, both sources) it removes 0.70%,
+  0.89%, 1.59% and 1.84% of fragments; the removed count equals the fragments overlapping the
+  blacklist exactly, in every sample. <strong>Values change for every feature</strong> (the fragment set
+  changes), so PONs must be rebuilt.</p>
+</li>
+<li>
+<p><strong><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction no longer depends on the output format, and fails loudly.</strong> Panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, every
+  <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> table, and gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> each looked for a plain <code>{sample}.correction_factors[.ontarget].tsv</code>.
+  <code>--output-format parquet</code>, and <code>--compress</code> (the Nextflow default), write <code>.parquet</code>/<code>.tsv.gz</code>
+  and no plain <code>.tsv</code>, so in the 0.9.x production cohorts (0.9.2 IGO: 3,158 run directories;
+  0.9.0 clinical: 33,104, all without a plain <code>.tsv</code>) those features ran <strong>without <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction</strong>,
+  while <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> donors (built with <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> forced) were corrected. Gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> was never corrected for anyone:
+  the factors went to Rust as a three-column temporary <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> that the loader skipped row by row,
+  while the log said "Using on-target <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factors".</p>
+</li>
+<li>One resolver (<code>core.gc_assets.resolve_gc_factors</code>) finds every factor table: beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>,
+    then the output directory; Parquet, then <code>.tsv.gz</code>, then <code>.tsv</code>. A static test fails if any
+    other module builds a factor filename.</li>
+<li>Gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> takes the table path, so Rust loads it. The Python loader, the dict path and the dead
+    <code>_get_gc_weight</code> are removed.</li>
+<li><abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> factors are written at full precision (previously 4 decimals; 43% of factors differed
+    from Parquet on a test sample).</li>
+<li><code>CorrectionFactors::load</code> reads exactly the path it is given, so a stale sibling <code>.parquet</code>
+    can no longer win. Columns are found by name, and a table with no rows, a missing column or a
+    non-finite factor is an <strong>error</strong> at every consumer. A fit with no length bin writes no table.</li>
+<li>The single-tool <code>region-entropy</code> resolves both tables as run-all does, and gains
+    <code>--gc-correct/--no-gc-correct</code>. Its <code>--gc-factors</code> validation now accepts the six-column table
+    in any format; it used to reject run-all's own Parquet tables.</li>
+<li>Nextflow tool-level mode passes extract's factor tables to every <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted tool; each used to
+    refit factors from the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with a different algorithm. A tool that still has to refit records
+    <code>recomputed</code> and warns.</li>
+<li><code>--no-gc-correct</code> is honoured by these consumers; previously a stale table was applied anyway.</li>
+<li><code>metadata</code> records which kind of table each population used (<code>gc_factors_offtarget</code>,
+    <code>gc_factors_ontarget</code>, <code>gc_correction_applied_*</code>), plus <code>fragments_on_missing_contig</code> and
+    <code>gc_fetch_failed</code>.</li>
+<li>Extract matches target regions with or without <code>chr</code>, as the features already did. (Contigs
+    the reference names the other way are resolved, not refused: see the contig entry above.)</li>
+<li><code>build-pon</code> refuses a donor whose factors are missing, and <code>--from-outputs</code> refuses sample
+    directories written before this fix. Both apply one rule: a panel donor needs its on-target
+    table too (<code>--from-outputs</code> checked only off-target, so a panel donor whose on-target fit did
+    not run entered the baseline with uncorrected gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>).</li>
+<li>A factor table never outlives the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> it was fitted on: writing a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, or refitting from
+    one, first removes that sample's earlier tables in every format. A rerun that fitted nothing,
+    or wrote another format, used to reuse the previous run's weights (the resolver prefers
+    Parquet) while the metadata recorded the correction as applied.</li>
+<li>Both loaders require all six documented columns; a table without <code>length_bin_max</code> passed
+    <code>validate-gc-factors</code>.</li>
+<li>A factor table the run would use must also be readable: an unreadable one stops the run.
+    It used to count as found, so gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>, panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> each failed on it (each
+    failure caught and logged) while the metadata recorded <code>gc_correction_applied_*=True</code>.</li>
+</ul>
+<p><strong>Values change</strong> for panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>, <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> and gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> in Parquet or compressed runs, so PONs
+  must be rebuilt.</p>
+<ul>
+<li>
 <p><strong>On a push, the PHI scan covered only the last commit.</strong> The scan base was
   <code>pull_request.base.sha || 'HEAD~1'</code>, so for a push it was <code>HEAD~1</code>: push
   three linear commits and two went unscanned, with nothing to say so. Merge

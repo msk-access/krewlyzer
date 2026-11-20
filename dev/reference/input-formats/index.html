@@ -2267,12 +2267,12 @@
   <a href="#gc-factors-tsv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GC Factors TSV
+        GC Factors table
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="GC Factors TSV">
+    <nav class="md-nav" aria-label="GC Factors table">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2291,17 +2291,6 @@
     <span class="md-ellipsis">
       
         Example
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#notes_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
       
     </span>
   </a>
@@ -3266,12 +3255,12 @@
   <a href="#gc-factors-tsv" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GC Factors TSV
+        GC Factors table
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="GC Factors TSV">
+    <nav class="md-nav" aria-label="GC Factors table">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -3290,17 +3279,6 @@
     <span class="md-ellipsis">
       
         Example
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#notes_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Notes
       
     </span>
   </a>
@@ -3469,10 +3447,10 @@
 <td><code>chr1\t500\t800\tLiver</code></td>
 </tr>
 <tr>
-<td><a href="#gc-factors-tsv"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factors <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></a></td>
-<td>length_bin, gc_pct, factor</td>
+<td><a href="#gc-factors-tsv"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factors table</a></td>
+<td>length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor</td>
 <td><code>--gc-factors</code></td>
-<td><code>10\t45\t1.05</code></td>
+<td><code>170\t175\t50\t100\t90\t1.25</code></td>
 </tr>
 </tbody>
 </table>
@@ -3907,11 +3885,11 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 <li><code>--atac-regions</code> - <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>-seq peaks</li>
 </ul>
 <hr>
-<h2 id="gc-factors-tsv"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factors <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr></h2>
-<p>Tab-separated correction factors for <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias normalization.</p>
+<h2 id="gc-factors-tsv"><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> Factors table</h2>
+<p>The <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors <code>extract</code> and <code>run-all</code> write as <code>{sample}.correction_factors.*</code>
+(and <code>.ontarget.*</code> in panel mode): <code>.parquet</code>, <code>.tsv.gz</code> or <code>.tsv</code>, per <code>--output-format</code> and
+<code>--compress</code>. Any of the three is accepted wherever a factor table is read.</p>
 <h3 id="format_7">Format</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>length_bin    gc_pct    factor
-</code></pre></div>
 <table>
 <thead>
 <tr>
@@ -3922,55 +3900,66 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
 </thead>
 <tbody>
 <tr>
-<td>length_bin</td>
+<td><code>length_bin_min</code></td>
 <td>int</td>
-<td>Fragment length bin: <code>(length - 60) // 5</code></td>
+<td>Fragment-length bin start (bp); bins are 5 bp, 60-999</td>
 </tr>
 <tr>
-<td>gc_pct</td>
+<td><code>length_bin_max</code></td>
 <td>int</td>
-<td><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> percentage (0-100)</td>
+<td>Bin end, exclusive</td>
 </tr>
 <tr>
-<td>factor</td>
+<td><code>gc_percent</code></td>
+<td>int</td>
+<td>Fragment <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>, rounded to a whole percent (0-100)</td>
+</tr>
+<tr>
+<td><code>observed</code></td>
+<td>int</td>
+<td>The sample's fragment count in this cell</td>
+</tr>
+<tr>
+<td><code>expected</code></td>
+<td>int</td>
+<td>The reference count for this cell (<code>gc_reference</code> asset)</td>
+</tr>
+<tr>
+<td><code>correction_factor</code></td>
 <td>float</td>
-<td>Correction factor (typically 0.5-2.0)</td>
+<td>The weight a fragment in this cell contributes</td>
 </tr>
 </tbody>
 </table>
+<p>Columns are matched by name. A table that has no factor rows, misses a column or carries a
+non-finite factor is refused, not silently treated as "no correction".</p>
 <h3 id="example_6">Example</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a>length_bin  gc_pct  factor
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>10  40  1.05
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>10  41  1.03
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>10  42  0.98
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>11  40  1.02
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>length_bin_min  length_bin_max  gc_percent  observed    expected    correction_factor
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>170 175 45  1532    1490    0.9731
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>170 175 50  1688    1520    0.9004
 </code></pre></div>
-<h3 id="notes_1">Notes</h3>
-<ul>
-<li>Length bin 10 corresponds to fragments 110-114bp</li>
-<li><abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> percentage is rounded to the nearest integer</li>
-<li>Factors near 1.0 indicate minimal bias</li>
-</ul>
 <h3 id="used-by_6">Used By</h3>
 <ul>
-<li><code>--gc-factors</code> / <code>-F</code> - Custom <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction factors</li>
+<li><code>--gc-factors</code> / <code>-F</code> (<code>region-entropy</code>): the off-target table. Without it the tool uses the
+  tables <code>extract</code> wrote beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, as <code>run-all</code> does.</li>
+<li><code>--correction-factors</code> (<code>mfsd</code>).</li>
 </ul>
 <hr>
 <h2 id="compression-support">Compression Support</h2>
 <p>All <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> files can be gzip-compressed (<code>.bed.gz</code>). Krewlyzer automatically detects and handles compression.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Both work</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed.gz
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Both work</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed.gz
 </code></pre></div>
 <hr>
 <h2 id="validation">Validation</h2>
 <p>Validate your files before analysis:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Validate specific files</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--gene-bed<span class="w"> </span>my_genes.bed
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed<span class="w"> </span>--wps-anchors<span class="w"> </span>my_anchors.bed
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="c1"># Validate bundled assets</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Validate specific files</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--gene-bed<span class="w"> </span>my_genes.bed
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--arms-bed<span class="w"> </span>my_arms.bed<span class="w"> </span>--wps-anchors<span class="w"> </span>my_anchors.bed
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="c1"># Validate bundled assets</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a>krewlyzer<span class="w"> </span>validate<span class="w"> </span>--genome<span class="w"> </span>hg19
 </code></pre></div>
 <p>If validation fails, you'll see:
 - Expected format and columns
@@ -4001,7 +3990,7 @@ Invalid: <code>Arm1</code>, <code>chr1p</code>, <code>p</code></p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 03:53:30 UTC"><span class="timeago" datetime="2026-07-31T03:53:30+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 03:53:30 UTC">2026-07-31</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 20, 2026 03:57:14 UTC"><span class="timeago" datetime="2026-11-20T03:57:14+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 20, 2026 03:57:14 UTC">2026-11-20</span>
   </span>
 
     
