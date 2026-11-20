@@ -487,96 +487,6 @@ pub fn compute_gcfix_factors(
     Ok(CorrectionFactors { data: factors })
 }
 
-/// Apply LOESS-based GC bias correction to counts
-/// 
-/// # Arguments
-/// * `gc_values` - GC content per region (0.0-1.0)
-/// * `counts` - Fragment counts per region
-/// * `config` - Optional LOESS configuration
-///
-/// # Returns
-/// * Corrected counts
-pub fn correct_gc_bias(
-    gc_values: &[f64],
-    counts: &[f64],
-    config: Option<GcCorrectionConfig>
-) -> Result<Vec<f64>> {
-    let cfg = config.unwrap_or_default();
-    
-    if gc_values.len() != counts.len() {
-        return Err(anyhow!("gc_values and counts must have same length"));
-    }
-    
-    if gc_values.len() < 15 {
-        return Err(anyhow!("Need at least 15 points for LOESS fitting"));
-    }
-    
-    // Fit LOESS to (gc, counts) 
-    let model = Lowess::new()
-        .fraction(cfg.fraction)
-        .iterations(cfg.iterations)
-        .delta(cfg.delta)
-        .adapter(Batch);
-    
-    if let Ok(model) = model.build() {
-        if let Ok(result) = model.fit(gc_values, counts) {
-            // Compute mean of fitted values
-            let mean_fit: f64 = result.y.iter().sum::<f64>() / result.y.len() as f64;
-            
-            // Correction: multiply counts by (mean_fit / predicted_fit)
-            let mut corrected = vec![0.0; counts.len()];
-            for (i, &c) in counts.iter().enumerate() {
-                let fitted = result.y[i];
-                if fitted > 0.0001 {
-                    corrected[i] = c * (mean_fit / fitted);
-                } else {
-                    corrected[i] = c;
-                }
-            }
-            return Ok(corrected);
-        }
-    }
-    
-    // Fallback: return uncorrected
-    Ok(counts.to_vec())
-}
-
-
-
-/// Correct WPS fragment types (different size ranges)
-///
-/// # Arguments
-/// * `gc_values` - GC content per region
-/// * `wps_long_counts` - WPS long fragment coverage (120-180bp)
-/// * `wps_short_counts` - WPS short fragment coverage (35-80bp)
-///
-/// # Returns
-/// * Tuple of corrected counts (wps_long, wps_short)
-pub fn correct_gc_bias_wps(
-    gc_values: &[f64],
-    wps_long_counts: &[f64],
-    wps_short_counts: &[f64],
-    verbose: bool,
-) -> Result<(Vec<f64>, Vec<f64>)> {
-    let config = GcCorrectionConfig::default();
-    
-    if verbose {
-        info!("Applying WPS GC correction...");
-    }
-    
-    let long_corrected = correct_gc_bias(gc_values, wps_long_counts, Some(config.clone()))
-        .map_err(|e| anyhow!("WPS long GC correction failed: {}", e))?;
-    
-    let short_corrected = correct_gc_bias(gc_values, wps_short_counts, Some(config))
-        .map_err(|e| anyhow!("WPS short GC correction failed: {}", e))?;
-    
-    if verbose {
-        info!("WPS GC correction complete");
-    }
-    
-    Ok((long_corrected, short_corrected))
-}
-
 use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 
@@ -685,16 +595,6 @@ pub fn validate_factor_table(path: &str) -> PyResult<usize> {
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{:#}", e)))
 }
 
-#[cfg(test)]
-fn variance(data: &[f64]) -> f64 {
-    let n = data.len() as f64;
-    if n < 2.0 {
-        return 0.0;
-    }
-    let mean = data.iter().sum::<f64>() / n;
-    data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)
-}
-
 use coitrees::{COITree, IntervalNode};
 use crate::bed::{ChromosomeMap, Fragment};
 use crate::engine::FragmentConsumer;
@@ -790,33 +690,6 @@ impl FragmentConsumer for GcObservationConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    #[test]
-    fn test_gc_correction_basic() {
-        // Simulated GC bias: counts increase with GC (15 points to meet minimum)
-        let gc = vec![0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.30, 0.40, 0.50, 0.60];
-        let counts = vec![75.0, 80.0, 85.0, 90.0, 95.0, 100.0, 105.0, 110.0, 115.0, 120.0, 125.0, 82.0, 92.0, 98.0, 108.0];
-        
-        let corrected = correct_gc_bias(&gc, &counts, None).unwrap();
-        
-        // Check output has same length as input
-        assert_eq!(corrected.len(), counts.len());
-        
-        // After correction, variance should be reduced (values should be closer to mean)
-        let var_before = variance(&counts);
-        let var_after = variance(&corrected);
-        // Note: Due to LOESS fit, variance may not always decrease for small/noisy datasets
-        println!("Variance before: {}, after: {}", var_before, var_after);
-    }
-    
-    #[test]
-    fn test_gc_correction_too_few_points() {
-        let gc = vec![0.4, 0.5];
-        let counts = vec![100.0, 100.0];
-        
-        let result = correct_gc_bias(&gc, &counts, None);
-        assert!(result.is_err(), "Should fail with too few points");
-    }
     
     // ---------------------------------------------------------------------
     // Loading and writing factor tables (redesign item 0). Every consumer used to fall back to
@@ -943,12 +816,5 @@ mod tests {
         let f = CorrectionFactors::load(&tsv).unwrap();
         assert_eq!(f.data[&(LengthBin(22), 50)].factor, 1.234_567_891_234_5);
         assert!(CorrectionFactors::load(dir.path().join("absent.tsv")).is_err());
-    }
-
-    #[test]
-    fn test_variance() {
-        let data = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];
-        let var = variance(&data);
-        assert!((var - 4.571).abs() < 0.01, "Variance calculation error");
     }
 }

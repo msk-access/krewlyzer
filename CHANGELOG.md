@@ -77,6 +77,18 @@ All notable changes to this project will be documented in this file.
 
 ### Removed
 
+- **Dead GC code, and the Python entry point `_core.wps.calculate_wps`** (GC redesign register
+  D2). None had a caller in `rust/src`, `src/`, `tests/`, `nextflow/` or `scripts/`:
+  - `gc_correction::correct_gc_bias` and `correct_gc_bias_wps`, a per-region LOESS correction that
+    nothing called, with their two tests and the test-only `variance` helper;
+  - `gc_reference::GcCorrectionFactors`, a factor table nothing built or read;
+  - `_core.wps.calculate_wps` (the "legacy" single-tool WPS entry point, absent from `_core.pyi`
+    and called by no Python code: every WPS run goes through `run_unified_pipeline`) and
+    `wps::compute_gc_from_fasta`, which only it called. Removing them orphaned
+    `WpsConsumer::write_output` (the per-position `WPS.tsv.gz` writer, whose `gc_correct` flag
+    was already ignored), the `WpsRow` it wrote, and `Region.gc`, which nothing read; all three
+    are gone too. `docs/guides/gc-correction.md` no longer lists `correct_gc_bias`.
+
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
   Cargo warned about both on every build of `rust/`, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04

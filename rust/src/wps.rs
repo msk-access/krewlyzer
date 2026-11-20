@@ -19,14 +19,11 @@
 
 
 use std::path::{Path, PathBuf};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::fs::File;
 use anyhow::{Result, Context, anyhow};
 
 use pyo3::prelude::*;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-use rust_htslib::faidx;
 use log::{info, debug, warn, error};
 use rayon::prelude::*;
 
@@ -109,7 +106,6 @@ pub struct Region {
     pub start: u64,      // Window start (expanded from center)
     pub end: u64,        // Window end (expanded from center)
     pub strand: String,  // +, -, or . (dot for unstranded)
-    pub gc: f64,         // GC content 0.0-1.0, computed from reference
     pub center: u64,     // Original center point from BED
     pub is_minus_strand: bool, // For ML vector flipping
 }
@@ -177,7 +173,6 @@ pub fn parse_regions_with_window(bed_path: &Path, window_bp: u64) -> Result<Vec<
                 start: window_start, 
                 end: window_end, 
                 strand, 
-                gc: 0.0,
                 center,
                 is_minus_strand: is_minus,
             });
@@ -206,7 +201,6 @@ pub fn parse_regions_with_window(bed_path: &Path, window_bp: u64) -> Result<Vec<
                 start, 
                 end, 
                 strand, 
-                gc: 0.0,
                 center,
                 is_minus_strand: is_minus,
             });
@@ -223,111 +217,8 @@ pub fn parse_regions_with_window(bed_path: &Path, window_bp: u64) -> Result<Vec<
     Ok(regions)
 }
 
-/// Compute GC content for regions from reference FASTA
-pub fn compute_gc_from_fasta(regions: &mut [Region], fasta_path: &Path) -> Result<()> {
-    let faidx = faidx::Reader::from_path(fasta_path)
-        .map_err(|e| anyhow!("Failed to open FASTA index: {}. Make sure .fai exists.", e))?;
-    
-    for region in regions.iter_mut() {
-        // Try both "chr" prefixed and non-prefixed chromosome names
-        let chrom_variants = [
-            region.chrom.clone(),
-            format!("chr{}", region.chrom),
-        ];
-        
-        let mut gc_computed = false;
-        for chrom in &chrom_variants {
-            match faidx.fetch_seq(chrom, region.start as usize, region.end as usize) {
-                Ok(seq) => {
-                    let len = seq.len();
-                    if len > 0 {
-                        let gc_count = seq.iter()
-                            .filter(|&&c| c == b'G' || c == b'g' || c == b'C' || c == b'c')
-                            .count();
-                        region.gc = gc_count as f64 / len as f64;
-                    } else {
-                        region.gc = 0.5; // Default for empty regions
-                    }
-                    gc_computed = true;
-                    break;
-                }
-                Err(_) => continue,
-            }
-        }
-        
-        if !gc_computed {
-            region.gc = 0.5; // Default if chromosome not found
-            debug!("Could not fetch GC for region {}:{}-{}, using default 0.5", 
-                   region.id, region.start, region.end);
-        }
-    }
-    
-    Ok(())
-}
-
-
-/// Unified entry point for WPS (replaces legacy sequential implementation)
-#[pyfunction]
-#[pyo3(signature = (bedgz_path, tsv_path, output_dir, file_stem, empty=false, total_fragments=None, reference_path=None, gc_correct=false, verbose=false))]
-pub fn calculate_wps(
-    _py: Python<'_>,
-    bedgz_path: &str,
-    tsv_path: &str,
-    output_dir: &str,
-    file_stem: &str,
-    empty: bool,
-    total_fragments: Option<u64>,
-    reference_path: Option<&str>,
-    gc_correct: bool,
-    verbose: bool,
-) -> PyResult<usize> {
-    let bed_path = Path::new(bedgz_path);
-    let tsv = Path::new(tsv_path);
-    let output_path = Path::new(output_dir).join(format!("{}.WPS.tsv.gz", file_stem));
-    
-    // 1. Parse Regions
-    let mut regions = parse_regions(tsv)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to parse regions: {}", e)))?;
-        
-    let initial_count = regions.len();
-    
-    // 2. Compute GC from FASTA if GC correction is enabled
-    if gc_correct {
-        if let Some(ref_path) = reference_path {
-            if verbose {
-                info!("Computing region GC content from reference FASTA...");
-            }
-            compute_gc_from_fasta(&mut regions, Path::new(ref_path))
-                .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("GC computation failed: {}", e)))?;
-            if verbose {
-                info!("GC content computed for {} regions", regions.len());
-            }
-        } else {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "gc_correct=True requires reference_path to be provided"
-            ));
-        }
-    }
-
-    // 3. Setup Engine
-    let mut chrom_map = ChromosomeMap::default();
-    let consumer = WpsConsumer::new(regions, &mut chrom_map, None); // No pre-loaded factors for legacy API
-    let analyzer = FragmentAnalyzer::new(consumer, 100_000); // 100k chunk size
-    
-    // 4. Process
-    let final_consumer = analyzer.process_file(bed_path, &mut chrom_map, false)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Processing failed: {}", e)))?;
-        
-    // 5. Write Output (with optional GC correction applied internally)
-    final_consumer.write_output(&output_path, total_fragments, empty, gc_correct, verbose)
-        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Failed to write output: {}", e)))?;
-        
-    Ok(initial_count)
-}
-
-
 use crate::bed::ChromosomeMap;
-use crate::engine::{FragmentConsumer, FragmentAnalyzer};
+use crate::engine::FragmentConsumer;
 use std::sync::Arc;
 use std::collections::HashMap;
 use coitrees::{COITree, IntervalNode, IntervalTree};
@@ -437,27 +328,6 @@ impl BaitMask {
             (false, false)
         }
     }
-}
-
-/// Output row for a single position with both Long and Short WPS
-#[derive(Debug, Clone)]
-struct WpsRow {
-    gene_id: String,
-    chrom: String,
-    pos: u64,
-    strand: String,      // +, -, or .
-    region_type: String, // TSS or CTCF
-    capture_mask: u8,    // 1 = reliable, 0 = edge/off-target
-    cov_long: f64,
-    cov_short: f64,
-    wps_long: f64,
-    wps_short: f64,
-    wps_ratio: f64,
-    wps_long_norm: f64,
-    wps_short_norm: f64,
-    wps_ratio_norm: f64,
-    prot_frac_nuc: f64,  // Protection fraction for nucleosome: spanning/(spanning+endpoints)
-    prot_frac_tf: f64,   // Protection fraction for TF
 }
 
 /// Internal accumulator for a single region (using Difference Arrays)
@@ -618,167 +488,6 @@ impl WpsConsumer {
     pub fn with_bait_mask(mut self, bait_mask: BaitMask) -> Self {
         self.bait_mask = Some(Arc::new(bait_mask));
         self
-    }
-    
-    /// Write results to output file (with optional GC correction)
-    /// 
-    /// When gc_correct=true:
-    /// 1. Compute mean WPS long/short per region  
-    /// 2. Fit LOESS: expected_wps = f(region_gc)
-    /// 3. Divide each position's WPS by region's expected
-    pub fn write_output(&self, output_path: &Path, total_markers: Option<u64>, empty: bool, gc_correct: bool, verbose: bool) -> Result<()> {
-        // Log summary before writing
-        let regions_with_data = self.accumulators.len();
-        let total_regions = self.regions.len();
-        info!("WPS: {} of {} regions with coverage ({:.1}%)", 
-            regions_with_data, total_regions, 
-            (regions_with_data as f64 / total_regions as f64) * 100.0);
-        info!("WPS: {} nucleosome fragments, {} TF fragments processed", 
-            self.nuc_fragments, self.tf_fragments);
-        
-        let file = File::create(output_path)?;
-        let mut encoder = GzEncoder::new(file, Compression::default());
-        let norm_factor = total_markers.unwrap_or(1_000_000) as f64 / 1_000_000.0;
-        
-        // If GC correction requested, compute expected values per region
-        if gc_correct && verbose {
-            info!("Legacy WPS GC correction ignored (using upstream fragment weighting).");
-        }
-        let _gc_correction_factors: Option<Vec<(f64, f64)>> = None;
-        
-        writeln!(encoder, "gene_id\tchrom\tpos\tstrand\tregion_type\tcapture_mask\tcov_long\tcov_short\twps_long\twps_short\twps_ratio\twps_long_norm\twps_short_norm\twps_ratio_norm\tprot_frac_nuc\tprot_frac_tf")?;
-        
-        for (i, region) in self.regions.iter().enumerate() {
-            // Check if we have data for this region
-            let acc_opt = self.accumulators.get(&i);
-            
-            // If no data and skipping empty - verify logic
-            if acc_opt.is_none() && !empty {
-                continue;
-            }
-            
-            let len = (region.end - region.start + 1) as usize;
-            
-            if acc_opt.is_none() {
-                // If we must print empty regions, print zeros
-                if empty {
-                    for j in 0..len {
-                        writeln!(encoder, "{}\t{}\t{}\t0\t0\t0\t0\t0.0000\t0.000000\t0.000000\t0.000000",
-                            region.id, region.chrom, region.start + j as u64)?;
-                    }
-                }
-                continue;
-            }
-            
-            let acc = acc_opt.unwrap();
-            
-            // Reconstruct values from difference arrays
-            let mut curr_cov_long = 0.0;
-            let mut curr_cov_short = 0.0;
-            let mut curr_wps_long = 0.0;
-            let mut curr_wps_short = 0.0;
-            // Protection fraction accumulators
-            let mut curr_spanning_long = 0.0;
-            let mut curr_endpoints_long = 0.0;
-            let mut curr_spanning_short = 0.0;
-            let mut curr_endpoints_short = 0.0;
-            
-            let mut rows = Vec::with_capacity(len);
-            let mut total_cov = 0.0;
-            
-            for j in 0..len {
-                curr_cov_long += acc.cov_long[j];
-                curr_cov_short += acc.cov_short[j];
-                curr_wps_long += acc.wps_long[j];
-                curr_wps_short += acc.wps_short[j];
-                curr_spanning_long += acc.spanning_long[j];
-                curr_endpoints_long += acc.endpoints_long[j];
-                curr_spanning_short += acc.spanning_short[j];
-                curr_endpoints_short += acc.endpoints_short[j];
-                
-                total_cov += curr_cov_long + curr_cov_short;
-                
-                // Legacy correction handled upstream
-                let wps_l_corrected = curr_wps_long;
-                let wps_s_corrected = curr_wps_short;
-                
-                let ratio = if wps_s_corrected.abs() > 1e-9 {
-                    wps_l_corrected / wps_s_corrected.abs()
-                } else if wps_l_corrected.abs() > 1e-9 {
-                    wps_l_corrected
-                } else {
-                    0.0
-                };
-                
-                // Determine region type from name prefix
-                let region_type = if region.id.starts_with("TSS|") {
-                    "TSS".to_string()
-                } else if region.id.starts_with("CTCF|") {
-                    "CTCF".to_string()
-                } else {
-                    "OTHER".to_string()
-                };
-                
-                // Compute capture_mask using bait_mask if available
-                let capture_mask = if let Some(ref mask) = self.bait_mask {
-                    let pos = region.start + j as u64;
-                    let (_on_target, is_reliable) = mask.check_position(&region.chrom, pos);
-                    if is_reliable { 1u8 } else { 0u8 }
-                } else {
-                    1u8 // No panel data = assume all reliable
-                };
-                
-                // Compute protection fraction: spanning / (spanning + endpoints)
-                let prot_frac_nuc = {
-                    let total = curr_spanning_long + curr_endpoints_long;
-                    if total > 1e-9 { curr_spanning_long / total } else { 0.0 }
-                };
-                let prot_frac_tf = {
-                    let total = curr_spanning_short + curr_endpoints_short;
-                    if total > 1e-9 { curr_spanning_short / total } else { 0.0 }
-                };
-                
-                rows.push(WpsRow {
-                    gene_id: region.id.clone(),
-                    chrom: region.chrom.clone(),
-                    pos: region.start + j as u64,
-                    strand: region.strand.clone(),
-                    region_type,
-                    capture_mask,
-                    cov_long: curr_cov_long,
-                    cov_short: curr_cov_short,
-                    wps_long: wps_l_corrected,
-                    wps_short: wps_s_corrected,
-                    wps_ratio: ratio,
-                    wps_long_norm: wps_l_corrected / norm_factor,
-                    wps_short_norm: wps_s_corrected / norm_factor,
-                    wps_ratio_norm: ratio / norm_factor,
-                    prot_frac_nuc,
-                    prot_frac_tf,
-                });
-            }
-            
-            // Skip empty if requested (double check)
-            if !empty && total_cov == 0.0 {
-                continue;
-            }
-            
-            if region.strand == "-" {
-                rows.reverse();
-            }
-            
-            for row in rows {
-                writeln!(encoder, "{}	{}	{}	{}	{}	{}	{}	{}	{}	{}	{:.4}	{:.6}	{:.6}	{:.6}	{:.4}	{:.4}", 
-                    row.gene_id, row.chrom, row.pos, row.strand, row.region_type, row.capture_mask,
-                    row.cov_long, row.cov_short,
-                    row.wps_long, row.wps_short, row.wps_ratio,
-                    row.wps_long_norm, row.wps_short_norm, row.wps_ratio_norm,
-                    row.prot_frac_nuc, row.prot_frac_tf)?;
-            }
-        }
-        
-        encoder.finish()?;
-        Ok(())
     }
     
     /// Write results as ML-ready Parquet with vector columns

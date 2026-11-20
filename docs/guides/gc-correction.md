@@ -208,13 +208,6 @@ pub struct CorrectionFactors {
     factors: HashMap<(LengthBin, u8), f64>,
     stats: HashMap<(LengthBin, u8), CorrectionBinStats>,
 }
-
-/// Apply LOESS-based correction
-pub fn correct_gc_bias(
-    gc_values: &[f64],
-    counts: &[f64],
-    config: Option<GcCorrectionConfig>
-) -> Result<Vec<f64>>
 ```
 
 ### Python Interface

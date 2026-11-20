@@ -81,55 +81,6 @@ pub fn get_length_bin_index(length: u32) -> Option<usize> {
     Some(((length - 60) / 5) as usize)
 }
 
-/// GC correction factors lookup table
-/// Indexed by [length_bin][gc_percent]
-#[derive(Debug, Clone)]
-pub struct GcCorrectionFactors {
-    /// Correction factors: [length_bin][gc_percent] -> factor
-    /// gc_percent is 0-100 (101 values)
-    pub factors: Vec<Vec<f64>>,
-    
-    /// Number of fragments observed per (length_bin, gc_percent)
-    pub counts: Vec<Vec<u64>>,
-}
-
-impl Default for GcCorrectionFactors {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl GcCorrectionFactors {
-    /// Create a new empty correction factors table
-    /// Uses NUM_LENGTH_BINS (188 bins of 5bp spanning 60..999)
-    pub fn new() -> Self {
-        Self {
-            factors: vec![vec![1.0; 101]; NUM_LENGTH_BINS],
-            counts: vec![vec![0; 101]; NUM_LENGTH_BINS],
-        }
-    }
-    
-    /// Get the correction factor for a given length and GC content
-    /// 
-    /// # Arguments
-    /// * `length` - Fragment length in bp
-    /// * `gc` - GC content as fraction 0.0-1.0
-    /// 
-    /// # Returns
-    /// * Correction factor (1.0 if no data available)
-    pub fn get_factor(&self, length: u32, gc: f64) -> f64 {
-        let bin_idx = match get_length_bin_index(length) {
-            Some(idx) => idx,
-            None => return 1.0,
-        };
-        
-        let gc_percent = (gc * 100.0).round() as usize;
-        let gc_idx = gc_percent.min(100);
-        
-        self.factors[bin_idx][gc_idx]
-    }
-}
-
 /// Valid genomic regions for GC correction estimation
 /// Excludes problematic regions, assembly gaps, and low-mappability areas
 #[derive(Debug, Clone)]
@@ -1093,13 +1044,5 @@ mod tests {
         assert_eq!(get_length_bin_index(1000), None);    // Out of range (exclusive)
         assert_eq!(get_length_bin_index(59), None);      // Out of range
     }
-    
-    #[test]
-    fn test_gc_correction_factors() {
-        let factors = GcCorrectionFactors::new();
-        
-        // Default factor should be 1.0
-        assert_eq!(factors.get_factor(100, 0.5), 1.0);
-        assert_eq!(factors.get_factor(200, 0.3), 1.0);
-    }
+
 }
