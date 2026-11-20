@@ -201,6 +201,9 @@ All notable changes to this project will be documented in this file.
     Parquet) while the metadata recorded the correction as applied.
   - Both loaders require all six documented columns; a table without `length_bin_max` passed
     `validate-gc-factors`.
+  - A factor table the run would use must also be readable: an unreadable one stops the run.
+    It used to count as found, so gene FSC, panel WPS, TFBS and ATAC each failed on it (each
+    failure caught and logged) while the metadata recorded `gc_correction_applied_*=True`.
 
   **Values change** for panel WPS, TFBS, ATAC and gene FSC in Parquet or compressed runs, so PONs
   must be rebuilt.

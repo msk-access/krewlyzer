@@ -181,6 +181,21 @@ def resolve_feature_gc_tables(
         if panel_mode
         else GcFactorsChoice(None, "none", "not panel mode")
     )
+    # Found must mean usable. The consumers of these tables (gene FSC, panel WPS, TFBS, ATAC) each
+    # catch their own failure and carry on, so an unreadable table that merely existed made every
+    # one of them fail quietly while the metadata recorded the correction as applied.
+    from krewlyzer import _core
+
+    for choice in (off, on):
+        if choice.path is not None:
+            try:
+                _core.gc.validate_factor_table(str(choice.path))
+            except Exception as e:
+                label = "off-target" if choice is off else "on-target"
+                raise RuntimeError(
+                    f"{label} GC factor table {choice.path.name} cannot be read ({e}); "
+                    "refusing to run rather than record a correction that did not happen"
+                ) from e
     if off.found and refitted:
         off = GcFactorsChoice(off.path, "recomputed")
         logger.warning(

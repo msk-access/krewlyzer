@@ -129,3 +129,33 @@ def test_gc_correction_off_resolves_nothing(tmp_path):
     )
     assert not off.found and not on.found
     assert off.record() == "none:gc correction disabled"
+
+
+@pytest.mark.parametrize("population", ["off_target", "on_target"])
+def test_an_unreadable_table_stops_the_run_instead_of_being_recorded_as_applied(
+    tmp_path, population
+):
+    """A table that exists but cannot be read used to count as found: gene FSC, panel WPS, TFBS
+    and ATAC each failed on it, each failure was caught and logged, and the metadata still
+    recorded `gc_correction_applied_*=True`. Review of PR #89."""
+    ref, expected = _reference(tmp_path / "ref.parquet")
+    valid = tmp_path / "valid.bed"
+    valid.write_text("chr1\t0\t1000\n")
+    d, bed = _run_layout(tmp_path, "production", ref, _observations(expected), valid)
+    ontarget = d / "s.correction_factors.ontarget.parquet"
+    ontarget.write_bytes((d / "s.correction_factors.parquet").read_bytes())
+    resolve_feature_gc_tables(
+        bed, d, "s", gc_correct=True, panel_mode=True, refitted=False
+    )
+
+    broken = (
+        ontarget if population == "on_target" else d / "s.correction_factors.parquet"
+    )
+    broken.write_bytes(b"not a parquet file")
+    label = population.replace("_", "-")
+    with pytest.raises(
+        RuntimeError, match=f"{label} GC factor table .* cannot be read"
+    ):
+        resolve_feature_gc_tables(
+            bed, d, "s", gc_correct=True, panel_mode=True, refitted=False
+        )
