@@ -180,7 +180,7 @@ def region_entropy(
         # never checks the version, so without this a refused model still z-scored TFBS/ATAC.
         from .core.pon_integration import load_requested_pon
 
-        load_requested_pon(
+        requested_pon = load_requested_pon(
             resolved_pon_path,
             record_dir=output,
             sample=sample_name,
@@ -230,6 +230,8 @@ def region_entropy(
         if (resolved_pon_path and resolved_pon_path.exists())
         else None
     )
+
+    n_scored = 0  # labels z-scored against the PON, across TFBS and ATAC
 
     # Build list of enabled features
     features = []
@@ -294,7 +296,7 @@ def region_entropy(
                 )
 
                 # Process off-target output (primary)
-                process_region_entropy(
+                n_scored += process_region_entropy(
                     out_raw,
                     out_final,
                     entropy_pon_parquet,
@@ -331,7 +333,7 @@ def region_entropy(
                         not verbose,
                     )
 
-                    process_region_entropy(
+                    n_scored += process_region_entropy(
                         out_raw_ont,
                         out_final_ont,
                         entropy_pon_parquet,
@@ -368,7 +370,7 @@ def region_entropy(
                 )
 
                 # Process off-target output (primary)
-                process_region_entropy(
+                n_scored += process_region_entropy(
                     out_raw,
                     out_final,
                     entropy_pon_parquet,
@@ -405,7 +407,7 @@ def region_entropy(
                         not verbose,
                     )
 
-                    process_region_entropy(
+                    n_scored += process_region_entropy(
                         out_raw_ont,
                         out_final_ont,
                         entropy_pon_parquet,
@@ -418,6 +420,18 @@ def region_entropy(
                         f"✅ ATAC on-target: {out_final_ont} ({n_ont} cancer types)"
                     )
 
+        from .core.output_provenance import record_pon_used
+
+        record_pon_used(
+            output,
+            sample_name,
+            (
+                requested_pon if n_scored else None
+            ),  # recorded as scored only if something was
+            entropy_pon_parquet,
+            output_format,
+            compress,
+        )
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)

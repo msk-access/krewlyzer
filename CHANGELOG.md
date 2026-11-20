@@ -141,7 +141,10 @@ All notable changes to this project will be documented in this file.
   (after `extract`) and otherwise may only raise `pon_applied`, so that flag does not depend on the
   order single tools ran in, and a table one of them left unscored is flagged rather than hidden.
   A single tool also refuses, before any work, to score a sample against a PON other than the one
-  its record names: tables from two PONs under one record would otherwise go unnoticed.
+  its record names: tables from two PONs under one record would otherwise go unnoticed. The
+  standalone scorers (`motif`, `region-entropy`, `region-mds`), which do not go through
+  `run_features`, now write their PON into the record once they have scored, so the next tool is
+  checked against it.
 - **The metadata stamp reads the file this run wrote.** It found `.tsv` first and then read
   Parquet first, so a TSV run beside an earlier run's `.parquet` wrote the earlier run's row back.
 

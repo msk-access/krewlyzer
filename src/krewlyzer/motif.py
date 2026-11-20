@@ -298,6 +298,13 @@ def motif(
             output_format=output_format,
             compress=compress,
         )
+        from .core.output_provenance import record_pon_used
+
+        # Recorded as scored only if MDS was z-scored: a PON with no MDS baseline scored nothing.
+        scored_with = pon if pon is not None and pon.mds_baseline else None
+        record_pon_used(
+            output, sample_name, scored_with, resolved_pon_path, output_format, compress
+        )
 
         # Additional aberrant k-mer analysis if PON provided
         if pon and hasattr(pon, "mds_baseline") and pon.mds_baseline:

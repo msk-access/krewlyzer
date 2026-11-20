@@ -348,3 +348,99 @@ def test_run_all_owns_the_record_for_region_mds():
         "owns_sample_record=True"
         in source[source.index("_region_mds(") : source.index("_region_mds(") + 1500]
     )
+
+
+def test_the_same_pon_is_accepted_again_on_a_tsv_record_with_no_cohort_digest(tmp_path):
+    """An empty `pon_cohort_digest` reads back from TSV as NaN, which compared as the string
+    'nan' and refused the very PON the record names (Greptile on #96)."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon, stamp_metadata
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    pon_path = _pon(tmp_path, "0.9.0")
+    model = load_requested_pon(pon_path)
+    model.cohort_digest = None
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+
+
+def test_a_pon_recorded_by_a_standalone_scorer_stops_a_later_tool_using_another(
+    tmp_path,
+):
+    """Behavioural, not a source grep: record PON A the way motif/region-entropy/region-mds do,
+    then a tool asking for PON B is refused; recording "no PON" never raises the flag.
+    """
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import record_pon_used
+    from krewlyzer.core.pon_integration import UnusablePonError, load_requested_pon
+
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    a_dir.mkdir(), b_dir.mkdir()
+    pon_a = _pon(a_dir, "0.9.0")
+    pon_b = _pon(b_dir, "0.9.0").rename(b_dir / "other.pon.parquet")
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+
+    record_pon_used(out, "s", None, None, output_format="tsv")
+    assert not bool(
+        pd.read_csv(out / "s.metadata.tsv", sep="\t")["pon_applied"].iloc[0]
+    )
+    record_pon_used(out, "s", load_requested_pon(pon_a), pon_a, output_format="tsv")
+    with pytest.raises(UnusablePonError):
+        load_requested_pon(pon_b, record_dir=out, sample="s", output_format="tsv")
+
+
+def test_an_empty_pon_applied_cell_is_not_read_as_applied(tmp_path):
+    """bool(NaN) is True: an empty cell in a TSV record read as "applied"."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame(
+        [{"sample_id": "s", "pon_applied": None, "pon_model": "x.pon.parquet"}]
+    ).to_csv(out / "s.metadata.tsv", sep="\t", index=False)
+    pon = _pon(tmp_path, "0.9.0")
+    refuse_a_second_pon(out, "s", load_requested_pon(pon), pon, output_format="tsv")
+
+
+def test_a_digit_only_cohort_digest_survives_a_tsv_round_trip(tmp_path):
+    """'0123…' read back from TSV as the integer 123…, refusing the same PON."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon, stamp_metadata
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    pon_path = _pon(tmp_path, "0.9.0")
+    model = load_requested_pon(pon_path)
+    model.cohort_digest = "0123456789012345"
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+
+
+def test_the_standalone_scorers_record_only_what_they_scored():
+    import inspect
+
+    from krewlyzer import motif, region_entropy, region_mds
+
+    assert "pon.mds_baseline else None" in inspect.getsource(motif)
+    assert "n_scored" in inspect.getsource(region_entropy)
+    src = inspect.getsource(region_mds)
+    assert "if scored" in src or "requested_pon if scored" in src

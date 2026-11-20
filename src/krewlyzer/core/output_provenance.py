@@ -39,6 +39,7 @@ columns when — and only when — a PON was actually used.
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -103,6 +104,23 @@ def record_path(
     return own if own.exists() else resolve_table_path(base)
 
 
+def _flag(value: Any) -> bool:
+    """A recorded boolean, with an empty cell false: `bool(NaN)` is True, so an empty
+    `pon_applied` read back from TSV counted as applied."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return False
+    return bool(value)
+
+
+def _as_text(value: Any) -> str:
+    """A recorded field as text, with None and NaN both empty: an empty field reads back from
+    TSV as NaN, which `str()` turns into "nan" and made the same PON look like another.
+    """
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    return str(value)
+
+
 def refuse_a_second_pon(
     output_dir: Path,
     sample: str,
@@ -119,23 +137,50 @@ def refuse_a_second_pon(
     from .pon_integration import UnusablePonError
 
     existing = record_path(output_dir, sample, output_format, compress)
-    frame = read_exact_table(existing) if existing is not None else None
+    # As text: a digit-only cohort digest such as '0123…' read back from TSV as an integer.
+    text = {"pon_model": str, "pon_cohort_digest": str}
+    frame = read_exact_table(existing, dtype=text) if existing is not None else None
     if frame is None or frame.empty or "pon_applied" not in frame.columns:
         return
-    if not bool(frame["pon_applied"].iloc[0]):
+    if not _flag(frame["pon_applied"].iloc[0]):
         return
     ours = provenance_fields(pon, pon_path)
     recorded = {
         key: frame[key].iloc[0] if key in frame.columns else None
         for key in ("pon_model", "pon_cohort_digest")
     }
-    if any(str(recorded[k] or "") != str(ours[k] or "") for k in recorded):
+    if any(_as_text(recorded[k]) != _as_text(ours[k]) for k in recorded):
         raise UnusablePonError(
             f"{sample} was scored against {recorded['pon_model']} "
             f"(cohort {recorded['pon_cohort_digest']}); refusing to score it against "
             f"{pon_path.name} as well. Re-run run-all to rescore the whole sample, or use "
             "the same PON."
         )
+
+
+def record_pon_used(
+    output_dir: Path,
+    sample: str,
+    pon: Any,
+    pon_path: Optional[Path],
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> bool:
+    """A standalone scorer's entry in the sample's record, after it has scored.
+
+    `motif`, `region-entropy` and `region-mds` do not go through `run_features`, so without this
+    they checked the record (`refuse_a_second_pon`) but never wrote it: after `extract`, one could
+    score with PON A and a later tool with PON B, unnoticed. Raise-only, like every single tool.
+    """
+    return stamp_metadata(
+        output_dir,
+        sample,
+        pon=pon,
+        pon_path=pon_path if pon is not None else None,
+        output_format=output_format,
+        compress=compress,
+        owns_record=False,
+    )
 
 
 def stamp_metadata(
@@ -194,7 +239,7 @@ def stamp_metadata(
         # pon_applied and gc_factors_* from one tool's run made validate-output stop checking
         # every other table. It may only *raise* pon_applied, so any order of single tools ends
         # with the same record: a table one of them left unscored is then flagged, not hidden.
-        if not (fields["pon_applied"] and not bool(frame["pon_applied"].iloc[0])):
+        if not (fields["pon_applied"] and not _flag(frame["pon_applied"].iloc[0])):
             logger.info(
                 f"{existing.name} already records how this sample was run; a single tool keeps it"
             )
