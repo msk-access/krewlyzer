@@ -239,7 +239,8 @@ _core.gc.compute_and_write_gc_factors(
 insert with `k` bp trimmed from each end (`gc_key`; `k` defaults to 10 until Step 3 chooses it
 from {0, 2, 5, 10}). A, C, G and T count in either case. Any other base in the trimmed window
 (N, IUPAC) means no key, and so does a fragment shorter than `2k + 20` bp. The observed tally,
-the expected counts and the lookup all use this one rule. Lengths run from 20 to 600 bp.
+the expected counts and the lookup all use this one rule. Lengths run from max(20, 2k + 20) to
+600 bp: 40 to 600 bp at the default trim of 10.
 
 **Expected counts** (`ExpectedTable`) are exhaustive: every start position at every exact length
 in a `Territory`, counted from prefix sums. A window counts only if it lies wholly inside one
@@ -264,9 +265,16 @@ cells holding 99.5% of the territory's expected windows.
 
 Below 100,000 fragments, or when a length has no support cell, the fit returns "cannot fit". It
 never returns weights of 1. `weight(length, gc)` returns no value, rather than 1.0, for an
-unresolved GC or a cell outside the model; what to do then is Step 3's policy. `FitQc` reports
-the shares of weight in clamped and capped cells, the lengths left unobserved or unfitted, and
-the fragments outside the length range, which are not fitted (Step 2 decides what they get).
+unresolved GC or a cell outside the model; what to do then is Step 3's policy. An invalid fit
+configuration is refused the same way. `FitQc` reports the shares of weight in clamped and
+capped cells, the lengths left unobserved or unfitted, and two kinds of unfitted fragment kept
+apart: those with **no key** (too short for the trim, or a non-ACGT base in the window) and those
+whose length is **outside the range** (Step 2 decides what they get).
+
+A `Tally` carries the territory digest and trim it was counted for, and the fit refuses one that
+does not match the expected table. `Territory::contains` gives the rule the expected counts use
+(wholly inside one interval; adjacent intervals are not merged), so a tally built with it counts
+the same fragments.
 
 **Provenance.** A model records its genome, territory and support digests, trim, GC definition
 version, fit configuration and krewlyzer version. Its compatibility hash covers all of these

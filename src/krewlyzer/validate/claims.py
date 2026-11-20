@@ -230,8 +230,8 @@ CLAIMS: Tuple[Claim, ...] = (
         "gc_model.length_min",
         "20",
         RustConst("gc_model.rs", "LENGTH_MIN"),
-        "the model's shortest fragment length (gc-correction.md: 20 to 600 bp); "
-        "at trim k the shortest with a key is max(20, 2k + 20)",
+        "the floor of the model's lengths: at trim k they run from max(20, 2k + 20) "
+        "to 600 bp, so 40-600 bp at the default trim (gc-correction.md, CHANGELOG)",
     ),
     Claim(
         "gc_model.length_max",

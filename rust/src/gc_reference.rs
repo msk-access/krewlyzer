@@ -671,6 +671,20 @@ impl Territory {
         &self.intervals
     }
 
+    /// Whether `[start, end)` on `contig` (the FASTA's own name, as [`ContigNames`] resolves it)
+    /// lies wholly inside **one** interval: the rule [`count_windows`] applies to the expected
+    /// counts, so a tally built with it counts the same fragments. Adjacent intervals are not
+    /// merged.
+    pub fn contains(&self, contig: &str, start: u64, end: u64) -> bool {
+        // The last interval on `contig` starting at or before `start` is the only candidate:
+        // intervals are sorted and never overlap.
+        let i = self.intervals.partition_point(|iv| (iv.contig.as_str(), iv.start) <= (contig, start));
+        i > 0 && {
+            let iv = &self.intervals[i - 1];
+            iv.contig == contig && start < end && end <= iv.end
+        }
+    }
+
     /// SHA-256 over every interval's FASTA contig name, contig length, start and end, in order.
     /// The contig length is in it so that the same coordinates on another assembly differ.
     pub fn digest(&self) -> String {
@@ -951,6 +965,30 @@ mod expected_tests {
         let split = table(&recs(&[("1", 0, 100), ("1", 100, 200)]), 40, 40, 0);
         let n = |t: &ExpectedTable| t.counts().cells().iter().sum::<u64>();
         assert!(n(&split) < n(&whole), "split {} vs whole {}", n(&split), n(&whole));
+    }
+
+    #[test]
+    fn contains_agrees_with_count_windows_window_by_window() {
+        // A 300 bp contig; intervals with a gap, two adjacent ones, and one at the contig's end.
+        let n = ContigNames::new([("1".to_string(), 300)]);
+        let t = Territory::resolve(&recs(&[("1", 10, 60), ("1", 80, 130), ("1", 130, 170), ("1", 250, 300)]), &n)
+            .unwrap();
+        for len in [20u16, 25, 50, 51] {
+            for start in 0..=(300 - len as u64) {
+                let end = start + len as u64;
+                // A genome of N except this window: the builder counts exactly this window, or none.
+                let mut seq = vec![b'N'; 300];
+                seq[start as usize..end as usize].fill(b'A');
+                let table = ExpectedTable::count(&t, "g", len, len, 0, |iv| {
+                    Ok(seq[iv.start as usize..iv.end as usize].to_vec())
+                }).unwrap();
+                let counted = table.counts().cells().iter().sum::<u64>();
+                assert!(counted <= 1);
+                assert_eq!(t.contains("1", start, end), counted == 1, "length {len} at {start}");
+            }
+        }
+        assert!(!t.contains("2", 10, 30), "another contig");
+        assert!(!t.contains("chr1", 10, 30), "contains takes the FASTA's own name");
     }
 
     #[test]

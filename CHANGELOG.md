@@ -59,9 +59,21 @@ All notable changes to this project will be documented in this file.
     `(κh)²/2`, is estimated and reported. Bandwidths are configuration (defaults 5 bp and 0.02 GC
     fraction, kernel truncated at 4 SD) until spec Step 3 chooses them. Below 100,000 fragments,
     or with a length that has no support cell, the fit returns an explicit "cannot fit", never
-    weights of 1. Fragments outside the model's 20-600 bp range are not fitted and are counted
-    in `FitQc` (what they get is Step 2's decision). Dense arrays and index-order sums make a
-    rerun bit-identical.
+    weights of 1. So does an invalid `FitConfig` (a bandwidth not finite and positive, a cap not
+    finite and at least 1, a minimum of 0), which would otherwise panic or fit flat weights.
+    The model's lengths run from max(20, 2k + 20) to 600 bp: 40-600 bp at the default trim of
+    10. `FitQc` counts two kinds of unfitted fragment separately: those with **no key** (too
+    short for the trim, or a non-ACGT base in the window: unresolved) and those whose key's
+    length is **outside the range** (what they get is Step 2's decision). Dense arrays and
+    index-order sums make a rerun bit-identical; `Provenance::digest` is pinned by a golden
+    value, so a change to its canonical form fails a test before it invalidates a PON.
+  - **Guards for Step 2.** A `Tally` records the territory digest and trim it was counted for,
+    and the fit refuses one whose territory or trim differs from the expected table's.
+    `Tally::add_insert` keys an insert with the tally's own trim; `Tally::add` refuses a key no
+    insert can have (a GC count above `length - 2k`, or a length below `2k + 20`) instead of
+    counting it as out of range. `Territory::contains` answers whether a fragment lies wholly
+    inside one interval, the rule the expected counts use; a test checks it agrees with the
+    builder window by window, adjacent intervals included.
   - **Sparse cells.** The support comes from the reference, not from donors (operator decision
     S1): at each length, the fewest GC cells holding 99.5% of the territory's expected windows. It
     needs no PON and no depth, and its digest is in the provenance. Raw weights are capped to
@@ -73,9 +85,11 @@ All notable changes to this project will be documented in this file.
     35-65% GC, expected counts from the real builder, and a million fragments drawn from it with
     a peaked size distribution, keyed by `gc_key` and thinned by a known bias that steepens with
     length. Cells where the bias is recovered within 5% (up to a per-length scale) hold 98.8% of
-    the fragments; in the no-bias control, cells with |w - 1| < 0.05 hold 99.7%. Each is shown to
-    fail when the fit returns weights of 1, always returns a curve, uses a kernel average instead
-    of local-linear, or uses four times the GC bandwidth.
+    the fragments; in the no-bias control, cells with |w - 1| < 0.05 hold 99.7%. A test shows
+    that the injected-bias check rejects weights of 1 and a fit with four times the GC
+    bandwidth, and that the control rejects a curve fitted to unbiased data. That a kernel
+    average in place of local-linear also fails was checked by mutating the code once; it is
+    not kept as a test.
   - `docs/guides/gc-correction.md` describes the model in a section marked "not yet used by any
     feature (spec Step 2)". Every constant it quotes (trim, length range, minimum trimmed window,
     support share, cap, minimum fragments, bandwidths, kernel reach) is registered in

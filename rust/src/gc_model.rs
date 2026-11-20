@@ -303,9 +303,12 @@ pub struct FitConfig {
 pub struct FitQc {
     /// Fragments in the tally the model was fitted on.
     pub fragments: u64,
-    /// Fragments the tally counted outside the model's length range: they were not fitted, and
-    /// have no weight. What they get is Step 2's decision; until then they are counted here.
+    /// Fragments the tally counted with a key whose length is outside the model's range: they
+    /// were not fitted and have no weight. What they get is Step 2's decision.
     pub fragments_outside_lengths: u64,
+    /// Inserts with no GC key at all (too short for the trim, or a non-ACGT base in the window):
+    /// unresolved, not out of range.
+    pub fragments_without_key: u64,
     /// Share of the fitted fragments' total weight in cells outside the support.
     pub clamped_weight_share: f64,
     /// Share of the fitted fragments' total weight in cells whose raw weight hit the cap.
@@ -677,6 +680,28 @@ pub const WEIGHT_CAP: f64 = 10.0;
 /// Fewer off-target fragments than this in the tally, and the fit refuses.
 pub const MIN_FIT_FRAGMENTS: u64 = 100_000;
 
+impl FitConfig {
+    /// Bandwidths finite and positive, the cap finite and at least 1, a positive minimum. Anything
+    /// else cannot define a model: a zero bandwidth makes every smoothed ratio NaN, and a cap
+    /// below 1 or NaN has no meaning (and panics in `f64::clamp`).
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let positive = |v: f64| v.is_finite() && v > 0.0;
+        if !positive(self.bandwidth_length_bp) {
+            return Err(format!("bandwidth_length_bp {} is not finite and positive", self.bandwidth_length_bp));
+        }
+        if !positive(self.bandwidth_gc) {
+            return Err(format!("bandwidth_gc {} is not finite and positive", self.bandwidth_gc));
+        }
+        if !(self.cap.is_finite() && self.cap >= 1.0) {
+            return Err(format!("cap {} is not finite and at least 1", self.cap));
+        }
+        if self.min_fragments == 0 {
+            return Err("min_fragments is 0: an empty tally would fit".to_string());
+        }
+        Ok(())
+    }
+}
+
 impl Default for FitConfig {
     fn default() -> Self {
         Self {
@@ -688,35 +713,64 @@ impl Default for FitConfig {
     }
 }
 
-/// A sample's fragments counted per cell. Step 2 builds it from the fragment record, over the
-/// same territory as the expected counts.
+/// A sample's fragments counted per cell, for one territory at one trim. Step 2 builds it from
+/// the fragment record with [`Self::add_insert`], over the same territory as the expected counts;
+/// [`fit`] refuses a tally whose territory digest or trim is not the expected table's.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tally {
     counts: GcGrid<u64>,
-    outside: u64,
+    territory_sha256: String,
+    outside_lengths: u64,
+    without_key: u64,
 }
 
 impl Tally {
-    pub fn new(min_len: u16, max_len: u16, trim_k: u16) -> Result<Self> {
-        Ok(Self { counts: GcGrid::new(min_len, max_len, trim_k, 0)?, outside: 0 })
+    pub fn new(min_len: u16, max_len: u16, trim_k: u16, territory_sha256: &str) -> Result<Self> {
+        Ok(Self {
+            counts: GcGrid::new(min_len, max_len, trim_k, 0)?,
+            territory_sha256: territory_sha256.to_string(),
+            outside_lengths: 0,
+            without_key: 0,
+        })
     }
 
-    /// A tally over the same cells as `grid`.
-    pub fn like<T>(grid: &GcGrid<T>) -> Self {
-        Self::new(grid.min_len(), grid.max_len(), grid.trim_k()).expect("an existing grid's shape is valid")
+    /// An empty tally over an expected table's cells, territory and trim.
+    pub fn for_expected(expected: &crate::gc_reference::ExpectedTable) -> Self {
+        let g = expected.counts();
+        Self::new(g.min_len(), g.max_len(), g.trim_k(), &expected.provenance().territory_sha256)
+            .expect("an existing grid's shape is valid")
     }
 
-    /// Count `n` fragments with this key. A key outside the grid's lengths is counted in
-    /// [`Self::outside`] instead, and `false` returned.
-    pub fn add(&mut self, key: GcKey, n: u64) -> bool {
+    /// Key a fragment's insert with this tally's own trim ([`gc_key`]) and count it. An insert
+    /// with no key (shorter than `2k + 20` bp, or a non-ACGT base in its window) is counted in
+    /// [`Self::without_key`]; one whose length is outside the grid in [`Self::outside_lengths`].
+    pub fn add_insert(&mut self, insert: &[u8]) -> Option<GcKey> {
+        let Some(key) = gc_key(insert, self.trim_k()) else {
+            self.without_key += 1;
+            return None;
+        };
+        self.add(key, 1).expect("gc_key yields only keys an insert can have");
+        Some(key)
+    }
+
+    /// Count `n` fragments with this key: `Ok(true)` in the grid, `Ok(false)` counted in
+    /// [`Self::outside_lengths`]. A key no insert can have at this trim (a length below
+    /// `2k + 20`, or a GC count above `length - 2k`) is an error, not "outside".
+    pub fn add(&mut self, key: GcKey, n: u64) -> Result<bool> {
+        let k = self.trim_k() as u32;
+        let (len, gc) = (key.length as u32, key.gc as u32);
+        if len < 2 * k + MIN_TRIMMED_WINDOW as u32 || gc > len - 2 * k {
+            return Err(anyhow!("GC key length {} gc {} is impossible at trim {}: no insert has it",
+                               key.length, key.gc, k));
+        }
         match self.counts.index(key.length, key.gc) {
             Some(i) => {
                 self.counts.cells_mut()[i] += n;
-                true
+                Ok(true)
             }
             None => {
-                self.outside += n;
-                false
+                self.outside_lengths += n;
+                Ok(false)
             }
         }
     }
@@ -725,9 +779,22 @@ impl Tally {
         &self.counts
     }
 
-    /// Fragments with a key the grid has no cell for (a length outside its range).
-    pub fn outside(&self) -> u64 {
-        self.outside
+    pub fn territory_sha256(&self) -> &str {
+        &self.territory_sha256
+    }
+
+    pub fn trim_k(&self) -> u16 {
+        self.counts.trim_k()
+    }
+
+    /// Fragments with a key whose length is outside the grid's range.
+    pub fn outside_lengths(&self) -> u64 {
+        self.outside_lengths
+    }
+
+    /// Inserts with no GC key: too short for the trim, or a non-ACGT base in the window.
+    pub fn without_key(&self) -> u64 {
+        self.without_key
     }
 
     /// Fragments in the grid, summed in index order.
@@ -745,6 +812,10 @@ pub enum FitError {
     NoSupport { length: u16 },
     /// The tally, the expected table and the support are not over the same cells.
     ShapeMismatch(String),
+    /// The tally was counted over another territory than the expected table's.
+    TerritoryMismatch { tally: String, expected: String },
+    /// The fit configuration cannot define a model.
+    InvalidConfig(String),
 }
 
 impl std::fmt::Display for FitError {
@@ -755,6 +826,10 @@ impl std::fmt::Display for FitError {
             FitError::NoSupport { length } => write!(
                 f, "cannot fit a GC model: length {length} bp has no cell in the support"),
             FitError::ShapeMismatch(why) => write!(f, "cannot fit a GC model: {why}"),
+            FitError::TerritoryMismatch { tally, expected } => write!(
+                f, "cannot fit a GC model: the tally was counted over territory {tally}, the \
+                    expected table over {expected}"),
+            FitError::InvalidConfig(why) => write!(f, "cannot fit a GC model: {why}"),
         }
     }
 }
@@ -800,7 +875,19 @@ pub fn fit(
     support: &CellSet,
     cfg: &FitConfig,
 ) -> std::result::Result<GcModel, FitError> {
+    fit_with_scales(observed, expected, support, cfg).map(|(m, _)| m)
+}
+
+/// [`fit`], also returning each length's normalising divisor (1.0 where nothing was normalised),
+/// so a test can recover the raw weights: `raw = weight * scale`.
+fn fit_with_scales(
+    observed: &Tally,
+    expected: &crate::gc_reference::ExpectedTable,
+    support: &CellSet,
+    cfg: &FitConfig,
+) -> std::result::Result<(GcModel, Vec<f64>), FitError> {
     use rayon::prelude::*;
+    cfg.validate().map_err(FitError::InvalidConfig)?;
     let exp = expected.counts();
     let obs = observed.counts();
     let sup = support.grid();
@@ -808,6 +895,12 @@ pub fn fit(
         return Err(FitError::ShapeMismatch(format!(
             "tally {}, expected table {}, support {}",
             obs.shape_string(), exp.shape_string(), sup.shape_string())));
+    }
+    if observed.territory_sha256() != expected.provenance().territory_sha256 {
+        return Err(FitError::TerritoryMismatch {
+            tally: observed.territory_sha256().to_string(),
+            expected: expected.provenance().territory_sha256.clone(),
+        });
     }
     let fragments = observed.total();
     if fragments < cfg.min_fragments {
@@ -895,8 +988,14 @@ pub fn fit(
     }
 
     // Normalise per length over the whole tally, in index order.
-    let mut qc = FitQc { fragments, fragments_outside_lengths: observed.outside(), ..FitQc::default() };
-    for &len in &lengths {
+    let mut scales = vec![1.0; lengths.len()];
+    let mut qc = FitQc {
+        fragments,
+        fragments_outside_lengths: observed.outside_lengths(),
+        fragments_without_key: observed.without_key(),
+        ..FitQc::default()
+    };
+    for (li, &len) in lengths.iter().enumerate() {
         let row_obs = obs.row(len);
         if row_obs.iter().all(|&o| o == 0) {
             qc.lengths_unobserved += 1;
@@ -916,6 +1015,7 @@ pub fn fit(
         if den > 0.0 {
             let c = num / den;
             row_w.iter_mut().flatten().for_each(|w| *w /= c);
+            scales[li] = c;
         }
     }
     // Shares of the fitted fragments' final weight that came from the support's edge or the cap.
@@ -954,6 +1054,7 @@ pub fn fit(
            mean {:.4}, p95 {:.4}", fragments, lengths.len(), qc.lengths_unobserved, qc.lengths_unfitted,
           qc.smoothing_bias_mean, qc.smoothing_bias_p95);
     GcModel::from_parts(weights, capped, support.clone(), provenance, qc)
+        .map(|m| (m, scales))
         .map_err(|e| FitError::ShapeMismatch(format!("{e:#}")))
 }
 
@@ -1174,7 +1275,8 @@ pub(crate) mod tests {
         let support = CellSet::from_grid(support, 0.995);
         let qc = FitQc { fragments: 123_456, clamped_weight_share: 0.0123, capped_weight_share: 0.004,
                          smoothing_bias_mean: 0.001, smoothing_bias_p95: 0.01,
-                         lengths_unobserved: 0, lengths_unfitted: 1, fragments_outside_lengths: 0 };
+                         lengths_unobserved: 0, lengths_unfitted: 1, fragments_outside_lengths: 0,
+                         fragments_without_key: 0 };
         let p = provenance(territory, &support);
         GcModel::from_parts(weights, capped, support, p, qc).unwrap()
     }
@@ -1300,6 +1402,23 @@ pub(crate) mod tests {
         assert!(GcGrid::new(100, 200, 40_000, 0u8).is_err());
         assert!(GcGrid::new(100, 200, 41, 0u8).is_err(), "100 bp < 2 * 41 + 20");
         assert!(GcGrid::new(100, 200, 40, 0u8).is_ok(), "100 bp = 2 * 40 + 20");
+    }
+
+    #[test]
+    fn the_provenance_digest_is_pinned() {
+        // A fixed input, a fixed hash: changing the canonical form invalidates every PON, so it
+        // must fail here first.
+        let p = Provenance {
+            genome: "hg19".into(),
+            territory_sha256: sha256_hex(b"territory"),
+            support_sha256: sha256_hex(b"support"),
+            trim_k: 10,
+            gc_definition_version: 1,
+            fit_config: FitConfig { bandwidth_length_bp: 5.0, bandwidth_gc: 0.02, cap: 10.0, min_fragments: 100_000 },
+            krewlyzer_version: "0.9.2".into(),
+        };
+        // Cross-checked with Python hashlib over the same canonical string.
+        assert_eq!(p.digest(), "0e06cef4f8e46d2bcb627115f4a429c5e845344b053fbb41a353850ba93532ef");
     }
 
     #[test]
@@ -1435,11 +1554,11 @@ pub(crate) mod fit_tests {
     }
 
     pub(crate) fn tally_from(e: &ExpectedTable, lambda: &[f64], rng: Option<&mut Rng>) -> Tally {
-        let mut t = Tally::like(e.counts());
+        let mut t = Tally::for_expected(e);
         let keys: Vec<GcKey> = e.counts().keys().collect();
         match rng {
-            None => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, l.round() as u64); }),
-            Some(r) => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, r.poisson(*l)); }),
+            None => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, l.round() as u64).unwrap(); }),
+            Some(r) => keys.iter().zip(lambda).for_each(|(k, l)| { t.add(*k, r.poisson(*l)).unwrap(); }),
         }
         t
     }
@@ -1577,10 +1696,10 @@ pub(crate) mod fit_tests {
         let f = steep(6.0);
         let mut rng = Rng::new(3);
         let full = tally_from(&e, &mean_tally(&e, 3e6, &f), Some(&mut rng));
-        let mut tenth = Tally::like(e.counts());
+        let mut tenth = Tally::for_expected(&e);
         let keys: Vec<GcKey> = e.counts().keys().collect();
         for (k, &c) in keys.iter().zip(full.counts().cells()) {
-            tenth.add(*k, rng.binomial_thin(c, 0.1));
+            tenth.add(*k, rng.binomial_thin(c, 0.1)).unwrap();
         }
         let s = nonzero_support(&e);
         let a = fit(&full, &e, &s, &FitConfig::default()).unwrap();
@@ -1612,7 +1731,7 @@ pub(crate) mod fit_tests {
     fn a_tally_below_the_minimum_cannot_be_fitted() {
         let e = expected_table(genome_shaped);
         let s = nonzero_support(&e);
-        let zero = Tally::like(e.counts());
+        let zero = Tally::for_expected(&e);
         assert_eq!(fit(&zero, &e, &s, &FitConfig::default()).unwrap_err(),
                    FitError::TooFewFragments { fragments: 0, required: MIN_FIT_FRAGMENTS });
         let small = tally_from(&e, &mean_tally(&e, 90_000.0, &steep(4.0)), None);
@@ -1631,9 +1750,91 @@ pub(crate) mod fit_tests {
     }
 
     #[test]
+    fn an_invalid_config_is_refused_not_fitted() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        let d = FitConfig::default();
+        let bad = [
+            FitConfig { cap: 0.5, ..d.clone() },
+            FitConfig { cap: f64::NAN, ..d.clone() },
+            FitConfig { cap: f64::INFINITY, ..d.clone() },
+            FitConfig { bandwidth_length_bp: 0.0, ..d.clone() },
+            FitConfig { bandwidth_length_bp: f64::NAN, ..d.clone() },
+            FitConfig { bandwidth_gc: -0.02, ..d.clone() },
+            FitConfig { bandwidth_gc: f64::INFINITY, ..d.clone() },
+            FitConfig { min_fragments: 0, ..d.clone() },
+        ];
+        for cfg in bad {
+            let r = std::panic::catch_unwind(|| fit(&t, &e, &s, &cfg));
+            assert!(matches!(r, Ok(Err(FitError::InvalidConfig(_)))), "{cfg:?} gave {r:?}");
+        }
+        // An empty tally with min_fragments 0 is refused too, by the config check.
+        let zero = Tally::for_expected(&e);
+        assert!(matches!(fit(&zero, &e, &s, &FitConfig { min_fragments: 0, ..d }),
+                         Err(FitError::InvalidConfig(_))));
+    }
+
+    #[test]
+    fn a_tally_for_another_territory_or_trim_is_refused() {
+        let e = expected_table(genome_shaped);
+        let s = nonzero_support(&e);
+        let good = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        let mut other = Tally::new(LO, HI, K, "territory-b").unwrap();
+        for (k, &c) in good.counts().keys().zip(good.counts().cells()) {
+            other.add(k, c).unwrap();
+        }
+        assert!(matches!(fit(&other, &e, &s, &FitConfig::default()), Err(FitError::TerritoryMismatch { .. })));
+        let trim = Tally::new(LO, HI, K + 1, "territory-a").unwrap();
+        assert!(matches!(fit(&trim, &e, &s, &FitConfig::default()), Err(FitError::ShapeMismatch(_))));
+    }
+
+    #[test]
+    fn add_insert_keys_with_the_tallys_own_trim() {
+        let e = expected_table(genome_shaped);
+        let mut t = Tally::for_expected(&e);
+        // 70 bp at k = 5: GGGGG ends are trimmed off, the 60 bp window holds 15 G.
+        let mut insert = b"GGGGG".to_vec();
+        insert.extend(std::iter::repeat_n(b"GAAA", 15).flatten());
+        insert.extend(b"GGGGG");
+        assert_eq!(t.add_insert(&insert), Some(GcKey { length: 70, gc: 15 }));
+        assert_eq!(*t.counts().get(70, 15).unwrap(), 1);
+        // No key: an N in the window, or too short for the trim. Not "outside lengths".
+        let mut with_n = insert.clone();
+        with_n[30] = b'N';
+        assert_eq!(t.add_insert(&with_n), None);
+        assert_eq!(t.add_insert(&[b'A'; 29]), None);
+        assert_eq!((t.without_key(), t.outside_lengths()), (2, 0));
+        // A keyed insert longer than the grid: outside lengths, not without key.
+        assert_eq!(t.add_insert(&[b'A'; 300]), Some(GcKey { length: 300, gc: 0 }));
+        assert_eq!((t.without_key(), t.outside_lengths()), (2, 1));
+    }
+
+    #[test]
+    fn a_key_no_insert_can_have_is_an_error() {
+        let e = expected_table(genome_shaped);
+        let mut t = Tally::for_expected(&e);
+        assert!(t.add(GcKey { length: 100, gc: 91 }, 1).is_err(), "gc above length - 2k");
+        assert!(t.add(GcKey { length: 300, gc: 291 }, 1).is_err(), "out of range and impossible");
+        assert!(t.add(GcKey { length: 29, gc: 0 }, 1).is_err(), "shorter than 2k + 20");
+        assert_eq!((t.total(), t.outside_lengths()), (0, 0));
+    }
+
+    #[test]
+    fn the_qc_separates_no_key_from_outside_lengths() {
+        let e = expected_table(genome_shaped);
+        let mut t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        t.add_insert(&[b'N'; 100]);
+        t.add_insert(&[b'N'; 100]);
+        t.add_insert(&[b'A'; 250]);
+        let q = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap().qc().clone();
+        assert_eq!((q.fragments_without_key, q.fragments_outside_lengths), (2, 1));
+    }
+
+    #[test]
     fn mismatched_shapes_cannot_be_fitted() {
         let e = expected_table(genome_shaped);
-        let t = Tally::new(LO, HI - 1, K).unwrap();
+        let t = Tally::new(LO, HI - 1, K, "territory-a").unwrap();
         assert!(matches!(fit(&t, &e, &nonzero_support(&e), &FitConfig::default()),
                          Err(FitError::ShapeMismatch(_))));
     }
@@ -1676,10 +1877,10 @@ pub(crate) mod fit_tests {
         }
         let e = ExpectedTable::from_counts(g, "synthetic", "t");
         let s = CellSet::from_expected(&e, SUPPORT_SHARE).unwrap();
-        let mut t = Tally::like(e.counts());
+        let mut t = Tally::for_expected(&e);
         let n_cells = s.grid().cells().iter().filter(|&&b| b).count();
         for (k, &c) in keys.iter().zip(e.counts().cells()) {
-            t.add(*k, c / 10);
+            t.add(*k, c / 10).unwrap();
         }
         let t0 = std::time::Instant::now();
         let m = fit(&t, &e, &s, &FitConfig::default()).unwrap();
@@ -1709,8 +1910,8 @@ pub(crate) mod fit_tests {
         let e = expected_table(genome_shaped);
         let mut t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
         let m0 = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
-        assert!(!t.add(GcKey { length: HI + 50, gc: 100 }, 7));
-        assert!(!t.add(GcKey { length: LO - 1, gc: 10 }, 3));
+        assert!(!t.add(GcKey { length: HI + 50, gc: 100 }, 7).unwrap());
+        assert!(!t.add(GcKey { length: LO - 1, gc: 10 }, 3).unwrap());
         let m1 = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
         assert_eq!((m0.qc().fragments_outside_lengths, m1.qc().fragments_outside_lengths), (0, 10));
     }
@@ -1763,7 +1964,7 @@ mod sparse_tests {
         let edge = (0..=e.counts().gc_max(len)).rev().find(|&g| s.contains(len, g)).unwrap();
         let outlier = edge + 5; // within the kernel's reach of the support (1.6 SD), so it could leak
         let mut t = base.clone();
-        t.add(GcKey { length: len, gc: outlier }, 5_000);
+        t.add(GcKey { length: len, gc: outlier }, 5_000).unwrap();
         let cfg = FitConfig::default();
         let (a, b) = (fit(&base, &e, &s, &cfg).unwrap(), fit(&t, &e, &s, &cfg).unwrap());
         assert_eq!(b.weight(len, Some(outlier)), b.weight(len, Some(edge)), "clamped to the edge value");
@@ -1785,7 +1986,26 @@ mod sparse_tests {
         let s = support(&e);
         let cfg = FitConfig::default();
         let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(16.0)), None);
-        let m = fit(&t, &e, &s, &cfg).unwrap();
+        let (m, scales) = fit_with_scales(&t, &e, &s, &cfg).unwrap();
+        // Raw = final * the length's divisor: every raw weight lies in [1/C, C], and a capped one
+        // sits exactly on a bound. Capping after normalisation ("normalise, cap, renormalise")
+        // leaves a capped cell at C times the first divisor instead.
+        let mut outside_bounds = 0;
+        for (li, len) in (LO..=HI).enumerate() {
+            for (w, &c) in m.weights().row(len).iter().zip(m.capped().row(len)) {
+                let (w, raw) = (w.unwrap(), w.unwrap() * scales[li]);
+                assert!(raw >= (1.0 / cfg.cap) * (1.0 - 1e-12) && raw <= cfg.cap * (1.0 + 1e-12),
+                        "length {len}: raw {raw}");
+                if c {
+                    let on_bound = (raw / cfg.cap - 1.0).abs() < 1e-12 || (raw * cfg.cap - 1.0).abs() < 1e-12;
+                    assert!(on_bound, "length {len}: a capped raw weight {raw} is not on a bound");
+                }
+                if !(1.0 / cfg.cap..=cfg.cap).contains(&w) {
+                    outside_bounds += 1;
+                }
+            }
+        }
+        assert!(outside_bounds > 0, "the cap bounds raw weights, so some normalised ones lie outside it");
         for len in LO..=HI {
             let row: Vec<f64> = m.weights().row(len).iter().flatten().copied().collect();
             let (lo, hi) = row.iter().fold((f64::MAX, f64::MIN), |(a, b), &w| (a.min(w), b.max(w)));
@@ -1897,7 +2117,7 @@ mod truth_tests {
         }
         let k = DEFAULT_TRIM_K as usize;
         let mut rng = Rng::new(seed);
-        let mut t = Tally::like(c.expected.counts());
+        let mut t = Tally::for_expected(&c.expected);
         let (mut kept, mut drawn) = (0, 0u64);
         while kept < n_keep {
             let len = draw_length(&mut rng);
@@ -1911,7 +2131,7 @@ mod truth_tests {
             let p = f(len, gc as f64 / (len - 2 * DEFAULT_TRIM_K) as f64) / f_max(len);
             assert!(p <= 1.0, "the acceptance ceiling must bound f (length {len}, gc {gc})");
             if rng.uniform() < p {
-                t.add(key, 1);
+                t.add(key, 1).unwrap();
                 kept += 1;
             }
         }
@@ -1939,6 +2159,55 @@ mod truth_tests {
         let (lo, hi) = (w(65), w(110)); // GC fraction 0.36 and 0.61
         let want = injected(200, 110.0 / 180.0) / injected(200, 65.0 / 180.0);
         assert!((lo / hi / want - 1.0).abs() < 0.05, "weight ratio {:.3} vs injected {:.3}", lo / hi, want);
+    }
+
+    /// A model with given weights over the case's support, for showing what the truth tests reject.
+    fn model_with(c: &Case, w: impl Fn(u16, u16) -> f64) -> GcModel {
+        let g = c.expected.counts();
+        let mut weights = GcGrid::new(g.min_len(), g.max_len(), g.trim_k(), None).unwrap();
+        let keys: Vec<GcKey> = g.keys().collect();
+        for (i, k) in keys.iter().enumerate() {
+            weights.cells_mut()[i] = Some(w(k.length, k.gc));
+        }
+        let capped = GcGrid::new(g.min_len(), g.max_len(), g.trim_k(), false).unwrap();
+        let fitted = fit(&sample(c, 200_000, &|_, _| 1.0, &|_| 1.0, 9), &c.expected, &c.support,
+                         &FitConfig::default()).unwrap();
+        GcModel::from_parts(weights, capped, c.support.clone(), fitted.provenance().clone(),
+                            FitQc::default()).unwrap()
+    }
+
+    #[test]
+    fn the_truth_tests_reject_flat_weights_a_curve_and_oversmoothing() {
+        let c = case();
+        let ceiling = |len: u16| injected(len, 0.9);
+        let biased = sample(&c, 1_000_000, &injected, &ceiling, 1);
+        // Weights of 1 on a biased sample.
+        let flat = model_with(&c, |_, _| 1.0);
+        let share = share_recovered(&flat, &biased, &injected, 0.05);
+        assert!(share < 0.95, "weights of 1 pass the injected-bias test: {share:.4}");
+        // Four times the GC bandwidth.
+        let wide = FitConfig { bandwidth_gc: 4.0 * DEFAULT_BANDWIDTH_GC, ..FitConfig::default() };
+        let m = fit(&biased, &c.expected, &c.support, &wide).unwrap();
+        let share = share_recovered(&m, &biased, &injected, 0.05);
+        assert!(share < 0.95, "a 4x GC bandwidth passes the injected-bias test: {share:.4}");
+        // A curve on an unbiased sample.
+        let unbiased = sample(&c, 1_000_000, &|_, _| 1.0, &|_| 1.0, 2);
+        let curve = model_with(&c, |len, gc| (1.5 * (gc as f64 / (len - 2 * DEFAULT_TRIM_K) as f64 - 0.45)).exp());
+        let near = share_near_one(&curve, &unbiased);
+        assert!(near < 0.95, "a curve passes the no-bias control: {near:.4}");
+    }
+
+    /// The share of fragments in cells with `|w - 1| < 0.05`.
+    fn share_near_one(m: &GcModel, t: &Tally) -> f64 {
+        let (mut near, mut all) = (0.0, 0.0);
+        for k in t.counts().keys() {
+            let o = *t.counts().get(k.length, k.gc).unwrap() as f64;
+            all += o;
+            if (m.weight(k.length, Some(k.gc)).unwrap() - 1.0).abs() < 0.05 {
+                near += o;
+            }
+        }
+        near / all
     }
 
     #[test]
