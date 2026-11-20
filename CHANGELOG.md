@@ -22,6 +22,23 @@ All notable changes to this project will be documented in this file.
   with its evidence. Today: coordinates correct in all 29 cases; `gc` is 0.0, not null,
   for the two fragments whose GC cannot be resolved.
 
+- **The redesigned GC model, as library code only (GC redesign item 1, #92).** New
+  `rust/src/gc_model.rs`. **No feature reads it yet and no output changes**: every GC-weighted
+  feature keeps reading today's correction factors until spec Step 2 moves the GC tally and the
+  lookups onto the shared fragment record.
+  - **One GC definition**, `gc_key`: the exact fragment length, and the integer GC count over the
+    insert with `trim_k` bp dropped from each end. A, C, G and T count in either case; any other
+    base in the window (N, IUPAC) gives no key, as does a fragment shorter than `2k + 20` bp. The
+    trimmed-off ends are not read.
+  - **`GcModel`**: one float64 weight per (length, GC count) cell, with its provenance (genome,
+    territory and support digests, trim, GC definition version, fit configuration, krewlyzer
+    version) and the fit's QC. `weight()` returns `None`, never 1.0, for an unresolved GC or a
+    cell outside the model. The compatibility hash covers everything but the krewlyzer version,
+    which is recorded but would otherwise invalidate every PON at each patch release.
+  - **A strict Parquet loader**: it refuses a table with no provenance, another GC definition
+    version, a missing, repeated or foreign cell, a non-finite or non-positive weight, or a
+    support that does not match its digest. Write and load round-trip bit-identically.
+
 ### Removed
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**

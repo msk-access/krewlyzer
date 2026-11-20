@@ -210,6 +210,15 @@ CLAIMS: Tuple[Claim, ...] = (
         RustConst("gc_correction.rs", "NUM_BINS"),
         "5bp bins spanning 60-999bp; see the divergence below",
     ),
+    # -- GC model (redesign item 1; no feature reads it until spec Step 2) ----
+    Claim(
+        "gc_model.min_trimmed_window",
+        "20",
+        RustConst("gc_model.rs", "MIN_TRIMMED_WINDOW"),
+        "a fragment shorter than 2k + 20 bp has no GC key (CHANGELOG, "
+        "gc-correction.md); the tally, the expected counts and the lookup all "
+        "use this one rule",
+    ),
     # -- PON sigma floor --------------------------------------------------
     Claim(
         "pon.sigma_floor",

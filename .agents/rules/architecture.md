@@ -37,6 +37,7 @@ alwaysApply: true
 | `uxm.rs` | Fragment-level methylation |
 | `gc_correction.rs` | LOESS GC bias correction |
 | `gc_reference.rs` | Pre-computed GC reference generation |
+| `gc_model.rs` | Redesigned GC model: `gc_key`, weights with provenance, strict loader. No feature reads it yet (spec Step 2) |
 | `pon_builder.rs` | PON model construction |
 | `filters.rs` | Fragment filtering logic |
 

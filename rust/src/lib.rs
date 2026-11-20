@@ -17,6 +17,7 @@
 //! - **engine**: Generic fragment analysis engine with parallel processing
 //! - **pipeline**: Unified pipeline orchestration for run-all
 //! - **gc_correction**: LOESS-based GC bias correction
+//! - **gc_model**: the redesigned GC model (key, fit, provenance); no feature reads it yet
 //! - **filters**: Read filtering (MAPQ, length, proper pair, duplicates)
 //! - **bed**: BED file parsing (gzip-compressed)
 
@@ -42,6 +43,7 @@ pub mod pipeline;
 pub mod gc_correction;
 pub mod pon_builder;  // PON aggregation functions
 pub mod gc_reference;
+pub mod gc_model;       // GC model: key, weights, provenance (redesign item 1; no consumer yet)
 pub mod region_entropy;  // TFBS/ATAC size entropy
 pub mod motif_utils;     // Shared motif/sequence utilities
 pub mod region_mds;      // Per-region MDS (Helzer et al.)
