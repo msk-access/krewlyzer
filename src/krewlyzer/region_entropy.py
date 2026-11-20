@@ -33,6 +33,7 @@ logger = logging.getLogger("region_entropy")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.gc_assets import resolve_gc_factors
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
 
@@ -59,8 +60,15 @@ def region_entropy(
     genome: str = typer.Option(
         "hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"
     ),
+    gc_correct: bool = typer.Option(
+        True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"
+    ),
     gc_factors: Optional[Path] = typer.Option(
-        None, "--gc-factors", "-F", help="GC correction factors TSV"
+        None,
+        "--gc-factors",
+        "-F",
+        help="Off-target GC factor table (.parquet/.tsv.gz/.tsv). "
+        "Default: the tables extract wrote beside the BED, as run-all uses",
     ),
     pon_model: Optional[Path] = typer.Option(
         None, "--pon-model", "-P", help="PON model for z-score computation"
@@ -186,8 +194,23 @@ def region_entropy(
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
     target_regions_str = str(resolved_target_path) if is_panel_mode else None
 
-    # Resolve GC correction factors
-    gc_str = str(gc_factors) if gc_factors and gc_factors.exists() else None
+    # GC correction factors, as run-all resolves them: --gc-factors for the off-target table if
+    # given, otherwise the tables extract wrote beside the BED (or in the output directory).
+    # Without this the single tool ran uncorrected unless the flag was passed, unlike run-all.
+    gc_str = gc_ontarget_str = None
+    if gc_correct:
+        if gc_factors and gc_factors.exists():
+            gc_str = str(gc_factors)
+        else:
+            off = resolve_gc_factors(bedgz_input, output, sample_name, "off_target")
+            gc_str = str(off.path) if off.found else None
+            if not off.found:
+                logger.warning(
+                    f"No GC factors ({off.reason}); TFBS/ATAC run uncorrected"
+                )
+        if is_panel_mode:
+            on = resolve_gc_factors(bedgz_input, output, sample_name, "on_target")
+            gc_ontarget_str = str(on.path) if on.found else None
 
     # Use PON parquet directly for Z-score normalization (Rust implementation)
     entropy_pon_parquet = (
@@ -253,7 +276,7 @@ def region_entropy(
                     str(tfbs_path_gw),
                     str(out_raw),
                     gc_str,
-                    None,  # gc_correction_ontarget_path
+                    gc_ontarget_str,  # on-target fragments of the split
                     target_regions_str,
                     not verbose,
                 )
@@ -290,7 +313,7 @@ def region_entropy(
                         str(bedgz_input),
                         str(tfbs_path_panel),
                         str(out_raw_ont),
-                        gc_str,
+                        gc_ontarget_str or gc_str,  # on-target table, as run-all
                         None,  # gc_correction_ontarget_path
                         None,  # target_regions_path (no split for panel-specific)
                         not verbose,
@@ -327,7 +350,7 @@ def region_entropy(
                     str(atac_path_gw),
                     str(out_raw),
                     gc_str,
-                    None,  # gc_correction_ontarget_path
+                    gc_ontarget_str,  # on-target fragments of the split
                     target_regions_str,
                     not verbose,
                 )
@@ -364,7 +387,7 @@ def region_entropy(
                         str(bedgz_input),
                         str(atac_path_panel),
                         str(out_raw_ont),
-                        gc_str,
+                        gc_ontarget_str or gc_str,  # on-target table, as run-all
                         None,  # gc_correction_ontarget_path
                         None,  # target_regions_path (no split for panel-specific)
                         not verbose,

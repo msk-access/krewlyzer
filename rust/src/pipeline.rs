@@ -200,8 +200,7 @@ pub fn run_unified_pipeline(
     // Phase 1: GC Correction Factors (Load or Compute)
     // ═══════════════════════════════════════════════════════════════════
     let factors = if let Some(input_path) = correction_input_path {
-        // Load pre-computed factors — Parquet-first auto-detection handles both
-        // Parquet (new) and TSV/legacy-CSV (old) transparently.
+        // Load exactly the pre-computed table the caller resolved (beside the BED).
         info!("pipeline: loading pre-computed GC correction factors from {:?}", input_path);
         match CorrectionFactors::load(&input_path) {
             Ok(f) => {
@@ -209,8 +208,10 @@ pub fn run_unified_pipeline(
                 Some(f)
             },
             Err(e) => {
-                warn!("pipeline: failed to load correction factors: {}. Proceeding without GC correction.", e);
-                None
+                // A table beside the BED that cannot be read must not become "no correction":
+                // that silently uncorrected run is what PON donors and samples were then compared on.
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "pipeline: cannot load GC correction factors from {:?}: {:#}", input_path, e)));
             }
         }
     } else if let (Some(gc_ref), Some(valid_reg), Some(out_factors)) = (gc_ref_path, valid_regions_path, correction_out_path) {
@@ -238,7 +239,11 @@ pub fn run_unified_pipeline(
         let computed = compute_gcfix_factors(&obs_result.observed, &ref_data, None)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Factor computation failed: {}", e)))?;
             
-        // 5. Write factors: dispatch by output_format (TSV / Parquet / both).
+        // 5. Write factors: dispatch by output_format (TSV / Parquet / both). Nothing is written
+        //    when no length bin could be fitted (a header-only table is refused on load).
+        if computed.data.is_empty() {
+            warn!("pipeline: no length bin could be fitted; GC correction skipped and no factor table written");
+        }
         // Use string-based stem extraction to avoid Path::with_extension()
         // mangling compound names like "correction_factors.ontarget".
         use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
@@ -250,7 +255,7 @@ pub fn run_unified_pipeline(
             &factors_str
         };
         debug!("pipeline: writing off-target GC factors → {} (format={})", factors_stem, fmt);
-        if should_write_tsv(fmt) {
+        if should_write_tsv(fmt) && !computed.data.is_empty() {
             let tsv_out = if compress {
                 PathBuf::from(format!("{}.tsv.gz", factors_stem))
             } else {
@@ -259,7 +264,7 @@ pub fn run_unified_pipeline(
             computed.write_tsv(&tsv_out, compress)
                 .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (TSV): {}", e)))?;
         }
-        if should_write_parquet(fmt) {
+        if should_write_parquet(fmt) && !computed.data.is_empty() {
             let pq = PathBuf::from(format!("{}.parquet", factors_stem));
             computed.write_parquet(&pq)
                 .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (Parquet): {}", e)))?;

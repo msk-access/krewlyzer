@@ -45,33 +45,40 @@ workflow TOOL_LEVEL {
     )
     ch_versions = ch_versions.mix(KREWLYZER_EXTRACT.out.versions)
     
-    // Combine extracted BEDs with PON/targets for downstream
+    // Combine extracted BEDs with extract's GC factor tables and PON/targets for downstream.
+    // The tables are staged beside the BED in every tool's work directory, so each tool resolves
+    // them as run-all does. Without them every tool refitted its own factors from the BED with a
+    // different algorithm (all fragments, no on/off-target split).
     ch_extracted_with_meta = KREWLYZER_EXTRACT.out.bed
+        .join(KREWLYZER_EXTRACT.out.gc_factors, remainder: true)
         .join(ch_extract.map { meta, bam, bai, pon, targets -> [meta, pon, targets] })
-        .map { meta, bed, pon, targets -> [meta, bed, pon ?: [], targets ?: []] }
-    
-    // Merge extracted BEDs with pre-extracted BEDs
-    ch_all_beds = ch_extracted_with_meta.mix(ch_beds)
+        .map { meta, bed, gc, pon, targets -> [meta, bed, gc ?: [], pon ?: [], targets ?: []] }
+
+    // Merge with pre-extracted BEDs, which come without factor tables
+    ch_all_beds = ch_extracted_with_meta.mix(
+        ch_beds.map { meta, bed, pon, targets -> [meta, bed, [], pon ?: [], targets ?: []] }
+    )
 
     // =====================================================
     // 2. PARALLEL FEATURE EXTRACTION
     // =====================================================
     
     // Convenience channels
-    ch_bed_only = ch_all_beds.map { meta, bed, pon, targets -> [meta, bed] }
-    ch_bed_targets = ch_all_beds.map { meta, bed, pon, targets -> [meta, bed, targets ?: []] }
+    ch_bed_plain = ch_all_beds.map { meta, bed, gc, pon, targets -> [meta, bed] }      // no GC use
+    ch_bed_only = ch_all_beds.map { meta, bed, gc, pon, targets -> [meta, bed, gc] }    // GC-weighted tools
+    ch_bed_targets = ch_all_beds.map { meta, bed, gc, pon, targets -> [meta, bed, gc, targets ?: []] }
     
     // FSC - Fragment Size Coverage
     KREWLYZER_FSC(
-        ch_bed_targets.map { meta, bed, targets -> [meta, bed] }, 
-        ch_bed_targets.map { it[2] }
+        ch_bed_targets.map { meta, bed, gc, targets -> [meta, bed, gc] }, 
+        ch_bed_targets.map { it[3] }
     )
     ch_versions = ch_versions.mix(KREWLYZER_FSC.out.versions)
     
     // FSR - Fragment Size Ratio
     KREWLYZER_FSR(
-        ch_bed_targets.map { meta, bed, targets -> [meta, bed] }, 
-        ch_bed_targets.map { it[2] }
+        ch_bed_targets.map { meta, bed, gc, targets -> [meta, bed, gc] }, 
+        ch_bed_targets.map { it[3] }
     )
     ch_versions = ch_versions.mix(KREWLYZER_FSR.out.versions)
     
@@ -93,18 +100,18 @@ workflow TOOL_LEVEL {
     ch_versions = ch_versions.mix(KREWLYZER_OCF.out.versions)
     
     // MOTIF - End motif and MDS
-    KREWLYZER_MOTIF(ch_bed_only, fasta)
+    KREWLYZER_MOTIF(ch_bed_plain, fasta)
     ch_versions = ch_versions.mix(KREWLYZER_MOTIF.out.versions)
     
     // REGION_ENTROPY - TFBS/ATAC size entropy
-    ch_bed_pon_targets = ch_all_beds.map { meta, bed, pon, targets -> 
-        [meta, bed, pon ?: [], targets ?: []] 
+    ch_bed_pon_targets = ch_all_beds.map { meta, bed, gc, pon, targets -> 
+        [meta, bed, gc, pon ?: [], targets ?: []] 
     }
     KREWLYZER_REGION_ENTROPY(
-        ch_bed_pon_targets.map { meta, bed, pon, targets -> [meta, bed] },
+        ch_bed_pon_targets.map { meta, bed, gc, pon, targets -> [meta, bed, gc] },
         fasta,
-        ch_bed_pon_targets.map { it[2] },  // pon
-        ch_bed_pon_targets.map { it[3] }   // targets
+        ch_bed_pon_targets.map { it[3] },  // pon
+        ch_bed_pon_targets.map { it[4] }   // targets
     )
     ch_versions = ch_versions.mix(KREWLYZER_REGION_ENTROPY.out.versions)
 
@@ -129,8 +136,8 @@ workflow TOOL_LEVEL {
     // =====================================================
     // 4. mFSD (Mutant Fragment Size Distribution)
     // =====================================================
-    // mFSD: pass FASTA for runtime GC correction; pre-computed factors are not
-    // available in tool-level mode (run-all generates them during extraction)
+    // mFSD: no factor tables in tool-level mode yet. mFSD's GC weighting is decided in the
+    // fragment-model Step 4 (mutant and wild-type fragments are GC-matched by locus).
     KREWLYZER_MFSD(ch_mfsd, fasta, [])
     ch_versions = ch_versions.mix(KREWLYZER_MFSD.out.versions)
 

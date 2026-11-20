@@ -50,6 +50,14 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **Reviews ask five standing questions, over the whole branch.** Every gate passed on #89, and so
+  did our own reviews, each of one commit's diff; the automated PR review read the whole branch
+  and found four real defects, all in its first commit. `.agents/rules/validation-gates.md` now
+  says to review `merge-base..HEAD` rather than the newest commit, to treat the PR's automated
+  review as part of the gate, and to ask every time about leftover state, sibling paths, outcome
+  against intent, where errors land, and claims against code. `AGENTS.md` points to it before a
+  push.
+
 - **Region-entropy tables are written through a buffer, removing the slowest `run-all` stage.**
   Both writers in `region_entropy.rs` called `writeln!` on a bare `File`, and
   that makes one write system call per formatted piece -- 9 per row of the
@@ -131,6 +139,100 @@ All notable changes to this project will be documented in this file.
   the base since, and the result is a tree nobody has tested.
 
 ### Fixed
+
+- **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
+  Python `set` of k-mers, which iterates in the per-process string-hash order, so the sum ran in
+  a different order each run: identical end-motif counts gave MDS differing in the last digit,
+  and `mds_z` differed run to run (on four real samples, by up to 6e-14 relative). The k-mers are
+  now summed in one fixed order. Values move only at that last digit; nothing else changes. It
+  had broken every byte-identical comparison between two runs, and PON MDS baselines shared it.
+
+- **One rule matches BAM contigs to the reference, and a wrong reference is refused.** Each place a
+  BAM contig met the reference FASTA had its own rule: extract matched names exactly, so a
+  `chr1`-named BAM read with a `1`-named FASTA gave every fragment GC 0.0 and nothing was
+  corrected; mFSD and the expected-GC builder tried the other spelling after a miss, and that
+  fallback **crashed** instead (rust-htslib's `fetch_seq` returns a `Vec` over a null pointer, not
+  `Err`, for a name the FASTA lacks: mFSD with `chr1` variants against a `1`-named FASTA, and
+  `generate_ref_genome_gc` with `chr`-less regions against a `chr`-named FASTA, both segfaulted).
+  `rust/src/contigs.rs` now resolves every BAM contig once, from the BAM header and the FASTA
+  index: the exact name first, then the other `chr` spelling, and the lengths must agree.
+  - **Refused before any read is processed:** a primary contig (1-22, X, Y) the reference lacks, or
+    one whose length differs (another assembly, such as hg38 against hg19, which no name rule can
+    see). `chrM` (16,571 bp) and `MT` (16,569 bp) stay apart by length.
+  - **Counted, not refused:** fragments on contigs the reference lacks (decoys, alts) or has at
+    another length (a non-primary contig such as chrM against rCRS; warned about), in
+    `fragments_on_missing_contig`; warned about above 1%. They are left out of the GC
+    observations instead of entering the lowest GC bin at 0%. Any failed GC fetch is warned about.
+  - The counts are filled when no BED is written too (`krewlyzer motif` reported 0 fragments).
+  - extract fetches GC and breakpoint-motif context under the resolved name; mFSD resolves a
+    variant's contig against the BAM the same way, and with GC factors but no reference is now an
+    error (it ran uncorrected, and the GC-correction guide's own example and the Nextflow module
+    did exactly that: both now pass the reference); `generate_ref_genome_gc` errors on a region the reference lacks
+    (it skipped it). A reference that cannot be opened is an error in extract (every fragment got
+    GC 0.0).
+  - This replaces the 50% share at which extract failed, which detected the naming mismatch rather
+    than resolving it. A run whose BAM and reference already matched by name, with no fragments on
+    contigs the reference lacks, is unaffected.
+  - The real-data test fixture (`tests/data/fixtures/test_sample.bam`) named 290 full-length
+    contigs against its 2 Mb, one-contig reference, which this now refuses. Its header names only
+    that contig; the 2 reads whose mates lay on other contigs are dropped (3,142 remain).
+
+- **The blacklist is applied whatever the contig naming.** Extract compared contig names exactly
+  when excluding blacklisted regions. The bundled hg19 blacklist (`hg19-blacklist.v2.bed.gz`, 834
+  regions) names contigs `chr1`, while MSK-ACCESS BAMs name them `1`, and Nextflow passes no
+  blacklist of its own (`exclude_regions = ''`). So in production the blacklist matched nothing
+  and **was never applied**. Extract now matches the blacklist, like target regions, with or
+  without a leading `chr`. On four evidence samples (both assays, both sources) it removes 0.70%,
+  0.89%, 1.59% and 1.84% of fragments; the removed count equals the fragments overlapping the
+  blacklist exactly, in every sample. **Values change for every feature** (the fragment set
+  changes), so PONs must be rebuilt.
+
+- **GC correction no longer depends on the output format, and fails loudly.** Panel WPS, every
+  TFBS and ATAC table, and gene FSC each looked for a plain `{sample}.correction_factors[.ontarget].tsv`.
+  `--output-format parquet`, and `--compress` (the Nextflow default), write `.parquet`/`.tsv.gz`
+  and no plain `.tsv`, so in the 0.9.x production cohorts (0.9.2 IGO: 3,158 run directories;
+  0.9.0 clinical: 33,104, all without a plain `.tsv`) those features ran **without GC correction**,
+  while PON donors (built with TSV forced) were corrected. Gene FSC was never corrected for anyone:
+  the factors went to Rust as a three-column temporary TSV that the loader skipped row by row,
+  while the log said "Using on-target GC factors".
+  - One resolver (`core.gc_assets.resolve_gc_factors`) finds every factor table: beside the BED,
+    then the output directory; Parquet, then `.tsv.gz`, then `.tsv`. A static test fails if any
+    other module builds a factor filename.
+  - Gene FSC takes the table path, so Rust loads it. The Python loader, the dict path and the dead
+    `_get_gc_weight` are removed.
+  - TSV factors are written at full precision (previously 4 decimals; 43% of factors differed
+    from Parquet on a test sample).
+  - `CorrectionFactors::load` reads exactly the path it is given, so a stale sibling `.parquet`
+    can no longer win. Columns are found by name, and a table with no rows, a missing column or a
+    non-finite factor is an **error** at every consumer. A fit with no length bin writes no table.
+  - The single-tool `region-entropy` resolves both tables as run-all does, and gains
+    `--gc-correct/--no-gc-correct`. Its `--gc-factors` validation now accepts the six-column table
+    in any format; it used to reject run-all's own Parquet tables.
+  - Nextflow tool-level mode passes extract's factor tables to every GC-weighted tool; each used to
+    refit factors from the BED with a different algorithm. A tool that still has to refit records
+    `recomputed` and warns.
+  - `--no-gc-correct` is honoured by these consumers; previously a stale table was applied anyway.
+  - `metadata` records which kind of table each population used (`gc_factors_offtarget`,
+    `gc_factors_ontarget`, `gc_correction_applied_*`), plus `fragments_on_missing_contig` and
+    `gc_fetch_failed`.
+  - Extract matches target regions with or without `chr`, as the features already did. (Contigs
+    the reference names the other way are resolved, not refused: see the contig entry above.)
+  - `build-pon` refuses a donor whose factors are missing, and `--from-outputs` refuses sample
+    directories written before this fix. Both apply one rule: a panel donor needs its on-target
+    table too (`--from-outputs` checked only off-target, so a panel donor whose on-target fit did
+    not run entered the baseline with uncorrected gene FSC).
+  - A factor table never outlives the BED it was fitted on: writing a new BED, or refitting from
+    one, first removes that sample's earlier tables in every format. A rerun that fitted nothing,
+    or wrote another format, used to reuse the previous run's weights (the resolver prefers
+    Parquet) while the metadata recorded the correction as applied.
+  - Both loaders require all six documented columns; a table without `length_bin_max` passed
+    `validate-gc-factors`.
+  - A factor table the run would use must also be readable: an unreadable one stops the run.
+    It used to count as found, so gene FSC, panel WPS, TFBS and ATAC each failed on it (each
+    failure caught and logged) while the metadata recorded `gc_correction_applied_*=True`.
+
+  **Values change** for panel WPS, TFBS, ATAC and gene FSC in Parquet or compressed runs, so PONs
+  must be rebuilt.
 
 - **On a push, the PHI scan covered only the last commit.** The scan base was
   `pull_request.base.sha || 'HEAD~1'`, so for a push it was `HEAD~1`: push

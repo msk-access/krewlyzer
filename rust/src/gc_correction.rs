@@ -18,7 +18,6 @@ use anyhow::{Result, anyhow};
 use log::{info, debug};
 use lowess::prelude::*;
 use std::io::{Write, BufRead};
-use std::path::PathBuf;
 use coitrees::IntervalTree;
 
 /// Configuration for GC bias correction
@@ -205,7 +204,7 @@ impl CorrectionFactors {
             let (bin, gc) = key;
             let stats = self.data.get(key).unwrap();
             let (min, max) = bin.range();
-            writeln!(w, "{}\t{}\t{}\t{}\t{}\t{:.4}",
+            writeln!(w, "{}\t{}\t{}\t{}\t{}\t{}",
                 min, max, gc, stats.observed, stats.expected, stats.factor)?;
         }
         // Flush to finalize gzip stream before dropping
@@ -265,57 +264,83 @@ impl CorrectionFactors {
     // Readers
     // -----------------------------------------------------------------------
 
-    /// Load correction factors from a **tab-separated** TSV file.
+    /// The six columns every factor table carries, in the order the writers emit them.
+    pub const COLUMNS: [&'static str; 6] =
+        ["length_bin_min", "length_bin_max", "gc_percent", "observed", "expected", "correction_factor"];
+
+    /// Insert one parsed row, rejecting what no writer produces: a non-finite or negative factor.
+    fn insert_row(data: &mut HashMap<(LengthBin, u8), CorrectionBinStats>, path: &Path, row: usize,
+                  len_min: u64, gc: u64, observed: u64, expected: u64, factor: f64) -> Result<()> {
+        if !factor.is_finite() || factor < 0.0 {
+            return Err(anyhow!("correction factor table {:?}, row {}: factor {} is not a finite non-negative number", path, row, factor));
+        }
+        if gc > 100 {
+            return Err(anyhow!("correction factor table {:?}, row {}: gc_percent {} is above 100", path, row, gc));
+        }
+        let bin = LengthBin::from_len(len_min)
+            .ok_or_else(|| anyhow!("correction factor table {:?}, row {}: length_bin_min {} is outside 60-999", path, row, len_min))?;
+        data.insert((bin, gc as u8), CorrectionBinStats { observed, expected, factor });
+        Ok(())
+    }
+
+    fn require_rows(data: HashMap<(LengthBin, u8), CorrectionBinStats>, path: &Path) -> Result<Self> {
+        if data.is_empty() {
+            return Err(anyhow!("correction factor table {:?} has no factor rows", path));
+        }
+        Ok(Self { data })
+    }
+
+    /// Load correction factors from a tab-separated table (gzip when the path ends in `.gz`).
     ///
-    /// This is the updated loader matching [`write_tsv`].  It parses tab-separated
-    /// fields and handles both the new TSV format and any legacy comma-separated
-    /// files by auto-detecting the delimiter on the first data line.
-    ///
-    /// When `path` ends with `.gz`, the file is transparently decompressed with
-    /// `flate2::GzDecoder` before parsing.
+    /// Columns are found by **name** in the header ([`Self::COLUMNS`]); a comma-separated legacy
+    /// file is accepted. Any malformed row, a missing column, a non-finite factor or a table with
+    /// no rows is an **error**: every consumer used to treat an unreadable table as "no
+    /// correction" and carry on, which is how gene FSC ran uncorrected for a year.
     pub fn load_tsv<P: AsRef<Path>>(path: P) -> Result<Self> {
-        use std::io::{BufRead, BufReader};
+        use std::io::BufReader;
         use flate2::read::GzDecoder;
         let path = path.as_ref();
         debug!("gc_correction: loading TSV → {:?}", path);
         let file = File::open(path)
             .with_context(|| format!("Failed to open correction factors TSV: {:?}", path))?;
-
-        // Transparently decompress gzip when the path ends with .gz
         let boxed_reader: Box<dyn std::io::Read> = if path.extension().is_some_and(|e| e == "gz") {
             Box::new(GzDecoder::new(file))
         } else {
             Box::new(file)
         };
         let mut reader = BufReader::new(boxed_reader);
-
-        let mut data = HashMap::new();
-        // Detect delimiter from header line
         let mut header = String::new();
         reader.read_line(&mut header)?;
         let delim = if header.contains('\t') { '\t' } else { ',' };
-        for line in reader.lines() {
+        let names: Vec<&str> = header.trim_end().split(delim).map(str::trim).collect();
+        let col = |name: &str| names.iter().position(|n| *n == name)
+            .ok_or_else(|| anyhow!("correction factor table {:?} has no `{}` column (header: {:?})", path, name, names));
+        // Every documented column must be present, `length_bin_max` too, though it is not read:
+        // a table without it is not the documented format and must not validate.
+        col(Self::COLUMNS[1])?;
+        let idx = [col(Self::COLUMNS[0])?, col(Self::COLUMNS[2])?, col(Self::COLUMNS[3])?,
+                   col(Self::COLUMNS[4])?, col(Self::COLUMNS[5])?];
+        let mut data = HashMap::new();
+        for (i, line) in reader.lines().enumerate() {
             let line = line?;
             if line.trim().is_empty() { continue; }
+            let row = i + 2; // 1-based, after the header
             let fields: Vec<&str> = line.split(delim).collect();
-            if fields.len() < 6 { continue; }
-            let len_min: u64 = fields[0].trim().parse().unwrap_or(0);
-            let gc: u8       = fields[2].trim().parse().unwrap_or(0);
-            let observed: u64 = fields[3].trim().parse().unwrap_or(0);
-            let expected: u64 = fields[4].trim().parse().unwrap_or(0);
-            let factor: f64   = fields[5].trim().parse().unwrap_or(1.0);
-            if len_min >= 60 {
-                let bin_idx = ((len_min - 60) / 5) as u8;
-                if bin_idx < LengthBin::NUM_BINS {
-                    data.insert((LengthBin(bin_idx), gc), CorrectionBinStats { observed, expected, factor });
-                }
+            if fields.len() < names.len() {
+                return Err(anyhow!("correction factor table {:?}, row {}: {} fields, header has {}", path, row, fields.len(), names.len()));
             }
+            let u = |k: usize| fields[idx[k]].trim().parse::<u64>()
+                .map_err(|e| anyhow!("correction factor table {:?}, row {}: {:?}: {}", path, row, fields[idx[k]], e));
+            let factor: f64 = fields[idx[4]].trim().parse()
+                .map_err(|e| anyhow!("correction factor table {:?}, row {}: {:?}: {}", path, row, fields[idx[4]], e))?;
+            Self::insert_row(&mut data, path, row, u(0)?, u(1)?, u(2)?, u(3)?, factor)?;
         }
         info!("gc_correction: loaded {} correction factors from {:?}", data.len(), path);
-        Ok(Self { data })
+        Self::require_rows(data, path)
     }
 
-    /// Load correction factors from a Parquet file.
+    /// Load correction factors from a Parquet table, columns found by **name**. Errors as
+    /// [`Self::load_tsv`] does.
     pub fn load_parquet<P: AsRef<Path>>(path: P) -> Result<Self> {
         use parquet::file::reader::{FileReader, SerializedFileReader};
         use parquet::record::RowAccessor;
@@ -324,58 +349,49 @@ impl CorrectionFactors {
         let file = File::open(path)
             .with_context(|| format!("Failed to open correction factors Parquet: {:?}", path))?;
         let reader = SerializedFileReader::new(file)
-            .map_err(|e| anyhow!("Parquet reader error: {}", e))?;
+            .map_err(|e| anyhow!("correction factor table {:?}: Parquet reader error: {}", path, e))?;
+        let fields = reader.metadata().file_metadata().schema_descr().root_schema().get_fields().to_vec();
+        let names: Vec<String> = fields.iter().map(|f| f.name().to_string()).collect();
+        let col = |name: &str| names.iter().position(|n| n == name)
+            .ok_or_else(|| anyhow!("correction factor table {:?} has no `{}` column (columns: {:?})", path, name, names));
+        col(Self::COLUMNS[1])?; // required, though not read (see load_tsv)
+        let (i_len, i_gc, i_obs, i_exp, i_fac) =
+            (col(Self::COLUMNS[0])?, col(Self::COLUMNS[2])?, col(Self::COLUMNS[3])?, col(Self::COLUMNS[4])?, col(Self::COLUMNS[5])?);
         let mut data = HashMap::new();
-        for row in reader.get_row_iter(None)
-            .map_err(|e| anyhow!("Row iterator error: {}", e))?
+        for (i, row) in reader.get_row_iter(None)
+            .map_err(|e| anyhow!("correction factor table {:?}: row iterator error: {}", path, e))?.enumerate()
         {
-            let row = row.map_err(|e| anyhow!("Row read error: {}", e))?;
-            let len_min: u64 = row.get_ulong(0).unwrap_or(0);
-            let gc: u8       = row.get_ubyte(2).or_else(|_| row.get_uint(2).map(|v| v as u8)).unwrap_or(0);
-            let observed: u64 = row.get_ulong(3).unwrap_or(0);
-            let expected: u64 = row.get_ulong(4).unwrap_or(0);
-            let factor: f64   = row.get_double(5).unwrap_or(1.0);
-            if len_min >= 60 {
-                let bin_idx = ((len_min - 60) / 5) as u8;
-                if bin_idx < LengthBin::NUM_BINS {
-                    data.insert((LengthBin(bin_idx), gc), CorrectionBinStats { observed, expected, factor });
-                }
-            }
+            let row_n = i + 1;
+            let row = row.map_err(|e| anyhow!("correction factor table {:?}, row {}: {}", path, row_n, e))?;
+            let bad = |what: &str, e: parquet::errors::ParquetError|
+                anyhow!("correction factor table {:?}, row {}: `{}`: {}", path, row_n, what, e);
+            let len_min = row.get_ulong(i_len).map_err(|e| bad(Self::COLUMNS[0], e))?;
+            let gc = row.get_ubyte(i_gc).map(u64::from)
+                .or_else(|_| row.get_uint(i_gc).map(u64::from))
+                .map_err(|e| bad(Self::COLUMNS[2], e))?;
+            let observed = row.get_ulong(i_obs).map_err(|e| bad(Self::COLUMNS[3], e))?;
+            let expected = row.get_ulong(i_exp).map_err(|e| bad(Self::COLUMNS[4], e))?;
+            let factor = row.get_double(i_fac).map_err(|e| bad(Self::COLUMNS[5], e))?;
+            Self::insert_row(&mut data, path, row_n, len_min, gc, observed, expected, factor)?;
         }
         info!("gc_correction: loaded {} correction factors from Parquet {:?}", data.len(), path);
-        Ok(Self { data })
+        Self::require_rows(data, path)
     }
 
-    /// **Parquet-first** auto-detect loader.  Used by all internal consumers
-    /// (`mfsd.rs`, `pipeline.rs` input path, `fsc_processor.py`).
-    ///
-    /// Priority:
-    /// 1. `{path}.parquet` (replace extension)
-    /// 2. `{path}.gz` (gzip-compressed TSV, when --compress was used)
-    /// 3. `{path}` as-is (TSV or legacy CSV — delimiter auto-detected)
-    ///
-    /// Returns an error only if all candidates fail to load.
+    /// Load **exactly** the table at `path`, by its extension: `.parquet` as Parquet, anything else
+    /// (`.tsv`, `.tsv.gz`, legacy `.csv`) as text. It no longer looks for a sibling `.parquet`
+    /// first: the caller resolves which table applies (`core.gc_assets.resolve_gc_factors`), and a
+    /// stale sibling must not silently win over it.
     pub fn load<P: AsRef<Path>>(path: P) -> Result<Self> {
         let p = path.as_ref();
-        let parquet_candidate = p.with_extension("parquet");
-        if parquet_candidate.exists() {
-            debug!("gc_correction::load: found Parquet candidate {:?}", parquet_candidate);
-            return Self::load_parquet(&parquet_candidate);
+        if !p.exists() {
+            return Err(anyhow!("correction factor table not found: {:?}", p));
         }
-        // Try .tsv.gz (produced by --compress)
-        let p_str = p.to_string_lossy();
-        let gz_candidate = PathBuf::from(format!("{}.gz", p_str));
-        if gz_candidate.exists() {
-            debug!("gc_correction::load: found .tsv.gz candidate {:?}", gz_candidate);
-            return Self::load_tsv(&gz_candidate);
+        if p.extension().is_some_and(|e| e == "parquet") {
+            Self::load_parquet(p)
+        } else {
+            Self::load_tsv(p)
         }
-        // Try the path as given (handles both .tsv and .tsv.gz passed directly)
-        if p.exists() {
-            debug!("gc_correction::load: loading {:?}", p);
-            return Self::load_tsv(p);
-        }
-        Err(anyhow!("Correction factors file not found: {:?} (tried {:?}, {:?}, and {:?})",
-            p, parquet_candidate, gz_candidate, p))
     }
 }
 
@@ -621,6 +637,12 @@ pub fn compute_and_write_gc_factors(
         .map_err(|e| PyRuntimeError::new_err(format!("Failed to compute GC factors: {}", e)))?;
     let n_factors = factors.data.len() as u64;
     info!("gc_correction: computed {} correction factor bins", n_factors);
+    if factors.data.is_empty() {
+        // No length bin had enough points to fit. Write nothing: a header-only table is refused on
+        // load, and "no table" is what the resolver records as `none:` for this sample.
+        log::warn!("gc_correction: no length bin could be fitted; no factor table written to {}", output_path);
+        return Ok(0);
+    }
 
     // Write outputs.
     // Use string-based stem extraction instead of Path::with_extension() to
@@ -651,6 +673,16 @@ pub fn compute_and_write_gc_factors(
     }
 
     Ok(n_factors)
+}
+
+/// Validate a GC correction factor table by loading it exactly as every consumer does
+/// ([`CorrectionFactors::load`]): any format, columns by name, strict. Returns the row count.
+/// Python's `asset_validation` calls this, so "valid" can never drift from "loadable".
+#[pyfunction]
+pub fn validate_factor_table(path: &str) -> PyResult<usize> {
+    CorrectionFactors::load(path)
+        .map(|f| f.data.len())
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{:#}", e)))
 }
 
 #[cfg(test)]
@@ -786,6 +818,133 @@ mod tests {
         assert!(result.is_err(), "Should fail with too few points");
     }
     
+    // ---------------------------------------------------------------------
+    // Loading and writing factor tables (redesign item 0). Every consumer used to fall back to
+    // "no correction" when a table did not parse, and `load` preferred a sibling Parquet over the
+    // path it was handed, so a stale table could silently win.
+    // ---------------------------------------------------------------------
+
+    fn two_factors() -> CorrectionFactors {
+        let mut data = HashMap::new();
+        data.insert((LengthBin(22), 50u8), CorrectionBinStats { observed: 100, expected: 90, factor: 1.234_567_891_234_5 });
+        data.insert((LengthBin(22), 30u8), CorrectionBinStats { observed: 80, expected: 95, factor: 0.5 });
+        CorrectionFactors { data }
+    }
+
+    fn assert_err_names_factors<T: std::fmt::Debug>(r: Result<T>, what: &str) {
+        let msg = format!("{:#}", r.expect_err(what));
+        assert!(msg.to_lowercase().contains("correction factor"), "{what}: message was {msg:?}");
+    }
+
+    #[test]
+    fn write_tsv_keeps_full_precision() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("s.correction_factors.tsv");
+        two_factors().write_tsv(&p, false).unwrap();
+        let back = CorrectionFactors::load_tsv(&p).unwrap();
+        assert_eq!(back.data[&(LengthBin(22), 50)].factor, 1.234_567_891_234_5);
+    }
+
+    #[test]
+    fn load_tsv_rejects_a_table_with_no_factor_rows() {
+        // The three-column shape the old gene-FSC dict path wrote: every row used to be skipped.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("bad.tsv");
+        std::fs::write(&p, "length_bin\tgc_pct\tfactor\n22\t50\t2.0\n").unwrap();
+        assert_err_names_factors(CorrectionFactors::load_tsv(&p), "three-column table");
+        std::fs::write(&p, "length_bin_min\tlength_bin_max\tgc_percent\tobserved\texpected\tcorrection_factor\n").unwrap();
+        assert_err_names_factors(CorrectionFactors::load_tsv(&p), "header only");
+    }
+
+    #[test]
+    fn load_tsv_rejects_a_non_finite_factor() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("nan.tsv");
+        std::fs::write(&p, "length_bin_min\tlength_bin_max\tgc_percent\tobserved\texpected\tcorrection_factor\n170\t175\t50\t100\t90\tNaN\n").unwrap();
+        assert_err_names_factors(CorrectionFactors::load_tsv(&p), "NaN factor");
+    }
+
+    #[test]
+    fn load_parquet_reads_columns_by_name() {
+        use arrow::array::{ArrayRef, Float64Array, UInt8Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("reordered.parquet");
+        let schema = Schema::new(vec![
+            Field::new("correction_factor", DataType::Float64, false),
+            Field::new("gc_percent", DataType::UInt8, false),
+            Field::new("observed", DataType::UInt64, false),
+            Field::new("expected", DataType::UInt64, false),
+            Field::new("length_bin_max", DataType::UInt64, false),
+            Field::new("length_bin_min", DataType::UInt64, false),
+        ]);
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(Float64Array::from(vec![1.75])), Arc::new(UInt8Array::from(vec![50u8])),
+            Arc::new(UInt64Array::from(vec![100u64])), Arc::new(UInt64Array::from(vec![90u64])),
+            Arc::new(UInt64Array::from(vec![175u64])), Arc::new(UInt64Array::from(vec![170u64])),
+        ];
+        crate::output_utils::write_parquet_batch(&p, Arc::new(schema), arrays).unwrap();
+        let f = CorrectionFactors::load_parquet(&p).unwrap();
+        assert_eq!(f.data[&(LengthBin(22), 50)].factor, 1.75);
+    }
+
+    #[test]
+    fn both_loaders_require_every_documented_column_including_length_bin_max() {
+        // `length_bin_max` is not read into the table, but a file without it is not the documented
+        // six-column format, and `validate-gc-factors` must not call it valid.
+        use arrow::array::{ArrayRef, Float64Array, UInt8Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let tsv = dir.path().join("no_max.tsv");
+        std::fs::write(&tsv, "length_bin_min\tgc_percent\tobserved\texpected\tcorrection_factor\n170\t50\t100\t90\t1.1\n").unwrap();
+        assert_err_names_factors(CorrectionFactors::load_tsv(&tsv), "TSV without length_bin_max");
+
+        let pq = dir.path().join("no_max.parquet");
+        let schema = Schema::new(vec![
+            Field::new("length_bin_min", DataType::UInt64, false),
+            Field::new("gc_percent", DataType::UInt8, false),
+            Field::new("observed", DataType::UInt64, false),
+            Field::new("expected", DataType::UInt64, false),
+            Field::new("correction_factor", DataType::Float64, false),
+        ]);
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from(vec![170u64])), Arc::new(UInt8Array::from(vec![50u8])),
+            Arc::new(UInt64Array::from(vec![100u64])), Arc::new(UInt64Array::from(vec![90u64])),
+            Arc::new(Float64Array::from(vec![1.1])),
+        ];
+        crate::output_utils::write_parquet_batch(&pq, Arc::new(schema), arrays).unwrap();
+        assert_err_names_factors(CorrectionFactors::load_parquet(&pq), "Parquet without length_bin_max");
+    }
+
+    #[test]
+    fn load_parquet_rejects_a_missing_column() {
+        use arrow::array::{ArrayRef, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("short.parquet");
+        let schema = Schema::new(vec![Field::new("length_bin_min", DataType::UInt64, false)]);
+        let arrays: Vec<ArrayRef> = vec![Arc::new(UInt64Array::from(vec![170u64]))];
+        crate::output_utils::write_parquet_batch(&p, Arc::new(schema), arrays).unwrap();
+        assert_err_names_factors(CorrectionFactors::load_parquet(&p), "missing columns");
+    }
+
+    #[test]
+    fn load_reads_exactly_the_path_it_is_given() {
+        // A stale sibling .parquet must not win over the .tsv the caller resolved.
+        let dir = tempfile::tempdir().unwrap();
+        let tsv = dir.path().join("s.correction_factors.tsv");
+        two_factors().write_tsv(&tsv, false).unwrap();
+        let mut stale = two_factors();
+        stale.data.get_mut(&(LengthBin(22), 50)).unwrap().factor = 9.0;
+        stale.write_parquet(dir.path().join("s.correction_factors.parquet")).unwrap();
+        let f = CorrectionFactors::load(&tsv).unwrap();
+        assert_eq!(f.data[&(LengthBin(22), 50)].factor, 1.234_567_891_234_5);
+        assert!(CorrectionFactors::load(dir.path().join("absent.tsv")).is_err());
+    }
+
     #[test]
     fn test_variance() {
         let data = vec![2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0];

@@ -37,6 +37,12 @@ from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
 from .motif_processor import compute_mds
 from ..assets import AssetManager
+from .gc_assets import (
+    check_reference_contigs,
+    factor_table_path,
+    remove_factor_tables,
+    require_gc_for_pon,
+)
 
 logger = logging.getLogger("krewlyzer.core.sample_processor")
 
@@ -94,6 +100,9 @@ class ExtractionResult:
     em_counts_ontarget: Dict[str, int] = field(default_factory=dict)
     bpm_counts_ontarget: Dict[str, int] = field(default_factory=dict)
     gc_observations_ontarget: Dict[Any, Any] = field(default_factory=dict)
+
+    # Contig guard counts from extract (fragments_on_missing_contig, gc_fetch_failed)
+    contig_guard: Dict[str, int] = field(default_factory=dict)
 
     # Derived data
     mds_score: float = 0.0
@@ -337,6 +346,9 @@ def extract_sample(
         output_dir.mkdir(parents=True, exist_ok=True)
         bed_path = output_dir / f"{sample_name}.bed.gz"
         bed_output_arg = str(bed_path)
+        # A factor table belongs to the BED it was fitted on: clear the previous run's before this
+        # run writes a new BED, so a run that fits none (or another format) cannot reuse it.
+        remove_factor_tables(output_dir, sample_name)
 
     # Call Rust extraction engine
     try:
@@ -373,7 +385,17 @@ def extract_sample(
         em_counts_on_raw,
         bpm_counts_on_raw,
         gc_obs_on,
+        contig_guard,
     ) = result
+
+    # Fragments on contigs the reference lacks (decoys, alts) and failed fetches have no GC and
+    # enter no GC model; a wrong reference was already refused by extract.
+    contig_guard = dict(contig_guard or {})
+    check_reference_contigs(
+        contig_guard.get("fragments_on_missing_contig", 0),
+        contig_guard.get("gc_fetch_failed", 0),
+        fragment_count,
+    )
 
     # em_counts and bpm_counts from Rust are dicts (k-mer -> count)
     # Keep as dicts for compatibility with motif_processor
@@ -420,6 +442,7 @@ def extract_sample(
         em_counts_ontarget=em_counts_ontarget,
         bpm_counts_ontarget=bpm_counts_ontarget,
         gc_observations_ontarget=gc_observations_ontarget,
+        contig_guard=contig_guard,
         mds_score=mds_score,
         kmer_frequencies=kmer_frequencies,
         is_panel_mode=is_panel_mode,
@@ -700,7 +723,7 @@ def write_extraction_outputs(
     Files written:
     - {sample}.bed.gz.tbi: Tabix index (for random access)
     - {sample}.metadata.json: Sample metadata and statistics
-    - {sample}.correction_factors.tsv: GC correction factors
+    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors
 
     Args:
         result: ExtractionResult from extract_sample()
@@ -754,12 +777,16 @@ def write_extraction_outputs(
         "filters_min_length": 65,
         "filters_max_length": 1000,
         "gc_correction_computed": gc_correct_status,
+        "fragments_on_missing_contig": int(
+            result.contig_guard.get("fragments_on_missing_contig", 0)
+        ),
+        "gc_fetch_failed": int(result.contig_guard.get("gc_fetch_failed", 0)),
         "timestamp": datetime.now().isoformat(),
     }
 
     # Compute GC correction factors
     if compute_gc_factors and result.gc_observations:
-        factors_path = output_dir / f"{sample}.correction_factors.tsv"
+        factors_path = factor_table_path(output_dir, sample, "off_target")
         try:
             assets = AssetManager(genome)
             gc_ref = assets.resolve("gc_reference")
@@ -987,7 +1014,7 @@ def process_sample(
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                factors_path = output_dir / f"{sample_name}.correction_factors.tsv"
+                factors_path = factor_table_path(output_dir, sample_name, "off_target")
 
                 n_factors = _core.gc.compute_and_write_gc_factors(
                     result.gc_observations,
@@ -1001,15 +1028,15 @@ def process_sample(
                     f"  Computed {n_factors} off-target GC factors: {factors_path.name}"
                 )
             except Exception as e:
-                logger.debug(f"  Off-target GC factor computation failed: {e}")
+                logger.warning(f"  Off-target GC factor computation failed: {e}")
 
         # On-target factors (panel mode - used by FSC, RegionEntropy)
         if result.gc_observations_ontarget and result.is_panel_mode:
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                factors_ontarget_path = (
-                    output_dir / f"{sample_name}.correction_factors.ontarget.tsv"
+                factors_ontarget_path = factor_table_path(
+                    output_dir, sample_name, "on_target"
                 )
 
                 n_factors_on = _core.gc.compute_and_write_gc_factors(
@@ -1060,6 +1087,24 @@ def process_sample(
     )
 
     outputs.feature_outputs = feature_outputs
+
+    # A donor whose GC factors were not found would enter the baseline uncorrected, and corrected
+    # samples would be scored against it. Refuse it here, before any of its features are kept.
+    gc_weighted = any(
+        (
+            enable_fsc,
+            enable_fsr,
+            enable_fsd,
+            enable_wps,
+            enable_ocf,
+            enable_tfbs,
+            enable_atac,
+        )
+    )
+    if pon_mode and gc_weighted and feature_outputs.gc_factors_choice is not None:
+        require_gc_for_pon(
+            feature_outputs.gc_factors_choice, panel_mode=feature_outputs.panel_mode
+        )
 
     # === Phase 3: Extract TFBS/ATAC entropy data for PON building ===
     if pon_mode:

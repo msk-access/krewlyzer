@@ -883,17 +883,18 @@ pub fn aggregate_by_gene(
     
     let n_regions = gene_regions.len();
     
-    // 2. Load GC correction factors — Parquet-first auto-detection via load()
+    // 2. Load GC correction factors from exactly the table the caller resolved
     let factors = if let Some(ref path) = gc_factors_path {
-        // CorrectionFactors::load() tries .parquet first, then TSV/legacy CSV
         match CorrectionFactors::load(path) {
             Ok(f) => {
                 log::info!("GeneFSC: Loaded {} GC correction factor bins from {:?}", f.data.len(), path);
                 Some(Arc::new(f))
             }
             Err(e) => {
-                log::warn!("GeneFSC: Failed to load GC factors from {:?}: {}", path, e);
-                None
+                // The caller asked for correction with this table; carrying on uncorrected is how
+                // gene FSC ran without correction while logging that it was corrected.
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "GeneFSC: cannot load GC correction factors from {:?}: {:#}", path, e)));
             }
         }
     } else {

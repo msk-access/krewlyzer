@@ -132,22 +132,19 @@ def compute_mds(em_counts: Dict[str, int], kmer: int = 4) -> float:
     Returns:
         MDS value normalized to [0.0, 1.0]
     """
-    bases = ["A", "C", "T", "G"]
-    valid_kmers = set("".join(i) for i in itertools.product(bases, repeat=kmer))
+    # Every ACGT k-mer in one fixed order, so the sum below runs in the same order every run. This
+    # was a set: a set of strings iterates in the per-process hash-seed order, and identical counts
+    # gave MDS values differing in the last digit from one run to the next.
+    valid_kmers = ["".join(i) for i in itertools.product("ACGT", repeat=kmer)]
+    counts = np.array([em_counts.get(k, 0) for k in valid_kmers], dtype=float)
 
-    # Filter to valid ACGT k-mers only
-    all_kmers = {k: 0 for k in valid_kmers}
-    for k, v in em_counts.items():
-        if k in valid_kmers:
-            all_kmers[k] = v
-
-    total = sum(all_kmers.values())
-    n_kmers = len(all_kmers)  # 256 for k=4
+    total = counts.sum()
+    n_kmers = len(valid_kmers)  # 256 for k=4
 
     if total == 0:
         return 0.0
 
-    freq = np.array(list(all_kmers.values())) / total
+    freq = counts / total
 
     # MDS = -sum(p * log2(p)) / log2(N) where N = 4^k
     entropy = -np.sum(freq * np.log2(freq + 1e-12))

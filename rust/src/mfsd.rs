@@ -33,6 +33,7 @@ use std::time::Duration;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use log::{info, warn, debug};
+use crate::contigs::ContigNames;
 
 // ============================================================================
 // Module-level constants
@@ -304,26 +305,18 @@ fn parse_marianas_family(qname: &str) -> Option<u32> {
 }
 
 
-/// Fetch sequence from reference FASTA for a genomic region
+/// GC content of a region, fetched under the reference's own contig name (resolved by contigs.rs).
+///
+/// The name must come from the reference's index: rust-htslib's `fetch_seq` does not return `Err`
+/// for a name the FASTA lacks, it returns a `Vec` over a null pointer. The try-both-spellings loop
+/// this replaced crashed on its first miss instead of falling through.
 fn fetch_reference_gc(
     fasta: &faidx::Reader,
-    chrom: &str,
+    fasta_name: &str,
     start: u64,
     end: u64,
 ) -> Option<f64> {
-    // Try with and without chr prefix
-    let chroms_to_try = if chrom.starts_with("chr") {
-        vec![chrom.to_string(), chrom.trim_start_matches("chr").to_string()]
-    } else {
-        vec![chrom.to_string(), format!("chr{}", chrom)]
-    };
-    
-    for chr_name in chroms_to_try {
-        if let Ok(seq) = fasta.fetch_seq(&chr_name, start as usize, end as usize) {
-            return Some(compute_gc_content(&seq));
-        }
-    }
-    None
+    fasta.fetch_seq(fasta_name, start as usize, end as usize).ok().map(|seq| compute_gc_content(&seq))
 }
 
 // ============================================================================
@@ -1096,9 +1089,7 @@ pub fn calculate_mfsd(
     use crate::gc_correction::CorrectionFactors;
     use std::sync::Arc;
     
-    // Load correction factors if provided.
-    // Uses CorrectionFactors::load() for Parquet-first auto-detection:
-    // tries {path}.parquet first, falls back to TSV/legacy CSV if not found.
+    // Load correction factors if provided: exactly the table the caller resolved.
     let factors: Option<Arc<CorrectionFactors>> = if let Some(ref factors_path) = correction_factors_path {
         match CorrectionFactors::load(factors_path) {
             Ok(f) => {
@@ -1106,8 +1097,8 @@ pub fn calculate_mfsd(
                 Some(Arc::new(f))
             },
             Err(e) => {
-                warn!("mfsd: failed to load correction factors from {:?}: {}. Proceeding without GC correction.", factors_path, e);
-                None
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "mfsd: cannot load GC correction factors from {:?}: {:#}", factors_path, e)));
             }
         }
     } else {
@@ -1115,20 +1106,32 @@ pub fn calculate_mfsd(
         None
     };
     
-    // Load reference FASTA if provided (for GC content computation)
-    let _fasta: Option<faidx::Reader> = if let Some(ref ref_path) = reference_path {
-        match faidx::Reader::from_path(ref_path) {
-            Ok(f) => {
-                info!("Loaded reference FASTA: {:?}", ref_path);
-                Some(f)
-            },
-            Err(e) => {
-                warn!("Failed to load reference FASTA: {}. GC correction disabled.", e);
-                None
-            }
+    // Contigs, through the one rule in contigs.rs: a variant's contig to the BAM's spelling, and the
+    // BAM's to the reference's for GC. Only GC correction reads the reference, so it is resolved
+    // only with factors; a reference that cannot serve them is an error, as a factor table that
+    // cannot load is.
+    let bam_contigs: Vec<(String, u64)> = {
+        let bam = bam::IndexedReader::from_path(&bam_path).map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(
+            format!("mfsd: cannot open BAM {:?}: {}", bam_path, e)))?;
+        let header = bam.header();
+        header.target_names().iter().enumerate()
+            .map(|(tid, name)| (String::from_utf8_lossy(name).to_string(), header.target_len(tid as u32).unwrap_or(0)))
+            .collect()
+    };
+    let bam_names = ContigNames::new(bam_contigs.iter().cloned());
+    // The reference's name per BAM tid; None for a contig it lacks (its fragments get no GC weight).
+    let fasta_names: Option<Vec<Option<String>>> = match (&factors, &reference_path) {
+        (None, _) => None,
+        (Some(_), None) => return Err(pyo3::exceptions::PyValueError::new_err(
+            "mfsd: GC correction factors were given without a reference FASTA, so no fragment's GC can be computed")),
+        (Some(_), Some(ref_path)) => {
+            let fa = faidx::Reader::from_path(ref_path).map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(
+                format!("mfsd: cannot open reference FASTA {:?}: {}", ref_path, e)))?;
+            info!("Loaded reference FASTA: {:?}", ref_path);
+            Some(ContigNames::from_faidx(&fa).resolve_header(&bam_contigs)
+                .map_err(|e| pyo3::exceptions::PyValueError::new_err(
+                    format!("mfsd: {:?} against reference {:?}: {}", bam_path, ref_path, e)))?)
         }
-    } else {
-        None
     };
     // 1. Parse Variants
     let mut variants = Vec::new();
@@ -1314,24 +1317,15 @@ pub fn calculate_mfsd(
                 None
             };
 
-            // Get chromosome tid
-            let tid = match bam.header().tid(var.chrom.as_bytes()) {
+            // The variant's contig in the BAM's spelling (contigs.rs: exact, then either `chr`).
+            let tid = match bam_names.resolve(&var.chrom, 0).name().and_then(|n| bam.header().tid(n.as_bytes())) {
                 Some(t) => t,
                 None => {
-                    let alt_name = if var.chrom.starts_with("chr") {
-                        var.chrom.trim_start_matches("chr").to_string()
-                    } else {
-                        format!("chr{}", var.chrom)
-                    };
-                    match bam.header().tid(alt_name.as_bytes()) {
-                        Some(t) => t,
-                        None => {
-                            warn!("Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
-                            return (var.clone(), result);
-                        }
-                    }
+                    warn!("Chromosome {} not found in BAM for variant at pos {}", var.chrom, var.pos + 1);
+                    return (var.clone(), result);
                 }
             };
+            let fasta_name = fasta_names.as_ref().and_then(|names| names[tid as usize].as_deref());
             
             // Fetch reads overlapping the variant anchor position only.
             // For indels, any read carrying the variant in its CIGAR must
@@ -1443,7 +1437,8 @@ pub fn calculate_mfsd(
                     // GC correction requires a valid FASTA reader — if the reference
                     // couldn't be opened, skip correction entirely (weight=1.0) rather
                     // than applying a factor based on an arbitrary GC percentage.
-                    if let Some(ref fasta) = thread_fasta {
+                    // Also no correction for a contig the reference lacks (fasta_name None).
+                    if let (Some(fasta), Some(fasta_name)) = (&thread_fasta, fasta_name) {
                         // Get fragment coordinates for GC lookup
                         let frag_start = record.pos() as u64;
                         let frag_end = if record.insert_size() > 0 {
@@ -1452,7 +1447,7 @@ pub fn calculate_mfsd(
                             frag_start + record.seq().len() as u64
                         };
 
-                        match fetch_reference_gc(fasta, &var.chrom, frag_start, frag_end) {
+                        match fetch_reference_gc(fasta, fasta_name, frag_start, frag_end) {
                             Some(gc) => {
                                 let gc_pct = (gc * 100.0).round() as u8;
                                 factors_arc.get_factor(frag_len as u64, gc_pct)

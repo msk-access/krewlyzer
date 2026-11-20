@@ -8,7 +8,7 @@ Uses Rust backend for accelerated extraction.
 
 Output Files:
     - {sample}.bed.gz: Fragment coordinates (chrom, start, end, strand, gc%, gc_weight)
-    - {sample}.correction_factors.tsv: LOESS-based GC correction factors
+    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: LOESS-based GC correction factors
     - {sample}.metadata.json: Processing statistics
 
 GC Correction: Computes per-fragment GC weights for all downstream tools.
@@ -41,6 +41,7 @@ from .core.bam_utils import check_bam_compatibility
 
 # Asset resolution for --assay auto-loading
 from .core.asset_resolution import resolve_target_regions
+from .core.gc_assets import factor_table_base, factor_table_path
 
 
 def extract(
@@ -145,7 +146,7 @@ def extract(
     - {sample}.bed.gz: Fragment coordinates with GC content
     - {sample}.bed.gz.tbi: Tabix index
     - {sample}.metadata.json: Fragment count and metadata
-    - {sample}.correction_factors.tsv: GC correction factors (if --gc-correct)
+    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors (if --gc-correct)
     """
     from .assets import AssetManager
 
@@ -236,7 +237,6 @@ def extract(
     output / f"{sample_name}.bed"  # Temp uncompressed
     output / f"{sample_name}.bed.gz"
     output / f"{sample_name}.metadata.json"
-    output / f"{sample_name}.correction_factors.tsv"
 
     try:
         # Pre-check BAM compatibility with current filters
@@ -325,9 +325,7 @@ def extract(
             try:
                 gc_ref = assets.resolve("gc_reference")
                 valid_regions = assets.resolve("valid_regions")
-                factors_ontarget = (
-                    output / f"{sample_name}.correction_factors.ontarget.tsv"
-                )
+                factors_ontarget = factor_table_path(output, sample_name, "on_target")
                 logger.info(
                     f"Computing ON-TARGET GC correction factors from {len(result.gc_observations_ontarget)} observation bins..."
                 )
@@ -336,6 +334,8 @@ def extract(
                     str(gc_ref),
                     str(valid_regions),
                     str(factors_ontarget),
+                    output_format=output_format,
+                    compress=compress,
                 )
                 logger.info(
                     f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}"
@@ -347,7 +347,7 @@ def extract(
         logger.info(f"Metadata: {output / f'{sample_name}.metadata.json'}")
         if gc_correct:
             logger.info(
-                f"Correction factors: {output / f'{sample_name}.correction_factors.tsv'}"
+                f"Correction factors: {factor_table_base(output, sample_name, 'off_target')}.*"
             )
 
     except Exception as e:

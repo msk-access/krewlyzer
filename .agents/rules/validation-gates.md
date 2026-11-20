@@ -39,6 +39,36 @@ difference. Rebuild before believing either result.
 | `validate-output` | A single sample. Degeneracy is cross-sample by nature; use `validate-cohort` |
 | `check_phi_guard.sh` | Identifiers inside `.gitleaks.toml` itself — gitleaks skips its own config |
 
+## What a review has to ask
+
+Every gate above passed on #89, and so did our own reviews, each of which read one commit's diff.
+The automated PR review read the whole branch and found four real defects, all four in the
+branch's **first** commit. Two rules follow:
+
+- **Review the whole branch,** `git merge-base origin/develop HEAD`..`HEAD`, not the newest
+  commit. Give the reviewer the code and these questions, not your conclusions or an "out of
+  scope" list: those point it where you already looked.
+- **The PR's automated review is part of the gate.** Read it before calling the PR ready and say
+  what it found.
+
+Then ask these five, every time. Each is a defect from #89 that every gate passed:
+
+1. **Leftover state.** Run it again into a directory an earlier run used: what does it find
+   there, and will it read it? An empty GC fit wrote no factor table, so the previous run's table
+   was used, and the metadata recorded the correction as applied.
+2. **Sibling paths.** Where else is the same question answered: in-process against
+   `--from-outputs`, run-all against a single tool, Rust against Python? Do they agree? The
+   in-process PON build refused a panel donor without on-target factors; `--from-outputs`
+   accepted it.
+3. **Outcome or intent.** Is every *found*, *applied* or *succeeded* flag set from what happened?
+   A factor table counted as found because the file existed, even when it could not be read.
+4. **Where errors land.** Follow each new error up to whatever catches it. If that code logs and
+   carries on, the error is silent again. The strict loader raised; gene FSC, panel WPS, TFBS and
+   ATAC each caught it and continued.
+5. **Claims against code.** For every *strict*, *validates* or *always* in a comment, docstring or
+   CHANGELOG entry, does the code do all of it? The "strict" loaders never required
+   `length_bin_max`.
+
 ## A test that passes proves nothing until it has failed
 
 Every significant defect in this repo was *present, plausible, and passing*.

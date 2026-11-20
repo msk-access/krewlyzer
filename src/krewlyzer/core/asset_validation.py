@@ -98,10 +98,17 @@ SCHEMA_SPECS: Dict[FileSchema, Dict[str, Any]] = {
         "doc_url": "https://msk-access.github.io/krewlyzer/advanced/input-formats/#region-bed",
     },
     FileSchema.GC_FACTORS_TSV: {
-        "min_cols": 3,
-        "description": "GC correction factors TSV",
-        "columns": ["length_bin", "gc_pct", "factor"],
-        "example": "Short\t40\t1.05\nShort\t41\t1.03",
+        "min_cols": 6,
+        "description": "GC correction factor table (.parquet, .tsv.gz or .tsv)",
+        "columns": [
+            "length_bin_min",
+            "length_bin_max",
+            "gc_percent",
+            "observed",
+            "expected",
+            "correction_factor",
+        ],
+        "example": "length_bin_min\tlength_bin_max\tgc_percent\tobserved\texpected\tcorrection_factor\n170\t175\t50\t100\t90\t1.25",
         "doc_url": "https://msk-access.github.io/krewlyzer/advanced/input-formats/#gc-factors-tsv",
         "has_header": True,
     },
@@ -148,6 +155,15 @@ def validate_file(path: Path, schema: FileSchema, max_lines: int = 10) -> int:
         raise FileNotFoundError(f"{spec['description']} not found: {path}")
 
     logger.info(f"Validating {spec['description']}: {path}")
+
+    if schema == FileSchema.GC_FACTORS_TSV:
+        # Ask the loader that will read it: any format, columns by name, strict.
+        from krewlyzer import _core
+
+        try:
+            return int(_core.gc.validate_factor_table(str(path)))
+        except ValueError as e:
+            _raise_validation_error(path, schema, 0, str(e))
 
     # Determine reader based on file extension
     open_fn = gzip.open if str(path).endswith(".gz") else open
@@ -278,25 +294,6 @@ def _validate_columns(fields: list, schema: FileSchema, line_num: int, path: Pat
                 schema,
                 line_num,
                 f"Strand (column 6) must be '+', '-', or '.', got '{fields[5]}'",
-            )
-
-    elif schema == FileSchema.GC_FACTORS_TSV:
-        # Column 2: gc_pct must be 0-100
-        try:
-            gc_pct = int(fields[1])
-            if not 0 <= gc_pct <= 100:
-                _raise_validation_error(
-                    path,
-                    schema,
-                    line_num,
-                    f"GC percent (column 2) must be 0-100, got {gc_pct}",
-                )
-        except ValueError:
-            _raise_validation_error(
-                path,
-                schema,
-                line_num,
-                f"GC percent (column 2) must be numeric, got '{fields[1]}'",
             )
 
         # Column 3: factor must be positive number
