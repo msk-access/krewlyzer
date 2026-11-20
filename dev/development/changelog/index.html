@@ -3263,8 +3263,9 @@
   and found four real defects, all in its first commit. <code>.agents/rules/validation-gates.md</code> now
   says to review <code>merge-base..HEAD</code> rather than the newest commit, to treat the PR's automated
   review as part of the gate, and to ask every time about leftover state, sibling paths, outcome
-  against intent, where errors land, and claims against code. <code>AGENTS.md</code> points to it before a
-  push.</p>
+  against intent, where errors land, and claims against code. <code>AGENTS.md</code> points to it at two
+  moments: before pushing (the whole-branch review) and before calling a PR ready (the automated
+  review, which a branch only has once it is pushed).</p>
 </li>
 <li>
 <p><strong>Region-entropy tables are written through a buffer, removing the slowest <code>run-all</code> stage.</strong>
