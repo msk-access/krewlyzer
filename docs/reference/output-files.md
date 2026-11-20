@@ -1180,7 +1180,7 @@ mean.
 | Column | Type | Description |
 |--------|------|-------------|
 | `krewlyzer_version` | str | The build that wrote this sample |
-| `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon`, for no PON, and for a PON the version guard refused — all three are legitimately unscored, and this is what distinguishes them from scoring that failed |
+| `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon` and for no PON, both legitimately unscored. A PON that cannot be used (unreadable, refused by the version guard, or a `--pon-model` path that does not exist) stops the run, so it never appears here. Written by run-all; a single tool fills it in when it is absent and may otherwise only raise it, never lower it |
 | `pon_model` | str | The PON, by **basename** — never the full path |
 | `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |

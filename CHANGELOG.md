@@ -122,6 +122,29 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **A PON you asked for that cannot be used stops the run.** An unreadable PON, one the version
+  guard refused, and a `--pon-model` path that does not exist all used to end in a warning and an
+  **unscored** run, recorded as `pon_applied=False` -- the same as a deliberate `--skip-pon` -- so
+  `validate-output` stopped requiring every z-score column. `load_pon_model` now raises
+  `UnusablePonError` and `resolve_pon_model` raises on a missing explicit path, in run-all and
+  every single tool alike, and **before any work**, so a refused PON no longer leaves unscored
+  tables behind. `region-entropy` never ran the version guard at all (Rust read the PON path
+  directly), and `region-mds` loaded its PON inside a `try` that would have swallowed the error.
+  A bundled PON that is not available for an assay is still a normal unscored run; one that is
+  present but unreadable (for example an un-pulled git-LFS pointer) now stops the run. In
+  Nextflow tool-level mode, a `--pon_model` path the task cannot see now fails the task instead
+  of giving an unscored result.
+- **A single tool keeps the sample's record.** `fsc`, `fsd`, `fsr`, `ocf` and `wps` rewrote
+  `pon_applied` and `gc_factors_*` for the whole sample, so `krewlyzer fsc --skip-pon` into a
+  run-all directory told `validate-output` to stop requiring every other table's z columns. Only
+  run-all and the PON build now rewrite the record. A single tool fills it in where none exists
+  (after `extract`) and otherwise may only raise `pon_applied`, so that flag does not depend on the
+  order single tools ran in, and a table one of them left unscored is flagged rather than hidden.
+  A single tool also refuses, before any work, to score a sample against a PON other than the one
+  its record names: tables from two PONs under one record would otherwise go unnoticed.
+- **The metadata stamp reads the file this run wrote.** It found `.tsv` first and then read
+  Parquet first, so a TSV run beside an earlier run's `.parquet` wrote the earlier run's row back.
+
 - **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
   Python `set` of k-mers, which iterates in the per-process string-hash order, so the sum ran in
   a different order each run: identical end-motif counts gave MDS differing in the last digit,

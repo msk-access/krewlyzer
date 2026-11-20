@@ -155,6 +155,11 @@ def region_mds(
         "--compress",
         help="Gzip-compress TSV output (only applies when format is tsv or both)",
     ),
+    owns_sample_record: bool = typer.Option(
+        False,
+        hidden=True,
+        help="Set by run-all, which owns the sample's record: skip the second-PON check.",
+    ),
 ):
     """
     Calculate per-region Motif Diversity Score (MDS).
@@ -256,6 +261,21 @@ def region_mds(
     else:
         logger.debug(f"Using provided sample name: {sample_name}")
 
+    # Before any work: an unusable PON, or one other than the PON this sample's record names,
+    # stops the run before a table is written.
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    try:
+        requested_pon = load_requested_pon(
+            resolved_pon_path,
+            record_dir=None if owns_sample_record else output,
+            sample=sample_name,
+            output_format=output_format,
+            compress=compress,
+        )
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+
     output_exon_base = output / f"{sample_name}.MDS.exon"
     output_gene_base = output / f"{sample_name}.MDS.gene"
     # Rust expects .tsv paths for its initial write; Parquet added by Python after.
@@ -319,20 +339,11 @@ def region_mds(
 
     # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
+        # Loaded through the guarded loader before the Rust pass (version floor included).
+        logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
+        pon = requested_pon
         try:
-            # The guarded loader, as in run-all: it carries the version floor,
-            # and `PonModel.load` does not.
-            from krewlyzer.core.pon_integration import load_pon_model
-
-            logger.info(f"Applying PON z-score normalization: {resolved_pon_path}")
-            pon = load_pon_model(resolved_pon_path)
-
-            if pon is None:
-                logger.warning(
-                    "No usable PON: per-gene MDS keeps its raw values and gets "
-                    "no z-scores"
-                )
-            elif pon.region_mds is None:
+            if pon.region_mds is None:
                 logger.warning(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )

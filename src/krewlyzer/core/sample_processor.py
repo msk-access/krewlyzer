@@ -1067,6 +1067,7 @@ def process_sample(
         bed_path=outputs.bed_path,
         output_dir=output_dir,
         sample_name=sample_name,
+        owns_sample_record=True,  # the PON build writes the whole sample
         genome=params.genome,
         enable_fsc=enable_fsc,
         enable_fsr=enable_fsr,

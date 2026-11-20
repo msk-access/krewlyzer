@@ -222,12 +222,13 @@ def resolve_pon_model(
         if explicit_path.exists():
             log.debug(f"PON resolution: Using explicit path: {explicit_path}")
             return explicit_path, "explicit"
-        else:
-            # Path specified but doesn't exist
-            log.warning(
-                f"PON resolution: Explicit path does not exist: {explicit_path}"
-            )
-            return explicit_path, "explicit"
+        # An explicit PON that is not there is an error: every caller used to skip it on
+        # `.exists()`, so the run finished unscored and looked like a deliberate --skip-pon.
+        # ValueError, like the other bad --pon-model arguments: every tool prints it as an error.
+        raise ValueError(
+            f"--pon-model {explicit_path.name}: no such file ({explicit_path}). "
+            "Pass an existing PON, or --skip-pon to run without one."
+        )
 
     # ==========================================================================
     # PRIORITY 2: --skip-pon flag

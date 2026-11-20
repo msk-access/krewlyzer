@@ -175,6 +175,18 @@ def region_entropy(
             variant=pon_variant,
             log=logger,
         )
+        # Before any work: an unusable PON, or one other than the PON this sample's record
+        # names, stops the run before a table is written. Rust reads the PON path itself and
+        # never checks the version, so without this a refused model still z-scored TFBS/ATAC.
+        from .core.pon_integration import load_requested_pon
+
+        load_requested_pon(
+            resolved_pon_path,
+            record_dir=output,
+            sample=sample_name,
+            output_format=output_format,
+            compress=compress,
+        )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)

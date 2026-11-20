@@ -172,6 +172,17 @@ def motif(
             variant=pon_variant,
             log=logger,
         )
+        # Before any work: an unusable PON, or one other than the PON this sample's record
+        # names, stops the run before a table is written.
+        from .core.pon_integration import load_requested_pon
+
+        requested_pon = load_requested_pon(
+            resolved_pon_path,
+            record_dir=output,
+            sample=sample_name,
+            output_format=output_format,
+            compress=compress,
+        )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
@@ -276,13 +287,7 @@ def motif(
             # directly here meant `krewlyzer motif` would happily score
             # against a pre-0.9.0 model that run-all refuses -- invariant #6,
             # single-tool and run-all behaving differently.
-            from .core.pon_integration import load_pon_model
-
-            pon = load_pon_model(resolved_pon_path)
-            if pon is None:
-                logger.warning(
-                    "No usable PON: MDS keeps its raw value and gets no z-score"
-                )
+            pon = requested_pon  # loaded, and checked, before the extraction
 
         # Write motif outputs using shared function
         write_motif_outputs(

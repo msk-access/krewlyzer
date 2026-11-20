@@ -6,7 +6,6 @@ Tests PON model loading, application, and z-score calculations.
 
 import pytest
 import pandas as pd
-from pathlib import Path
 
 
 @pytest.fixture
@@ -125,13 +124,14 @@ def test_pon_integration_load_model(tmp_path, sample_pon_parquet):
 
 
 @pytest.mark.integration
-def test_pon_missing_file():
-    """Test PON loading handles missing file gracefully."""
-    from krewlyzer.core.pon_integration import load_pon_model
+def test_an_unreadable_pon_stops_the_run(tmp_path):
+    """A PON the user asked for and cannot be read is an error, not an unscored run."""
+    from krewlyzer.core.pon_integration import UnusablePonError, load_pon_model
 
-    result = load_pon_model(Path("/nonexistent/path/pon.parquet"))
-
-    assert result is None
+    junk = tmp_path / "pon.parquet"
+    junk.write_bytes(b"not a parquet file")
+    with pytest.raises(UnusablePonError, match="pon.parquet"):
+        load_pon_model(junk)
 
 
 @pytest.mark.unit

@@ -455,44 +455,39 @@ def run_all(
     if resolved_pon_path and resolved_pon_path.exists():
         from .core.pon_integration import load_pon_model
 
-        pon = load_pon_model(resolved_pon_path)
-        if pon:
-            logger.debug(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
-            # Log component availability
-            components = []
-            if pon.gc_bias:
-                components.append("GC-bias")
-            if pon.fsd_baseline:
-                components.append("FSD")
-            if pon.wps_baseline:
-                components.append("WPS")
-            if pon.ocf_baseline:
-                components.append("OCF")
-            if pon.mds_baseline:
-                components.append("MDS")
-            logger.debug(
-                f"  Components: {', '.join(components) if components else 'none'}"
+        pon = load_pon_model(resolved_pon_path)  # raises if unusable
+        logger.debug(f"PON model loaded: {pon.assay} (n={pon.n_samples})")
+        # Log component availability
+        components = []
+        if pon.gc_bias:
+            components.append("GC-bias")
+        if pon.fsd_baseline:
+            components.append("FSD")
+        if pon.wps_baseline:
+            components.append("WPS")
+        if pon.ocf_baseline:
+            components.append("OCF")
+        if pon.mds_baseline:
+            components.append("MDS")
+        logger.debug(f"  Components: {', '.join(components) if components else 'none'}")
+
+        # Panel compatibility check
+        if hasattr(pon, "check_panel_compatibility"):
+            pon.check_panel_compatibility(is_panel_mode)
+
+        # PON/sample panel mode validation
+        from .pon.validation import validate_panel_config, print_validation_warnings
+
+        validation = validate_panel_config(
+            pon_model=pon, target_regions=resolved_target_path, assay=resolved_assay
+        )
+        if validation.warnings or validation.errors:
+            print_validation_warnings(validation, console)
+        if not validation.valid:
+            logger.error(
+                "PON validation failed. Use compatible PON or correct assay flag."
             )
-
-            # Panel compatibility check
-            if hasattr(pon, "check_panel_compatibility"):
-                pon.check_panel_compatibility(is_panel_mode)
-
-            # PON/sample panel mode validation
-            from .pon.validation import validate_panel_config, print_validation_warnings
-
-            validation = validate_panel_config(
-                pon_model=pon, target_regions=resolved_target_path, assay=resolved_assay
-            )
-            if validation.warnings or validation.errors:
-                print_validation_warnings(validation, console)
-            if not validation.valid:
-                logger.error(
-                    "PON validation failed. Use compatible PON or correct assay flag."
-                )
-                raise typer.Exit(1)
-        else:
-            logger.warning(f"Failed to load PON model: {resolved_pon_path}")
+            raise typer.Exit(1)
 
     # Window settings for FSC/FSR
     # fsc_windows: bin size in bp — must match the bundled bin BED (100kb)
@@ -750,6 +745,7 @@ def run_all(
                 bed_path=bedgz_file,
                 output_dir=output,
                 sample_name=sample,
+                owns_sample_record=True,  # run-all writes the whole sample
                 genome=genome,
                 enable_fsc=True,
                 enable_fsr=True,
@@ -956,6 +952,7 @@ def run_all(
             if gene_bed and gene_bed.exists():
                 logger.info(f"Running region-MDS for assay '{resolved_assay}'...")
                 n_regions, n_genes = _region_mds(
+                    owns_sample_record=True,  # run-all writes the whole sample's record
                     bam_input=bam_input,
                     reference=reference,
                     output=output,
