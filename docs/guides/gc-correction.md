@@ -90,7 +90,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
-| **Region Entropy** | `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region Entropy** | `--gc-correct`, `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
 | **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
@@ -101,7 +101,21 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 When `--target-regions` is provided to `extract`:
 - GC model is built from **off-target** fragments only
 - Avoids capture bias contamination
-- Generates both `.correction_factors.tsv` (off-target) and `.correction_factors.ontarget.tsv` (on-target)
+- Generates both `.correction_factors.*` (off-target) and `.correction_factors.ontarget.*` (on-target), in the run's `--output-format`
+
+**Which table a feature uses.** Every consumer finds its table through one resolver
+(`core.gc_assets.resolve_gc_factors`): beside the BED first, then in the output directory;
+Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
+factors and GC correction does not depend on the output format. Each sample's metadata records
+the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
+
+!!! warning "0.9.x cohorts"
+    Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
+    `.tsv` factor table. Runs with `--output-format parquet`, or with `--compress` (the Nextflow
+    default), write none, so those features ran **without GC correction**, while PON donors
+    (built with TSV forced) were corrected. Gene FSC was uncorrected for samples and donors
+    alike. Re-run those cohorts; `build-pon --from-outputs` refuses sample directories from
+    before the fix.
 
 ---
 

@@ -16,6 +16,168 @@ if TYPE_CHECKING:
 logger = logging.getLogger("krewlyzer.core.gc_assets")
 
 
+#: Share of fragments on contigs absent from the FASTA above which extract fails: a naming mismatch
+#: (`chr1` against `1`) puts ~100% there, while a few decoy or alt contigs the FASTA lacks do not.
+CONTIG_MISMATCH_FAIL_SHARE = 0.5
+#: Share above which it is warned about and recorded, but the run continues.
+CONTIG_MISMATCH_WARN_SHARE = 0.01
+
+
+def check_reference_contigs(n_missing: int, n_total: int) -> float:
+    """Apply the contig-mismatch policy to extract's counts; return the missing share.
+
+    Fragments on a contig the FASTA lacks get GC 0.0, so no length bin can be fitted and GC
+    correction silently does nothing. Raises when the share points at a naming mismatch.
+    """
+    share = n_missing / n_total if n_total else 0.0
+    if share > CONTIG_MISMATCH_FAIL_SHARE:
+        raise RuntimeError(
+            f"{share:.0%} of fragments are on contigs missing from the reference FASTA. "
+            "The BAM and FASTA probably name contigs differently (`chr1` against `1`); "
+            "use the reference the BAM was aligned to."
+        )
+    if share > CONTIG_MISMATCH_WARN_SHARE:
+        logger.warning(
+            f"{share:.1%} of fragments are on contigs missing from the reference; "
+            "their GC is unresolved and they enter no GC model"
+        )
+    return share
+
+
+#: The populations a GC factor table is fitted on. Panel runs fit both.
+POPULATIONS = ("off_target", "on_target")
+#: Search order for an existing table: full-precision Parquet first, then compressed TSV, then TSV.
+FACTOR_KINDS = (("parquet", ".parquet"), ("tsv.gz", ".tsv.gz"), ("tsv", ".tsv"))
+
+
+def factor_table_base(directory: Path, sample: str, population: str) -> Path:
+    """`{directory}/{sample}.correction_factors[.ontarget]`, without an extension.
+
+    The only place a factor-table filename is spelled: writers add the extension their
+    `--output-format`/`--compress` call for, and readers go through `resolve_gc_factors`.
+    """
+    if population not in POPULATIONS:
+        raise ValueError(
+            f"unknown GC factor population {population!r}; expected one of {POPULATIONS}"
+        )
+    suffix = ".correction_factors" + ("" if population == "off_target" else ".ontarget")
+    return Path(directory) / f"{sample}{suffix}"
+
+
+def factor_table_path(
+    directory: Path, sample: str, population: str, ext: str = ".tsv"
+) -> Path:
+    """Path handed to a factor *writer*. The Rust writer replaces the extension with the one the
+    run's `--output-format`/`--compress` call for, so `.tsv` here is a base, not a format choice.
+    """
+    base = factor_table_base(directory, sample, population)
+    return base.with_name(base.name + ext)
+
+
+@dataclass(frozen=True)
+class GcFactorsChoice:
+    """Which GC factor table a run uses for one population, or why there is none."""
+
+    path: Optional[Path]
+    kind: str  # "parquet" | "tsv.gz" | "tsv" | "recomputed" | "none"
+    reason: str = (
+        ""  # why there is no table; never a filename (filenames carry the sample ID)
+    )
+    searched: tuple = ()  # the names looked for, for log messages only
+
+    @property
+    def found(self) -> bool:
+        return self.path is not None
+
+    def record(self) -> str:
+        """The metadata value: the kind, never a filename (filenames carry the sample ID)."""
+        return self.kind if self.found else f"none:{self.reason}"
+
+
+def resolve_gc_factors(
+    bed_path: Path, output_dir: Optional[Path], sample: str, population: str
+) -> GcFactorsChoice:
+    """Find the GC factor table for `population`, in any format run-all writes.
+
+    Search order: beside the BED, under the BED's stem (the table extract wrote with it), then
+    `output_dir` under the sample name. Within each, Parquet, then `.tsv.gz`, then `.tsv`.
+    Pass `output_dir=None` to search beside the BED only.
+
+    Every reader goes through this. Before it existed, three call sites looked only for a plain
+    `.tsv`, which production (`--output-format both --compress`) never writes, and silently ran
+    uncorrected.
+    """
+    bed_path = Path(bed_path)
+    places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]
+    if output_dir is not None:
+        places.append((Path(output_dir), sample))
+    searched = []
+    for directory, stem in places:
+        base = factor_table_base(directory, stem, population)
+        for kind, ext in FACTOR_KINDS:
+            candidate = base.with_name(base.name + ext)
+            if candidate.exists():
+                return GcFactorsChoice(candidate, kind)
+        searched.append(base.name + ".{parquet,tsv.gz,tsv}")
+    where = (
+        "beside the BED or in the output directory"
+        if output_dir is not None
+        else "beside the BED"
+    )
+    return GcFactorsChoice(
+        None, "none", f"not found {where}", tuple(dict.fromkeys(searched))
+    )
+
+
+def resolve_feature_gc_tables(
+    bed_path: Path,
+    output_dir: Path,
+    sample: str,
+    gc_correct: bool,
+    panel_mode: bool,
+    refitted: bool,
+) -> "tuple[GcFactorsChoice, GcFactorsChoice]":
+    """The (off-target, on-target) factor tables run_features' Python-side consumers use.
+
+    `refitted` is True when no table sat beside the BED, so the Rust pass refitted factors from
+    the BED itself (Phase 1, a different tally from extract's); that choice is recorded as
+    `recomputed` and warned about, because its values differ from run-all's.
+    """
+    if not gc_correct:
+        off = on = GcFactorsChoice(None, "none", "gc correction disabled")
+        return off, on
+    off = resolve_gc_factors(bed_path, output_dir, sample, "off_target")
+    on = (
+        resolve_gc_factors(bed_path, output_dir, sample, "on_target")
+        if panel_mode
+        else GcFactorsChoice(None, "none", "not panel mode")
+    )
+    if off.found and refitted:
+        off = GcFactorsChoice(off.path, "recomputed")
+        logger.warning(
+            "GC factors were refitted from this BED because extract's table was not beside it; "
+            "values differ from run-all. Run the tool on the extract output directory to match."
+        )
+    return off, on
+
+
+def require_gc_for_pon(choices: dict, panel_mode: bool) -> None:
+    """Refuse to build a PON baseline from a donor whose GC factors were not found.
+
+    The donor's features would enter the baseline uncorrected and corrected samples would be
+    scored against them -- the mismatch item 0 removes. A missing donor is better than that.
+    """
+    needed = ("off_target", "on_target") if panel_mode else ("off_target",)
+    for population in needed:
+        choice = choices.get(population)
+        if choice is None or not choice.found:
+            reason = choice.reason if choice is not None else "not resolved"
+            raise RuntimeError(
+                f"PON donor has no {population.replace('_', '-')} GC factor table ({reason}); "
+                "refusing to build a baseline from uncorrected features"
+            )
+
+
 @dataclass
 class GcAssets:
     """Resolved GC correction assets."""
@@ -57,27 +219,20 @@ def resolve_gc_assets(
     if not gc_correct:
         return result
 
-    # First, check for pre-computed correction factors adjacent to input.
-    # Try Parquet first (written when --output-format=parquet|both), then
-    # gzipped TSV (--compress), then plain TSV.
-    sample_stem = bedgz_input.stem.replace(".bed", "")
-    for ext in (
-        ".correction_factors.parquet",
-        ".correction_factors.tsv.gz",
-        ".correction_factors.tsv",
-    ):
-        potential_factors = bedgz_input.parent / f"{sample_stem}{ext}"
-        if potential_factors.exists():
-            result.factors_input = potential_factors
-            result.gc_correct_enabled = True
-            logger.info(f"Using pre-computed GC factors: {potential_factors.name}")
-            return result
+    # Pre-computed factors beside the input BED (extract writes them there). Only beside the BED:
+    # a table an earlier single-tool run left in output_dir must not be silently reused.
+    pre = resolve_gc_factors(bedgz_input, None, sample_name, "off_target")
+    if pre.path is not None:
+        result.factors_input = pre.path
+        result.gc_correct_enabled = True
+        logger.info(f"Using pre-computed GC factors: {pre.path.name}")
+        return result
 
     # Resolve bundled GC assets
     try:
         result.gc_ref = assets.resolve("gc_reference")
         result.valid_regions = assets.resolve("valid_regions")
-        result.factors_out = output_dir / f"{sample_name}.correction_factors.tsv"
+        result.factors_out = factor_table_path(output_dir, sample_name, "off_target")
         result.gc_correct_enabled = True
         logger.info(f"GC correction enabled ({genome})")
     except FileNotFoundError as e:

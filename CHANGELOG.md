@@ -114,6 +114,43 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **GC correction no longer depends on the output format, and fails loudly.** Panel WPS, every
+  TFBS and ATAC table, and gene FSC each looked for a plain `{sample}.correction_factors[.ontarget].tsv`.
+  `--output-format parquet`, and `--compress` (the Nextflow default), write `.parquet`/`.tsv.gz`
+  and no plain `.tsv`, so in the 0.9.x production cohorts (0.9.2 IGO: 3,158 run directories;
+  0.9.0 clinical: 33,104, all without a plain `.tsv`) those features ran **without GC correction**,
+  while PON donors (built with TSV forced) were corrected. Gene FSC was never corrected for anyone:
+  the factors went to Rust as a three-column temporary TSV that the loader skipped row by row,
+  while the log said "Using on-target GC factors".
+  - One resolver (`core.gc_assets.resolve_gc_factors`) finds every factor table: beside the BED,
+    then the output directory; Parquet, then `.tsv.gz`, then `.tsv`. A static test fails if any
+    other module builds a factor filename.
+  - Gene FSC takes the table path, so Rust loads it. The Python loader, the dict path and the dead
+    `_get_gc_weight` are removed.
+  - TSV factors are written at full precision (previously 4 decimals; 43% of factors differed
+    from Parquet on a test sample).
+  - `CorrectionFactors::load` reads exactly the path it is given, so a stale sibling `.parquet`
+    can no longer win. Columns are found by name, and a table with no rows, a missing column or a
+    non-finite factor is an **error** at every consumer. A fit with no length bin writes no table.
+  - The single-tool `region-entropy` resolves both tables as run-all does, and gains
+    `--gc-correct/--no-gc-correct`. Its `--gc-factors` validation now accepts the six-column table
+    in any format; it used to reject run-all's own Parquet tables.
+  - Nextflow tool-level mode passes extract's factor tables to every GC-weighted tool; each used to
+    refit factors from the BED with a different algorithm. A tool that still has to refit records
+    `recomputed` and warns.
+  - `--no-gc-correct` is honoured by these consumers; previously a stale table was applied anyway.
+  - `metadata` records which kind of table each population used (`gc_factors_offtarget`,
+    `gc_factors_ontarget`, `gc_correction_applied_*`), plus `fragments_on_missing_contig` and
+    `gc_fetch_failed`.
+  - Extract fails when more than 50% of fragments are on contigs missing from the FASTA (the
+    signature of `chr1`-against-`1` naming, which silently gave every fragment GC 0.0), warns above
+    1%, and matches target regions with or without `chr`, as the features already did.
+  - `build-pon` refuses a donor whose factors are missing, and `--from-outputs` refuses sample
+    directories written before this fix.
+
+  **Values change** for panel WPS, TFBS, ATAC and gene FSC in Parquet or compressed runs, so PONs
+  must be rebuilt.
+
 - **On a push, the PHI scan covered only the last commit.** The scan base was
   `pull_request.base.sha || 'HEAD~1'`, so for a push it was `HEAD~1`: push
   three linear commits and two went unscanned, with nothing to say so. Merge

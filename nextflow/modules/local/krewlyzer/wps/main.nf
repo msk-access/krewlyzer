@@ -14,7 +14,7 @@ process KREWLYZER_WPS {
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
-    tuple val(meta), path(bed)
+    tuple val(meta), path(bed), path(gc_factors)  // gc_factors: extract's tables, staged beside the BED ([] if none)
     path fasta
     path wps_anchors
     path wps_background

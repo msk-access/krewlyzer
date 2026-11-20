@@ -166,6 +166,25 @@ def incomplete_reason(sample_dir: Path) -> Optional[str]:
     ]
     if missing:
         return f"missing {', '.join(missing)}"
+    return gc_reason(sample_dir, stem)
+
+
+def gc_reason(sample_dir: Path, stem: str) -> Optional[str]:
+    """Why this donor's features cannot enter a baseline on GC grounds, or None.
+
+    Builds before the GC-lookup fix wrote `.tsv.gz`/`.parquet` factor tables that three consumers
+    never found, so their panel WPS, TFBS, ATAC and gene FSC are uncorrected and their metadata
+    does not say so. A baseline from such donors would be compared with corrected samples.
+    """
+    meta = _read(sample_dir / f"{stem}.metadata")
+    if meta is None or meta.empty or "gc_factors_offtarget" not in meta.columns:
+        return (
+            "written before the GC-lookup fix (no gc_factors_offtarget in its metadata): its "
+            "panel WPS, TFBS, ATAC and gene FSC may not be GC-corrected; re-run run-all"
+        )
+    kind = str(meta["gc_factors_offtarget"].iloc[0])
+    if kind.startswith("none"):
+        return f"not GC-corrected ({kind})"
     return None
 
 

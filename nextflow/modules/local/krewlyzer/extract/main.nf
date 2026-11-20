@@ -27,6 +27,9 @@ process KREWLYZER_EXTRACT {
     tuple val(meta), path("*.metadata.tsv")    , emit: metadata,         optional: true
     tuple val(meta), path("*.metadata.tsv.gz") , emit: metadata_gz,      optional: true
     tuple val(meta), path("*.metadata.parquet"), emit: metadata_parquet, optional: true
+    // GC factor tables (.parquet / .tsv.gz / .tsv, off- and on-target). The tool-level
+    // subworkflow stages them beside the BED so each tool uses extract's factors, as run-all does.
+    tuple val(meta), path("*.correction_factors*"), emit: gc_factors, optional: true
     path "versions.yml"                   , emit: versions
 
     when:

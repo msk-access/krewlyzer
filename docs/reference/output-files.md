@@ -1166,6 +1166,10 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `filters_mapq` | int | Minimum MAPQ applied |
 | `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
 | `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
+| `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
+| `fragments_on_missing_contig` | int | Fragments on contigs absent from the reference FASTA (their GC is unresolved). Extract fails above 50% of fragments, the signature of `chr1`-against-`1` naming |
+| `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched |
 | `timestamp` | str | ISO timestamp of the run |
 
 **Provenance, since 0.9.0.** Which build wrote this sample, and what it was

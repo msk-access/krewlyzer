@@ -139,6 +139,7 @@ fn krewlyzer_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_valid_regions_ontarget, &gc_mod)?)?;
     gc_mod.add_function(wrap_pyfunction!(gc_reference::generate_ref_genome_gc, &gc_mod)?)?;
     gc_mod.add_function(wrap_pyfunction!(gc_correction::compute_and_write_gc_factors, &gc_mod)?)?;
+    gc_mod.add_function(wrap_pyfunction!(gc_correction::validate_factor_table, &gc_mod)?)?;
     m.add_submodule(&gc_mod)?;
     
     // PON Builder submodule (aggregation functions)

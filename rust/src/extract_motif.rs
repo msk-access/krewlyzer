@@ -50,6 +50,10 @@ struct ChunkResult {
     // Key: (length_bin, gc_percent), Value: count
     gc_observations: HashMap<(u8, u8), u64>,         // Off-target (unbiased)
     gc_observations_ontarget: HashMap<(u8, u8), u64>, // On-target (for panel mode)
+    // Contig guard: fragments whose contig is absent from the FASTA (their GC cannot be
+    // computed), and fragments whose sequence fetch failed on a contig that is present.
+    n_missing_contig: u64,
+    n_gc_fetch_failed: u64,
 }
 
 impl ChunkResult {
@@ -63,12 +67,22 @@ impl ChunkResult {
             count: 0,
             gc_observations: HashMap::new(),
             gc_observations_ontarget: HashMap::new(),
+            n_missing_contig: 0,
+            n_gc_fetch_failed: 0,
         }
     }
 }
 
-// Blacklist helpers
-fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
+/// Contig name without a leading `chr`, so `chr1` and `1` compare equal. The feature code already
+/// matches this way (`fsc.rs`, `fsd.rs`); extract did not, so a `1`-named target BED against a
+/// `chr1` BAM silently put every fragment off-target here while the features still split.
+fn norm_chrom(c: &str) -> &str {
+    c.strip_prefix("chr").unwrap_or(c)
+}
+
+/// Regions (chrom, start, end) from a BED. With `normalise`, contig names lose a leading `chr`, so
+/// `chr1` and `1` match; the query side must then be normalised too ([`overlaps_region`]).
+fn load_regions(path: &str, normalise: bool) -> HashSet<(String, u64, u64)> {
     let mut regions = HashSet::new();
     let path_buf = std::path::PathBuf::from(path);
     if let Ok(reader) = crate::bed::get_reader(&path_buf) {
@@ -76,7 +90,8 @@ fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() >= 3 {
                 if let (Ok(start), Ok(end)) = (fields[1].parse(), fields[2].parse()) {
-                    regions.insert((fields[0].to_string(), start, end));
+                    let chrom = if normalise { norm_chrom(fields[0]) } else { fields[0] };
+                    regions.insert((chrom.to_string(), start, end));
                 }
             }
         }
@@ -84,7 +99,8 @@ fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
     regions
 }
 
-fn overlaps_exclude(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>) -> bool {
+fn overlaps_region(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>, normalise: bool) -> bool {
+    let chrom = if normalise { norm_chrom(chrom) } else { chrom };
     for (ex_chrom, ex_start, ex_end) in exclude {
         if chrom == ex_chrom && start < *ex_end && end > *ex_start {
             return true;
@@ -135,6 +151,7 @@ pub fn process_bam_parallel(
     HashMap<String, u64>,     // end_motifs_on (on-target)
     HashMap<String, u64>,     // bp_motifs_on (on-target)
     HashMap<(u8, u8), u64>,   // gc_observations_ontarget (on-target)
+    HashMap<String, u64>,     // contig guard counts: fragments_on_missing_contig, gc_fetch_failed
 )> {
     
     // 1. Configure Global Thread Pool if needed
@@ -144,7 +161,7 @@ pub fn process_bam_parallel(
     
     // Load blacklist (Main thread)
     let exclude_regions = match exclude_path {
-        Some(p) => load_exclude_regions(&p),
+        Some(p) => load_regions(&p, false),  // exact names, as before: see the blacklist commit
         None => HashSet::new(),
     };
     // To share with Rayon, we wrap in Arc
@@ -153,7 +170,7 @@ pub fn process_bam_parallel(
     // Load target regions for off-target GC model (panel data like MSK-ACCESS)
     let target_regions = match target_regions_path {
         Some(ref p) => {
-            let regions = load_exclude_regions(p);  // Reuse same loader
+            let regions = load_regions(p, true);  // chr-insensitive, as the features match
             info!("Panel mode: GC model will use off-target reads only ({} target regions)", regions.len());
             regions
         },
@@ -312,7 +329,7 @@ pub fn process_bam_parallel(
                      };
 
                      // Blacklist Check
-                     if !exclude_arc.is_empty() && overlaps_exclude(&chunk.chrom, start, end, &exclude_arc) {
+                     if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, start, end, &exclude_arc, false) {
                          continue;
                      }
                      
@@ -321,10 +338,13 @@ pub fn process_bam_parallel(
                          if let Some(ref fa) = local_fasta {
                              match fa.fetch_seq(&chunk.chrom, start as usize, (end - 1) as usize) {
                                  Ok(seq) => calculate_gc(&seq),
-                                 Err(_) => 0.0,
+                                 Err(_) => { result.n_gc_fetch_failed += 1; 0.0 }
                              }
                          } else { 0.0 }
-                     } else { 0.0 };
+                     } else {
+                         if !chrom_valid { result.n_missing_contig += 1; }
+                         0.0
+                     };
                      
                      result
                          .fragments
@@ -334,7 +354,7 @@ pub fn process_bam_parallel(
                      // Accumulate GC observation for correction factor computation
                      // Length bins: 5bp bins from 60-400bp = 68 bins (matches gc_correction.rs)
                      // Panel mode: Separate on-target and off-target for dual GC models
-                     let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
+                     let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, start, end, &target_arc, true);
                      let length = tlen as u64;
                      // 5bp bins: (length - 60) / 5 -> 0..67
                      let length_bin = ((length.saturating_sub(60)) / 5).min(67) as u8;
@@ -381,7 +401,7 @@ pub fn process_bam_parallel(
                     (e.saturating_sub(abs_len as u64), e)
                 };
                 
-                if !exclude_arc.is_empty() && overlaps_exclude(&chunk.chrom, frag_start, frag_end, &exclude_arc) {
+                if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, frag_start, frag_end, &exclude_arc, false) {
                      continue;
                 }
                 
@@ -403,7 +423,7 @@ pub fn process_bam_parallel(
                 }
                 
                 // Check if fragment overlaps target regions (for on/off routing)
-                let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, frag_start, frag_end, &target_arc);
+                let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, frag_start, frag_end, &target_arc, true);
                 
                 // Store End Motif (route to on-target or off-target)
                 let motif_str = String::from_utf8_lossy(&motif_seq).to_string();
@@ -465,6 +485,7 @@ pub fn process_bam_parallel(
     // 4. Merge Results
     info!("Merging results...");
     let mut total_count = 0;
+    let (mut n_missing_contig, mut n_gc_fetch_failed) = (0u64, 0u64);
     let mut final_end_motifs = HashMap::new();
     let mut final_bp_motifs = HashMap::new();
     let mut final_gc_observations: HashMap<(u8, u8), u64> = HashMap::new();
@@ -511,6 +532,8 @@ pub fn process_bam_parallel(
 
         for res in &results {
             total_count += res.count;
+            n_missing_contig += res.n_missing_contig;
+            n_gc_fetch_failed += res.n_gc_fetch_failed;
             // Merge GC observations (off-target)
             for ((len_bin, gc_pct), count) in &res.gc_observations {
                 *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
@@ -525,6 +548,8 @@ pub fn process_bam_parallel(
         // Just sum counts if not writing output
          for res in &results {
             total_count += res.count;
+            n_missing_contig += res.n_missing_contig;
+            n_gc_fetch_failed += res.n_gc_fetch_failed;
             // Still merge GC observations
             for ((len_bin, gc_pct), count) in &res.gc_observations {
                 *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
@@ -569,5 +594,13 @@ pub fn process_bam_parallel(
         }
     }
     
-    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on, final_gc_observations_ontarget))
+    if n_missing_contig > 0 || n_gc_fetch_failed > 0 {
+        log::warn!("extract: {} fragments on contigs missing from the reference, {} failed sequence fetches; their GC is unresolved (0.0)",
+                   n_missing_contig, n_gc_fetch_failed);
+    }
+    let guard: HashMap<String, u64> = [
+        ("fragments_on_missing_contig".to_string(), n_missing_contig),
+        ("gc_fetch_failed".to_string(), n_gc_fetch_failed),
+    ].into_iter().collect();
+    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on, final_gc_observations_ontarget, guard))
 }

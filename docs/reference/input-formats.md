@@ -13,7 +13,7 @@ This page documents the expected formats for custom input files used as override
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
-| [GC Factors TSV](#gc-factors-tsv) | length_bin, gc_pct, factor | `--gc-factors` | `10\t45\t1.05` |
+| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--gc-factors` | `170\t175\t50\t100\t90\t1.25` |
 
 ---
 
@@ -314,41 +314,39 @@ chr2	1000	1500	Blood
 
 ---
 
-## GC Factors TSV {#gc-factors-tsv}
+## GC Factors table {#gc-factors-tsv}
 
-Tab-separated correction factors for GC bias normalization.
+The GC correction factors `extract` and `run-all` write as `{sample}.correction_factors.*`
+(and `.ontarget.*` in panel mode): `.parquet`, `.tsv.gz` or `.tsv`, per `--output-format` and
+`--compress`. Any of the three is accepted wherever a factor table is read.
 
 ### Format
 
-```
-length_bin    gc_pct    factor
-```
-
 | Column | Type | Description |
 |--------|------|-------------|
-| length_bin | int | Fragment length bin: `(length - 60) // 5` |
-| gc_pct | int | GC percentage (0-100) |
-| factor | float | Correction factor (typically 0.5-2.0) |
+| `length_bin_min` | int | Fragment-length bin start (bp); bins are 5 bp, 60-999 |
+| `length_bin_max` | int | Bin end, exclusive |
+| `gc_percent` | int | Fragment GC, rounded to a whole percent (0-100) |
+| `observed` | int | The sample's fragment count in this cell |
+| `expected` | int | The reference count for this cell (`gc_reference` asset) |
+| `correction_factor` | float | The weight a fragment in this cell contributes |
+
+Columns are matched by name. A table that has no factor rows, misses a column or carries a
+non-finite factor is refused, not silently treated as "no correction".
 
 ### Example
 
 ```tsv
-length_bin	gc_pct	factor
-10	40	1.05
-10	41	1.03
-10	42	0.98
-11	40	1.02
+length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
+170	175	45	1532	1490	0.9731
+170	175	50	1688	1520	0.9004
 ```
-
-### Notes
-
-- Length bin 10 corresponds to fragments 110-114bp
-- GC percentage is rounded to the nearest integer
-- Factors near 1.0 indicate minimal bias
 
 ### Used By
 
-- `--gc-factors` / `-F` - Custom GC correction factors
+- `--gc-factors` / `-F` (`region-entropy`): the off-target table. Without it the tool uses the
+  tables `extract` wrote beside the BED, as `run-all` does.
+- `--correction-factors` (`mfsd`).
 
 ---
 

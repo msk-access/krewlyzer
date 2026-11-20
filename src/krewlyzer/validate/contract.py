@@ -468,6 +468,49 @@ CONTRACT: Tuple[TableRule, ...] = (
                 required=False,
                 constant_reason="one PON per cohort, by the release it ships with",
             ),
+            # Which GC factor table each population was corrected with, by kind
+            # (parquet / tsv.gz / tsv / recomputed / none:<reason>), never a filename.
+            # Not required: directories from builds before the GC-lookup fix lack them,
+            # and `build-pon --from-outputs` refuses those separately.
+            *(
+                ColumnRule(
+                    f"gc_factors_{tag}",
+                    Kind.STRING,
+                    Vary.NEVER,
+                    required=False,
+                    constant_reason=(
+                        "one pipeline configuration writes one kind of table for a "
+                        "whole cohort; a cohort-wide `none:` is the finding to read"
+                    ),
+                )
+                for tag in ("offtarget", "ontarget")
+            ),
+            *(
+                ColumnRule(
+                    f"gc_correction_applied_{tag}",
+                    Kind.NUMERIC,
+                    Vary.NEVER,
+                    required=False,
+                    constant_reason=(
+                        "a cohort is corrected or not as a whole; all-False is the "
+                        "finding this flag exists to surface"
+                    ),
+                )
+                for tag in ("offtarget", "ontarget")
+            ),
+            *(
+                ColumnRule(
+                    name,
+                    Kind.NUMERIC,
+                    Vary.NEVER,
+                    required=False,
+                    constant_reason=(
+                        "normally 0 in every sample; any non-zero count is the finding "
+                        "(contigs absent from the FASTA, or failed sequence fetches)"
+                    ),
+                )
+                for name in ("fragments_on_missing_contig", "gc_fetch_failed")
+            ),
         ),
         rows=Rows(exactly=1),
     ),

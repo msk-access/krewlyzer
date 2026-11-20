@@ -419,7 +419,7 @@ pub fn run_region_entropy(
     // These factors correct for GC bias in off-target/genome-wide regions
     // -------------------------------------------------------------------------
     let factors_offtarget = if let Some(ref p) = gc_correction_path {
-        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        // CorrectionFactors::load() reads exactly the table the caller resolved
         match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded OFF-TARGET GC factors: {} ({} bins)", 
@@ -427,8 +427,8 @@ pub fn run_region_entropy(
                 Some(Arc::new(f))
             }
             Err(e) => {
-                log::warn!("RegionEntropy: Failed to load off-target GC factors from {}: {}", p, e);
-                None
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "RegionEntropy: cannot load off-target GC correction factors from {}: {:#}", p, e)));
             }
         }
     } else {
@@ -442,7 +442,7 @@ pub fn run_region_entropy(
     // Falls back to off-target factors if not provided
     // -------------------------------------------------------------------------
     let factors_ontarget = if let Some(ref p) = gc_correction_ontarget_path {
-        // CorrectionFactors::load() tries .parquet first, then falls back to TSV/legacy CSV
+        // CorrectionFactors::load() reads exactly the table the caller resolved
         match CorrectionFactors::load(p.as_str()) {
             Ok(f) => {
                 log::info!("RegionEntropy: Loaded ON-TARGET GC factors: {} ({} bins)", 
@@ -450,8 +450,10 @@ pub fn run_region_entropy(
                 Some(Arc::new(f))
             }
             Err(e) => {
-                log::warn!("RegionEntropy: Failed to load on-target GC factors from {}: {}, falling back to off-target", p, e);
-                factors_offtarget.clone()  // Fallback to off-target factors
+                // A table that exists but cannot be read is an error; a *missing* on-target table
+                // is the documented off-target fallback below.
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "RegionEntropy: cannot load on-target GC correction factors from {}: {:#}", p, e)));
             }
         }
     } else if target_regions_path.is_some() {

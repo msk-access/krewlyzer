@@ -16,8 +16,9 @@ pytestmark = pytest.mark.skipif(
 class TestDualGcObservations:
     """Tests for dual GC observation collection in Rust."""
 
-    def test_extract_returns_7_values(self):
-        """Test that process_bam_parallel returns 7 values including gc_observations_ontarget."""
+    def test_extract_signature(self):
+        """process_bam_parallel takes the documented parameters (it returns an 8-tuple: counts,
+        motifs and GC observations off/on target, and the contig-guard counts)."""
         # This is a signature test - actual BAM processing needs real data
         from krewlyzer import _core
 
