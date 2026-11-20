@@ -216,6 +216,9 @@ impl<T> GcGrid<T> {
 // Support, fit configuration, QC and provenance
 // ---------------------------------------------------------------------------------------------
 
+/// The share of each length's expected windows the support holds.
+pub const SUPPORT_SHARE: f64 = 0.995;
+
 /// The cells a model is fitted on. Outside it a length takes its nearest in-support GC value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CellSet {
@@ -226,6 +229,33 @@ pub struct CellSet {
 impl CellSet {
     pub(crate) fn from_grid(cells: GcGrid<bool>, share: f64) -> Self {
         Self { cells, share }
+    }
+
+    /// The support from the reference (decision S1): at each length, the fewest GC cells holding
+    /// `share` of the territory's expected windows, largest first (ties to the lower GC count).
+    /// It needs no donors and no depth, and is fixed per (genome, territory, trim).
+    pub fn from_expected(expected: &crate::gc_reference::ExpectedTable, share: f64) -> Result<Self> {
+        if !(share > 0.0 && share <= 1.0) {
+            return Err(anyhow!("support share {share} is not in (0, 1]"));
+        }
+        let e = expected.counts();
+        let mut cells = GcGrid::new(e.min_len(), e.max_len(), e.trim_k(), false)?;
+        for len in e.min_len()..=e.max_len() {
+            let row = e.row(len);
+            let target = share * row.iter().sum::<u64>() as f64;
+            let mut order: Vec<usize> = (0..row.len()).collect();
+            order.sort_by(|&a, &b| row[b].cmp(&row[a]).then(a.cmp(&b)));
+            let mut held = 0u64;
+            let out = cells.row_mut(len);
+            for g in order {
+                if held as f64 >= target || row[g] == 0 {
+                    break;
+                }
+                held += row[g];
+                out[g] = true;
+            }
+        }
+        Ok(Self { cells, share })
     }
 
     pub fn contains(&self, length: u16, gc: u16) -> bool {
@@ -749,9 +779,13 @@ type SmoothedRow = Vec<Option<Local>>;
 ///    inverse variance of `r`). Local-linear rather than a kernel average: a kernel average is
 ///    biased wherever the expected density has a slope, and at the support's edge. What remains
 ///    is a curvature bias of about `(h^2 / 2) |r''| / r`, reported in [`FitQc`].
-/// 3. Raw weight `= 1 / smoothed r`.
-/// 4. Normalise per length over the **whole** tally: `w(L, ·) /= Σ_g obs·w / Σ_g obs`, so the
-///    weighted total of every length equals its fragment count.
+/// 3. Raw weight `= 1 / smoothed r`, capped to `[1/C, C]`.
+/// 4. Sparse cells: a cell outside the support takes its length's nearest in-support value.
+///    Observed fragments there never enter the smoother, so an outlier moves only its own length's
+///    normalising scale. Both the clamped and the capped share of the weight are reported.
+/// 5. Normalise per length over the **whole** tally: `w(L, ·) /= Σ_g obs·w / Σ_g obs`, so the
+///    weighted total of every length equals its fragment count. The cap bounds the raw weights,
+///    not the normalised ones.
 ///
 /// Dense arrays, every sum in index order; rows are computed in parallel but each one
 /// sequentially, and nothing is reduced across threads, so a rerun is bit-identical.
@@ -805,16 +839,55 @@ pub fn fit(
         .map(|&len| smooth_row(len, exp, sup, &y, &v, cfg))
         .collect();
 
+    // Raw weights, capped to [1/C, C] before normalisation (a ratio smoothed to zero or below asks
+    // for an unbounded weight, so it is capped at C). Then every cell without a fitted value (outside
+    // the support, or with nothing in reach) takes its length's nearest fitted GC value, ties to the
+    // lower GC count, and inherits that value's cap flag.
+    let shape = |fill| GcGrid::new(exp.min_len(), exp.max_len(), exp.trim_k(), fill).expect("same shape");
     let mut weights: GcGrid<Option<f64>> = GcGrid::new(exp.min_len(), exp.max_len(), exp.trim_k(), None)
         .expect("same shape as the expected table");
+    let mut capped = shape(false);
+    let mut clamped = shape(false);
     for (li, &len) in lengths.iter().enumerate() {
-        for (g, local) in smoothed[li].iter().enumerate() {
-            if let Some(s) = local.map(|l| l.s).filter(|s| *s > 0.0) {
-                weights.row_mut(len)[g] = Some(1.0 / s);
+        let row = &smoothed[li];
+        let raw: Vec<Option<(f64, bool)>> = row.iter().map(|local| local.map(|l| {
+            let r = if l.s > 0.0 { 1.0 / l.s } else { f64::INFINITY };
+            let c = r.clamp(1.0 / cfg.cap, cfg.cap);
+            (c, c != r)
+        })).collect();
+        if raw.iter().all(Option::is_none) {
+            continue; // nothing in reach: the length is unfitted
+        }
+        let mut left = vec![None; raw.len()];
+        let mut last = None;
+        for (g, r) in raw.iter().enumerate() {
+            if r.is_some() {
+                last = Some(g);
             }
+            left[g] = last;
+        }
+        let mut right = vec![None; raw.len()];
+        let mut next = None;
+        for (g, r) in raw.iter().enumerate().rev() {
+            if r.is_some() {
+                next = Some(g);
+            }
+            right[g] = next;
+        }
+        let (w_row, c_row, k_row) = (weights.row_mut(len), capped.row_mut(len), clamped.row_mut(len));
+        for g in 0..raw.len() {
+            let src = match (left[g], right[g]) {
+                (Some(a), Some(b)) => if g - a <= b - g { a } else { b },
+                (Some(a), None) => a,
+                (None, Some(b)) => b,
+                (None, None) => unreachable!("the row has a fitted cell"),
+            };
+            let (w, was_capped) = raw[src].expect("src is fitted");
+            w_row[g] = Some(w);
+            c_row[g] = was_capped;
+            k_row[g] = src != g;
         }
     }
-    let capped = GcGrid::new(exp.min_len(), exp.max_len(), exp.trim_k(), false).expect("same shape");
 
     // Normalise per length over the whole tally, in index order.
     let mut qc = FitQc { fragments, ..FitQc::default() };
@@ -839,6 +912,24 @@ pub fn fit(
             let c = num / den;
             row_w.iter_mut().flatten().for_each(|w| *w /= c);
         }
+    }
+    // Shares of the fitted fragments' final weight that came from the support's edge or the cap.
+    let (mut total, mut from_edge, mut at_cap) = (0.0, 0.0, 0.0);
+    for (i, w) in weights.cells().iter().enumerate() {
+        if let Some(w) = w {
+            let ow = obs.cells()[i] as f64 * w;
+            total += ow;
+            if clamped.cells()[i] {
+                from_edge += ow;
+            }
+            if capped.cells()[i] {
+                at_cap += ow;
+            }
+        }
+    }
+    if total > 0.0 {
+        qc.clamped_weight_share = from_edge / total;
+        qc.capped_weight_share = at_cap / total;
     }
     let (mean, p95) = smoothing_bias(&lengths, &smoothed, exp, obs, cfg);
     qc.smoothing_bias_mean = mean;
@@ -1516,5 +1607,106 @@ pub(crate) mod fit_tests {
         assert_eq!(m.qc().lengths_unobserved, 1);
         assert_eq!(m.qc().fragments, t.total());
         assert!(m.weight(130, Some(60)).is_some(), "smoothed from its neighbours");
+    }
+}
+
+#[cfg(test)]
+mod sparse_tests {
+    use super::fit_tests::*;
+    use super::*;
+
+    fn support(e: &crate::gc_reference::ExpectedTable) -> CellSet {
+        CellSet::from_expected(e, SUPPORT_SHARE).unwrap()
+    }
+
+    #[test]
+    fn the_support_is_the_fewest_cells_holding_the_share_at_every_length() {
+        let e = expected_table(genome_shaped);
+        let s = support(&e);
+        for len in LO..=HI {
+            let row = e.counts().row(len);
+            let total: u64 = row.iter().sum();
+            let held: u64 = row.iter().zip(s.grid().row(len)).filter(|(_, &b)| b).map(|(c, _)| c).sum();
+            assert!(held as f64 >= SUPPORT_SHARE * total as f64, "length {len}: {held} of {total}");
+            // Minimal: without its smallest member it falls below the share.
+            let smallest = row.iter().zip(s.grid().row(len)).filter(|(_, &b)| b).map(|(c, _)| *c).min().unwrap();
+            assert!(((held - smallest) as f64) < SUPPORT_SHARE * total as f64, "length {len} is not minimal");
+        }
+        // Two references, two supports.
+        let u = support(&expected_table(uniform_ref));
+        assert_ne!(s.digest(), u.digest());
+    }
+
+    #[test]
+    fn a_cell_outside_the_support_takes_the_edge_value_and_does_not_enter_the_fit() {
+        let e = expected_table(genome_shaped);
+        let s = support(&e);
+        let base = tally_from(&e, &mean_tally(&e, 2e6, &steep(6.0)), None);
+        let len = 167u16;
+        let edge = (0..=e.counts().gc_max(len)).rev().find(|&g| s.contains(len, g)).unwrap();
+        let outlier = edge + 5; // within the kernel's reach of the support (1.6 SD), so it could leak
+        let mut t = base.clone();
+        t.add(GcKey { length: len, gc: outlier }, 5_000);
+        let cfg = FitConfig::default();
+        let (a, b) = (fit(&base, &e, &s, &cfg).unwrap(), fit(&t, &e, &s, &cfg).unwrap());
+        assert_eq!(b.weight(len, Some(outlier)), b.weight(len, Some(edge)), "clamped to the edge value");
+        // The outlier changes the length's normalising scale and nothing else.
+        let k = b.weight(len, Some(edge)).unwrap() / a.weight(len, Some(edge)).unwrap();
+        for g in 0..=e.counts().gc_max(len) {
+            if s.contains(len, g) {
+                let r = b.weight(len, Some(g)).unwrap() / a.weight(len, Some(g)).unwrap();
+                assert!((r / k - 1.0).abs() < 1e-12, "gc {g}: the outlier entered the smoother");
+            }
+        }
+        assert!((weighted_ratio(&b, &t, len) - 1.0).abs() < 1e-9, "the outlier's weight is normalised too");
+    }
+
+    #[test]
+    fn raw_weights_are_capped_before_normalisation() {
+        // Slope 16 asks for raw weights near 40 at the low-GC edge of the support.
+        let e = expected_table(genome_shaped);
+        let s = support(&e);
+        let cfg = FitConfig::default();
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(16.0)), None);
+        let m = fit(&t, &e, &s, &cfg).unwrap();
+        for len in LO..=HI {
+            let row: Vec<f64> = m.weights().row(len).iter().flatten().copied().collect();
+            let (lo, hi) = row.iter().fold((f64::MAX, f64::MIN), |(a, b), &w| (a.min(w), b.max(w)));
+            // Both ends raw in [1/C, C] and divided by one scale: their ratio is at most C².
+            assert!(hi / lo <= cfg.cap * cfg.cap * (1.0 + 1e-12), "length {len}: {hi} / {lo}");
+            assert!((weighted_ratio(&m, &t, len) - 1.0).abs() < 1e-9, "length {len} keeps its total");
+        }
+        assert!(m.capped().cells().iter().any(|&c| c), "the case must reach the cap");
+        assert!(m.qc().capped_weight_share > 0.0);
+    }
+
+    #[test]
+    fn the_qc_shares_vary_with_the_input() {
+        let e = expected_table(genome_shaped);
+        let s = support(&e);
+        let cfg = FitConfig::default();
+        let qc = |slope: f64| fit(&tally_from(&e, &mean_tally(&e, 2e6, &steep(slope)), None), &e, &s, &cfg)
+            .unwrap().qc().clone();
+        let (gentle, steep16) = (qc(4.0), qc(16.0));
+        assert_eq!(gentle.capped_weight_share, 0.0, "a gentle bias stays inside the cap");
+        assert!(steep16.capped_weight_share > 0.0);
+        assert!(gentle.clamped_weight_share > 0.0 && steep16.clamped_weight_share > 0.0);
+        assert_ne!(gentle.clamped_weight_share, steep16.clamped_weight_share);
+        for q in [&gentle, &steep16] {
+            assert!(q.clamped_weight_share < 0.05 && q.capped_weight_share < 0.5, "{q:?}");
+        }
+    }
+
+    #[test]
+    fn every_observed_fragment_has_a_weight_in_a_fitted_length() {
+        let e = expected_table(genome_shaped);
+        let s = support(&e);
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(8.0)), None);
+        let m = fit(&t, &e, &s, &FitConfig::default()).unwrap();
+        for k in t.counts().keys() {
+            if *t.counts().get(k.length, k.gc).unwrap() > 0 {
+                assert!(m.weight(k.length, Some(k.gc)).is_some(), "{k:?}");
+            }
+        }
     }
 }

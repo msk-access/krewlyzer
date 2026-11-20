@@ -60,6 +60,13 @@ All notable changes to this project will be documented in this file.
     fraction, kernel truncated at 4 SD) until spec Step 3 chooses them. Below 100,000 fragments,
     or with a length that has no support cell, the fit returns an explicit "cannot fit", never
     weights of 1. Dense arrays and index-order sums make a rerun bit-identical.
+  - **Sparse cells.** The support comes from the reference, not from donors (operator decision
+    S1): at each length, the fewest GC cells holding 99.5% of the territory's expected windows. It
+    needs no PON and no depth, and its digest is in the provenance. Raw weights are capped to
+    [1/10, 10] *before* normalisation. A cell outside the support takes its length's nearest
+    in-support value, and its fragments never enter the smoother, so an outlier moves only its own
+    length's normalising scale. The share of the final weight in clamped cells and in capped cells
+    are each reported (`FitQc`), never hidden (AGENTS invariant #3).
 
 ### Removed
 

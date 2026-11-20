@@ -241,6 +241,20 @@ CLAIMS: Tuple[Claim, ...] = (
         "kappa = 10 it puts the curvature bias near (kappa h)^2 / 2 = 0.02",
     ),
     Claim(
+        "gc_model.support_share",
+        "0.995",
+        RustConst("gc_model.rs", "SUPPORT_SHARE"),
+        "each length's support holds this share of the territory's expected "
+        "windows (decision S1: from the reference, not from donors)",
+    ),
+    Claim(
+        "gc_model.weight_cap",
+        "10.0",
+        RustConst("gc_model.rs", "WEIGHT_CAP"),
+        "raw weights are capped to [1/10, 10] before normalisation (decision "
+        "S5; the proposal allowed 10-20)",
+    ),
+    Claim(
         "gc_model.kernel_reach_sd",
         "4.0",
         RustConst("gc_model.rs", "KERNEL_REACH_SD"),
