@@ -151,7 +151,7 @@ Key fixtures from `tests/conftest.py`:
 | `temp_ocr` | OCF regions file |
 | `temp_vcf` | mFSD variants file |
 | `full_test_data` | Bundle for run-all |
-| `real_bam` | Production data (3144 reads) |
+| `real_bam` | Production data (3142 reads; header matches the 2Mb `real_reference`) |
 | `real_pon` | MSK-ACCESS v1 PON |
 
 ---

@@ -24,10 +24,14 @@ use noodles::bgzf;
 
 // Use shared utilities to avoid code duplication
 use crate::motif_utils::{reverse_complement, calculate_gc};
+use crate::contigs::{norm_chrom, ContigNames};
 
 struct Chunk {
     tid: u32,
     chrom: String,
+    /// The reference FASTA's name for `chrom`, used by every sequence fetch; `None` when the
+    /// reference lacks the contig (a decoy or alt), so its fragments get no GC.
+    fasta_name: Option<String>,
     start: u64,
     end: u64,
 }
@@ -50,6 +54,10 @@ struct ChunkResult {
     // Key: (length_bin, gc_percent), Value: count
     gc_observations: HashMap<(u8, u8), u64>,         // Off-target (unbiased)
     gc_observations_ontarget: HashMap<(u8, u8), u64>, // On-target (for panel mode)
+    // Fragments whose contig the reference lacks (their GC cannot be computed), and fragments
+    // whose GC fetch failed on a contig it has. Neither enters the GC observations.
+    n_missing_contig: u64,
+    n_gc_fetch_failed: u64,
 }
 
 impl ChunkResult {
@@ -63,12 +71,17 @@ impl ChunkResult {
             count: 0,
             gc_observations: HashMap::new(),
             gc_observations_ontarget: HashMap::new(),
+            n_missing_contig: 0,
+            n_gc_fetch_failed: 0,
         }
     }
 }
 
-// Blacklist helpers
-fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
+/// Regions (chrom, start, end) from a BED, contig names without a leading `chr`, so `chr1` and `1`
+/// match. Used for targets and for the blacklist; queries go through [`overlaps_region`], which
+/// normalises the same way. The bundled hg19 blacklist names `chr1` while MSK-ACCESS BAMs name `1`:
+/// with exact matching it matched nothing and was never applied.
+fn load_regions(path: &str) -> HashSet<(String, u64, u64)> {
     let mut regions = HashSet::new();
     let path_buf = std::path::PathBuf::from(path);
     if let Ok(reader) = crate::bed::get_reader(&path_buf) {
@@ -76,7 +89,7 @@ fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() >= 3 {
                 if let (Ok(start), Ok(end)) = (fields[1].parse(), fields[2].parse()) {
-                    regions.insert((fields[0].to_string(), start, end));
+                    regions.insert((norm_chrom(fields[0]).to_string(), start, end));
                 }
             }
         }
@@ -84,7 +97,8 @@ fn load_exclude_regions(path: &str) -> HashSet<(String, u64, u64)> {
     regions
 }
 
-fn overlaps_exclude(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>) -> bool {
+fn overlaps_region(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>) -> bool {
+    let chrom = norm_chrom(chrom);
     for (ex_chrom, ex_start, ex_end) in exclude {
         if chrom == ex_chrom && start < *ex_end && end > *ex_start {
             return true;
@@ -135,6 +149,7 @@ pub fn process_bam_parallel(
     HashMap<String, u64>,     // end_motifs_on (on-target)
     HashMap<String, u64>,     // bp_motifs_on (on-target)
     HashMap<(u8, u8), u64>,   // gc_observations_ontarget (on-target)
+    HashMap<String, u64>,     // contig counts: fragments_on_missing_contig, gc_fetch_failed
 )> {
     
     // 1. Configure Global Thread Pool if needed
@@ -144,7 +159,7 @@ pub fn process_bam_parallel(
     
     // Load blacklist (Main thread)
     let exclude_regions = match exclude_path {
-        Some(p) => load_exclude_regions(&p),
+        Some(p) => load_regions(&p),
         None => HashSet::new(),
     };
     // To share with Rayon, we wrap in Arc
@@ -153,7 +168,7 @@ pub fn process_bam_parallel(
     // Load target regions for off-target GC model (panel data like MSK-ACCESS)
     let target_regions = match target_regions_path {
         Some(ref p) => {
-            let regions = load_exclude_regions(p);  // Reuse same loader
+            let regions = load_regions(p);
             info!("Panel mode: GC model will use off-target reads only ({} target regions)", regions.len());
             regions
         },
@@ -162,20 +177,12 @@ pub fn process_bam_parallel(
     let target_arc = std::sync::Arc::new(target_regions);
     let is_panel_mode = !target_arc.is_empty();
 
-    // Load available chromosomes from FASTA to avoid fetch crashes
-    let valid_chroms = if let Ok(fa) = faidx::Reader::from_path(&fasta_path) {
-        let n = fa.n_seqs();
-        let mut s = HashSet::new();
-        for i in 0..n {
-             if let Ok(name) = fa.seq_name(i as i32) {
-                 s.insert(name);
-             }
-        }
-        Some(s)
-    } else {
-        None
-    };
-    let valid_chroms_arc = std::sync::Arc::new(valid_chroms);
+    // The reference's contigs (names and lengths), for the one BAM-to-FASTA rule in contigs.rs.
+    // A reference that cannot be opened is an error: it used to leave every fragment at GC 0.
+    let contig_names = faidx::Reader::from_path(&fasta_path)
+        .map(|fa| ContigNames::from_faidx(&fa))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(
+            format!("Failed to open reference FASTA {}: {}", fasta_path, e)))?;
 
     let config = UnifiedConfig {
         mapq,
@@ -194,19 +201,35 @@ pub fn process_bam_parallel(
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Failed to open BAM: {}", e)))?;
     
     let header = bam_reader.header();
+    let bam_contigs: Vec<(String, u64)> = header.target_names().iter().enumerate()
+        .map(|(tid, name)| (String::from_utf8_lossy(name).to_string(),
+                            header.target_len(tid as u32).unwrap_or(0)))
+        .collect();
+
+    // Resolve every BAM contig before any read is processed. A primary contig the reference lacks,
+    // or any contig whose length differs (another assembly), is an error; other absent contigs
+    // (decoys, alts) are counted per fragment and reported by the caller.
+    let fasta_names = contig_names.resolve_header(&bam_contigs)
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(
+            format!("{} against reference {}: {}", bam_path, fasta_path, e)))?;
+    let absent: Vec<&str> = bam_contigs.iter().zip(&fasta_names)
+        .filter(|(_, f)| f.is_none()).map(|((n, _), _)| n.as_str()).collect();
+    if !absent.is_empty() {
+        info!("{} BAM contigs are not in the reference (decoys, alts, unplaced); their fragments get no GC: {}{}",
+              absent.len(), absent[..absent.len().min(5)].join(", "), if absent.len() > 5 { ", ..." } else { "" });
+    }
+
     let mut chunks = Vec::new();
     let chunk_size = 10_000_000; // 10Mb chunks
-    
-    for (tid, name_bytes) in header.target_names().iter().enumerate() {
-        let name = String::from_utf8_lossy(name_bytes).to_string();
-        let len = header.target_len(tid as u32).unwrap_or(0);
-        
+
+    for (tid, ((name, len), fasta_name)) in bam_contigs.iter().zip(fasta_names).enumerate() {
         let mut start = 0;
-        while start < len {
-            let end = (start + chunk_size).min(len);
+        while start < *len {
+            let end = (start + chunk_size).min(*len);
             chunks.push(Chunk {
                 tid: tid as u32,
                 chrom: name.clone(),
+                fasta_name: fasta_name.clone(),
                 start,
                 end,
             });
@@ -250,14 +273,9 @@ pub fn process_bam_parallel(
             return result;
         }
 
-        // Check if chromosome is in reference
-        let chrom_valid = if let Some(ref set) = *valid_chroms_arc {
-             set.contains(&chunk.chrom)
-        } else { false };
-        
-        // Only fetch if chrom is valid AND we have a reader
-        let can_fetch_seq = chrom_valid && local_fasta.is_some();
-        
+        // The reference's name for this contig, for every fetch below; `None` when it lacks it.
+        let fasta_name = chunk.fasta_name.as_deref();
+
         let context_len = (config.kmer as f64 / 2.0).ceil() as usize;
 
         for record_res in local_bam.records() {
@@ -280,112 +298,75 @@ pub fn process_bam_parallel(
                 continue;
             }
 
-            // --- Extract Logic (BED Output) ---
-            // Only process R1 for Fragment definition to avoid double counting
-            if config.output_bed && record.is_first_in_template() {
-                 let tlen_signed = record.insert_size();
-                 let tlen = tlen_signed.abs();
-                 if tlen >= config.min_len as i64 && tlen <= config.max_len as i64 {
-                     // The fragment spans the outermost bases of the pair, which
-                     // is not `pos() + |tlen|` when R1 is the rightmost mate:
-                     // there `pos()` is near the fragment's 3' end and the
-                     // interval lands ~(tlen - read_length) too far right. Same
-                     // sign handling as the motif block below, and the same
-                     // construction the pre-Rust implementation used before the
-                     // reverse branch was dropped in the rewrite.
-                     //
-                     // Consensus BAMs normalise R1 to forward so this is rare
-                     // there (<1%), but uncollapsed and WGS input run ~50%.
-                     //
-                     // Branch on the TLEN sign, not on is_reverse(). htslib
-                     // gives the rightmost segment of a pair a negative TLEN,
-                     // and "am I the rightmost mate" is exactly the question
-                     // here. The two agree for well-formed FR pairs and diverge
-                     // for malformed ones -- real data contains records flagged
-                     // forward whose mate lies to their left.
-                     let (start, end) = if tlen_signed >= 0 {
-                         let s = record.pos() as u64;
-                         (s, s + tlen as u64)
-                     } else {
-                         let e = record.cigar().end_pos() as u64;
-                         (e.saturating_sub(tlen as u64), e)
-                     };
+            // --- The fragment, from either mate ---
+            let tlen_signed = record.insert_size();
+            let tlen = tlen_signed.unsigned_abs();
+            if tlen < config.min_len as u64 || tlen > config.max_len as u64 { continue; }
 
-                     // Blacklist Check
-                     if !exclude_arc.is_empty() && overlaps_exclude(&chunk.chrom, start, end, &exclude_arc) {
-                         continue;
-                     }
-                     
-                     // Calculate GC
-                     let gc = if can_fetch_seq {
-                         if let Some(ref fa) = local_fasta {
-                             match fa.fetch_seq(&chunk.chrom, start as usize, (end - 1) as usize) {
-                                 Ok(seq) => calculate_gc(&seq),
-                                 Err(_) => 0.0,
-                             }
-                         } else { 0.0 }
-                     } else { 0.0 };
-                     
-                     result
-                         .fragments
-                         .push((start, format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc)));
-                     result.count += 1;
-                     
-                     // Accumulate GC observation for correction factor computation
-                     // Length bins: 5bp bins from 60-400bp = 68 bins (matches gc_correction.rs)
-                     // Panel mode: Separate on-target and off-target for dual GC models
-                     let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, start, end, &target_arc);
-                     let length = tlen as u64;
-                     // 5bp bins: (length - 60) / 5 -> 0..67
-                     let length_bin = ((length.saturating_sub(60)) / 5).min(67) as u8;
-                     let gc_pct = (gc * 100.0).round() as u8;
-                     
-                     if is_on_target {
-                         *result.gc_observations_ontarget.entry((length_bin, gc_pct)).or_insert(0) += 1;
-                     } else {
-                         *result.gc_observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
-                     }
-                 }
+            // The fragment spans the outermost bases of the pair, which is not `pos() + |tlen|`
+            // when this mate is the rightmost one: there `pos()` is near the fragment's 3' end and
+            // the interval lands ~(tlen - read_length) too far right. Consensus BAMs normalise R1
+            // to forward so this is rare there (<1%), but uncollapsed and WGS input run ~50%.
+            //
+            // Branch on the TLEN sign, not on is_reverse(). htslib gives the rightmost segment of
+            // a pair a negative TLEN, and "am I the rightmost mate" is exactly the question here.
+            // The two agree for well-formed FR pairs and diverge for malformed ones -- real data
+            // contains records flagged forward whose mate lies to their left.
+            let (start, end) = if tlen_signed >= 0 {
+                let s = record.pos() as u64;
+                (s, s + tlen)
+            } else {
+                let e = record.cigar().end_pos() as u64;
+                (e.saturating_sub(tlen), e)
+            };
+
+            if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, start, end, &exclude_arc) {
+                continue;
+            }
+            let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, start, end, &target_arc);
+
+            // --- Fragment count, contig counts, BED and GC: R1 only, so each pair counts once ---
+            if record.is_first_in_template() {
+                result.count += 1;
+                if fasta_name.is_none() { result.n_missing_contig += 1; }
+
+                if config.output_bed {
+                    // None when the reference lacks the contig or the fetch fails. Such a fragment
+                    // is still written (GC 0.0 in the BED, as before) but enters no GC observation:
+                    // counted at 0% it would bias the model's lowest bin.
+                    let gc = match (fasta_name, &local_fasta) {
+                        (Some(name), Some(fa)) => match fa.fetch_seq(name, start as usize, (end - 1) as usize) {
+                            Ok(seq) => Some(calculate_gc(&seq)),
+                            Err(_) => { result.n_gc_fetch_failed += 1; None }
+                        },
+                        // The reference opened on the main thread but not in this one.
+                        (Some(_), None) => { result.n_gc_fetch_failed += 1; None }
+                        (None, _) => None,
+                    };
+
+                    result
+                        .fragments
+                        .push((start, format!("{}\t{}\t{}\t{:.4}", chunk.chrom, start, end, gc.unwrap_or(0.0))));
+
+                    // GC observation for correction factor computation. Length bins: 5bp bins from
+                    // 60-400bp = 68 bins (matches gc_correction.rs). Panel mode: separate on-target
+                    // and off-target for dual GC models.
+                    if let Some(gc) = gc {
+                        // 5bp bins: (length - 60) / 5 -> 0..67
+                        let length_bin = ((tlen.saturating_sub(60)) / 5).min(67) as u8;
+                        let gc_pct = (gc * 100.0).round() as u8;
+                        let observations = if is_on_target {
+                            &mut result.gc_observations_ontarget
+                        } else {
+                            &mut result.gc_observations
+                        };
+                        *observations.entry((length_bin, gc_pct)).or_insert(0) += 1;
+                    }
+                }
             }
             
-            // --- Motif Logic ---
+            // --- Motif Logic: every fragment end, so both mates ---
             if config.count_motifs {
-                // ... (Motif logic needs independent blacklist check? Or relies on R1 check?)
-                // Motif tool counts *individual fragment ends*.
-                // If the fragment is blacklisted, we should skip counting its motifs.
-                // But since we process R1 and R2 *independently*, we need to know the fragment coordinates involved.
-                // TLEN gives us length. pos gives us one end.
-                // R1: [pos, pos+tlen]
-                // R2: [mate_pos, mate_pos+tlen] -> [pos, pos+tlen] (if proper pair)
-                // We can reconstruct fragment coordinates from EITHER read using TLEN.
-                // But we must be careful about `tlen` sign.
-                // R1 (fwd): tlen > 0. Frag: [pos, pos+tlen]
-                // R2 (rev): tlen < 0. Frag: [mate_pos, mate_pos+abs(tlen)] => [end-abs(tlen), end]. 
-                // Where `end` of R2 ALIGNMENT is the end of the fragment?
-                // R2 alignment: [pos, end]. The fragment end is `end`. The fragment start is `end - abs(tlen)`.
-                
-                let tlen = record.insert_size();
-                let abs_len = tlen.abs();
-                if abs_len < config.min_len as i64 || abs_len > config.max_len as i64 { continue; }
-                
-                // Reconstruct fragment coords for blacklist check
-                let (frag_start, frag_end) = if tlen > 0 {
-                    (record.pos() as u64, (record.pos() + tlen) as u64)
-                } else {
-                    // tlen < 0. record is R2 (usually).
-                    // The mate is at `record.mate_pos()`.
-                    // But checking blacklist requires `start, end`.
-                    // Frag End is `record.cigar().end_pos()`.
-                    // Frag Start is `Frag End - abs_len`.
-                    let e = record.cigar().end_pos() as u64;
-                    (e.saturating_sub(abs_len as u64), e)
-                };
-                
-                if !exclude_arc.is_empty() && overlaps_exclude(&chunk.chrom, frag_start, frag_end, &exclude_arc) {
-                     continue;
-                }
-                
-                // Get sequence
                 let seq = record.seq();
                 if seq.len() < config.kmer { continue; }
                 
@@ -402,9 +383,6 @@ pub fn process_bam_parallel(
                      genomic_coords = (record.cigar().end_pos(), record.cigar().end_pos());
                 }
                 
-                // Check if fragment overlaps target regions (for on/off routing)
-                let is_on_target = is_panel_mode && overlaps_exclude(&chunk.chrom, frag_start, frag_end, &target_arc);
-                
                 // Store End Motif (route to on-target or off-target)
                 let motif_str = String::from_utf8_lossy(&motif_seq).to_string();
                 if is_on_target {
@@ -413,32 +391,22 @@ pub fn process_bam_parallel(
                     *result.end_motifs.entry(motif_str.clone()).or_default() += 1;
                 }
                 
-                // Breakpoint Motif ... (retained)
-                // Needs FASTA fetch
-                if can_fetch_seq { // Safe guard
-                    if let Some(ref fa) = local_fasta {
-                    // Logic for Breakpoint context needs careful coordinate handling matching `motif.rs`
-                    // Simplified for now: strictly context + motif
-                    // If FWD: Ref[pos-p..pos] + Frag[0..p]
-                    // If REV: Frag[end-p..end] (RC) + Ref[end..end+p]
-                    
-                    // Implementation skipped for brevity in this step, focusing on framework.
-                    // But we MUST implement it if we claim parity.
-                    // For now, let's placeholder "BP logic here".
-                    // Actually, "krewlyzer motif" relies on BP motif. I should include it.
-                    
+                // Breakpoint motif: reference context + fragment end, so it needs the FASTA.
+                // If FWD: Ref[pos-p..pos] + Frag[0..p]
+                // If REV: Frag[end-p..end] (RC) + Ref[end..end+p]
+                if let (Some(name), Some(fa)) = (fasta_name, &local_fasta) {
                     let p = context_len;
                     let bp_str = if !record.is_reverse() {
                         let pos = genomic_coords.0 as usize;
                         let ctx_start = pos.saturating_sub(p);
-                        let ref_seq = fa.fetch_seq(&chunk.chrom, ctx_start, pos.saturating_sub(1)).unwrap_or_default();
+                        let ref_seq = fa.fetch_seq(name, ctx_start, pos.saturating_sub(1)).unwrap_or_default();
                         let frag_part = &motif_seq[0..p.min(motif_seq.len())];
                         let full = [ref_seq, frag_part.to_vec()].concat();
                         String::from_utf8_lossy(&full).to_string()
                     } else {
                         // Reverse
                         let pos = genomic_coords.0 as usize; // end of mapping
-                        let ref_seq = fa.fetch_seq(&chunk.chrom, pos, pos + p - 1).unwrap_or_default();
+                        let ref_seq = fa.fetch_seq(name, pos, pos + p - 1).unwrap_or_default();
                         let frag_part = &motif_seq[0..p.min(motif_seq.len())]; // acts as RC of end
                         let full = [frag_part.to_vec(), ref_seq].concat();
                         String::from_utf8_lossy(&full).to_string()
@@ -451,7 +419,6 @@ pub fn process_bam_parallel(
                         *result.bp_motifs.entry(bp_str).or_default() += 1;
                     }
                 }
-                } // End safe guard
             }
         }
         
@@ -465,11 +432,24 @@ pub fn process_bam_parallel(
     // 4. Merge Results
     info!("Merging results...");
     let mut total_count = 0;
+    let (mut n_missing_contig, mut n_gc_fetch_failed) = (0u64, 0u64);
     let mut final_end_motifs = HashMap::new();
     let mut final_bp_motifs = HashMap::new();
     let mut final_gc_observations: HashMap<(u8, u8), u64> = HashMap::new();
     let mut final_gc_observations_ontarget: HashMap<(u8, u8), u64> = HashMap::new();
-    
+
+    for res in &results {
+        total_count += res.count;
+        n_missing_contig += res.n_missing_contig;
+        n_gc_fetch_failed += res.n_gc_fetch_failed;
+        for ((len_bin, gc_pct), count) in &res.gc_observations {
+            *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+        }
+        for ((len_bin, gc_pct), count) in &res.gc_observations_ontarget {
+            *final_gc_observations_ontarget.entry((*len_bin, *gc_pct)).or_insert(0) += count;
+        }
+    }
+
     // Write BED if requested
     if let Some(path) = output_bed_path {
         info!("Writing BED to {}...", path);
@@ -508,31 +488,7 @@ pub fn process_bam_parallel(
             pending.extend(res.fragments.iter().map(|(s, line)| (*s, line)));
         }
         flush(&mut pending, &mut writer)?;
-
-        for res in &results {
-            total_count += res.count;
-            // Merge GC observations (off-target)
-            for ((len_bin, gc_pct), count) in &res.gc_observations {
-                *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
-            }
-            // Merge GC observations (on-target)
-            for ((len_bin, gc_pct), count) in &res.gc_observations_ontarget {
-                *final_gc_observations_ontarget.entry((*len_bin, *gc_pct)).or_insert(0) += count;
-            }
-        }
         writer.finish()?;  // Ensure proper EOF marker
-    } else {
-        // Just sum counts if not writing output
-         for res in &results {
-            total_count += res.count;
-            // Still merge GC observations
-            for ((len_bin, gc_pct), count) in &res.gc_observations {
-                *final_gc_observations.entry((*len_bin, *gc_pct)).or_insert(0) += count;
-            }
-            for ((len_bin, gc_pct), count) in &res.gc_observations_ontarget {
-                *final_gc_observations_ontarget.entry((*len_bin, *gc_pct)).or_insert(0) += count;
-            }
-        }
     }
     
     debug!("Total GC observation bins: {} off-target, {} on-target", 
@@ -569,5 +525,12 @@ pub fn process_bam_parallel(
         }
     }
     
-    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on, final_gc_observations_ontarget))
+    // Reported here; the policy (when to warn) is check_reference_contigs in core/gc_assets.py.
+    info!("Contigs: {} fragments on contigs the reference lacks, {} failed GC fetches; neither enters a GC model",
+          n_missing_contig, n_gc_fetch_failed);
+    let guard: HashMap<String, u64> = [
+        ("fragments_on_missing_contig".to_string(), n_missing_contig),
+        ("gc_fetch_failed".to_string(), n_gc_fetch_failed),
+    ].into_iter().collect();
+    Ok((total_count, final_end_motifs, final_bp_motifs, final_gc_observations, final_end_motifs_on, final_bp_motifs_on, final_gc_observations_ontarget, guard))
 }

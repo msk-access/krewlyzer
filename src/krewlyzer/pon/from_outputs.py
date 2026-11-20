@@ -45,6 +45,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
+from krewlyzer.core.gc_assets import gc_populations_needed
 from krewlyzer.core.output_utils import TABLE_EXTENSIONS, read_table, resolve_table_path
 
 logger = logging.getLogger("build-pon")
@@ -166,6 +167,32 @@ def incomplete_reason(sample_dir: Path) -> Optional[str]:
     ]
     if missing:
         return f"missing {', '.join(missing)}"
+    return gc_reason(sample_dir, stem)
+
+
+def gc_reason(sample_dir: Path, stem: str) -> Optional[str]:
+    """Why this donor's features cannot enter a baseline on GC grounds, or None.
+
+    Builds before the GC-lookup fix wrote `.tsv.gz`/`.parquet` factor tables that three consumers
+    never found, so their panel WPS, TFBS, ATAC and gene FSC are uncorrected and their metadata
+    does not say so. A baseline from such donors would be compared with corrected samples.
+    """
+    meta = _read(sample_dir / f"{stem}.metadata")
+    if meta is None or meta.empty or "gc_factors_offtarget" not in meta.columns:
+        return (
+            "written before the GC-lookup fix (no gc_factors_offtarget in its metadata): its "
+            "panel WPS, TFBS, ATAC and gene FSC may not be GC-corrected; re-run run-all"
+        )
+    # The same rule as the in-process build (`require_gc_for_pon`): a panel donor needs both
+    # tables, since its on-target features (gene FSC, panel WPS) use the on-target one.
+    panel = "panel_mode" in meta.columns and bool(meta["panel_mode"].iloc[0])
+    for population in gc_populations_needed(panel):
+        column = f"gc_factors_{population.replace('_', '')}"
+        kind = (
+            str(meta[column].iloc[0]) if column in meta.columns else "none:not recorded"
+        )
+        if kind.startswith("none"):
+            return f"not GC-corrected, {population.replace('_', '-')} ({kind})"
     return None
 
 

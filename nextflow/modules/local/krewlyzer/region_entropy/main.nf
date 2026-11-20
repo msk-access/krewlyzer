@@ -14,7 +14,7 @@ process KREWLYZER_REGION_ENTROPY {
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
-    tuple val(meta), path(bed)
+    tuple val(meta), path(bed), path(gc_factors)  // gc_factors: extract's tables, staged beside the BED ([] if none)
     path fasta
     path pon_model          // Optional PON model for z-score normalization
     path targets            // Optional target regions for panel mode

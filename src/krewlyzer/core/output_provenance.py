@@ -93,8 +93,13 @@ def stamp_metadata(
     pon_path: Optional[Path] = None,
     output_format: str = "tsv",
     compress: bool = False,
+    gc_factors: Optional[dict] = None,
 ) -> bool:
     """Add the provenance columns to `{sample}.metadata.*`. True if written.
+
+    `gc_factors` maps "off_target"/"on_target" to the `GcFactorsChoice` the run used; it records
+    which kind of factor table each population was corrected with, or why none was (redesign
+    item 0: production ran panel WPS, TFBS and ATAC uncorrected and nothing said so).
 
     A no-op when there is no metadata table, which is the normal case for a
     single-feature CLI run: those write one feature table and no completion
@@ -124,6 +129,10 @@ def stamp_metadata(
     fields = provenance_fields(pon, pon_path)
     for name, value in fields.items():
         frame[name] = value
+    for population, choice in (gc_factors or {}).items():
+        tag = population.replace("_", "")  # off_target -> offtarget
+        frame[f"gc_factors_{tag}"] = choice.record()
+        frame[f"gc_correction_applied_{tag}"] = bool(choice.found)
 
     write_table(frame, base, output_format=output_format, compress=compress)
 

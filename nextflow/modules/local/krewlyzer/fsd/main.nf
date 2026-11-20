@@ -13,7 +13,7 @@ process KREWLYZER_FSD {
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
     input:
-    tuple val(meta), path(bed)
+    tuple val(meta), path(bed), path(gc_factors)  // gc_factors: extract's tables, staged beside the BED ([] if none)
 
     output:
     tuple val(meta), path("*.FSD.tsv"), emit: tsv

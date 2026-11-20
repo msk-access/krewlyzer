@@ -72,7 +72,7 @@ krewlyzer validate --gene-bed my_genes.bed          # one custom file
 | `--arms-bed` | Chromosome arms: chrom, start, end, arm |
 | `--wps-anchors` | WPS anchors, BED6 |
 | `--ocr-file` | OCF open-chromatin regions |
-| `--gc-factors` | GC correction factors TSV |
+| `--gc-factors` | GC correction factor table (`.parquet`, `.tsv.gz` or `.tsv`; six columns) |
 | `--bin-file` | Genomic bins, BED3 |
 
 Use `-G` before reporting a bundled-asset problem: a partial `git lfs pull`

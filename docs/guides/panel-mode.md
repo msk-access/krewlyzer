@@ -164,7 +164,7 @@ In panel mode, each feature outputs two files:
 | MDS | `.MDS.tsv` | `.MDS.ontarget.tsv` |
 
 !!! note
-    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
+    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.*`, any format)
     when available, providing better accuracy for capture-biased data.
 
 **Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/regulatory/ocf.md#panel-mode) for details.

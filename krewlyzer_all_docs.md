@@ -87,7 +87,7 @@ krewlyzer validate --gene-bed my_genes.bed          # one custom file
 | `--arms-bed` | Chromosome arms: chrom, start, end, arm |
 | `--wps-anchors` | WPS anchors, BED6 |
 | `--ocr-file` | OCF open-chromatin regions |
-| `--gc-factors` | GC correction factors TSV |
+| `--gc-factors` | GC correction factor table (`.parquet`, `.tsv.gz` or `.tsv`; six columns) |
 | `--bin-file` | Genomic bins, BED3 |
 
 Use `-G` before reporting a bundled-asset problem: a partial `git lfs pull`
@@ -1721,7 +1721,7 @@ Key fixtures from `tests/conftest.py`:
 | `temp_ocr` | OCF regions file |
 | `temp_vcf` | mFSD variants file |
 | `full_test_data` | Bundle for run-all |
-| `real_bam` | Production data (3144 reads) |
+| `real_bam` | Production data (3142 reads; header matches the 2Mb `real_reference`) |
 | `real_pon` | MSK-ACCESS v1 PON |
 
 ---
@@ -2462,7 +2462,7 @@ This enables cross-sample depth comparisons independent of library size and regi
 
 ### GC Correction for Gene FSC
 
-In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.tsv`) for accurate copy number estimates.
+In panel mode, gene-level FSC uses **on-target GC correction factors** (`.correction_factors.ontarget.*`, any format) for accurate copy number estimates.
 
 **Why this matters:**
 - Different genes have different GC content
@@ -5142,7 +5142,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 | `--tfbs-regions` | | PATH | | Custom TFBS regions BED.gz |
 | `--atac-regions` | | PATH | | Custom ATAC regions BED.gz |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
-| `--gc-factors` | `-F` | PATH | | GC correction factors TSV |
+| `--gc-correct/--no-gc-correct` | | FLAG | `--gc-correct` | Apply GC bias correction |
+| `--gc-factors` | `-F` | PATH | | Off-target GC factor table (`.parquet`/`.tsv.gz`/`.tsv`); default: the tables `extract` wrote beside the BED, as `run-all` uses |
 | `--pon-model` | `-P` | PATH | | PON model for z-score normalization |
 | `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization (for ML negatives) |
@@ -7220,8 +7221,9 @@ krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ### Using Pre-computed Factors
 
 ```bash
-# mFSD can use factors from extract
-krewlyzer mfsd -i sample.bam -V variants.vcf \
+# mFSD can use factors from extract. It computes each fragment's GC from the
+# reference, so the reference is required with them.
+krewlyzer mfsd -i sample.bam -V variants.vcf -g reference.fa \
     --correction-factors output/sample.correction_factors.tsv \
     -o output/
 ```
@@ -7238,7 +7240,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
-| **Region Entropy** | `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region Entropy** | `--gc-correct`, `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
 | **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
@@ -7249,7 +7251,21 @@ krewlyzer mfsd -i sample.bam -V variants.vcf \
 When `--target-regions` is provided to `extract`:
 - GC model is built from **off-target** fragments only
 - Avoids capture bias contamination
-- Generates both `.correction_factors.tsv` (off-target) and `.correction_factors.ontarget.tsv` (on-target)
+- Generates both `.correction_factors.*` (off-target) and `.correction_factors.ontarget.*` (on-target), in the run's `--output-format`
+
+**Which table a feature uses.** Every consumer finds its table through one resolver
+(`core.gc_assets.resolve_gc_factors`): beside the BED first, then in the output directory;
+Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
+factors and GC correction does not depend on the output format. Each sample's metadata records
+the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
+
+!!! warning "0.9.x cohorts"
+    Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
+    `.tsv` factor table. Runs with `--output-format parquet`, or with `--compress` (the Nextflow
+    default), write none, so those features ran **without GC correction**, while PON donors
+    (built with TSV forced) were corrected. Gene FSC was uncorrected for samples and donors
+    alike. Re-run those cohorts; `build-pon --from-outputs` refuses sample directories from
+    before the fix.
 
 ---
 
@@ -7762,7 +7778,7 @@ In panel mode, each feature outputs two files:
 | MDS | `.MDS.tsv` | `.MDS.ontarget.tsv` |
 
 !!! note
-    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.tsv`)
+    On-target outputs use **on-target GC correction factors** (`.correction_factors.ontarget.*`, any format)
     when available, providing better accuracy for capture-biased data.
 
 **Note on OCF ontarget**: OCF.ontarget uses **both** on-target fragments **AND** panel-filtered OCR regions. This dual-filter approach maximizes signal-to-noise for panel-specific tissue-of-origin detection. See [OCF Feature](../features/regulatory/ocf.md#panel-mode) for details.
@@ -9210,7 +9226,7 @@ This page documents the expected formats for custom input files used as override
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
-| [GC Factors TSV](#gc-factors-tsv) | length_bin, gc_pct, factor | `--gc-factors` | `10\t45\t1.05` |
+| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--gc-factors` | `170\t175\t50\t100\t90\t1.25` |
 
 ---
 
@@ -9511,41 +9527,39 @@ chr2	1000	1500	Blood
 
 ---
 
-## GC Factors TSV {#gc-factors-tsv}
+## GC Factors table {#gc-factors-tsv}
 
-Tab-separated correction factors for GC bias normalization.
+The GC correction factors `extract` and `run-all` write as `{sample}.correction_factors.*`
+(and `.ontarget.*` in panel mode): `.parquet`, `.tsv.gz` or `.tsv`, per `--output-format` and
+`--compress`. Any of the three is accepted wherever a factor table is read.
 
 ### Format
 
-```
-length_bin    gc_pct    factor
-```
-
 | Column | Type | Description |
 |--------|------|-------------|
-| length_bin | int | Fragment length bin: `(length - 60) // 5` |
-| gc_pct | int | GC percentage (0-100) |
-| factor | float | Correction factor (typically 0.5-2.0) |
+| `length_bin_min` | int | Fragment-length bin start (bp); bins are 5 bp, 60-999 |
+| `length_bin_max` | int | Bin end, exclusive |
+| `gc_percent` | int | Fragment GC, rounded to a whole percent (0-100) |
+| `observed` | int | The sample's fragment count in this cell |
+| `expected` | int | The reference count for this cell (`gc_reference` asset) |
+| `correction_factor` | float | The weight a fragment in this cell contributes |
+
+Columns are matched by name. A table that has no factor rows, misses a column or carries a
+non-finite factor is refused, not silently treated as "no correction".
 
 ### Example
 
 ```tsv
-length_bin	gc_pct	factor
-10	40	1.05
-10	41	1.03
-10	42	0.98
-11	40	1.02
+length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
+170	175	45	1532	1490	0.9731
+170	175	50	1688	1520	0.9004
 ```
-
-### Notes
-
-- Length bin 10 corresponds to fragments 110-114bp
-- GC percentage is rounded to the nearest integer
-- Factors near 1.0 indicate minimal bias
 
 ### Used By
 
-- `--gc-factors` / `-F` - Custom GC correction factors
+- `--gc-factors` / `-F` (`region-entropy`): the off-target table. Without it the tool uses the
+  tables `extract` wrote beside the BED, as `run-all` does.
+- `--correction-factors` (`mfsd`).
 
 ---
 
@@ -10754,6 +10768,10 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `filters_mapq` | int | Minimum MAPQ applied |
 | `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
 | `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
+| `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
+| `fragments_on_missing_contig` | int | Fragments on contigs the reference FASTA lacks under either `chr` spelling, such as decoys and alts; their GC is unresolved and they enter no GC model. A non-primary contig at another length counts here too. Warned about above 1% of fragments. A primary contig the reference lacks, or has at another length, is refused before extraction |
+| `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched; they enter no GC model, and any is warned about |
 | `timestamp` | str | ISO timestamp of the run |
 
 **Provenance, since 0.9.0.** Which build wrote this sample, and what it was

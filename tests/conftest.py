@@ -346,7 +346,8 @@ FIXTURES_DIR = Path(__file__).parent / "data" / "fixtures"
 
 @pytest.fixture
 def real_bam():
-    """Real BAM file subset (3144 reads from chr1:1-2000000)."""
+    """Real BAM file subset (3142 reads on 1:1-2000000; its header names only that 2Mb contig, as the
+    fixture reference does)."""
     bam = FIXTURES_DIR / "test_sample.bam"
     if bam.exists():
         return bam

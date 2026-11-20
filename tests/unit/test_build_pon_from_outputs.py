@@ -320,6 +320,18 @@ def _sample_dir(root: Path, index: int, *, band_limited: bool = False) -> Path:
         ),
         Path(f"{base}.FSC.regions"),
     )
+    # What a run after the GC-lookup fix records: both populations corrected, by kind.
+    pd.DataFrame(
+        [
+            {
+                "sample_id": stem,
+                "gc_factors_offtarget": "parquet",
+                "gc_factors_ontarget": "parquet",
+                "gc_correction_applied_offtarget": True,
+                "gc_correction_applied_ontarget": True,
+            }
+        ]
+    ).to_parquet(directory / f"{stem}.metadata.parquet")
     return directory
 
 
@@ -376,6 +388,29 @@ def test_a_half_written_directory_is_refused_by_name(corpus):
     collected, skipped = from_outputs.collect(from_outputs.discover_samples(corpus))
     assert len(skipped) == 1 and skipped[0][0] == victim
     assert len(collected.sample_ids) == N_SAMPLES - 1
+
+
+def test_a_directory_from_before_the_gc_lookup_fix_is_refused(corpus):
+    """0.9.x run-all left panel WPS, TFBS, ATAC and gene FSC uncorrected in Parquet/compressed
+    output, and its metadata does not say which tables were used. Aggregating such a donor into a
+    baseline that corrected samples are scored against reintroduces the mismatch."""
+    victim = sorted(corpus.iterdir())[2]
+    for meta in victim.glob("*.metadata.*"):
+        meta.unlink()
+    reason = from_outputs.incomplete_reason(victim) or ""
+    assert "GC-lookup fix" in reason
+
+
+def test_an_uncorrected_donor_is_refused(corpus):
+    victim = sorted(corpus.iterdir())[3]
+    meta = next(victim.glob("*.metadata.parquet"))
+    frame = pd.read_parquet(meta)
+    frame["gc_factors_offtarget"] = (
+        "none:not found beside the BED or in the output directory"
+    )
+    frame["gc_correction_applied_offtarget"] = False
+    frame.to_parquet(meta)
+    assert "not GC-corrected" in (from_outputs.incomplete_reason(victim) or "")
 
 
 def test_a_run_that_never_finished_is_refused(corpus):
@@ -558,3 +593,38 @@ def test_aggregation_needs_no_extraction_assets(corpus, tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert output.exists()
+
+
+def _metadata(directory, **columns):
+    directory.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"sample_id": "s", **columns}]).to_parquet(
+        directory / "s.metadata.parquet"
+    )
+    return directory
+
+
+def test_a_panel_donor_without_on_target_factors_is_refused_as_in_process(tmp_path):
+    """The in-process PON build refuses a panel donor with no on-target table
+    (`require_gc_for_pon`); `--from-outputs` checked only off-target, so that donor's
+    uncorrected gene FSC entered the baseline. One rule for both paths (review of PR #89).
+    """
+    d = _metadata(
+        tmp_path / "panel",
+        panel_mode=True,
+        gc_factors_offtarget="parquet",
+        gc_factors_ontarget="none:no on-target table",
+    )
+    reason = from_outputs.gc_reason(d, "s")
+    assert reason is not None and "on-target" in reason
+    _metadata(
+        d,
+        panel_mode=True,
+        gc_factors_offtarget="parquet",
+        gc_factors_ontarget="parquet",
+    )
+    assert from_outputs.gc_reason(d, "s") is None
+
+
+def test_a_whole_genome_donor_needs_only_off_target_factors(tmp_path):
+    d = _metadata(tmp_path / "wgs", panel_mode=False, gc_factors_offtarget="parquet")
+    assert from_outputs.gc_reason(d, "s") is None

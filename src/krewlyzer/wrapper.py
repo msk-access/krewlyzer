@@ -54,6 +54,7 @@ from .core.utils import resolve_bool as _resolve_bool
 
 # Import asset resolution functions (PON/target auto-loading)
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.gc_assets import factor_table_path, resolve_gc_factors
 
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
@@ -676,8 +677,8 @@ def run_all(
                         try:
                             gc_ref = assets.resolve("gc_reference")
                             valid_regions = assets.resolve("valid_regions")
-                            factors_ontarget = (
-                                output / f"{sample}.correction_factors.ontarget.tsv"
+                            factors_ontarget = factor_table_path(
+                                output, sample, "on_target"
                             )
                             logger.info(
                                 f"Computing on-target GC factors from {len(extraction_result.gc_observations_ontarget)} obs..."
@@ -861,40 +862,31 @@ def run_all(
             try:
                 from .mfsd import mfsd
 
-                # Resolve GC correction factors using the same logic as other tools
-                from .core.gc_assets import resolve_gc_assets
-
-                gc = resolve_gc_assets(
-                    assets, output, sample, bedgz_file, gc_correct=True, genome=genome
-                )
-
-                # Panel mode: prefer on-target GC factors for mFSD
-                # Variants are in captured regions (exons/promoters), which have different
-                # GC bias than off-target genome-wide fragments
+                # GC factors through the one resolver. Panel mode prefers the on-target table:
+                # variants sit in captured regions, whose GC bias differs from off-target.
+                gc_choice = None
                 if is_panel_mode:
-                    # On-target factors: check Parquet first, then TSV fallback
-                    for ext in (
-                        ".correction_factors.ontarget.parquet",
-                        ".correction_factors.ontarget.tsv",
-                    ):
-                        candidate = output / f"{sample}{ext}"
-                        if candidate.exists():
-                            correction_factors_path = candidate
-                            logger.info(
-                                f"mFSD: Using on-target GC factors ({candidate.name})"
-                            )
-                            break
-                    else:
-                        _cfp = gc.factors_input or gc.factors_out
-                        assert _cfp is not None, "correction_factors must be set"
-                        correction_factors_path = _cfp
-                        logger.warning(
-                            "mFSD: On-target factors not found, using global factors"
+                    gc_choice = resolve_gc_factors(
+                        bedgz_file, output, sample, "on_target"
+                    )
+                    if gc_choice.path is not None:
+                        logger.info(
+                            f"mFSD: on-target GC factors ({gc_choice.path.name})"
                         )
-                else:
-                    _cfp2 = gc.factors_input or gc.factors_out
-                    assert _cfp2 is not None, "correction_factors must be set"
-                    correction_factors_path = _cfp2
+                    else:
+                        logger.warning(
+                            f"mFSD: on-target GC factors not found ({gc_choice.reason}); "
+                            "using the off-target table"
+                        )
+                if gc_choice is None or not gc_choice.found:
+                    gc_choice = resolve_gc_factors(
+                        bedgz_file, output, sample, "off_target"
+                    )
+                if not gc_choice.found:
+                    logger.warning(
+                        f"mFSD: no GC factors ({gc_choice.reason}); running uncorrected"
+                    )
+                correction_factors_path = gc_choice.path
 
                 # Resolve which BAM to use for mFSD
                 mfsd_bam_path = (
