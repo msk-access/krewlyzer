@@ -114,6 +114,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
+  Python `set` of k-mers, which iterates in the per-process string-hash order, so the sum ran in
+  a different order each run: identical end-motif counts gave MDS differing in the last digit,
+  and `mds_z` differed run to run (on four real samples, by up to 6e-14 relative). The k-mers are
+  now summed in one fixed order. Values move only at that last digit; nothing else changes. It
+  had broken every byte-identical comparison between two runs, and PON MDS baselines shared it.
+
 - **On a push, the PHI scan covered only the last commit.** The scan base was
   `pull_request.base.sha || 'HEAD~1'`, so for a push it was `HEAD~1`: push
   three linear commits and two went unscanned, with nothing to say so. Merge
