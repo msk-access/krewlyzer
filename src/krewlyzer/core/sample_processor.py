@@ -37,7 +37,12 @@ from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
 from .motif_processor import compute_mds
 from ..assets import AssetManager
-from .gc_assets import check_reference_contigs, factor_table_path, require_gc_for_pon
+from .gc_assets import (
+    check_reference_contigs,
+    factor_table_path,
+    remove_factor_tables,
+    require_gc_for_pon,
+)
 
 logger = logging.getLogger("krewlyzer.core.sample_processor")
 
@@ -341,6 +346,9 @@ def extract_sample(
         output_dir.mkdir(parents=True, exist_ok=True)
         bed_path = output_dir / f"{sample_name}.bed.gz"
         bed_output_arg = str(bed_path)
+        # A factor table belongs to the BED it was fitted on: clear the previous run's before this
+        # run writes a new BED, so a run that fits none (or another format) cannot reuse it.
+        remove_factor_tables(output_dir, sample_name)
 
     # Call Rust extraction engine
     try:

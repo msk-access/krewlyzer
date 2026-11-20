@@ -62,6 +62,37 @@ def factor_table_base(directory: Path, sample: str, population: str) -> Path:
     return Path(directory) / f"{sample}{suffix}"
 
 
+def remove_factor_tables(
+    directory: Path, sample: str, populations: tuple = POPULATIONS
+) -> list:
+    """Remove a sample's factor tables, in every format, before a run writes its own.
+
+    A table belongs to the BED it was fitted on. The resolver finds one in any format, Parquet
+    first, so a table an earlier run left here was reused whenever this run wrote none (no
+    fittable bin, no observations, a failed fit) or wrote another format, and the metadata then
+    recorded the correction as applied. Returns the paths removed.
+    """
+    removed = []
+    for population in populations:
+        base = factor_table_base(directory, sample, population)
+        for _, ext in FACTOR_KINDS:
+            path = Path(f"{base}{ext}")
+            if path.exists():
+                path.unlink()
+                removed.append(path)
+    if removed:
+        logger.info(
+            f"Removed {len(removed)} GC factor table(s) left by an earlier run: "
+            + ", ".join(p.name for p in removed)
+        )
+    return removed
+
+
+def gc_populations_needed(panel_mode: bool) -> tuple:
+    """The factor tables a sample must have to count as GC-corrected: panel runs fit both."""
+    return POPULATIONS if panel_mode else ("off_target",)
+
+
 def factor_table_path(
     directory: Path, sample: str, population: str, ext: str = ".tsv"
 ) -> Path:
@@ -165,8 +196,7 @@ def require_gc_for_pon(choices: dict, panel_mode: bool) -> None:
     The donor's features would enter the baseline uncorrected and corrected samples would be
     scored against them -- the mismatch item 0 removes. A missing donor is better than that.
     """
-    needed = ("off_target", "on_target") if panel_mode else ("off_target",)
-    for population in needed:
+    for population in gc_populations_needed(panel_mode):
         choice = choices.get(population)
         if choice is None or not choice.found:
             reason = choice.reason if choice is not None else "not resolved"

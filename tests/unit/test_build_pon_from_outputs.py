@@ -593,3 +593,38 @@ def test_aggregation_needs_no_extraction_assets(corpus, tmp_path):
     )
     assert result.exit_code == 0, result.output
     assert output.exists()
+
+
+def _metadata(directory, **columns):
+    directory.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([{"sample_id": "s", **columns}]).to_parquet(
+        directory / "s.metadata.parquet"
+    )
+    return directory
+
+
+def test_a_panel_donor_without_on_target_factors_is_refused_as_in_process(tmp_path):
+    """The in-process PON build refuses a panel donor with no on-target table
+    (`require_gc_for_pon`); `--from-outputs` checked only off-target, so that donor's
+    uncorrected gene FSC entered the baseline. One rule for both paths (review of PR #89).
+    """
+    d = _metadata(
+        tmp_path / "panel",
+        panel_mode=True,
+        gc_factors_offtarget="parquet",
+        gc_factors_ontarget="none:no on-target table",
+    )
+    reason = from_outputs.gc_reason(d, "s")
+    assert reason is not None and "on-target" in reason
+    _metadata(
+        d,
+        panel_mode=True,
+        gc_factors_offtarget="parquet",
+        gc_factors_ontarget="parquet",
+    )
+    assert from_outputs.gc_reason(d, "s") is None
+
+
+def test_a_whole_genome_donor_needs_only_off_target_factors(tmp_path):
+    d = _metadata(tmp_path / "wgs", panel_mode=False, gc_factors_offtarget="parquet")
+    assert from_outputs.gc_reason(d, "s") is None

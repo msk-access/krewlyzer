@@ -185,7 +185,15 @@ All notable changes to this project will be documented in this file.
   - Extract matches target regions with or without `chr`, as the features already did. (Contigs
     the reference names the other way are resolved, not refused: see the contig entry above.)
   - `build-pon` refuses a donor whose factors are missing, and `--from-outputs` refuses sample
-    directories written before this fix.
+    directories written before this fix. Both apply one rule: a panel donor needs its on-target
+    table too (`--from-outputs` checked only off-target, so a panel donor whose on-target fit did
+    not run entered the baseline with uncorrected gene FSC).
+  - A factor table never outlives the BED it was fitted on: writing a new BED, or refitting from
+    one, first removes that sample's earlier tables in every format. A rerun that fitted nothing,
+    or wrote another format, used to reuse the previous run's weights (the resolver prefers
+    Parquet) while the metadata recorded the correction as applied.
+  - Both loaders require all six documented columns; a table without `length_bin_max` passed
+    `validate-gc-factors`.
 
   **Values change** for panel WPS, TFBS, ATAC and gene FSC in Parquet or compressed runs, so PONs
   must be rebuilt.

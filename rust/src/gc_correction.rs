@@ -315,6 +315,9 @@ impl CorrectionFactors {
         let names: Vec<&str> = header.trim_end().split(delim).map(str::trim).collect();
         let col = |name: &str| names.iter().position(|n| *n == name)
             .ok_or_else(|| anyhow!("correction factor table {:?} has no `{}` column (header: {:?})", path, name, names));
+        // Every documented column must be present, `length_bin_max` too, though it is not read:
+        // a table without it is not the documented format and must not validate.
+        col(Self::COLUMNS[1])?;
         let idx = [col(Self::COLUMNS[0])?, col(Self::COLUMNS[2])?, col(Self::COLUMNS[3])?,
                    col(Self::COLUMNS[4])?, col(Self::COLUMNS[5])?];
         let mut data = HashMap::new();
@@ -351,6 +354,7 @@ impl CorrectionFactors {
         let names: Vec<String> = fields.iter().map(|f| f.name().to_string()).collect();
         let col = |name: &str| names.iter().position(|n| n == name)
             .ok_or_else(|| anyhow!("correction factor table {:?} has no `{}` column (columns: {:?})", path, name, names));
+        col(Self::COLUMNS[1])?; // required, though not read (see load_tsv)
         let (i_len, i_gc, i_obs, i_exp, i_fac) =
             (col(Self::COLUMNS[0])?, col(Self::COLUMNS[2])?, col(Self::COLUMNS[3])?, col(Self::COLUMNS[4])?, col(Self::COLUMNS[5])?);
         let mut data = HashMap::new();
@@ -883,6 +887,35 @@ mod tests {
         crate::output_utils::write_parquet_batch(&p, Arc::new(schema), arrays).unwrap();
         let f = CorrectionFactors::load_parquet(&p).unwrap();
         assert_eq!(f.data[&(LengthBin(22), 50)].factor, 1.75);
+    }
+
+    #[test]
+    fn both_loaders_require_every_documented_column_including_length_bin_max() {
+        // `length_bin_max` is not read into the table, but a file without it is not the documented
+        // six-column format, and `validate-gc-factors` must not call it valid.
+        use arrow::array::{ArrayRef, Float64Array, UInt8Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let tsv = dir.path().join("no_max.tsv");
+        std::fs::write(&tsv, "length_bin_min\tgc_percent\tobserved\texpected\tcorrection_factor\n170\t50\t100\t90\t1.1\n").unwrap();
+        assert_err_names_factors(CorrectionFactors::load_tsv(&tsv), "TSV without length_bin_max");
+
+        let pq = dir.path().join("no_max.parquet");
+        let schema = Schema::new(vec![
+            Field::new("length_bin_min", DataType::UInt64, false),
+            Field::new("gc_percent", DataType::UInt8, false),
+            Field::new("observed", DataType::UInt64, false),
+            Field::new("expected", DataType::UInt64, false),
+            Field::new("correction_factor", DataType::Float64, false),
+        ]);
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt64Array::from(vec![170u64])), Arc::new(UInt8Array::from(vec![50u8])),
+            Arc::new(UInt64Array::from(vec![100u64])), Arc::new(UInt64Array::from(vec![90u64])),
+            Arc::new(Float64Array::from(vec![1.1])),
+        ];
+        crate::output_utils::write_parquet_batch(&pq, Arc::new(schema), arrays).unwrap();
+        assert_err_names_factors(CorrectionFactors::load_parquet(&pq), "Parquet without length_bin_max");
     }
 
     #[test]

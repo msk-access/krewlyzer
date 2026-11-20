@@ -33,7 +33,11 @@ import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import resolve_feature_gc_tables, resolve_gc_assets
+from .gc_assets import (
+    remove_factor_tables,
+    resolve_feature_gc_tables,
+    resolve_gc_assets,
+)
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
@@ -401,6 +405,11 @@ def run_features(
     # =========================================================================
     # 4. RUN RUST UNIFIED PIPELINE
     # =========================================================================
+
+    if gc.factors_out:
+        # Refitting from the BED into output_dir: an older table there, in any format, would win
+        # the next lookup over the one written now (or stand in for none, if nothing fits).
+        remove_factor_tables(output_dir, sample_name, ("off_target",))
 
     logger.info("Running Rust unified pipeline...")
     rust_start = time.time()
