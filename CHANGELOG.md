@@ -114,6 +114,13 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
+  Python `set` of k-mers, which iterates in the per-process string-hash order, so the sum ran in
+  a different order each run: identical end-motif counts gave MDS differing in the last digit,
+  and `mds_z` differed run to run (on four real samples, by up to 6e-14 relative). The k-mers are
+  now summed in one fixed order. Values move only at that last digit; nothing else changes. It
+  had broken every byte-identical comparison between two runs, and PON MDS baselines shared it.
+
 - **One rule matches BAM contigs to the reference, and a wrong reference is refused.** Each place a
   BAM contig met the reference FASTA had its own rule: extract matched names exactly, so a
   `chr1`-named BAM read with a `1`-named FASTA gave every fragment GC 0.0 and nothing was
