@@ -220,6 +220,27 @@ CLAIMS: Tuple[Claim, ...] = (
         "use this one rule",
     ),
     Claim(
+        "gc_model.default_trim_k",
+        "10",
+        RustConst("gc_model.rs", "DEFAULT_TRIM_K"),
+        "bp trimmed from each end of the insert before counting GC, until spec "
+        "Step 3 chooses k from {0, 2, 5, 10} by held-out residual",
+    ),
+    Claim(
+        "gc_model.length_min",
+        "20",
+        RustConst("gc_model.rs", "LENGTH_MIN"),
+        "the model's shortest fragment length (gc-correction.md: 20 to 600 bp); "
+        "at trim k the shortest with a key is max(20, 2k + 20)",
+    ),
+    Claim(
+        "gc_model.length_max",
+        "600",
+        RustConst("gc_model.rs", "LENGTH_MAX"),
+        "the model's longest fragment length; today's factor table runs to 999 "
+        "bp, so Step 2 must decide what a longer fragment gets",
+    ),
+    Claim(
         "gc_model.min_fit_fragments",
         "100_000",
         RustConst("gc_model.rs", "MIN_FIT_FRAGMENTS"),

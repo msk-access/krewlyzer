@@ -7363,6 +7363,53 @@ _core.gc.compute_and_write_gc_factors(
 
 ---
 
+## The redesigned GC model (library only)
+
+!!! warning "Not yet used by any feature (spec Step 2)"
+    Everything in this section is library code in `rust/src/gc_model.rs` and
+    `rust/src/gc_reference.rs`. Every GC-weighted feature still reads the correction factors
+    described above, until spec Step 2 moves the GC tally and the lookups onto the shared fragment
+    record. Nothing here changes an output.
+
+**One GC definition.** A fragment's cell is its exact length and the integer GC count of its
+insert with `k` bp trimmed from each end (`gc_key`; `k` defaults to 10 until Step 3 chooses it
+from {0, 2, 5, 10}). A, C, G and T count in either case. Any other base in the trimmed window
+(N, IUPAC) means no key, and so does a fragment shorter than `2k + 20` bp. The observed tally,
+the expected counts and the lookup all use this one rule. Lengths run from 20 to 600 bp.
+
+**Expected counts** (`ExpectedTable`) are exhaustive: every start position at every exact length
+in a `Territory`, counted from prefix sums. A window counts only if it lies wholly inside one
+interval. The territory's contigs resolve through `contigs::ContigNames`, and its SHA-256
+includes each contig's length, so the same coordinates on another assembly have another digest.
+
+**The support** comes from the reference, not from donors. At each length it is the fewest GC
+cells holding 99.5% of the territory's expected windows.
+
+**The fit** (`gc_model::fit`):
+
+1. At each length, `r = p_obs(GC | length) / p_exp(GC | length)` over the support.
+2. `r` is smoothed over (length, GC fraction) by a Gaussian-kernel **local-linear** fit,
+   weighted by the expected count at the sample's depth. The bandwidths are configuration
+   (defaults 5 bp and 0.02 GC fraction, truncated at 4 SD) until Step 3 chooses them by held-out
+   residual. The remaining curvature bias, about `(κh)²/2`, is estimated and reported.
+3. Raw weight = `1 / smoothed r`, capped to [1/10, 10].
+4. A cell outside the support takes its length's nearest in-support value. Its fragments never
+   enter the smoother.
+5. Each length's weights are divided by their fragment-weighted mean over the whole tally, so
+   every length keeps its total weight: `Σ obs·w = Σ obs`.
+
+Below 100,000 fragments, or when a length has no support cell, the fit returns "cannot fit". It
+never returns weights of 1. `weight(length, gc)` returns no value, rather than 1.0, for an
+unresolved GC or a cell outside the model; what to do then is Step 3's policy. The shares of
+weight in clamped and capped cells are reported in `FitQc`.
+
+**Provenance.** A model records its genome, territory and support digests, trim, GC definition
+version, fit configuration and krewlyzer version. Its compatibility hash covers all of these
+except the krewlyzer version. The Parquet loader refuses a table with no provenance or with
+another GC definition version: it does not reinterpret it.
+
+---
+
 ## When to Disable
 
 Disable GC correction (`--no-gc-correct`) when:

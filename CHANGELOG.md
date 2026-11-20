@@ -74,6 +74,10 @@ All notable changes to this project will be documented in this file.
     the fragments; in the no-bias control, cells with |w - 1| < 0.05 hold 99.7%. Each is shown to
     fail when the fit returns weights of 1, always returns a curve, uses a kernel average instead
     of local-linear, or uses four times the GC bandwidth.
+  - `docs/guides/gc-correction.md` describes the model in a section marked "not yet used by any
+    feature (spec Step 2)". Every constant it quotes (trim, length range, minimum trimmed window,
+    support share, cap, minimum fragments, bandwidths, kernel reach) is registered in
+    `validate/claims.py`.
 
 ### Removed
 
