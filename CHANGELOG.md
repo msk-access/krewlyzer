@@ -114,6 +114,16 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The blacklist is applied whatever the contig naming.** Extract compared contig names exactly
+  when excluding blacklisted regions. The bundled hg19 blacklist (`hg19-blacklist.v2.bed.gz`, 834
+  regions) names contigs `chr1`, while MSK-ACCESS BAMs name them `1`, and Nextflow passes no
+  blacklist of its own (`exclude_regions = ''`). So in production the blacklist matched nothing
+  and **was never applied**. Extract now matches the blacklist, like target regions, with or
+  without a leading `chr`. On four evidence samples (both assays, both sources) it removes 0.70%,
+  0.89%, 1.59% and 1.84% of fragments; the removed count equals the fragments overlapping the
+  blacklist exactly, in every sample. **Values change for every feature** (the fragment set
+  changes), so PONs must be rebuilt.
+
 - **GC correction no longer depends on the output format, and fails loudly.** Panel WPS, every
   TFBS and ATAC table, and gene FSC each looked for a plain `{sample}.correction_factors[.ontarget].tsv`.
   `--output-format parquet`, and `--compress` (the Nextflow default), write `.parquet`/`.tsv.gz`

@@ -7,6 +7,8 @@ feature code (which strips `chr`) still split on/off-target: the two disagreed o
 target" meant.
 """
 
+import gzip
+
 import pytest
 
 from krewlyzer import _core
@@ -73,3 +75,36 @@ def test_target_names_match_with_or_without_chr(tmp_path):
     result = _extract(sample, sample.reference, tmp_path / "t.bed", targets=targets)
     on_target_observations = sum(result[6].values())
     assert on_target_observations > 0, "a `1`-named target BED must match a `chr1` BAM"
+
+
+def test_blacklist_names_match_with_or_without_chr(tmp_path):
+    """The bundled hg19 blacklist names contigs `chr1`; MSK-ACCESS BAMs name them `1`. Extract
+    compared names exactly, so in production the blacklist matched nothing and was never applied
+    (on four evidence samples it removes 0.7-1.8% of fragments once it does)."""
+    sample = make_sample(tmp_path / "s")
+    first = sample.contigs[0]
+    exclude = tmp_path / "blacklist.bed"
+    exclude.write_text(f"{first.name.removeprefix('chr')}\t0\t{first.length}\n")
+    kept = _core.extract_motif.process_bam_parallel(
+        str(sample.bam),
+        str(sample.reference),
+        20,
+        65,
+        1000,
+        4,
+        1,
+        str(tmp_path / "x.bed"),
+        None,
+        str(exclude),
+        None,
+        True,
+        True,
+        True,
+    )
+    everything = _extract(sample, sample.reference, tmp_path / "all.bed")
+    with gzip.open(tmp_path / "all.bed", "rt") as fh:  # extract writes BGZF
+        on_first = sum(1 for line in fh if line.split("\t", 1)[0] == first.name)
+    assert on_first > 0
+    assert (
+        kept[0] == everything[0] - on_first
+    ), "a `1`-named blacklist must apply to a `chr1` BAM"

@@ -80,9 +80,11 @@ fn norm_chrom(c: &str) -> &str {
     c.strip_prefix("chr").unwrap_or(c)
 }
 
-/// Regions (chrom, start, end) from a BED. With `normalise`, contig names lose a leading `chr`, so
-/// `chr1` and `1` match; the query side must then be normalised too ([`overlaps_region`]).
-fn load_regions(path: &str, normalise: bool) -> HashSet<(String, u64, u64)> {
+/// Regions (chrom, start, end) from a BED, contig names without a leading `chr`, so `chr1` and `1`
+/// match. Used for targets and for the blacklist; queries go through [`overlaps_region`], which
+/// normalises the same way. The bundled hg19 blacklist names `chr1` while MSK-ACCESS BAMs name `1`:
+/// with exact matching it matched nothing and was never applied.
+fn load_regions(path: &str) -> HashSet<(String, u64, u64)> {
     let mut regions = HashSet::new();
     let path_buf = std::path::PathBuf::from(path);
     if let Ok(reader) = crate::bed::get_reader(&path_buf) {
@@ -90,8 +92,7 @@ fn load_regions(path: &str, normalise: bool) -> HashSet<(String, u64, u64)> {
             let fields: Vec<&str> = line.split('\t').collect();
             if fields.len() >= 3 {
                 if let (Ok(start), Ok(end)) = (fields[1].parse(), fields[2].parse()) {
-                    let chrom = if normalise { norm_chrom(fields[0]) } else { fields[0] };
-                    regions.insert((chrom.to_string(), start, end));
+                    regions.insert((norm_chrom(fields[0]).to_string(), start, end));
                 }
             }
         }
@@ -99,8 +100,8 @@ fn load_regions(path: &str, normalise: bool) -> HashSet<(String, u64, u64)> {
     regions
 }
 
-fn overlaps_region(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>, normalise: bool) -> bool {
-    let chrom = if normalise { norm_chrom(chrom) } else { chrom };
+fn overlaps_region(chrom: &str, start: u64, end: u64, exclude: &HashSet<(String, u64, u64)>) -> bool {
+    let chrom = norm_chrom(chrom);
     for (ex_chrom, ex_start, ex_end) in exclude {
         if chrom == ex_chrom && start < *ex_end && end > *ex_start {
             return true;
@@ -161,7 +162,7 @@ pub fn process_bam_parallel(
     
     // Load blacklist (Main thread)
     let exclude_regions = match exclude_path {
-        Some(p) => load_regions(&p, false),  // exact names, as before: see the blacklist commit
+        Some(p) => load_regions(&p),
         None => HashSet::new(),
     };
     // To share with Rayon, we wrap in Arc
@@ -170,7 +171,7 @@ pub fn process_bam_parallel(
     // Load target regions for off-target GC model (panel data like MSK-ACCESS)
     let target_regions = match target_regions_path {
         Some(ref p) => {
-            let regions = load_regions(p, true);  // chr-insensitive, as the features match
+            let regions = load_regions(p);
             info!("Panel mode: GC model will use off-target reads only ({} target regions)", regions.len());
             regions
         },
@@ -329,7 +330,7 @@ pub fn process_bam_parallel(
                      };
 
                      // Blacklist Check
-                     if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, start, end, &exclude_arc, false) {
+                     if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, start, end, &exclude_arc) {
                          continue;
                      }
                      
@@ -354,7 +355,7 @@ pub fn process_bam_parallel(
                      // Accumulate GC observation for correction factor computation
                      // Length bins: 5bp bins from 60-400bp = 68 bins (matches gc_correction.rs)
                      // Panel mode: Separate on-target and off-target for dual GC models
-                     let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, start, end, &target_arc, true);
+                     let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, start, end, &target_arc);
                      let length = tlen as u64;
                      // 5bp bins: (length - 60) / 5 -> 0..67
                      let length_bin = ((length.saturating_sub(60)) / 5).min(67) as u8;
@@ -401,7 +402,7 @@ pub fn process_bam_parallel(
                     (e.saturating_sub(abs_len as u64), e)
                 };
                 
-                if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, frag_start, frag_end, &exclude_arc, false) {
+                if !exclude_arc.is_empty() && overlaps_region(&chunk.chrom, frag_start, frag_end, &exclude_arc) {
                      continue;
                 }
                 
@@ -423,7 +424,7 @@ pub fn process_bam_parallel(
                 }
                 
                 // Check if fragment overlaps target regions (for on/off routing)
-                let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, frag_start, frag_end, &target_arc, true);
+                let is_on_target = is_panel_mode && overlaps_region(&chunk.chrom, frag_start, frag_end, &target_arc);
                 
                 // Store End Motif (route to on-target or off-target)
                 let motif_str = String::from_utf8_lossy(&motif_seq).to_string();
