@@ -42,7 +42,7 @@ from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
 from .wps_processor import post_process_wps
-from .pon_integration import load_pon_model
+from .pon_integration import load_requested_pon
 from .gene_bed import load_gene_bed
 
 # Rust backend
@@ -146,6 +146,7 @@ def run_features(
     # Output format control
     output_format: str = "tsv",  # "tsv" | "parquet" | "both"
     compress: bool = False,  # Gzip TSV outputs when True
+    owns_sample_record: bool = False,  # run-all and the PON build: rewrite the sample's record
 ) -> FeatureOutputs:
     """
     Run unified feature extraction pipeline.
@@ -237,6 +238,14 @@ def run_features(
     # Resolve optional Path parameters (handles typer.OptionInfo when called directly)
     resolved_target_regions = _resolve_path(target_regions)
     resolved_pon_model = _resolve_path(pon_model)
+    # Before any work: an unusable PON stops the run before a table is written.
+    loaded_pon = load_requested_pon(
+        resolved_pon_model,
+        record_dir=None if owns_sample_record else output_dir,
+        sample=sample_name,
+        output_format=resolved_output_format,
+        compress=resolved_compress,
+    )
     resolved_fsc_bins = _resolve_path(fsc_bins)
     resolved_fsd_arms = _resolve_path(fsd_arms)
     resolved_wps_anchors = _resolve_path(wps_anchors)
@@ -466,7 +475,7 @@ def run_features(
     pon_parquet = None
     pon_for_zscore = None  # Separate variable for z-score normalization
     if resolved_pon_model:
-        pon = load_pon_model(resolved_pon_model)
+        pon = loaded_pon
         # Only after the load succeeded.
         #
         # `pon_parquet` is handed to the Rust scorers as a *path* -- FSD, WPS,
@@ -474,13 +483,9 @@ def run_features(
         # unconditionally meant a PON the version guard had just refused was
         # still normalised against by every one of them: the Python half
         # stopped and the Rust half carried on.
+        # load_requested_pon raised on an unusable model, so a refused PON never reaches here; the
+        # conditional stays so the Rust scorers can only ever see a model that loaded.
         pon_parquet = resolved_pon_model if pon else None
-        if resolved_pon_model and not pon:
-            logger.error(
-                f"PON at {resolved_pon_model.name} was refused; every feature "
-                "keeps its raw values and gets no z-score. Nothing is scored "
-                "against a model this build cannot vouch for."
-            )
         if pon:
             logger.info(f"PON loaded: {pon.assay} (n={pon.n_samples})")
             # When skip_pon_zscore is True (--skip-pon mode), don't pass PON for z-scores
@@ -1126,7 +1131,6 @@ def run_features(
     if enable_tfbs or enable_atac:
         from .region_entropy_processor import process_region_entropy
 
-        # Note: load_pon_model is imported at module level (line 41)
         # Note: gc_str and gc_ontarget_str are resolved above (section 4b)
 
         # Use pon_parquet directly for Z-score normalization (Rust implementation)
@@ -1459,6 +1463,7 @@ def run_features(
         output_format=resolved_output_format,
         compress=resolved_compress,
         gc_factors=outputs.gc_factors_choice,
+        owns_record=owns_sample_record,
     )
 
     logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

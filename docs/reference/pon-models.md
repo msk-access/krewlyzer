@@ -116,7 +116,7 @@ one value of it. All 24 are present in the shipped GRCh37 models.
 
 ### Version compatibility
 
-**A PON older than 0.9.0 is refused.** That release changed what several
+**A PON older than 0.9.0 is refused, and the run stops.** That release changed what several
 features *mean* — a fabricated `wps_background`, floored σ, a region-MDS fitted
 over a different fragment range — so an older model is not merely stale, it is
 measuring something else, and every z-score against it is wrong in a way no

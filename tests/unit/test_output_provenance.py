@@ -214,3 +214,86 @@ def test_the_contract_declares_the_gc_columns():
     ):
         assert name in by_name, name
         assert by_name[name].vary is Vary.NEVER and by_name[name].constant_reason
+
+
+def test_the_stamp_reads_the_file_this_run_wrote_not_a_stale_sibling(tmp_path):
+    """A TSV run beside an earlier run's `.parquet`: the stamp found the `.tsv` but read the
+    Parquet (`read_table` is Parquet-first), so it wrote the earlier run's row back over this
+    run's. Review of #88's plan."""
+    pd.DataFrame([{"sample_id": "S1", "total_fragments": 10, "genome": "hg19"}]).to_csv(
+        tmp_path / "S1.metadata.tsv", sep="\t", index=False
+    )
+    pd.DataFrame(
+        [{"sample_id": "S1", "total_fragments": 99, "genome": "hg19"}]
+    ).to_parquet(tmp_path / "S1.metadata.parquet")
+
+    assert stamp_metadata(tmp_path, "S1", output_format="tsv")
+    frame = pd.read_csv(tmp_path / "S1.metadata.tsv", sep="\t")
+    assert frame["total_fragments"].iloc[0] == 10
+
+
+def test_a_single_tool_keeps_the_record_run_all_wrote(tmp_path):
+    """`krewlyzer fsc --skip-pon` into a run-all directory rewrote pon_applied for the whole
+    sample, and validate-output stopped requiring every other table's z columns. A single tool
+    fills the record in only where none exists (operator, 20 Nov)."""
+    path = _marker(tmp_path)
+    stamp_metadata(
+        tmp_path,
+        "S1",
+        pon=_Pon(),
+        pon_path=Path("x.pon.parquet"),
+        output_format="parquet",
+    )
+    assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])
+
+    assert not stamp_metadata(
+        tmp_path, "S1", pon=None, output_format="parquet", owns_record=False
+    )
+    assert bool(
+        pd.read_parquet(path)["pon_applied"].iloc[0]
+    ), "run-all's record was overwritten"
+
+    assert stamp_metadata(
+        tmp_path, "S1", pon=None, output_format="parquet", owns_record=True
+    )
+    assert not bool(pd.read_parquet(path)["pon_applied"].iloc[0])
+
+
+def test_a_single_tool_fills_in_a_record_that_does_not_exist_yet(tmp_path):
+    """After `krewlyzer extract`, the metadata has no provenance: the first tool records it."""
+    path = _marker(tmp_path)
+    assert stamp_metadata(
+        tmp_path, "S1", pon=None, output_format="parquet", owns_record=False
+    )
+    assert "pon_applied" in pd.read_parquet(path).columns
+
+
+def test_only_run_all_and_the_pon_build_own_the_sample_record():
+    import inspect
+
+    from krewlyzer import wrapper
+    from krewlyzer.core import sample_processor, unified_processor
+
+    assert "owns_record=owns_sample_record" in inspect.getsource(unified_processor)
+    for module in (wrapper, sample_processor):
+        assert "owns_sample_record=True" in inspect.getsource(module), module.__name__
+
+
+def test_single_tools_give_the_same_record_in_any_order(tmp_path):
+    """extract, then `fsd --skip-pon`, then `wps --pon-model X`: the first tool's unscored record
+    must not stand, or validate-output stops requiring WPS's z columns. A single tool may raise
+    pon_applied, never lower it."""
+    path = _marker(tmp_path)
+    stamp_metadata(tmp_path, "S1", pon=None, output_format="parquet", owns_record=False)
+    assert not bool(pd.read_parquet(path)["pon_applied"].iloc[0])
+    stamp_metadata(
+        tmp_path,
+        "S1",
+        pon=_Pon(),
+        pon_path=Path("x.pon.parquet"),
+        output_format="parquet",
+        owns_record=False,
+    )
+    assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])
+    stamp_metadata(tmp_path, "S1", pon=None, output_format="parquet", owns_record=False)
+    assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])

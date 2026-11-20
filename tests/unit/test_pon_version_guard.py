@@ -135,11 +135,13 @@ def _pon(tmp_path, version):
     return path
 
 
-def test_the_loader_refuses_an_old_model(tmp_path, caplog):
-    from krewlyzer.core.pon_integration import load_pon_model
+def test_the_loader_refuses_an_old_model(tmp_path):
+    """Refused means the run stops. It used to return None, and the run finished unscored with
+    pon_applied=False -- indistinguishable from a deliberate --skip-pon."""
+    from krewlyzer.core.pon_integration import UnusablePonError, load_pon_model
 
-    assert load_pon_model(_pon(tmp_path, "0.8.3")) is None
-    assert any("0.8.3" in r.message for r in caplog.records)
+    with pytest.raises(UnusablePonError, match="0.8.3"):
+        load_pon_model(_pon(tmp_path, "0.8.3"))
 
 
 def test_the_loader_accepts_a_current_model(tmp_path):
@@ -225,3 +227,220 @@ def test_a_refused_pon_does_not_reach_the_rust_scorers():
             "apply_wps_pon is not being handed the guarded path; a refused PON "
             f"would still be scored against:\n{c}"
         )
+
+
+def test_region_entropy_goes_through_the_guarded_loader_too():
+    """It handed the PON path straight to Rust, which never checks the version, so a refused
+    model still z-scored TFBS and ATAC (review of #88 PR A)."""
+    import inspect
+
+    from krewlyzer import region_entropy
+
+    assert "load_requested_pon(" in inspect.getsource(region_entropy)
+
+
+def test_an_unusable_pon_stops_a_single_tool_before_it_writes_anything(tmp_path):
+    """Loading after the pass left unscored tables under their final names, beside whatever
+    marker the directory already had."""
+    from krewlyzer.core.pon_integration import UnusablePonError
+    from krewlyzer.core.sample_processor import extract_sample
+    from krewlyzer.core.unified_processor import run_features
+    from tests.invariants.synth import make_sample
+
+    sample = make_sample(tmp_path / "s")
+    extract_sample(
+        sample.bam,
+        sample.reference,
+        output_dir=tmp_path / "bed",
+        sample_name="s",
+        threads=1,
+    )
+    junk = tmp_path / "junk.pon.parquet"
+    junk.write_bytes(b"not a parquet file")
+    out = tmp_path / "out"
+    with pytest.raises(UnusablePonError):
+        run_features(
+            bed_path=tmp_path / "bed" / "s.bed.gz",
+            output_dir=out,
+            sample_name="s",
+            fsc_bins=sample.assets.bins,
+            enable_fsc=True,
+            enable_fsd=True,
+            fsd_arms=sample.assets.arms,
+            gc_correct=False,
+            pon_model=junk,
+            threads=1,
+        )
+    assert not out.exists() or not any(out.iterdir()), sorted(
+        p.name for p in out.iterdir()
+    )
+
+
+def test_a_single_tool_refuses_to_score_a_sample_against_a_second_pon(tmp_path):
+    """The sample's record names the PON it was scored against. A single tool scoring it against
+    another one would leave tables from two PONs under one record, with nothing to flag it
+    (review of #88 PR A). Refused before any work; the same PON again is fine."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import stamp_metadata
+    from krewlyzer.core.pon_integration import UnusablePonError, load_requested_pon
+
+    x_dir, y_dir = tmp_path / "x", tmp_path / "y"
+    x_dir.mkdir(), y_dir.mkdir()
+    pon_x, pon_y = _pon(x_dir, "0.9.0"), _pon(y_dir, "0.9.0")
+    pon_y = pon_y.rename(y_dir / "other.pon.parquet")
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_parquet(out / "s.metadata.parquet")
+    model_x = load_requested_pon(pon_x)
+    stamp_metadata(out, "s", pon=model_x, pon_path=pon_x, output_format="parquet")
+
+    assert load_requested_pon(pon_x, record_dir=out, sample="s") is not None
+    with pytest.raises(
+        UnusablePonError,
+        match="t.pon.parquet.*other.pon.parquet|other.pon.parquet.*t.pon.parquet",
+    ):
+        load_requested_pon(pon_y, record_dir=out, sample="s")
+
+
+def test_the_refusal_reads_the_record_this_run_writes_not_a_stale_copy(tmp_path):
+    """A stale `.tsv` record from an earlier run (PON X) beside this run's `.parquet` (PON Y):
+    checking Y against the `.tsv` refused the run's own PON."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon, stamp_metadata
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    x_dir, y_dir = tmp_path / "x", tmp_path / "y"
+    x_dir.mkdir(), y_dir.mkdir()
+    pon_x = _pon(x_dir, "0.9.0")
+    pon_y = _pon(y_dir, "0.9.0").rename(y_dir / "other.pon.parquet")
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+    stamp_metadata(
+        out, "s", pon=load_requested_pon(pon_x), pon_path=pon_x, output_format="tsv"
+    )
+    pd.DataFrame([{"sample_id": "s"}]).to_parquet(out / "s.metadata.parquet")
+    stamp_metadata(
+        out, "s", pon=load_requested_pon(pon_y), pon_path=pon_y, output_format="parquet"
+    )
+
+    refuse_a_second_pon(
+        out, "s", load_requested_pon(pon_y), pon_y, output_format="parquet"
+    )
+
+
+def test_run_all_owns_the_record_for_region_mds():
+    """run-all rewrites the whole record, so its region-MDS call must not run the second-PON
+    check (a stale copy could refuse run-all's own PON, and run-all's catch would hide it).
+    """
+    import inspect
+
+    from krewlyzer import wrapper
+
+    source = inspect.getsource(wrapper)
+    assert "owns_sample_record=True" in source.split("_region_mds(", 1)[1].split(
+        ")", 1
+    )[0] or (
+        "owns_sample_record=True"
+        in source[source.index("_region_mds(") : source.index("_region_mds(") + 1500]
+    )
+
+
+def test_the_same_pon_is_accepted_again_on_a_tsv_record_with_no_cohort_digest(tmp_path):
+    """An empty `pon_cohort_digest` reads back from TSV as NaN, which compared as the string
+    'nan' and refused the very PON the record names (Greptile on #96)."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon, stamp_metadata
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    pon_path = _pon(tmp_path, "0.9.0")
+    model = load_requested_pon(pon_path)
+    model.cohort_digest = None
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+
+
+def test_a_pon_recorded_by_a_standalone_scorer_stops_a_later_tool_using_another(
+    tmp_path,
+):
+    """Behavioural, not a source grep: record PON A the way motif/region-entropy/region-mds do,
+    then a tool asking for PON B is refused; recording "no PON" never raises the flag.
+    """
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import record_pon_used
+    from krewlyzer.core.pon_integration import UnusablePonError, load_requested_pon
+
+    a_dir, b_dir = tmp_path / "a", tmp_path / "b"
+    a_dir.mkdir(), b_dir.mkdir()
+    pon_a = _pon(a_dir, "0.9.0")
+    pon_b = _pon(b_dir, "0.9.0").rename(b_dir / "other.pon.parquet")
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+
+    record_pon_used(out, "s", None, None, output_format="tsv")
+    assert not bool(
+        pd.read_csv(out / "s.metadata.tsv", sep="\t")["pon_applied"].iloc[0]
+    )
+    record_pon_used(out, "s", load_requested_pon(pon_a), pon_a, output_format="tsv")
+    with pytest.raises(UnusablePonError):
+        load_requested_pon(pon_b, record_dir=out, sample="s", output_format="tsv")
+
+
+def test_an_empty_pon_applied_cell_is_not_read_as_applied(tmp_path):
+    """bool(NaN) is True: an empty cell in a TSV record read as "applied"."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame(
+        [{"sample_id": "s", "pon_applied": None, "pon_model": "x.pon.parquet"}]
+    ).to_csv(out / "s.metadata.tsv", sep="\t", index=False)
+    pon = _pon(tmp_path, "0.9.0")
+    refuse_a_second_pon(out, "s", load_requested_pon(pon), pon, output_format="tsv")
+
+
+def test_a_digit_only_cohort_digest_survives_a_tsv_round_trip(tmp_path):
+    """'0123…' read back from TSV as the integer 123…, refusing the same PON."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import refuse_a_second_pon, stamp_metadata
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    pon_path = _pon(tmp_path, "0.9.0")
+    model = load_requested_pon(pon_path)
+    model.cohort_digest = "0123456789012345"
+    out = tmp_path / "out"
+    out.mkdir()
+    pd.DataFrame([{"sample_id": "s"}]).to_csv(
+        out / "s.metadata.tsv", sep="\t", index=False
+    )
+    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+
+
+def test_the_standalone_scorers_record_only_what_they_scored():
+    import inspect
+
+    from krewlyzer import motif, region_entropy, region_mds
+
+    assert "pon.mds_baseline else None" in inspect.getsource(motif)
+    assert "n_scored" in inspect.getsource(region_entropy)
+    src = inspect.getsource(region_mds)
+    assert "if scored" in src or "requested_pon if scored" in src

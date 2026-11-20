@@ -159,6 +159,21 @@ class TestResolvePonModel:
         assert source == "explicit"
         mock_assets.get_pon.assert_not_called()
 
+    def test_an_explicit_pon_that_does_not_exist_is_an_error(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        """It used to warn and be skipped by every caller, giving an unscored run."""
+        # ValueError, like every other bad --pon-model argument: each tool prints it as an
+        # ERROR line instead of a traceback.
+        with pytest.raises(ValueError, match="nope.pon.parquet"):
+            resolve_pon_model(
+                explicit_path=tmp_path / "nope.pon.parquet",
+                assay="xs2",
+                skip_pon=False,
+                assets=mock_assets,
+                log=mock_logger,
+            )
+
     def test_skip_flag_returns_none(self, mock_assets, mock_logger):
         """--skip-pon should return (None, 'skipped')."""
         path, source = resolve_pon_model(

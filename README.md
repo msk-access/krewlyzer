@@ -151,7 +151,8 @@ tooling: installing the tool should not deliver a linter.
 ### Upgrading to 0.9.0 — your own PON will be refused
 
 The bundled PONs were **rebuilt** for 0.9.0, not just re-stamped. A PON you
-built yourself with an earlier version is refused rather than scored against:
+built yourself with an earlier version is refused rather than scored against, and the run
+stops with:
 
 ```
 my.pon.parquet was built for krewlyzer 0.8.3, older than the 0.9.0 floor.
