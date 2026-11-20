@@ -77,13 +77,24 @@ pub fn gc_key(insert: &[u8], trim_k: u16) -> Option<GcKey> {
     }
     let mut gc = 0u16;
     for &b in &insert[k..insert.len() - k] {
-        match b {
-            b'G' | b'g' | b'C' | b'c' => gc += 1,
-            b'A' | b'a' | b'T' | b't' => {}
-            _ => return None,
+        match base_class(b) {
+            (true, is_gc) => gc += is_gc as u16,
+            (false, _) => return None,
         }
     }
     Some(GcKey { length, gc })
+}
+
+/// `(counts, is_gc)` for one base: whether it counts toward the window (A/C/G/T, either case),
+/// and whether it is G or C. The expected-count builder's prefix sums use this too, so the two
+/// cannot disagree about a base.
+#[inline]
+pub(crate) fn base_class(b: u8) -> (bool, bool) {
+    match b {
+        b'G' | b'g' | b'C' | b'c' => (true, true),
+        b'A' | b'a' | b'T' | b't' => (true, false),
+        _ => (false, false),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

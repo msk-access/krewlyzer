@@ -38,6 +38,16 @@ All notable changes to this project will be documented in this file.
   - **A strict Parquet loader**: it refuses a table with no provenance, another GC definition
     version, a missing, repeated or foreign cell, a non-finite or non-positive weight, or a
     support that does not match its digest. Write and load round-trip bit-identically.
+  - **Exhaustive expected counts over a territory** (`gc_reference::ExpectedTable`): every start
+    position at every exact length, from prefix sums of GC and of non-ACGT bases, replacing (for
+    the new model only) the 100 bp-step sampler that used one midpoint length per 5 bp bin and
+    left GC holes at short lengths. A window counts only if it lies wholly inside one interval of
+    the `Territory`, which is resolved through `contigs::ContigNames` and refuses an unknown
+    contig, an interval past its contig's end and overlapping intervals; its SHA-256 covers each
+    contig's FASTA name and length, so the same coordinates on another assembly differ. The
+    table is written as Parquet with its provenance and refused on load without it. Additive:
+    `generate_ref_genome_gc`, `LENGTH_BINS` and `get_length_bin_index` are unchanged, because
+    today's fit still reads the shipped `ref_genome_GC` asset.
 
 ### Removed
 
