@@ -73,7 +73,8 @@ demand, so a rule nobody opens is a rule that does not exist.
 | Docs or constants | `pytest tests/unit/test_claims_registry.py` | — |
 | Before blessing a cohort | `krewlyzer validate-output RESULTS_DIR` | `rules/validation-gates.md` — what each gate is blind to |
 | Before blessing a cohort or a release | `KREWLYZER_TEST_CORPUS=<dir> pytest tests/real_data` (local only) | `docs/development/release-guide.md` |
-| Before pushing a branch or calling a PR ready | A fresh review of the whole branch; then read the PR's automated review | `rules/validation-gates.md` — the five questions every review asks |
+| Before pushing a branch | A fresh review of the whole branch | `rules/validation-gates.md` — the five questions every review asks |
+| Before calling a PR ready | Read the PR's automated review and say what it found | `rules/validation-gates.md` |
 | PHI rules touched | `bash scripts/check_phi_guard.sh` | invariant #4 below |
 | Build or QC tooling | — | `rules/development.md` |
 | After a release | `python scripts/check_release_artifacts.py` | — |

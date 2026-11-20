@@ -37,8 +37,9 @@ All notable changes to this project will be documented in this file.
   and found four real defects, all in its first commit. `.agents/rules/validation-gates.md` now
   says to review `merge-base..HEAD` rather than the newest commit, to treat the PR's automated
   review as part of the gate, and to ask every time about leftover state, sibling paths, outcome
-  against intent, where errors land, and claims against code. `AGENTS.md` points to it before a
-  push.
+  against intent, where errors land, and claims against code. `AGENTS.md` points to it at two
+  moments: before pushing (the whole-branch review) and before calling a PR ready (the automated
+  review, which a branch only has once it is pushed).
 
 - **Region-entropy tables are written through a buffer, removing the slowest `run-all` stage.**
   Both writers in `region_entropy.rs` called `writeln!` on a bare `File`, and
