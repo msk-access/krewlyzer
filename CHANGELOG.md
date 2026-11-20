@@ -32,6 +32,14 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **Reviews ask five standing questions, over the whole branch.** Every gate passed on #89, and so
+  did our own reviews, each of one commit's diff; the automated PR review read the whole branch
+  and found four real defects, all in its first commit. `.agents/rules/validation-gates.md` now
+  says to review `merge-base..HEAD` rather than the newest commit, to treat the PR's automated
+  review as part of the gate, and to ask every time about leftover state, sibling paths, outcome
+  against intent, where errors land, and claims against code. `AGENTS.md` points to it before a
+  push.
+
 - **Region-entropy tables are written through a buffer, removing the slowest `run-all` stage.**
   Both writers in `region_entropy.rs` called `writeln!` on a bare `File`, and
   that makes one write system call per formatted piece -- 9 per row of the
