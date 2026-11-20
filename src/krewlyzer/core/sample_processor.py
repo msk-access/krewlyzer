@@ -380,11 +380,13 @@ def extract_sample(
         contig_guard,
     ) = result
 
-    # Fragments on contigs the FASTA lacks get GC 0.0 and enter no GC model. A naming mismatch
-    # (chr1 against 1) puts nearly all of them there: refuse that rather than run uncorrected.
+    # Fragments on contigs the reference lacks (decoys, alts) and failed fetches have no GC and
+    # enter no GC model; a wrong reference was already refused by extract.
     contig_guard = dict(contig_guard or {})
     check_reference_contigs(
-        contig_guard.get("fragments_on_missing_contig", 0), fragment_count
+        contig_guard.get("fragments_on_missing_contig", 0),
+        contig_guard.get("gc_fetch_failed", 0),
+        fragment_count,
     )
 
     # em_counts and bpm_counts from Rust are dicts (k-mer -> count)

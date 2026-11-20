@@ -72,8 +72,9 @@ krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ### Using Pre-computed Factors
 
 ```bash
-# mFSD can use factors from extract
-krewlyzer mfsd -i sample.bam -V variants.vcf \
+# mFSD can use factors from extract. It computes each fragment's GC from the
+# reference, so the reference is required with them.
+krewlyzer mfsd -i sample.bam -V variants.vcf -g reference.fa \
     --correction-factors output/sample.correction_factors.tsv \
     -o output/
 ```

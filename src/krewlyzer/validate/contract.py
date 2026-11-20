@@ -505,8 +505,9 @@ CONTRACT: Tuple[TableRule, ...] = (
                     Vary.NEVER,
                     required=False,
                     constant_reason=(
-                        "normally 0 in every sample; any non-zero count is the finding "
-                        "(contigs absent from the FASTA, or failed sequence fetches)"
+                        "often 0 in every sample: fragments on contigs the reference lacks "
+                        "(decoys, alts) and failed GC fetches; a wrong reference is refused "
+                        "before extraction, so a count here is reported, not a failure"
                     ),
                 )
                 for name in ("fragments_on_missing_contig", "gc_fetch_failed")

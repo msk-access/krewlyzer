@@ -16,29 +16,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger("krewlyzer.core.gc_assets")
 
 
-#: Share of fragments on contigs absent from the FASTA above which extract fails: a naming mismatch
-#: (`chr1` against `1`) puts ~100% there, while a few decoy or alt contigs the FASTA lacks do not.
-CONTIG_MISMATCH_FAIL_SHARE = 0.5
-#: Share above which it is warned about and recorded, but the run continues.
+#: Share of fragments on contigs the reference lacks above which it is warned about. Extract itself
+#: refuses a wrong reference (a primary contig absent, or a length mismatch) before reading; what
+#: remains is decoys and alts, recorded in the metadata whatever the share.
 CONTIG_MISMATCH_WARN_SHARE = 0.01
 
 
-def check_reference_contigs(n_missing: int, n_total: int) -> float:
-    """Apply the contig-mismatch policy to extract's counts; return the missing share.
+def check_reference_contigs(n_missing: int, n_fetch_failed: int, n_total: int) -> float:
+    """Report extract's contig counts; return the share of fragments on contigs the reference lacks.
 
-    Fragments on a contig the FASTA lacks get GC 0.0, so no length bin can be fitted and GC
-    correction silently does nothing. Raises when the share points at a naming mismatch.
+    Those fragments, and any whose reference fetch failed, have no GC and enter no GC model. A
+    wrong reference never reaches here: extract refuses it from the BAM header.
     """
     share = n_missing / n_total if n_total else 0.0
-    if share > CONTIG_MISMATCH_FAIL_SHARE:
-        raise RuntimeError(
-            f"{share:.0%} of fragments are on contigs missing from the reference FASTA. "
-            "The BAM and FASTA probably name contigs differently (`chr1` against `1`); "
-            "use the reference the BAM was aligned to."
-        )
     if share > CONTIG_MISMATCH_WARN_SHARE:
         logger.warning(
-            f"{share:.1%} of fragments are on contigs missing from the reference; "
+            f"{share:.1%} of fragments are on contigs missing from the reference "
+            "(decoys, alts, unplaced); their GC is unresolved and they enter no GC model"
+        )
+    if n_fetch_failed:
+        logger.warning(
+            f"{n_fetch_failed} fragments' reference sequence could not be fetched; "
             "their GC is unresolved and they enter no GC model"
         )
     return share

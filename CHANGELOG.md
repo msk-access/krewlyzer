@@ -114,6 +114,36 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **One rule matches BAM contigs to the reference, and a wrong reference is refused.** Each place a
+  BAM contig met the reference FASTA had its own rule: extract matched names exactly, so a
+  `chr1`-named BAM read with a `1`-named FASTA gave every fragment GC 0.0 and nothing was
+  corrected; mFSD and the expected-GC builder tried the other spelling after a miss, and that
+  fallback **crashed** instead (rust-htslib's `fetch_seq` returns a `Vec` over a null pointer, not
+  `Err`, for a name the FASTA lacks: mFSD with `chr1` variants against a `1`-named FASTA, and
+  `generate_ref_genome_gc` with `chr`-less regions against a `chr`-named FASTA, both segfaulted).
+  `rust/src/contigs.rs` now resolves every BAM contig once, from the BAM header and the FASTA
+  index: the exact name first, then the other `chr` spelling, and the lengths must agree.
+  - **Refused before any read is processed:** a primary contig (1-22, X, Y) the reference lacks, or
+    one whose length differs (another assembly, such as hg38 against hg19, which no name rule can
+    see). `chrM` (16,571 bp) and `MT` (16,569 bp) stay apart by length.
+  - **Counted, not refused:** fragments on contigs the reference lacks (decoys, alts) or has at
+    another length (a non-primary contig such as chrM against rCRS; warned about), in
+    `fragments_on_missing_contig`; warned about above 1%. They are left out of the GC
+    observations instead of entering the lowest GC bin at 0%. Any failed GC fetch is warned about.
+  - The counts are filled when no BED is written too (`krewlyzer motif` reported 0 fragments).
+  - extract fetches GC and breakpoint-motif context under the resolved name; mFSD resolves a
+    variant's contig against the BAM the same way, and with GC factors but no reference is now an
+    error (it ran uncorrected, and the GC-correction guide's own example and the Nextflow module
+    did exactly that: both now pass the reference); `generate_ref_genome_gc` errors on a region the reference lacks
+    (it skipped it). A reference that cannot be opened is an error in extract (every fragment got
+    GC 0.0).
+  - This replaces the 50% share at which extract failed, which detected the naming mismatch rather
+    than resolving it. A run whose BAM and reference already matched by name, with no fragments on
+    contigs the reference lacks, is unaffected.
+  - The real-data test fixture (`tests/data/fixtures/test_sample.bam`) named 290 full-length
+    contigs against its 2 Mb, one-contig reference, which this now refuses. Its header names only
+    that contig; the 2 reads whose mates lay on other contigs are dropped (3,142 remain).
+
 - **The blacklist is applied whatever the contig naming.** Extract compared contig names exactly
   when excluding blacklisted regions. The bundled hg19 blacklist (`hg19-blacklist.v2.bed.gz`, 834
   regions) names contigs `chr1`, while MSK-ACCESS BAMs name them `1`, and Nextflow passes no
@@ -152,9 +182,8 @@ All notable changes to this project will be documented in this file.
   - `metadata` records which kind of table each population used (`gc_factors_offtarget`,
     `gc_factors_ontarget`, `gc_correction_applied_*`), plus `fragments_on_missing_contig` and
     `gc_fetch_failed`.
-  - Extract fails when more than 50% of fragments are on contigs missing from the FASTA (the
-    signature of `chr1`-against-`1` naming, which silently gave every fragment GC 0.0), warns above
-    1%, and matches target regions with or without `chr`, as the features already did.
+  - Extract matches target regions with or without `chr`, as the features already did. (Contigs
+    the reference names the other way are resolved, not refused: see the contig entry above.)
   - `build-pon` refuses a donor whose factors are missing, and `--from-outputs` refuses sample
     directories written before this fix.
 

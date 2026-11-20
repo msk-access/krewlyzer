@@ -1721,7 +1721,7 @@ Key fixtures from `tests/conftest.py`:
 | `temp_ocr` | OCF regions file |
 | `temp_vcf` | mFSD variants file |
 | `full_test_data` | Bundle for run-all |
-| `real_bam` | Production data (3144 reads) |
+| `real_bam` | Production data (3142 reads; header matches the 2Mb `real_reference`) |
 | `real_pon` | MSK-ACCESS v1 PON |
 
 ---
@@ -7208,8 +7208,9 @@ krewlyzer fsc -i sample.bed.gz --no-gc-correct -o output/
 ### Using Pre-computed Factors
 
 ```bash
-# mFSD can use factors from extract
-krewlyzer mfsd -i sample.bam -V variants.vcf \
+# mFSD can use factors from extract. It computes each fragment's GC from the
+# reference, so the reference is required with them.
+krewlyzer mfsd -i sample.bam -V variants.vcf -g reference.fa \
     --correction-factors output/sample.correction_factors.tsv \
     -o output/
 ```
@@ -10755,8 +10756,8 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
 | `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
-| `fragments_on_missing_contig` | int | Fragments on contigs absent from the reference FASTA (their GC is unresolved). Extract fails above 50% of fragments, the signature of `chr1`-against-`1` naming |
-| `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched |
+| `fragments_on_missing_contig` | int | Fragments on contigs the reference FASTA lacks under either `chr` spelling, such as decoys and alts; their GC is unresolved and they enter no GC model. A non-primary contig at another length counts here too. Warned about above 1% of fragments. A primary contig the reference lacks, or has at another length, is refused before extraction |
+| `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched; they enter no GC model, and any is warned about |
 | `timestamp` | str | ISO timestamp of the run |
 
 **Provenance, since 0.9.0.** Which build wrote this sample, and what it was

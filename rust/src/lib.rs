@@ -36,6 +36,7 @@ pub mod wps;
 pub mod mfsd;
 pub mod uxm;
 pub mod extract_motif;
+pub mod contigs;         // One BAM-to-FASTA contig-name rule
 pub mod engine;
 pub mod pipeline;
 pub mod gc_correction;

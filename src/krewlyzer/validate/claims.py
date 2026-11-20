@@ -323,13 +323,6 @@ CLAIMS: Tuple[Claim, ...] = (
         "refused rather than silently scored against",
     ),
     Claim(
-        "gc.contig_mismatch_fail_share",
-        "0.5",
-        PyConst("krewlyzer.core.gc_assets", "CONTIG_MISMATCH_FAIL_SHARE"),
-        "extract fails above this share of fragments on contigs missing from the FASTA: a "
-        "chr1-against-1 naming mismatch puts ~100% there, a few absent decoy contigs do not",
-    ),
-    Claim(
         "gc.contig_mismatch_warn_share",
         "0.01",
         PyConst("krewlyzer.core.gc_assets", "CONTIG_MISMATCH_WARN_SHARE"),
