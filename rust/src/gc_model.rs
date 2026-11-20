@@ -116,8 +116,9 @@ impl<T: Clone> GcGrid<T> {
     /// shortest length has no key (`min_len < 2k + MIN_TRIMMED_WINDOW`): a length that can never
     /// hold a fragment would read as one with no support.
     pub fn new(min_len: u16, max_len: u16, trim_k: u16, fill: T) -> Result<Self> {
-        let shortest = 2 * trim_k + MIN_TRIMMED_WINDOW;
-        if min_len < shortest {
+        // In u32: a trim read from a file must not overflow into a short minimum.
+        let shortest = 2 * trim_k as u32 + MIN_TRIMMED_WINDOW as u32;
+        if (min_len as u32) < shortest {
             return Err(anyhow!(
                 "GC grid: lengths start at {min_len} bp, but at trim {trim_k} no fragment shorter \
                  than {shortest} bp has a GC key"
@@ -140,7 +141,8 @@ impl<T: Clone> GcGrid<T> {
 impl<T> GcGrid<T> {
     /// The default length range at a trim: `max(LENGTH_MIN, 2k + 20)..=LENGTH_MAX`.
     pub fn lengths_for(trim_k: u16) -> (u16, u16) {
-        (LENGTH_MIN.max(2 * trim_k + MIN_TRIMMED_WINDOW), LENGTH_MAX)
+        let shortest = (2 * trim_k as u32 + MIN_TRIMMED_WINDOW as u32).min(u16::MAX as u32) as u16;
+        (LENGTH_MIN.max(shortest), LENGTH_MAX)
     }
 
     pub fn min_len(&self) -> u16 {
@@ -301,6 +303,9 @@ pub struct FitConfig {
 pub struct FitQc {
     /// Fragments in the tally the model was fitted on.
     pub fragments: u64,
+    /// Fragments the tally counted outside the model's length range: they were not fitted, and
+    /// have no weight. What they get is Step 2's decision; until then they are counted here.
+    pub fragments_outside_lengths: u64,
     /// Share of the fitted fragments' total weight in cells outside the support.
     pub clamped_weight_share: f64,
     /// Share of the fitted fragments' total weight in cells whose raw weight hit the cap.
@@ -890,7 +895,7 @@ pub fn fit(
     }
 
     // Normalise per length over the whole tally, in index order.
-    let mut qc = FitQc { fragments, ..FitQc::default() };
+    let mut qc = FitQc { fragments, fragments_outside_lengths: observed.outside(), ..FitQc::default() };
     for &len in &lengths {
         let row_obs = obs.row(len);
         if row_obs.iter().all(|&o| o == 0) {
@@ -1169,7 +1174,7 @@ pub(crate) mod tests {
         let support = CellSet::from_grid(support, 0.995);
         let qc = FitQc { fragments: 123_456, clamped_weight_share: 0.0123, capped_weight_share: 0.004,
                          smoothing_bias_mean: 0.001, smoothing_bias_p95: 0.01,
-                         lengths_unobserved: 0, lengths_unfitted: 1 };
+                         lengths_unobserved: 0, lengths_unfitted: 1, fragments_outside_lengths: 0 };
         let p = provenance(territory, &support);
         GcModel::from_parts(weights, capped, support, p, qc).unwrap()
     }
@@ -1210,7 +1215,7 @@ pub(crate) mod tests {
         ];
         crate::output_utils::write_parquet_batch(&p, schema, arrays).unwrap();
         let err = format!("{:#}", GcModel::load_parquet(&p).unwrap_err());
-        assert!(err.contains("provenance"), "{err}");
+        assert!(err.contains(META_PROVENANCE), "{err}");
     }
 
     #[test]
@@ -1234,6 +1239,67 @@ pub(crate) mod tests {
         m.write_parquet(&p).unwrap();
         let err = format!("{:#}", GcModel::load_parquet(&p).unwrap_err());
         assert!(err.contains("support"), "{err}");
+    }
+
+    /// One written row: length, gc, weight, in_support, capped.
+    type Row = (u16, u16, Option<f64>, bool, bool);
+    type Edit = Box<dyn Fn(&mut Vec<Row>)>;
+
+    /// Rewrite a model's rows through `edit`, keeping its metadata, and load the result.
+    fn load_edited(m: &GcModel, edit: impl Fn(&mut Vec<Row>)) -> String {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("m.parquet");
+        m.write_parquet(&src).unwrap();
+        let (meta, _) = read_parquet_with_metadata(&src).unwrap();
+        let mut rows: Vec<_> = m.weights().keys().zip(m.weights().cells())
+            .zip(m.support().grid().cells().iter().zip(m.capped().cells()))
+            .map(|((k, w), (s, c))| (k.length, k.gc, *w, *s, *c)).collect();
+        edit(&mut rows);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("length", DataType::UInt16, false),
+            Field::new("gc", DataType::UInt16, false),
+            Field::new("weight", DataType::Float64, true),
+            Field::new("in_support", DataType::Boolean, false),
+            Field::new("capped", DataType::Boolean, false),
+        ]));
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt16Array::from_iter_values(rows.iter().map(|r| r.0))),
+            Arc::new(UInt16Array::from_iter_values(rows.iter().map(|r| r.1))),
+            Arc::new(Float64Array::from(rows.iter().map(|r| r.2).collect::<Vec<_>>())),
+            Arc::new(BooleanArray::from(rows.iter().map(|r| r.3).collect::<Vec<_>>())),
+            Arc::new(BooleanArray::from(rows.iter().map(|r| r.4).collect::<Vec<_>>())),
+        ];
+        let dst = dir.path().join("edited.parquet");
+        let meta: Vec<(&str, String)> = meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        write_parquet_with_metadata(&dst, schema, arrays, meta).unwrap();
+        match GcModel::load_parquet(&dst) {
+            Ok(_) => "loaded".to_string(),
+            Err(e) => format!("{e:#}"),
+        }
+    }
+
+    #[test]
+    fn a_malformed_cell_set_is_refused() {
+        let m = small_model("t");
+        assert_eq!(load_edited(&m, |_| {}), "loaded", "the unedited rows load");
+        let cases: [(&str, &str, Edit); 5] = [
+            ("repeated", "appears twice", Box::new(|r| { let x = r[3]; r.push(x); })),
+            ("missing", "missing", Box::new(|r| { r.pop(); })),
+            ("foreign", "outside its own shape", Box::new(|r| r[0].1 = 999)),
+            ("zero weight", "finite positive", Box::new(|r| r[0].2 = Some(0.0))),
+            ("NaN weight", "finite positive", Box::new(|r| r[0].2 = Some(f64::NAN))),
+        ];
+        for (what, needle, edit) in cases {
+            let err = load_edited(&m, edit);
+            assert!(err.contains(needle), "{what}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_grid_refuses_a_trim_that_overflows() {
+        assert!(GcGrid::new(100, 200, 40_000, 0u8).is_err());
+        assert!(GcGrid::new(100, 200, 41, 0u8).is_err(), "100 bp < 2 * 41 + 20");
+        assert!(GcGrid::new(100, 200, 40, 0u8).is_ok(), "100 bp = 2 * 40 + 20");
     }
 
     #[test]
@@ -1596,6 +1662,57 @@ pub(crate) mod fit_tests {
         assert!(b0 < 0.002, "flat: {b0}");
         assert!((0.015..0.025).contains(&b1), "κ = 10: {b1}");
         assert!(curved.qc().smoothing_bias_p95 >= b1);
+    }
+
+    /// Fit runtime on the full grid at the default trim (40-600 bp): `cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn timing_of_a_fit_on_the_full_grid() {
+        let (lo, hi) = GcGrid::<u64>::lengths_for(DEFAULT_TRIM_K);
+        let mut g = GcGrid::new(lo, hi, DEFAULT_TRIM_K, 0u64).unwrap();
+        let keys: Vec<GcKey> = g.keys().collect();
+        for (i, k) in keys.iter().enumerate() {
+            g.cells_mut()[i] = genome_shaped(k.length - 2 * DEFAULT_TRIM_K, k.gc).round() as u64;
+        }
+        let e = ExpectedTable::from_counts(g, "synthetic", "t");
+        let s = CellSet::from_expected(&e, SUPPORT_SHARE).unwrap();
+        let mut t = Tally::like(e.counts());
+        let n_cells = s.grid().cells().iter().filter(|&&b| b).count();
+        for (k, &c) in keys.iter().zip(e.counts().cells()) {
+            t.add(*k, c / 10);
+        }
+        let t0 = std::time::Instant::now();
+        let m = fit(&t, &e, &s, &FitConfig::default()).unwrap();
+        eprintln!("fit: lengths {lo}..={hi}, {} cells, {n_cells} in support, {} fragments: {:.2} s",
+                  e.counts().len(), t.total(), t0.elapsed().as_secs_f64());
+        assert!(m.qc().lengths_unfitted == 0);
+    }
+
+    #[test]
+    fn lengths_beyond_the_kernels_reach_are_unfitted_and_reported() {
+        // No fragment at 100-150 bp: the middle lengths are more than 4 SD (20 bp) from any data.
+        let e = expected_table(genome_shaped);
+        let mut t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        for len in 100..=150 {
+            t.counts.row_mut(len).iter_mut().for_each(|c| *c = 0);
+        }
+        let m = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        // 120-130 are unreachable: each is more than 20 bp from 99 and from 151.
+        assert_eq!(m.qc().lengths_unfitted, 11);
+        assert_eq!(m.qc().lengths_unobserved, 51);
+        assert_eq!(m.weight(125, Some(60)), None);
+        assert!(m.weight(110, Some(50)).is_some());
+    }
+
+    #[test]
+    fn fragments_outside_the_length_range_are_reported() {
+        let e = expected_table(genome_shaped);
+        let mut t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        let m0 = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        assert!(!t.add(GcKey { length: HI + 50, gc: 100 }, 7));
+        assert!(!t.add(GcKey { length: LO - 1, gc: 10 }, 3));
+        let m1 = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap();
+        assert_eq!((m0.qc().fragments_outside_lengths, m1.qc().fragments_outside_lengths), (0, 10));
     }
 
     #[test]

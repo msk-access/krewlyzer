@@ -279,8 +279,8 @@ CLAIMS: Tuple[Claim, ...] = (
         "gc_model.kernel_reach_sd",
         "4.0",
         RustConst("gc_model.rs", "KERNEL_REACH_SD"),
-        "the kernel is truncated at this many SDs; a cell with nothing in reach "
-        "has no weight rather than an extrapolated one",
+        "the kernel is truncated at this many SDs; a length with no fragment in "
+        "reach has no weight (FitQc.lengths_unfitted) rather than an extrapolated one",
     ),
     # -- PON sigma floor --------------------------------------------------
     Claim(

@@ -59,7 +59,9 @@ All notable changes to this project will be documented in this file.
     `(κh)²/2`, is estimated and reported. Bandwidths are configuration (defaults 5 bp and 0.02 GC
     fraction, kernel truncated at 4 SD) until spec Step 3 chooses them. Below 100,000 fragments,
     or with a length that has no support cell, the fit returns an explicit "cannot fit", never
-    weights of 1. Dense arrays and index-order sums make a rerun bit-identical.
+    weights of 1. Fragments outside the model's 20-600 bp range are not fitted and are counted
+    in `FitQc` (what they get is Step 2's decision). Dense arrays and index-order sums make a
+    rerun bit-identical.
   - **Sparse cells.** The support comes from the reference, not from donors (operator decision
     S1): at each length, the fewest GC cells holding 99.5% of the territory's expected windows. It
     needs no PON and no depth, and its digest is in the provenance. Raw weights are capped to

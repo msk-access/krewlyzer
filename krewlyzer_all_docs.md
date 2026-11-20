@@ -7400,8 +7400,9 @@ cells holding 99.5% of the territory's expected windows.
 
 Below 100,000 fragments, or when a length has no support cell, the fit returns "cannot fit". It
 never returns weights of 1. `weight(length, gc)` returns no value, rather than 1.0, for an
-unresolved GC or a cell outside the model; what to do then is Step 3's policy. The shares of
-weight in clamped and capped cells are reported in `FitQc`.
+unresolved GC or a cell outside the model; what to do then is Step 3's policy. `FitQc` reports
+the shares of weight in clamped and capped cells, the lengths left unobserved or unfitted, and
+the fragments outside the length range, which are not fitted (Step 2 decides what they get).
 
 **Provenance.** A model records its genome, territory and support digests, trim, GC definition
 version, fit configuration and krewlyzer version. Its compatibility hash covers all of these

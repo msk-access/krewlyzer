@@ -1005,6 +1005,24 @@ mod expected_tests {
         v.write_parquet(&p).unwrap();
         let err = format!("{:#}", ExpectedTable::load_parquet(&p).unwrap_err());
         assert!(err.contains("definition version"), "{err}");
+        // The same rows with no metadata: refused.
+        use arrow::array::{ArrayRef, UInt16Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let keys: Vec<_> = t.counts().keys().collect();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("length", DataType::UInt16, false),
+            Field::new("gc", DataType::UInt16, false),
+            Field::new("expected", DataType::UInt64, false),
+        ]));
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt16Array::from_iter_values(keys.iter().map(|k| k.length))),
+            Arc::new(UInt16Array::from_iter_values(keys.iter().map(|k| k.gc))),
+            Arc::new(UInt64Array::from(t.counts().cells().to_vec())),
+        ];
+        crate::output_utils::write_parquet_batch(&p, schema, arrays).unwrap();
+        let err = format!("{:#}", ExpectedTable::load_parquet(&p).unwrap_err());
+        assert!(err.contains(EXPECTED_META_PROVENANCE), "{err}");
     }
 
     /// Synthetic-scale timing for the expected-count builder (`cargo test --release -- --ignored`).
