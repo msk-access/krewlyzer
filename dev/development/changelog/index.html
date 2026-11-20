@@ -3350,6 +3350,33 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li><strong>A <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> you asked for that cannot be used stops the run.</strong> An unreadable <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, one the version
+  guard refused, and a <code>--pon-model</code> path that does not exist all used to end in a warning and an
+  <strong>unscored</strong> run, recorded as <code>pon_applied=False</code> -- the same as a deliberate <code>--skip-pon</code> -- so
+  <code>validate-output</code> stopped requiring every z-score column. <code>load_pon_model</code> now raises
+  <code>UnusablePonError</code> and <code>resolve_pon_model</code> raises on a missing explicit path, in run-all and
+  every single tool alike, and <strong>before any work</strong>, so a refused <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> no longer leaves unscored
+  tables behind. <code>region-entropy</code> never ran the version guard at all (Rust read the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> path
+  directly), and <code>region-mds</code> loaded its <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> inside a <code>try</code> that would have swallowed the error.
+  A bundled <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> that is not available for an assay is still a normal unscored run; one that is
+  present but unreadable (for example an un-pulled git-LFS pointer) now stops the run. In
+  Nextflow tool-level mode, a <code>--pon_model</code> path the task cannot see now fails the task instead
+  of giving an unscored result.</li>
+<li><strong>A single tool keeps the sample's record.</strong> <code>fsc</code>, <code>fsd</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code> rewrote
+  <code>pon_applied</code> and <code>gc_factors_*</code> for the whole sample, so <code>krewlyzer fsc --skip-pon</code> into a
+  run-all directory told <code>validate-output</code> to stop requiring every other table's z columns. Only
+  run-all and the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build now rewrite the record. A single tool fills it in where none exists
+  (after <code>extract</code>) and otherwise may only raise <code>pon_applied</code>, so that flag does not depend on the
+  order single tools ran in, and a table one of them left unscored is flagged rather than hidden.
+  A single tool also refuses, before any work, to score a sample against a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> other than the one
+  its record names: tables from two PONs under one record would otherwise go unnoticed. The
+  standalone scorers (<code>motif</code>, <code>region-entropy</code>, <code>region-mds</code>), which do not go through
+  <code>run_features</code>, now write their <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> into the record once they have scored, so the next tool is
+  checked against it.</li>
+<li>
+<p><strong>The metadata stamp reads the file this run wrote.</strong> It found <code>.tsv</code> first and then read
+  Parquet first, so a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run beside an earlier run's <code>.parquet</code> wrote the earlier run's row back.</p>
+</li>
 <li>
 <p><strong><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> is the same in two runs of the same input.</strong> <code>compute_mds</code> summed the entropy over a
   Python <code>set</code> of k-mers, which iterates in the per-process string-hash order, so the sum ran in
