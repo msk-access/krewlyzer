@@ -5,7 +5,7 @@
 <link href="../release-guide/" rel="prev">
 <link href="../contributing/" rel="next">
 <link href="../../assets/images/favicon.png" rel="icon">
-<meta content="mkdocs-1.6.1, mkdocs-material-9.8.1" name="generator">
+<meta content="mkdocs-1.6.1, mkdocs-material-9.8.2" name="generator">
 <title>Changelog - Krewlyzer</title>
 <link href="../../assets/stylesheets/main.57a0d79d.min.css" rel="stylesheet">
 <link href="../../assets/stylesheets/palette.fb2fffe2.min.css" rel="stylesheet">
@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3340,6 +3340,14 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li>
+<p><strong><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> is the same in two runs of the same input.</strong> <code>compute_mds</code> summed the entropy over a
+  Python <code>set</code> of k-mers, which iterates in the per-process string-hash order, so the sum ran in
+  a different order each run: identical end-motif counts gave <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> differing in the last digit,
+  and <code>mds_z</code> differed run to run (on four real samples, by up to 6e-14 relative). The k-mers are
+  now summed in one fixed order. Values move only at that last digit; nothing else changes. It
+  had broken every byte-identical comparison between two runs, and <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> baselines shared it.</p>
+</li>
 <li>
 <p><strong>On a push, the PHI scan covered only the last commit.</strong> The scan base was
   <code>pull_request.base.sha || 'HEAD~1'</code>, so for a push it was <code>HEAD~1</code>: push
