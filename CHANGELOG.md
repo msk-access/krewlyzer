@@ -123,6 +123,14 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **UXM runs under run-all.** run-all called the `uxm` typer command as a plain function and
+  passed no `threads`, so a typer `OptionInfo` reached `threads > 0` and raised `TypeError` on
+  every run-all given `--bisulfite-bam`. The catch-all logged "UXM failed" and carried on, so no
+  run-all has written a UXM table. Region-MDS was called the same way without `pon_variant`, so an
+  `OptionInfo` reached the PON lookup in place of `--pon-variant`. `uxm`, `mfsd` and `region-mds`
+  now each have a stage function (`uxm_stage`, `mfsd_stage`, `region_mds_stage`) that takes plain
+  arguments and raises the real exception; the commands wrap it and exit as before, and run-all
+  calls the stage.
 - **A PON you asked for that cannot be used stops the run.** An unreadable PON, one the version
   guard refused, and a `--pon-model` path that does not exist all used to end in a warning and an
   **unscored** run, recorded as `pon_applied=False` -- the same as a deliberate `--skip-pon` -- so

@@ -831,16 +831,18 @@ def run_all(
             progress.start_task(task_uxm)
             progress.update(task_uxm, description="[4/5] UXM ...")
             try:
-                from .uxm import uxm
+                from .uxm import uxm_stage
 
                 # resolved_bisulfite_bam is guaranteed non-None: has_uxm checks it above
                 assert resolved_bisulfite_bam is not None
-                uxm(
+                uxm_stage(
                     resolved_bisulfite_bam,
                     output,
                     sample,
                     None,
                     genome,
+                    threads=threads,
+                    verbose=debug,
                     output_format=resolved_output_format,
                     compress=resolved_compress,
                 )
@@ -856,7 +858,7 @@ def run_all(
             progress.start_task(task_mfsd)
             progress.update(task_mfsd, description="[5/5] mFSD ...")
             try:
-                from .mfsd import mfsd
+                from .mfsd import mfsd_stage
 
                 # GC factors through the one resolver. Panel mode prefers the on-target table:
                 # variants sit in captured regions, whose GC bias differs from off-target.
@@ -908,7 +910,7 @@ def run_all(
                 assert (
                     resolved_variants is not None
                 ), "mfsd called without resolved_variants — check has_mfsd guard"
-                mfsd(
+                mfsd_stage(
                     bam_input=mfsd_bam_path,
                     input_file=resolved_variants,
                     output=output,
@@ -945,13 +947,13 @@ def run_all(
     # ═══════════════════════════════════════════════════════════════════
     if resolved_assay:
         try:
-            from .region_mds import region_mds as _region_mds
+            from .region_mds import region_mds_stage
 
             # Resolve gene BED for the assay
             gene_bed = assets.get_gene_bed_for_mode(resolved_assay)
             if gene_bed and gene_bed.exists():
                 logger.info(f"Running region-MDS for assay '{resolved_assay}'...")
-                n_regions, n_genes = _region_mds(
+                n_regions, n_genes = region_mds_stage(
                     owns_sample_record=True,  # run-all writes the whole sample's record
                     bam_input=bam_input,
                     reference=reference,
@@ -965,6 +967,7 @@ def run_all(
                     minlen=minlen,
                     maxlen=maxlen,
                     pon_model=resolved_pon_path,
+                    pon_variant=pon_variant,
                     skip_pon=skip_pon,
                     threads=threads,
                     verbose=debug,

@@ -97,89 +97,35 @@ def _apply_exon_zscores(
     return True, n_scored
 
 
-def region_mds(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (indexed)"),
-    reference: Path = typer.Argument(..., help="Reference FASTA file"),
-    output: Path = typer.Argument(..., help="Output directory"),
-    gene_bed: Optional[Path] = typer.Option(
-        None, "--gene-bed", "-g", help="Gene/exon BED file (panel or WGS format)"
-    ),
-    genome: str = typer.Option(
-        "hg19", "--genome", "-G", help="Genome build (hg19/hg38)"
-    ),
-    assay: Optional[str] = typer.Option(
-        None, "--assay", "-a", help="Assay code (xs1, xs2, wgs) for bundled gene BED"
-    ),
-    sample_name: Optional[str] = typer.Option(
-        None,
-        "--sample-name",
-        "-s",
-        help="Sample name for output files (default: derived from BAM filename)",
-    ),
-    e1_only: bool = typer.Option(
-        False, "--e1-only", help="Only output E1 (first exon) results"
-    ),
-    mapq: int = typer.Option(20, "--mapq", help="Minimum mapping quality"),
-    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
-    maxlen: int = typer.Option(
-        1000,
-        "--maxlen",
-        help="Maximum fragment length (default: 1000 for consistency with run-all)",
-    ),
-    pon_model: Optional[Path] = typer.Option(
-        None, "--pon-model", "-P", help="PON model for z-score computation"
-    ),
-    pon_variant: str = typer.Option(
-        "all_unique",
-        "--pon-variant",
-        help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)",
-    ),
-    skip_pon: bool = typer.Option(
-        False,
-        "--skip-pon",
-        help="Skip PON z-score normalization (for PON samples used as ML negatives)",
-    ),
-    threads: int = typer.Option(
-        0, "--threads", "-t", help="Number of threads (0 = use all available cores)"
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose logging"
-    ),
-    silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
-    output_format: str = typer.Option(
-        "tsv",
-        "--output-format",
-        "-F",
-        help="Output format: tsv | parquet | both (default: tsv)",
-    ),
-    compress: bool = typer.Option(
-        False,
-        "--compress",
-        help="Gzip-compress TSV output (only applies when format is tsv or both)",
-    ),
-    owns_sample_record: bool = typer.Option(
-        False,
-        hidden=True,
-        help="Set by run-all, which owns the sample's record: skip the second-PON check.",
-    ),
+def region_mds_stage(
+    bam_input: Path,
+    reference: Path,
+    output: Path,
+    gene_bed: Optional[Path] = None,
+    genome: str = "hg19",
+    assay: Optional[str] = None,
+    sample_name: Optional[str] = None,
+    e1_only: bool = False,
+    mapq: int = 20,
+    minlen: int = 65,
+    maxlen: int = 1000,
+    pon_model: Optional[Path] = None,
+    pon_variant: str = "all_unique",
+    skip_pon: bool = False,
+    threads: int = 0,
+    verbose: bool = False,
+    silent: bool = False,
+    output_format: str = "tsv",
+    compress: bool = False,
+    owns_sample_record: bool = False,
 ):
-    """
-    Calculate per-region Motif Diversity Score (MDS).
+    """Per-region MDS for one sample; returns ``(n_regions, n_genes)``. Raises on failure.
 
-    MDS measures the diversity of 4-mer end motifs at each genomic region.
-    Higher MDS indicates more diverse motif usage; lower MDS may indicate
-    aberrant fragmentation patterns associated with disease.
-
-    Examples:
-
-        # Panel mode with bundled gene BED
-        krewlyzer region-mds sample.bam ref.fa out/ --assay xs2
-
-        # WGS mode
-        krewlyzer region-mds sample.bam ref.fa out/ --assay wgs
-
-        # Custom gene BED
-        krewlyzer region-mds sample.bam ref.fa out/ --gene-bed custom.bed
+    The body of the `region-mds` command, with plain arguments. run-all called the typer command
+    as a function and passed no `pon_variant`, so a typer `OptionInfo` reached the PON resolver in
+    its place. Named `region_mds_stage` because `run_region_mds` is the Rust entry point.
+    ``owns_sample_record`` is set by run-all, which owns the sample's record: it skips the
+    second-PON check.
     """
     from krewlyzer import _core
     from krewlyzer.assets import AssetManager
@@ -191,9 +137,9 @@ def region_mds(
 
     # Validate inputs
     if not bam_input.exists():
-        raise typer.BadParameter(f"BAM file not found: {bam_input}")
+        raise FileNotFoundError(f"BAM file not found: {bam_input}")
     if not reference.exists():
-        raise typer.BadParameter(f"Reference FASTA not found: {reference}")
+        raise FileNotFoundError(f"Reference FASTA not found: {reference}")
 
     # Validate user-provided override files
     from .core.asset_validation import validate_file, FileSchema
@@ -210,7 +156,7 @@ def region_mds(
     if gene_bed:
         # User-provided gene BED
         if not gene_bed.exists():
-            raise typer.BadParameter(f"Gene BED not found: {gene_bed}")
+            raise FileNotFoundError(f"Gene BED not found: {gene_bed}")
         resolved_gene_bed = gene_bed
         gene_bed_source = "explicit"
         logger.debug(f"Using user-provided gene BED: {gene_bed}")
@@ -218,7 +164,7 @@ def region_mds(
         # Bundled gene BED from assay
         resolved_gene_bed = assets.get_gene_bed_for_mode(assay)
         if resolved_gene_bed is None:
-            raise typer.BadParameter(
+            raise FileNotFoundError(
                 f"Gene BED not available for assay '{assay}' and genome '{genome}'"
             )
         gene_bed_source = "bundled"
@@ -230,15 +176,15 @@ def region_mds(
             gene_bed_source = "bundled"
             logger.debug(f"Using WGS gene BED: {resolved_gene_bed}")
         else:
-            raise typer.BadParameter(
+            raise FileNotFoundError(
                 "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
             )
 
     # ═══════════════════════════════════════════════════════════════════
     # ASSET RESOLUTION (PON)
     # ═══════════════════════════════════════════════════════════════════
-    try:
-        resolved_pon_path, pon_source = resolve_pon_model(
+    resolved_pon_path, pon_source = (
+        resolve_pon_model(  # ValueError: --pon-model + --skip-pon
             explicit_path=pon_model,
             assay=assay,
             skip_pon=skip_pon,
@@ -246,8 +192,7 @@ def region_mds(
             variant=pon_variant,
             log=logger,
         )
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    )
 
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -267,16 +212,13 @@ def region_mds(
     # stops the run before a table is written.
     from krewlyzer.core.pon_integration import load_requested_pon
 
-    try:
-        requested_pon = load_requested_pon(
-            resolved_pon_path,
-            record_dir=None if owns_sample_record else output,
-            sample=sample_name,
-            output_format=output_format,
-            compress=compress,
-        )
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    requested_pon = load_requested_pon(  # ValueError (UnusablePonError) if unusable
+        resolved_pon_path,
+        record_dir=None if owns_sample_record else output,
+        sample=sample_name,
+        output_format=output_format,
+        compress=compress,
+    )
 
     output_exon_base = output / f"{sample_name}.MDS.exon"
     output_gene_base = output / f"{sample_name}.MDS.gene"
@@ -481,3 +423,112 @@ def region_mds(
             )
 
     return n_regions, n_genes
+
+
+def region_mds(
+    bam_input: Path = typer.Argument(..., help="Input BAM file (indexed)"),
+    reference: Path = typer.Argument(..., help="Reference FASTA file"),
+    output: Path = typer.Argument(..., help="Output directory"),
+    gene_bed: Optional[Path] = typer.Option(
+        None, "--gene-bed", "-g", help="Gene/exon BED file (panel or WGS format)"
+    ),
+    genome: str = typer.Option(
+        "hg19", "--genome", "-G", help="Genome build (hg19/hg38)"
+    ),
+    assay: Optional[str] = typer.Option(
+        None, "--assay", "-a", help="Assay code (xs1, xs2, wgs) for bundled gene BED"
+    ),
+    sample_name: Optional[str] = typer.Option(
+        None,
+        "--sample-name",
+        "-s",
+        help="Sample name for output files (default: derived from BAM filename)",
+    ),
+    e1_only: bool = typer.Option(
+        False, "--e1-only", help="Only output E1 (first exon) results"
+    ),
+    mapq: int = typer.Option(20, "--mapq", help="Minimum mapping quality"),
+    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
+    maxlen: int = typer.Option(
+        1000,
+        "--maxlen",
+        help="Maximum fragment length (default: 1000 for consistency with run-all)",
+    ),
+    pon_model: Optional[Path] = typer.Option(
+        None, "--pon-model", "-P", help="PON model for z-score computation"
+    ),
+    pon_variant: str = typer.Option(
+        "all_unique",
+        "--pon-variant",
+        help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)",
+    ),
+    skip_pon: bool = typer.Option(
+        False,
+        "--skip-pon",
+        help="Skip PON z-score normalization (for PON samples used as ML negatives)",
+    ),
+    threads: int = typer.Option(
+        0, "--threads", "-t", help="Number of threads (0 = use all available cores)"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+    silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only applies when format is tsv or both)",
+    ),
+):
+    """
+    Calculate per-region Motif Diversity Score (MDS).
+
+    MDS measures the diversity of 4-mer end motifs at each genomic region.
+    Higher MDS indicates more diverse motif usage; lower MDS may indicate
+    aberrant fragmentation patterns associated with disease.
+
+    Examples:
+
+        # Panel mode with bundled gene BED
+        krewlyzer region-mds sample.bam ref.fa out/ --assay xs2
+
+        # WGS mode
+        krewlyzer region-mds sample.bam ref.fa out/ --assay wgs
+
+        # Custom gene BED
+        krewlyzer region-mds sample.bam ref.fa out/ --gene-bed custom.bed
+    """
+    try:
+        return region_mds_stage(
+            bam_input,
+            reference,
+            output,
+            gene_bed=gene_bed,
+            genome=genome,
+            assay=assay,
+            sample_name=sample_name,
+            e1_only=e1_only,
+            mapq=mapq,
+            minlen=minlen,
+            maxlen=maxlen,
+            pon_model=pon_model,
+            pon_variant=pon_variant,
+            skip_pon=skip_pon,
+            threads=threads,
+            verbose=verbose,
+            silent=silent,
+            output_format=output_format,
+            compress=compress,
+        )
+    except (FileNotFoundError, ValueError) as e:
+        # A missing input or an unusable PON, as before: a usage error.
+        raise typer.BadParameter(str(e))
+    except Exception as e:
+        logger.error(f"Region-MDS failed: {e}")
+        raise typer.Exit(1)

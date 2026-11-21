@@ -342,11 +342,13 @@ def test_run_all_owns_the_record_for_region_mds():
     from krewlyzer import wrapper
 
     source = inspect.getsource(wrapper)
-    assert "owns_sample_record=True" in source.split("_region_mds(", 1)[1].split(
+    assert "owns_sample_record=True" in source.split("region_mds_stage(", 1)[1].split(
         ")", 1
     )[0] or (
         "owns_sample_record=True"
-        in source[source.index("_region_mds(") : source.index("_region_mds(") + 1500]
+        in source[
+            source.index("region_mds_stage(") : source.index("region_mds_stage(") + 1500
+        ]
     )
 
 

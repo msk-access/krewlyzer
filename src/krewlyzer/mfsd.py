@@ -36,6 +36,173 @@ logger = logging.getLogger("mfsd")
 from krewlyzer import _core
 
 
+def mfsd_stage(
+    bam_input: Path,
+    input_file: Path,
+    output: Path,
+    sample_name: Optional[str] = None,
+    reference: Optional[Path] = None,
+    correction_factors: Optional[Path] = None,
+    mapq: int = 20,
+    minlen: int = 65,
+    maxlen: int = 1000,
+    skip_duplicates: bool = True,
+    require_proper_pair: bool = False,
+    duplex: bool = False,
+    output_distributions: bool = False,
+    min_baseq: int = 20,
+    verbose: bool = False,
+    threads: int = 0,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Path:
+    """Compute mFSD for one sample and return the table written. Raises on failure.
+
+    The body of the `mfsd` command, with plain arguments. The command converts every failure to
+    `typer.Exit`, so a caller recording what went wrong would only ever see `Exit`; run-all calls
+    this instead, and so can record the real class.
+    """
+    # Set log level based on verbose flag
+    if verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Verbose logging enabled")
+
+    # Configure Rust thread pool
+    if threads > 0:
+        try:
+            _core.configure_threads(threads)
+            logger.info(f"Configured {threads} threads for parallel processing")
+        except Exception as e:
+            logger.warning(f"Could not configure threads: {e}")
+
+    # Input validation
+    if not bam_input.exists():
+        raise FileNotFoundError(f"BAM file not found: {bam_input}")
+
+    if not str(bam_input).endswith(".bam"):
+        raise ValueError(f"Input must be a .bam file: {bam_input}")
+
+    if not input_file.exists():
+        raise FileNotFoundError(f"Variant file not found: {input_file}")
+
+    # Validate optional paths
+    if reference and not reference.exists():
+        raise FileNotFoundError(f"Reference FASTA not found: {reference}")
+
+    if correction_factors and not correction_factors.exists():
+        raise FileNotFoundError(
+            f"Correction factors file not found: {correction_factors}"
+        )
+
+    # Create output directory
+    output.mkdir(parents=True, exist_ok=True)
+
+    # Derive sample name (use provided or derive from input filename)
+    if sample_name is None:
+        sample_name = bam_input.stem.replace(".bam", "")
+
+    output_file = output / f"{sample_name}.mFSD.tsv"
+
+    logger.info(f"Processing {bam_input.name}")
+
+    # Detect input type
+    input_type = (
+        "vcf"
+        if str(input_file).endswith(".vcf") or str(input_file).endswith(".vcf.gz")
+        else "maf"
+    )
+    logger.info(f"Detected input type: {input_type}")
+
+    # Log GC correction status
+    if correction_factors:
+        logger.info(f"GC correction enabled using: {correction_factors}")
+    else:
+        logger.info("GC correction disabled (no --correction-factors provided)")
+
+    # Log duplex mode
+    if duplex:
+        logger.info(
+            "Duplex mode enabled: using fgbio cD tag or Marianas read names for family size weighting"
+        )
+
+    # Call Rust backend with optional reference and correction factors
+    _core.mfsd.calculate_mfsd(
+        str(bam_input),
+        str(input_file),
+        str(output_file),
+        input_type,
+        mapq,
+        minlen,
+        maxlen,
+        output_distributions,
+        str(reference) if reference else None,
+        str(correction_factors) if correction_factors else None,
+        require_proper_pair,
+        duplex,
+        min_baseq=min_baseq,
+    )
+
+    # Rust always writes TSV; convert to Parquet/both afterward if requested.
+    # This two-step approach avoids re-implementing Arrow schema in Rust for mFSD.
+    logger.info(f"mFSD complete: {output_file} (raw TSV from Rust)")
+    logger.debug(
+        f"mFSD post-process: output_format={output_format!r}, compress={compress}"
+    )
+    if output_format != "tsv":
+        logger.debug(f"mFSD: converting {output_file.name} → format={output_format!r}")
+        # read_exact_table: Rust wrote this exact TSV. read_table is
+        # parquet-first and would prefer a stale `.parquet` sibling from an
+        # earlier run into the same directory (c92ed86).
+        df = read_exact_table(output_file)
+        if df is not None:
+            write_table(
+                df,
+                output_file.with_suffix(""),
+                output_format=output_format,
+                compress=compress,
+            )
+        else:
+            logger.warning(
+                f"mFSD: could not read {output_file.name} for format conversion"
+            )
+    elif compress:
+        # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
+        logger.debug(f"mFSD: compressing {output_file.name} → .tsv.gz")
+        # read_exact_table: Rust wrote this exact TSV. read_table is
+        # parquet-first and would prefer a stale `.parquet` sibling from an
+        # earlier run into the same directory (c92ed86).
+        df = read_exact_table(output_file)
+        if df is not None:
+            write_table(
+                df, output_file.with_suffix(""), output_format="tsv", compress=True
+            )
+
+    if output_distributions:
+        dist_file = output_file.with_suffix(".distributions.tsv")
+        logger.info(f"Distributions: {dist_file}")
+        if output_format != "tsv":
+            logger.debug(
+                f"mFSD: converting {dist_file.name} → format={output_format!r}"
+            )
+            # read_exact_table: Rust wrote this exact TSV. read_table is
+            # parquet-first and would prefer a stale `.parquet` sibling from an
+            # earlier run into the same directory (c92ed86).
+            df_dist = read_exact_table(dist_file)
+            if df_dist is not None:
+                write_table(
+                    df_dist,
+                    dist_file.with_suffix(""),
+                    output_format=output_format,
+                    compress=compress,
+                )
+            else:
+                logger.warning(
+                    f"mFSD: could not read {dist_file.name} for format conversion"
+                )
+    return output_file
+
+
 def mfsd(
     bam_input: Path = typer.Option(..., "--input", "-i", help="Input BAM file"),
     input_file: Path = typer.Option(
@@ -131,151 +298,27 @@ def mfsd(
     - {sample}.mFSD.tsv: Summary statistics (46 columns)
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
-    # Set log level based on verbose flag
-    if verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
-        logger.setLevel(logging.DEBUG)
-        logger.debug("Verbose logging enabled")
-
-    # Configure Rust thread pool
-    if threads > 0:
-        try:
-            _core.configure_threads(threads)
-            logger.info(f"Configured {threads} threads for parallel processing")
-        except Exception as e:
-            logger.warning(f"Could not configure threads: {e}")
-
-    # Input validation
-    if not bam_input.exists():
-        logger.error(f"BAM file not found: {bam_input}")
-        raise typer.Exit(1)
-
-    if not str(bam_input).endswith(".bam"):
-        logger.error(f"Input must be a .bam file: {bam_input}")
-        raise typer.Exit(1)
-
-    if not input_file.exists():
-        logger.error(f"Variant file not found: {input_file}")
-        raise typer.Exit(1)
-
-    # Validate optional paths
-    if reference and not reference.exists():
-        logger.error(f"Reference FASTA not found: {reference}")
-        raise typer.Exit(1)
-
-    if correction_factors and not correction_factors.exists():
-        logger.error(f"Correction factors file not found: {correction_factors}")
-        raise typer.Exit(1)
-
-    # Create output directory
-    output.mkdir(parents=True, exist_ok=True)
-
-    # Derive sample name (use provided or derive from input filename)
-    if sample_name is None:
-        sample_name = bam_input.stem.replace(".bam", "")
-
-    output_file = output / f"{sample_name}.mFSD.tsv"
-
     try:
-        logger.info(f"Processing {bam_input.name}")
-
-        # Detect input type
-        input_type = (
-            "vcf"
-            if str(input_file).endswith(".vcf") or str(input_file).endswith(".vcf.gz")
-            else "maf"
-        )
-        logger.info(f"Detected input type: {input_type}")
-
-        # Log GC correction status
-        if correction_factors:
-            logger.info(f"GC correction enabled using: {correction_factors}")
-        else:
-            logger.info("GC correction disabled (no --correction-factors provided)")
-
-        # Log duplex mode
-        if duplex:
-            logger.info(
-                "Duplex mode enabled: using fgbio cD tag or Marianas read names for family size weighting"
-            )
-
-        # Call Rust backend with optional reference and correction factors
-        _core.mfsd.calculate_mfsd(
-            str(bam_input),
-            str(input_file),
-            str(output_file),
-            input_type,
-            mapq,
-            minlen,
-            maxlen,
-            output_distributions,
-            str(reference) if reference else None,
-            str(correction_factors) if correction_factors else None,
-            require_proper_pair,
-            duplex,
+        mfsd_stage(
+            bam_input,
+            input_file,
+            output,
+            sample_name,
+            reference=reference,
+            correction_factors=correction_factors,
+            mapq=mapq,
+            minlen=minlen,
+            maxlen=maxlen,
+            skip_duplicates=skip_duplicates,
+            require_proper_pair=require_proper_pair,
+            duplex=duplex,
+            output_distributions=output_distributions,
             min_baseq=min_baseq,
+            verbose=verbose,
+            threads=threads,
+            output_format=output_format,
+            compress=compress,
         )
-
-        # Rust always writes TSV; convert to Parquet/both afterward if requested.
-        # This two-step approach avoids re-implementing Arrow schema in Rust for mFSD.
-        logger.info(f"mFSD complete: {output_file} (raw TSV from Rust)")
-        logger.debug(
-            f"mFSD post-process: output_format={output_format!r}, compress={compress}"
-        )
-        if output_format != "tsv":
-            logger.debug(
-                f"mFSD: converting {output_file.name} → format={output_format!r}"
-            )
-            # read_exact_table: Rust wrote this exact TSV. read_table is
-            # parquet-first and would prefer a stale `.parquet` sibling from an
-            # earlier run into the same directory (c92ed86).
-            df = read_exact_table(output_file)
-            if df is not None:
-                write_table(
-                    df,
-                    output_file.with_suffix(""),
-                    output_format=output_format,
-                    compress=compress,
-                )
-            else:
-                logger.warning(
-                    f"mFSD: could not read {output_file.name} for format conversion"
-                )
-        elif compress:
-            # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
-            logger.debug(f"mFSD: compressing {output_file.name} → .tsv.gz")
-            # read_exact_table: Rust wrote this exact TSV. read_table is
-            # parquet-first and would prefer a stale `.parquet` sibling from an
-            # earlier run into the same directory (c92ed86).
-            df = read_exact_table(output_file)
-            if df is not None:
-                write_table(
-                    df, output_file.with_suffix(""), output_format="tsv", compress=True
-                )
-
-        if output_distributions:
-            dist_file = output_file.with_suffix(".distributions.tsv")
-            logger.info(f"Distributions: {dist_file}")
-            if output_format != "tsv":
-                logger.debug(
-                    f"mFSD: converting {dist_file.name} → format={output_format!r}"
-                )
-                # read_exact_table: Rust wrote this exact TSV. read_table is
-                # parquet-first and would prefer a stale `.parquet` sibling from an
-                # earlier run into the same directory (c92ed86).
-                df_dist = read_exact_table(dist_file)
-                if df_dist is not None:
-                    write_table(
-                        df_dist,
-                        dist_file.with_suffix(""),
-                        output_format=output_format,
-                        compress=compress,
-                    )
-                else:
-                    logger.warning(
-                        f"mFSD: could not read {dist_file.name} for format conversion"
-                    )
-
     except Exception as e:
         logger.error(f"mFSD calculation failed: {e}")
         raise typer.Exit(1)
