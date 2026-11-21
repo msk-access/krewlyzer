@@ -275,18 +275,24 @@ def test_a_pon_without_an_mds_baseline_gives_mds_z_unavailable(sample, tmp_path)
 
 
 def test_a_cached_motif_step_leaves_the_mds_z_record_alone(sample, tmp_path):
-    """A rerun that reuses the motif tables did not z-score them; their record stands.
+    """A rerun that reuses the motif tables (same PON) did not z-score them; their record
+    stands, failures included.
 
     TSV, because the motif cache check looks for `.tsv` names only (noted in the plan, not
-    fixed here). The second run has no PON: rewriting `mds_z` from it would say
-    `not_requested` about a table the first run's PON scored.
+    fixed here). The earlier failure is written into the record by hand: it is what a rewrite
+    from the reusing run would lose.
     """
+    import pandas as pd
+
     out = tmp_path / "out"
     pon = _pon_without_mds_baseline(tmp_path / "no_mds.pon.parquet")
     _run_tsv(sample, out, pon_model=pon, skip_pon=False)
-    assert _outcomes_tsv(out)["mds_z"] == ("unavailable", "")
-    _run_tsv(sample, out)
-    assert _outcomes_tsv(out)["mds_z"] == ("unavailable", "")
+    path = out / "S.metadata.tsv"
+    row = pd.read_csv(path, sep="\t", dtype=str, keep_default_na=False)
+    row["mds_z_status"], row["mds_z_error"] = "failed", "OSError"
+    row.to_csv(path, sep="\t", index=False)
+    _run_tsv(sample, out, pon_model=pon, skip_pon=False)
+    assert _outcomes_tsv(out)["mds_z"] == ("failed", "OSError")
     assert _outcomes_tsv(out)["uxm"] == ("not_requested", ""), "the rest is rewritten"
 
 
@@ -428,3 +434,77 @@ def test_a_single_region_entropy_after_a_failed_run_all_records_ran(sample, tmp_
     assert result.exit_code == 0, result.output
     assert outcomes(out)["tfbs"] == ("ran", "")
     assert outcomes(out)["atac"] == ("not_requested", ""), "not touched: it was not run"
+
+
+def test_a_single_tool_in_another_format_does_not_clear_a_stale_parquet_table(
+    sample, tmp_path
+):
+    """region-entropy at its default `-F tsv` rewrites `.TFBS.tsv`; the `.TFBS.parquet`
+    downstream reads is still the first run's, and the gate must keep saying so."""
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+    from krewlyzer.validate.gate import check_sample
+
+    out = tmp_path / "out"
+    _run(sample, out, no_tfbs=False)  # TFBS.parquet written
+    pointer = lfs_pointer(tmp_path / "regions.bed.gz")
+    patch = ((AssetManager, "tfbs_regions", property(lambda self: pointer)),)
+    assert _run(sample, out, patch, no_tfbs=False)["tfbs"][0] == "failed"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "region-entropy",
+            "-i",
+            str(out / "S.bed.gz"),
+            "-o",
+            str(out),
+            "-s",
+            "S",
+            "--no-atac",
+            "--skip-pon",
+            "--no-gc-correct",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert (out / "S.TFBS.tsv").exists()
+    assert outcomes(out)["tfbs"][0] == "failed"
+    stale = [f for f in check_sample("S", out)[0] if f.id == "STAGE.STALE_TABLE"]
+    assert ".TFBS.parquet" in {f.table for f in stale}
+
+
+def _mds_pon(path: Path) -> Path:
+    """A PON the loader accepts that can score the whole-sample MDS."""
+    import pandas as pd
+
+    pd.DataFrame(
+        [
+            {
+                "table": "metadata",
+                "schema_version": "1.0",
+                "assay": "xs1",
+                "n_samples": 21.0,
+                "krewlyzer_version": "0.9.0",
+            },
+            {"table": "mds_baseline", "mds_mean": 0.9, "mds_std": 0.05},
+        ]
+    ).to_parquet(path)
+    return path
+
+
+def test_cached_motif_tables_made_without_the_pon_now_in_use_are_redone(
+    sample, tmp_path
+):
+    """The motif cache skipped the step whatever the PON: a run without one, then with one,
+    shipped `pon_applied=True` with an unscored MDS."""
+    import pandas as pd
+
+    out = tmp_path / "out"
+    _run_tsv(sample, out)
+    assert _outcomes_tsv(out)["mds_z"] == ("not_requested", "")
+    _run_tsv(
+        sample, out, pon_model=_mds_pon(tmp_path / "mds.pon.parquet"), skip_pon=False
+    )
+    assert _outcomes_tsv(out)["mds_z"] == ("ran", "")
+    assert "mds_z" in pd.read_csv(out / "S.MDS.tsv", sep="\t", comment="#").columns

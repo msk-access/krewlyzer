@@ -184,3 +184,13 @@ def test_every_column_stage_is_named_by_a_column_rule():
     named = {c.requires_stage for r in CONTRACT for c in r.columns if c.requires_stage}
     assert named <= set(STAGES)
     assert named | set(STAGE_TABLES) == set(STAGES)
+
+
+@pytest.mark.parametrize("status", ["not_requested", "unavailable"])
+def test_a_consumed_table_beside_a_stage_that_did_not_run_is_an_error(tmp_path, status):
+    """`MDS.gene` from an earlier `--assay` run, beside a run without one: downstream reads it
+    as this run's, the same harm as a table beside a failed stage."""
+    directory = _sample(tmp_path, region_mds=status)  # tables left in place
+    found = [f for f in _findings(directory) if f.id == "STAGE.UNEXPECTED_TABLE"]
+    assert {f.table for f in found} == set(STAGE_TABLES["region_mds"])
+    assert all(f.severity is Severity.ERROR for f in found)

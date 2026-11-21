@@ -169,9 +169,9 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 
 | Finding | Severity | When |
 |---------|----------|------|
-| `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, so `--strict-validation` fails exactly the runs it did before |
+| `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, at the severity the absence had. A failed MDS z-score is new: nothing reported it before |
 | `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
-| `STAGE.UNEXPECTED_TABLE` | WARN | A table is present although its stage was not requested (or had no input) in this run |
+| `STAGE.UNEXPECTED_TABLE` | ERROR if that table is read downstream, else WARN | A table is present although its stage was not requested (or had no input) in this run: left from another configuration, and read downstream as this run's |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
 
 A stage that was not requested gives no finding when nothing downstream reads its
@@ -181,6 +181,10 @@ The z-score columns other stages add — `mds_z` in `MDS` and `MDS.ontarget`,
 z-scoring ran, and not otherwise. A directory written before these columns
 existed behaves as it did, except that `MDS.gene`'s z columns are no longer
 required there.
+
+Under `--strict-validation` a run with absent tables fails as before. Three cases
+fail that did not: a failed MDS z-score, and a consumed table present beside a
+stage that failed (`STAGE.STALE_TABLE`) or that did not run (`STAGE.UNEXPECTED_TABLE`).
 
 | Exit | Meaning |
 |------|---------|

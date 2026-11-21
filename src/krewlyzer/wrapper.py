@@ -638,6 +638,25 @@ def run_all(
             or not bpm_output.exists()
             or not mds_output.exists()
         )
+        # Cached motif tables were scored (or not) against the PON of the run that made them.
+        # Reusing them under another PON -- or with one after a run without -- ships the old
+        # scoring under this run's record (`pon_applied=True` beside an MDS with no `mds_z`).
+        if not should_run_engine:
+            from .core.output_provenance import record_names_pon
+
+            if not record_names_pon(
+                output,
+                sample,
+                pon,
+                resolved_pon_path if pon is not None else None,
+                resolved_output_format,
+                resolved_compress,
+            ):
+                logger.info(
+                    "Cached motif tables were made against another PON (or none); "
+                    "re-running the motif step"
+                )
+                should_run_engine = True
 
         # extraction_result is initially None; set below if engine runs or cache is valid
         extraction_result: Optional[ExtractionResult] = None

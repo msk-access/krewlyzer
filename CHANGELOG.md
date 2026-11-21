@@ -15,12 +15,14 @@ All notable changes to this project will be documented in this file.
   `unavailable` or `failed` -- and `{stage}_error`, the exception's class name only, never its
   message (messages carry input paths; sample directories are named for the patient). One writer,
   `output_provenance.record_stage_outcomes`: run-all reads the record its own format writes and
-  writes its formats; a single tool updates every copy that exists, each in its own format, and
-  creates none, whatever its `--output-format`. run-all
-  writes every status on every run, except that a rerun reusing cached motif tables leaves
-  `mds_z*` as recorded. A single tool records only the stages it attempted and never
+  writes its formats; a single tool updates only the copies in the format(s) it wrote its tables
+  in (so a `-F tsv` rerun beside a Parquet run-all leaves `.metadata.parquet`, and the stale
+  `.parquet` table beside it, as they were) and creates none. run-all writes every status on
+  every run, except that a rerun reusing cached motif tables (same PON) leaves `mds_z*` as
+  recorded. A single tool records only the stages it attempted and never
   `not_requested`; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
-  hand, which is how a stage that failed under run-all gets fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
+  hand at run-all's `--output-format`, which is how a stage that failed under run-all gets
+  fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
   columns are in the output contract as optional strings.
 
 ### Removed
@@ -58,15 +60,19 @@ All notable changes to this project will be documented in this file.
   mFSD), which is the severity the absent tables had. A stage not requested gives no finding when
   nothing reads its tables -- no `--variants` was a WARN on every such run -- while a consumed
   table such as `MDS.gene` is still reported absent; making those conditional on `--assay` is its
-  own change. A table present beside a stage not requested is a WARN (`STAGE.UNEXPECTED_TABLE`).
+  own change. A table present beside a stage that did not run in this run (`not_requested`,
+  `no_variants`, `unavailable`) is `STAGE.UNEXPECTED_TABLE`: ERROR when downstream reads it,
+  which it does as this run's, else WARN.
   `mds_z` in `MDS` and `MDS.ontarget`, never declared, is now required where the record says it
   was computed (`ColumnRule.requires_stage`), and only there: requiring it whenever a PON was
   applied would be a false ERROR for a BED-built PON, which has no MDS baseline. Being declared,
   it is also fingerprinted, so `validate-cohort` now checks it for degeneracy where present.
 
-  Two cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed table
-  **present** beside a stage that failed in the same run (`STAGE.STALE_TABLE`: a previous run's
-  table, or a partial one, that downstream would read as this run's), and a failed MDS z-score.
+  Three cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed
+  table **present** beside a stage that failed in the same run (`STAGE.STALE_TABLE`: a previous
+  run's table, or a partial one, that downstream would read as this run's) or beside a stage that
+  did not run in it (`STAGE.UNEXPECTED_TABLE`: left from an earlier configuration), and a failed
+  MDS z-score.
   One requirement is **loosened**: `MDS.gene`'s `mds_z` and `mds_e1_z` were required
   unconditionally, though they are written only with a PON that has a `region_mds` baseline, so
   every run without one was an ERROR. They are now required only where `region_mds_z_status` is
@@ -172,6 +178,14 @@ All notable changes to this project will be documented in this file.
   weighting off. A panel WPS failure is logged at warning, not debug. Region-MDS's PON z-scoring
   could fail inside a `try` that logged a warning; an unreadable gene table there is now a failure
   rather than a skip, and both are recorded.
+- **run-all re-runs the motif step when its cached tables were made under another PON.** The
+  cache reused the motif tables whatever PON was in use, so a run without a PON followed by one
+  with a PON shipped `pon_applied=True` beside an MDS with no z-score. It now reuses them only
+  when the sample's record names the PON now in use (or none, for none). The cache check itself
+  still looks for `.tsv` names only, so it never fires under Parquet or `--compress`; that is
+  unchanged, and fixing this did not need it.
+- **`motif` records the PON only if the MDS z-score was written.** It recorded `pon_applied` from
+  the PON having an MDS baseline, which held even when the z-score then failed.
 - **The whole-sample MDS z-score reads the table this run wrote.** The append read Parquet-first,
   so a TSV run beside an earlier run's `.MDS.parquet` read that file, found its `mds_z`, and
   skipped the append: the fresh `.MDS.tsv` shipped with no z-score. It now reads the exact file,

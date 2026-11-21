@@ -98,6 +98,15 @@ def _apply_exon_zscores(
     return True, n_scored
 
 
+def _usage(exc: Exception) -> Exception:
+    """Mark ``exc`` as a usage error -- an argument path that does not exist, or a PON that
+    cannot be resolved or used -- which the command reports as `BadParameter` (exit 2), as it
+    did before the stage split. Anything else the stage raises exits 1, as it always did; the
+    class is kept either way, for the sample's record."""
+    exc.usage_error = True  # type: ignore[attr-defined]
+    return exc
+
+
 def _derived_sample_name(bam_input: Path) -> str:
     """The sample name when none is given: the BAM's stem, without a `.sorted` suffix."""
     name = bam_input.stem
@@ -147,9 +156,9 @@ def region_mds_stage(
 
     # Validate inputs
     if not bam_input.exists():
-        raise FileNotFoundError(f"BAM file not found: {bam_input}")
+        raise _usage(FileNotFoundError(f"BAM file not found: {bam_input}"))
     if not reference.exists():
-        raise FileNotFoundError(f"Reference FASTA not found: {reference}")
+        raise _usage(FileNotFoundError(f"Reference FASTA not found: {reference}"))
 
     # Validate user-provided override files
     from .core.asset_validation import validate_file, FileSchema
@@ -166,7 +175,7 @@ def region_mds_stage(
     if gene_bed:
         # User-provided gene BED
         if not gene_bed.exists():
-            raise FileNotFoundError(f"Gene BED not found: {gene_bed}")
+            raise _usage(FileNotFoundError(f"Gene BED not found: {gene_bed}"))
         resolved_gene_bed = gene_bed
         gene_bed_source = "explicit"
         logger.debug(f"Using user-provided gene BED: {gene_bed}")
@@ -174,8 +183,10 @@ def region_mds_stage(
         # Bundled gene BED from assay
         resolved_gene_bed = assets.get_gene_bed_for_mode(assay)
         if resolved_gene_bed is None:
-            raise FileNotFoundError(
-                f"Gene BED not available for assay '{assay}' and genome '{genome}'"
+            raise _usage(
+                FileNotFoundError(
+                    f"Gene BED not available for assay '{assay}' and genome '{genome}'"
+                )
             )
         gene_bed_source = "bundled"
         logger.debug(f"Using bundled gene BED for assay '{assay}': {resolved_gene_bed}")
@@ -186,15 +197,17 @@ def region_mds_stage(
             gene_bed_source = "bundled"
             logger.debug(f"Using WGS gene BED: {resolved_gene_bed}")
         else:
-            raise FileNotFoundError(
-                "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
+            raise _usage(
+                FileNotFoundError(
+                    "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
+                )
             )
 
     # ═══════════════════════════════════════════════════════════════════
     # ASSET RESOLUTION (PON)
     # ═══════════════════════════════════════════════════════════════════
-    resolved_pon_path, pon_source = (
-        resolve_pon_model(  # ValueError: --pon-model + --skip-pon
+    try:
+        resolved_pon_path, pon_source = resolve_pon_model(
             explicit_path=pon_model,
             assay=assay,
             skip_pon=skip_pon,
@@ -202,7 +215,10 @@ def region_mds_stage(
             variant=pon_variant,
             log=logger,
         )
-    )
+    except (
+        ValueError
+    ) as e:  # --pon-model with --skip-pon, or a --pon-model that is absent
+        raise _usage(e)
 
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -220,13 +236,16 @@ def region_mds_stage(
     # stops the run before a table is written.
     from krewlyzer.core.pon_integration import load_requested_pon
 
-    requested_pon = load_requested_pon(  # ValueError (UnusablePonError) if unusable
-        resolved_pon_path,
-        record_dir=None if owns_sample_record else output,
-        sample=sample_name,
-        output_format=output_format,
-        compress=compress,
-    )
+    try:
+        requested_pon = load_requested_pon(
+            resolved_pon_path,
+            record_dir=None if owns_sample_record else output,
+            sample=sample_name,
+            output_format=output_format,
+            compress=compress,
+        )
+    except ValueError as e:  # UnusablePonError, or a second PON for this sample
+        raise _usage(e)
 
     output_exon_base = output / f"{sample_name}.MDS.exon"
     output_gene_base = output / f"{sample_name}.MDS.gene"
@@ -546,13 +565,12 @@ def region_mds(
             output_format=output_format,
             compress=compress,
         )
-    except (FileNotFoundError, ValueError) as e:
-        # A missing input or an unusable PON, as before: a usage error.
-        raise typer.BadParameter(str(e))
     except Exception as e:
+        if getattr(e, "usage_error", False):
+            raise typer.BadParameter(str(e))  # exit 2, as before the split
         logger.error(f"Region-MDS failed: {e}")
         raise typer.Exit(1)
-    # Into the sample's record, if it has one: rerunning this command is how a Region-MDS that
+    # Into the sample's record, if it has one: rerunning this command (at run-all's --output-format) is how a Region-MDS that
     # failed under run-all gets fixed. Success only -- a failure here exits non-zero, and may
     # not have touched the tables a good earlier run left.
     record_stage_outcomes(

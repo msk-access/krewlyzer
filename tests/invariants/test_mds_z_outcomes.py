@@ -241,3 +241,65 @@ def test_an_exon_z_score_failure_is_not_a_gene_z_score_failure(tmp_path, monkeyp
     )
     assert z.status == "ran"
     assert "mds_z" in pd.read_parquet(out / "S.MDS.gene.parquet").columns
+
+
+def test_motif_records_the_pon_only_if_the_mds_z_score_was_written(
+    tmp_path, monkeypatch
+):
+    """`pon_applied` followed whether the PON had an MDS baseline, not whether the z-score
+    reached the table: an unreadable MDS table recorded a scored sample with no `mds_z`.
+    """
+    from typer.testing import CliRunner
+
+    import krewlyzer.core.sample_processor as sp
+    from krewlyzer.cli import app
+
+    sample = make_sample(tmp_path / "in", BASELINE)
+    pon = tmp_path / "mds.pon.parquet"
+    pd.DataFrame(
+        [
+            {
+                "table": "metadata",
+                "schema_version": "1.0",
+                "assay": "xs1",
+                "n_samples": 21.0,
+                "krewlyzer_version": "0.9.0",
+            },
+            {"table": "mds_baseline", "mds_mean": 0.9, "mds_std": 0.05},
+        ]
+    ).to_parquet(pon)
+
+    def run(out):
+        out.mkdir()
+        pd.DataFrame([{"sample_id": "S", "total_fragments": 1}]).to_parquet(
+            out / "S.metadata.parquet"
+        )
+        args = [
+            "motif",
+            "-i",
+            str(sample.bam),
+            "-r",
+            str(sample.reference),
+            "-o",
+            str(out),
+            "-s",
+            "S",
+            "-P",
+            str(pon),
+            "--output-format",
+            "parquet",
+        ]
+        result = CliRunner().invoke(app, args)
+        assert result.exit_code == 0, result.output
+        return pd.read_parquet(out / "S.metadata.parquet").iloc[0]
+
+    scored = run(tmp_path / "scored")
+    monkeypatch.setattr(
+        sp, "read_exact_table", lambda *a, **k: None
+    )  # MDS table unreadable
+    unscored = run(tmp_path / "unscored")
+    assert (scored["mds_z_status"], bool(scored["pon_applied"])) == ("ran", True)
+    assert (unscored["mds_z_status"], bool(unscored["pon_applied"])) == (
+        "failed",
+        False,
+    )

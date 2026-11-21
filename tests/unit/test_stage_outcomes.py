@@ -175,15 +175,16 @@ def test_the_status_columns_are_in_the_contract():
     "record_fmt, tool_fmt, tool_compress",
     [("parquet", "tsv", False), ("tsv", "parquet", False), ("tsv", "tsv", True)],
 )
-def test_a_single_tool_updates_the_record_that_exists_in_its_format(
+def test_a_single_tool_never_records_into_a_format_it_did_not_write(
     tmp_path, record_fmt, tool_fmt, tool_compress
 ):
-    """A single tool run at another `--output-format` must neither leave the record downstream
-    reads unchanged (a new `.tsv` beside the `.parquet`) nor create a completion marker in a
-    directory that has none (a `.parquet` in a TSV directory: invariant #2)."""
+    """The record must describe the tables beside it. A single tool at `-F tsv` after a Parquet
+    run-all rewrote `.TFBS.tsv`, not the `.TFBS.parquet` downstream reads; recording `ran` in
+    `.metadata.parquet` would hide that stale table from the gate. Nor may it create a copy:
+    a `.metadata.parquet` in a TSV directory is a completion marker (invariant #2)."""
     _marker(tmp_path, record_fmt)
     before = sorted(p.name for p in tmp_path.iterdir())
-    record_stage_outcomes(
+    assert not record_stage_outcomes(
         tmp_path,
         "S1",
         {"uxm": Outcome("ran")},
@@ -192,13 +193,28 @@ def test_a_single_tool_updates_the_record_that_exists_in_its_format(
         owns_record=False,
     )
     assert sorted(p.name for p in tmp_path.iterdir()) == before
-    assert _row(tmp_path, record_fmt)["uxm_status"] == "ran"
+    assert "uxm_status" not in _row(tmp_path, record_fmt)
 
 
-def test_a_single_tool_updates_every_copy_of_the_record(tmp_path):
+@pytest.mark.parametrize(
+    "tool_fmt, updated, untouched",
+    [("tsv", "tsv", "parquet"), ("parquet", "parquet", "tsv")],
+)
+def test_a_single_tool_updates_only_the_copies_in_its_own_format(
+    tmp_path, tool_fmt, updated, untouched
+):
     _marker(tmp_path, "both")
     record_stage_outcomes(
-        tmp_path, "S1", {"uxm": Outcome("ran")}, "tsv", owns_record=False
+        tmp_path, "S1", {"uxm": Outcome("ran")}, tool_fmt, owns_record=False
+    )
+    assert _row(tmp_path, updated)["uxm_status"] == "ran"
+    assert "uxm_status" not in _row(tmp_path, untouched)
+
+
+def test_a_single_tool_writing_both_updates_both(tmp_path):
+    _marker(tmp_path, "both")
+    record_stage_outcomes(
+        tmp_path, "S1", {"uxm": Outcome("ran")}, "both", owns_record=False
     )
     assert _row(tmp_path, "parquet")["uxm_status"] == "ran"
     assert _row(tmp_path, "tsv")["uxm_status"] == "ran"

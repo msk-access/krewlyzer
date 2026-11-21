@@ -426,7 +426,7 @@ def region_entropy(
 
         from .core.output_provenance import record_pon_used
 
-        # As run-all records them: rerunning this command is how a TFBS or ATAC stage that
+        # As run-all records them: rerunning this command (at run-all's --output-format) is how a TFBS or ATAC stage that
         # failed under run-all gets fixed. What it wrote, and nothing else.
         record_stage_outcomes(
             output, sample_name, ran, output_format, compress, owns_record=False

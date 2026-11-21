@@ -310,8 +310,9 @@ def motif(
             owns_record=False,
         )
 
-        # Recorded as scored only if MDS was z-scored: a PON with no MDS baseline scored nothing.
-        scored_with = pon if pon is not None and pon.mds_baseline else None
+        # Recorded as scored only if the MDS z-score reached the table: from the outcome, not
+        # from the PON having a baseline, which also held when the z-score then failed.
+        scored_with = pon if motif_outcomes["mds_z"].status == "ran" else None
         record_pon_used(
             output, sample_name, scored_with, resolved_pon_path, output_format, compress
         )

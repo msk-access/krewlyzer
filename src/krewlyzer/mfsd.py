@@ -322,7 +322,7 @@ def mfsd(
     except Exception as e:
         logger.error(f"mFSD calculation failed: {e}")
         raise typer.Exit(1)
-    # Into the sample's record, if it has one: rerunning this command is how a stage that failed
+    # Into the sample's record, if it has one: rerunning this command (at run-all's --output-format) is how a stage that failed
     # under run-all gets fixed. Success only -- a failure here exits non-zero, and may not have
     # touched the table a good earlier run left.
     from .core.output_provenance import Outcome, record_stage_outcomes

@@ -80,3 +80,41 @@ def test_the_commands_still_exit_on_failure(tmp_path):
         result = runner.invoke(app, args)
         assert result.exit_code == 1, (args[0], result.output)
         assert not isinstance(result.exception, FileNotFoundError), args[0]
+
+
+def test_region_mds_keeps_its_exit_codes(tmp_path):
+    """Usage errors (a missing argument path) exit 2, as `BadParameter` did before; anything
+    else in the stage -- a malformed gene BED, an unknown genome -- exits 1, as before.
+    """
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    sample = make_sample(tmp_path / "in", BASELINE)
+    malformed = tmp_path / "genes.bed"
+    malformed.write_text("chr1\tnot-a-number\t100\tGENE\n")
+    base = [str(sample.bam), str(sample.reference), str(tmp_path / "o"), "-s", "S"]
+    runner = CliRunner()
+    missing_bam = [
+        "region-mds",
+        str(tmp_path / "absent.bam"),
+        *base[1:],
+        "--gene-bed",
+        str(sample.assets.genes),
+    ]
+    assert runner.invoke(app, missing_bam).exit_code == 2
+    assert (
+        runner.invoke(
+            app, ["region-mds", *base, "--gene-bed", str(malformed)]
+        ).exit_code
+        == 1
+    )
+    unknown_genome = [
+        "region-mds",
+        *base,
+        "--gene-bed",
+        str(sample.assets.genes),
+        "-G",
+        "hg99",
+    ]
+    assert runner.invoke(app, unknown_genome).exit_code == 1

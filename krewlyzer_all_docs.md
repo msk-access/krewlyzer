@@ -184,9 +184,9 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 
 | Finding | Severity | When |
 |---------|----------|------|
-| `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, so `--strict-validation` fails exactly the runs it did before |
+| `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, at the severity the absence had. A failed MDS z-score is new: nothing reported it before |
 | `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
-| `STAGE.UNEXPECTED_TABLE` | WARN | A table is present although its stage was not requested (or had no input) in this run |
+| `STAGE.UNEXPECTED_TABLE` | ERROR if that table is read downstream, else WARN | A table is present although its stage was not requested (or had no input) in this run: left from another configuration, and read downstream as this run's |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
 
 A stage that was not requested gives no finding when nothing downstream reads its
@@ -196,6 +196,10 @@ The z-score columns other stages add — `mds_z` in `MDS` and `MDS.ontarget`,
 z-scoring ran, and not otherwise. A directory written before these columns
 existed behaves as it did, except that `MDS.gene`'s z columns are no longer
 required there.
+
+Under `--strict-validation` a run with absent tables fails as before. Three cases
+fail that did not: a failed MDS z-score, and a consumed table present beside a
+stage that failed (`STAGE.STALE_TABLE`) or that did not run (`STAGE.UNEXPECTED_TABLE`).
 
 | Exit | Meaning |
 |------|---------|
@@ -10807,8 +10811,8 @@ here, so "not requested" and "requested and failed" no longer look the same.
 (the PON z-scores of `MDS`, `MDS.ontarget` and `MDS.gene`). run-all writes every
 status on every run, except that a rerun reusing cached motif tables leaves
 `mds_z*` as the run that wrote those tables recorded them. A single tool records
-only the stages it attempted, never `not_requested`, into every copy of this
-table that exists (whatever its own `--output-format`), and creates none. `extract` writes this table
+only the stages it attempted, never `not_requested`, and only into the copies of
+this table in the format(s) it wrote its own tables in; it creates none. `extract` writes this table
 from scratch, so it clears the statuses: a new fragment BED is a new sample. All
 are absent from directories written before this release, and Nextflow tool-level
 mode writes no metadata table at all, so it records none. `validate-output`

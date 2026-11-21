@@ -442,7 +442,7 @@ def test_the_standalone_scorers_record_only_what_they_scored():
 
     from krewlyzer import motif, region_entropy, region_mds
 
-    assert "pon.mds_baseline else None" in inspect.getsource(motif)
+    assert 'motif_outcomes["mds_z"].status == "ran"' in inspect.getsource(motif)
     assert "n_scored" in inspect.getsource(region_entropy)
     src = inspect.getsource(region_mds)
     assert "if scored" in src or "requested_pon if scored" in src

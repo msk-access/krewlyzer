@@ -369,10 +369,13 @@ def _stage_findings(
     """What the recorded outcomes say, before any table is read.
 
     A failed stage is one finding with its reason, at ERROR when anything downstream reads one
-    of its tables and WARN otherwise -- the severity its absent tables had, so
-    `--strict-validation` fails exactly the runs it failed before. A table present beside a
-    failed stage is a previous run's or a partial one: a deliberate new finding, ERROR when that
-    table is consumed and WARN otherwise. A table beside a stage not asked for is a WARN: left from another configuration.
+    of its tables and WARN otherwise -- the severity its absent tables had, so for absent tables
+    `--strict-validation` fails the runs it failed before. It fails more runs than before in
+    three cases, each deliberate: a failed stage whose tables are only columns (the MDS
+    z-scores, which nothing reported), and a consumed table **present** beside a stage that
+    failed (`STAGE.STALE_TABLE`: a previous run's table, or a partial one) or that did not run
+    in this run (`STAGE.UNEXPECTED_TABLE`: left from another configuration). Downstream reads a
+    consumed table as this run's either way. For a table nothing reads, both are WARN.
     """
     findings: List[Finding] = []
     for stage, (status, error) in outcomes.items():
@@ -444,11 +447,14 @@ def _stage_findings(
                 findings.append(
                     Finding(
                         id="STAGE.UNEXPECTED_TABLE",
-                        severity=Severity.WARN,
+                        severity=(
+                            Severity.ERROR if suffix in _CONSUMED else Severity.WARN
+                        ),
                         category=Category.COMPLETION,
                         message=(
                             f"{name} is present although {stage} was {status.replace('_', ' ')} "
-                            "in this run: left from an earlier configuration of this directory"
+                            "in this run: left from an earlier configuration of this directory, "
+                            "and would be read as this run's"
                         ),
                         table=suffix,
                         samples=[sample],

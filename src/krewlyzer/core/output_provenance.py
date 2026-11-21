@@ -164,6 +164,39 @@ def refuse_a_second_pon(
         )
 
 
+def record_names_pon(
+    output_dir: Path,
+    sample: str,
+    pon: Any,
+    pon_path: Optional[Path],
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> bool:
+    """Whether the sample's record says it was scored against exactly this PON (or, for
+    ``pon=None``, against none).
+
+    For a cache: a table made under one PON is not reusable under another. run-all reused its
+    motif tables whatever the PON, so a run without one and then a run with one shipped
+    ``pon_applied=True`` beside an MDS with no z-score. No record, or one without provenance,
+    names nothing, so nothing cached can be trusted against it.
+    """
+    existing = record_path(output_dir, sample, output_format, compress)
+    text = {"pon_model": str, "pon_cohort_digest": str}
+    frame = read_exact_table(existing, dtype=text) if existing is not None else None
+    if frame is None or frame.empty or "pon_applied" not in frame.columns:
+        return False
+    ours = provenance_fields(pon, pon_path)
+    if _flag(frame["pon_applied"].iloc[0]) != ours["pon_applied"]:
+        return False
+    if not ours["pon_applied"]:
+        return True
+    return all(
+        _as_text(frame[key].iloc[0] if key in frame.columns else None)
+        == _as_text(ours[key])
+        for key in ("pon_model", "pon_cohort_digest")
+    )
+
+
 def record_pon_used(
     output_dir: Path,
     sample: str,
@@ -344,10 +377,12 @@ def record_stage_outcomes(
     A single tool (False) records only the stages it attempted -- ``ran``, ``failed`` or
     ``unavailable`` -- and never ``not_requested``: `krewlyzer fsc` without `--assay` did not ask
     for gene FSC, but run-all may have, and ran it. For a stage it did attempt, the last writer
-    wins, because it rewrote that stage's tables. It updates every copy of the record that
-    exists, each in its own format, and creates none: a single tool at its default `-F tsv`
-    beside a Parquet run-all left the `.parquet` downstream reads unchanged, and one at
-    `-F parquet` in a TSV directory created a completion marker for a sample with no Parquet.
+    wins, because it rewrote that stage's tables -- in the format it wrote them. So it updates
+    only the copies of the record in its own format(s) (`tsv` the `.tsv`, or the `.tsv.gz`
+    with `--compress`; `parquet` the `.parquet`; `both` both), and creates none. A tool at
+    `-F tsv` after a Parquet run-all rewrote `.TFBS.tsv`, not the `.TFBS.parquet` downstream
+    reads; recording `ran` in `.metadata.parquet` would have hidden that stale table from the
+    gate. And a `.metadata.parquet` created in a TSV directory is a completion marker.
 
     A no-op when there is no metadata table: a single tool run into an empty directory writes no
     completion marker.
@@ -369,15 +404,13 @@ def record_stage_outcomes(
         existing = record_path(output_dir, sample, output_format, compress)
         targets = [(existing, output_format, compress)] if existing is not None else []
     else:
-        targets = [
-            (path, fmt, gz)
-            for path, fmt, gz in (
-                (Path(f"{base}.parquet"), "parquet", False),
-                (Path(f"{base}.tsv.gz"), "tsv", True),
-                (Path(f"{base}.tsv"), "tsv", False),
-            )
-            if path.exists()
-        ]
+        written_by_this_run = []
+        if output_format in ("parquet", "both"):
+            written_by_this_run.append((Path(f"{base}.parquet"), "parquet", False))
+        if output_format in ("tsv", "both"):
+            tsv = Path(f"{base}.tsv.gz" if compress else f"{base}.tsv")
+            written_by_this_run.append((tsv, "tsv", compress))
+        targets = [t for t in written_by_this_run if t[0].exists()]
     if not targets:
         logger.debug(f"No metadata table for {sample}; stage outcomes not recorded.")
         return False
