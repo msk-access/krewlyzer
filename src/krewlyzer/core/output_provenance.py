@@ -176,6 +176,87 @@ def refuse_a_second_pon(
         )
 
 
+class ConfigurationMismatch(ValueError):
+    """A run whose settings differ from the ones the folder's record holds. Raised before
+    anything is written."""
+
+
+#: The settings that decide which tables a run writes, as the record names them. A rerun with
+#: other values writes another set of tables, and whatever the first run wrote that the second
+#: does not is left looking current: a panel folder rerun without its assay rewrites `TFBS` but
+#: not `TFBS.ontarget`, under one `tfbs=ran` (Greptile on #98). `genome`, `assay` and
+#: `target_regions` are written at extraction; `fsc_e1_aggregation` by run-all's own stamp.
+CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation")
+
+
+def _setting(field: str, value: Any) -> str:
+    """A setting in the form two runs can compare."""
+    if value is None or (isinstance(value, float) and math.isnan(value)):
+        return ""
+    text = str(value).strip()
+    if field == "genome":
+        from krewlyzer.assets import genome_build
+
+        try:
+            return genome_build(text) if text else ""
+        except ValueError:
+            return text.lower()
+    if field == "assay":
+        return text.lower()
+    if field == "target_regions":
+        # By file name: Nextflow stages the BED at a new path in every task, and the record holds
+        # whatever path extraction was given.
+        return Path(text).name if text else ""
+    # fsc_e1_aggregation. Not `bool(text)`: "False" read back from a TSV record is truthy.
+    return "true" if text.lower() in ("true", "1", "1.0") else "false"
+
+
+def refuse_a_different_configuration(
+    output_dir: Path,
+    sample: str,
+    given: Mapping[str, Any],
+    *,
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Refuse a run whose settings differ from the ones the folder's record holds.
+
+    Called by every entry point that writes a settings-dependent set of tables, before it writes
+    anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy` and
+    `region-mds` (not run-all's own calls or the PON build, which own the record they write).
+    ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
+    it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
+    record does not hold (written before the field existed).
+
+    Raises `ConfigurationMismatch`, naming each differing setting with both values, and saying to
+    use a fresh output folder: a legitimate change of settings changes every table anyway.
+    """
+    unknown = sorted(set(given) - set(CONFIGURATION_FIELDS))
+    if unknown:
+        raise ValueError(f"unknown setting(s) {unknown}; one of {CONFIGURATION_FIELDS}")
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    if frame is None or frame.empty:
+        return
+    differing = []
+    for field, value in given.items():
+        if field not in frame.columns:
+            continue
+        recorded, ours = _setting(field, frame[field].iloc[0]), _setting(field, value)
+        if recorded != ours:
+            differing.append(
+                f"{field}={recorded or '(none)'} there, {ours or '(none)'} here"
+            )
+    if differing:
+        raise ConfigurationMismatch(
+            f"{sample} in {Path(output_dir).name}/ was written with other settings: "
+            + "; ".join(differing)
+            + ". A rerun with other settings would leave the first run's extra tables looking "
+            "current. Use a fresh output folder, or remove this one."
+        )
+
+
 def record_names_pon(
     output_dir: Path,
     sample: str,
@@ -267,6 +348,7 @@ def stamp_metadata(
     compress: bool,
     gc_factors: Optional[dict] = None,
     owns_record: bool = True,
+    settings: Optional[Mapping[str, Any]] = None,
 ) -> bool:
     """Add the provenance columns to `{sample}.metadata.*`. True if written.
 
@@ -286,6 +368,10 @@ def stamp_metadata(
     Read-modify-write rather than appended at creation: the metadata table is
     written during extraction, before any PON is loaded, so the PON fields are
     not knowable yet at that point.
+
+    ``settings`` are `CONFIGURATION_FIELDS` this run decided that extraction could not record
+    (run-all's E1 aggregation), written only when the run owns the record: a single tool must not
+    rewrite the configuration a later rerun is checked against.
     """
     base = output_dir / f"{sample}.metadata"
     # Read the file this run's format writes (`record_path`), then write all of them. Resolving
@@ -327,6 +413,13 @@ def stamp_metadata(
 
     for name, value in fields.items():
         frame[name] = value
+    if owns_record:
+        for name, value in (settings or {}).items():
+            if name not in CONFIGURATION_FIELDS:
+                raise ValueError(
+                    f"unknown setting {name!r}; one of {CONFIGURATION_FIELDS}"
+                )
+            frame[name] = value
     for population, choice in (gc_factors or {}).items():
         tag = population.replace("_", "")  # off_target -> offtarget
         frame[f"gc_factors_{tag}"] = choice.record()

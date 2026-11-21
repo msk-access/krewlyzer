@@ -28,7 +28,7 @@ Usage:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 import logging
 import time
 
@@ -239,6 +239,27 @@ def run_features(
     # Resolve optional Path parameters (handles typer.OptionInfo when called directly)
     resolved_target_regions = _resolve_path(target_regions)
     resolved_pon_model = _resolve_path(pon_model)
+    resolved_assay = _resolve_str(assay)
+    gene_fsc_requested = bool(enable_fsc and resolved_assay)
+    # Before any work: a single tool with other settings than the folder's record would leave the
+    # first run's extra tables looking current. run-all and the PON build own the record.
+    if not owns_sample_record:
+        from .output_provenance import refuse_a_different_configuration
+
+        settings: Dict[str, Any] = {
+            "genome": genome,
+            "assay": resolved_assay,
+            "target_regions": resolved_target_regions,
+        }
+        if gene_fsc_requested:  # E1 decides a table only gene FSC writes
+            settings["fsc_e1_aggregation"] = not disable_e1_aggregation
+        refuse_a_different_configuration(
+            output_dir,
+            sample_name,
+            settings,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
     # Before any work: an unusable PON stops the run before a table is written.
     loaded_pon = load_requested_pon(
         resolved_pon_model,
@@ -256,7 +277,6 @@ def run_features(
 
     # Resolve optional bool and string parameters
     resolved_wps_empty = _resolve_bool(wps_empty, False)
-    resolved_assay = _resolve_str(assay)
 
     # Configure thread pool (may fail if already configured by parent process)
     if resolved_threads > 0:
@@ -1489,6 +1509,7 @@ def run_features(
         compress=resolved_compress,
         gc_factors=outputs.gc_factors_choice,
         owns_record=owns_sample_record,
+        settings={"fsc_e1_aggregation": not disable_e1_aggregation},
     )
     # A separate call: the stamp returns early for a single tool that keeps the record, and a
     # single tool's own stages must still be recorded. Only what this run attempted: gene FSC

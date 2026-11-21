@@ -198,7 +198,9 @@ def test_a_rerun_after_a_failure_records_ran(sample, tmp_path):
 
 
 def test_a_single_tool_never_writes_not_requested_over_run_all(sample, tmp_path):
-    """`krewlyzer fsc` without `--assay` did not ask for gene FSC; run-all did, and ran it."""
+    """`krewlyzer fsc`, rerun with run-all's settings, did not attempt panel WPS: it must leave
+    run-all's `ran` alone rather than record `not_requested`. (Rerun without the assay, it is
+    refused before any work: `test_configuration_guard_runs.py`.)"""
     from krewlyzer.core.unified_processor import run_features
 
     out = tmp_path / "out"
@@ -208,6 +210,7 @@ def test_a_single_tool_never_writes_not_requested_over_run_all(sample, tmp_path)
         bed_path=out / "S.bed.gz",
         output_dir=out,
         sample_name="S",
+        assay="xs1",
         enable_fsc=True,
         fsc_bins=sample.assets.bins,
         gc_correct=False,

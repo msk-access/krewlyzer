@@ -200,6 +200,17 @@ def region_entropy(
             assets=assets,
             log=logger,
         )
+        # Before any work: other settings than the folder's record would leave the first run's
+        # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
+        from .core.output_provenance import refuse_a_different_configuration
+
+        refuse_a_different_configuration(
+            output,
+            sample_name,
+            {"genome": genome, "assay": assay, "target_regions": resolved_target_path},
+            output_format=output_format,
+            compress=compress,
+        )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)

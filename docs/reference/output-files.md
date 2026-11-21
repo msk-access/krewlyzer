@@ -1185,6 +1185,17 @@ mean.
 | `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
 | `pon_digest` | str | sha256 of the PON's baseline rows: answers "the same baselines?". A PON rebuilt from the same donors keeps its name and cohort digest and gets a new `pon_digest`; `stamp-pon` leaves it unchanged. run-all reuses cached motif tables only under the same `pon_digest`, and a single tool refuses a PON with another one. Absent from directories written before this release |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
+| `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
+
+**One folder, one configuration.** A rerun into a sample's folder must use the settings
+recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
+file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
+feature tool that takes these settings refuse a run with others before writing anything, naming
+the setting. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
+the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+this way, since each task starts in an empty work folder; there, publish a different
+configuration to a different `--outdir`.
 
 **Optional stages.** run-all carries on when an optional stage fails, so that one
 stage cannot cost a sample its other features. What each one did is recorded

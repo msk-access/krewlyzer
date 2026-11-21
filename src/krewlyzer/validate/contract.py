@@ -532,6 +532,17 @@ CONTRACT: Tuple[TableRule, ...] = (
                 constant_reason="one PON per cohort, by the content of its baselines",
             ),
             ColumnRule(
+                "fsc_e1_aggregation",
+                Kind.NUMERIC,
+                Vary.NEVER,
+                required=False,
+                constant_reason=(
+                    "a run setting (run-all's --disable-e1-aggregation), recorded so a rerun "
+                    "with another one is refused; one pipeline configuration gives every "
+                    "sample the same value"
+                ),
+            ),
+            ColumnRule(
                 "pon_krewlyzer_version",
                 Kind.STRING,
                 Vary.NEVER,

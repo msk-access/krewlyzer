@@ -53,6 +53,19 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **A rerun into a sample's folder must use the settings recorded there.** A rerun with other
+  settings writes another set of tables, and whatever the first run wrote that the second does not
+  was left looking current: a panel folder rerun without its assay rewrote `TFBS` but not
+  `TFBS.ontarget`, under one `tfbs=ran`, and `validate-output` could not tell (Greptile on #98).
+  run-all, `extract` (which rewrites the record) and every feature tool that takes these settings
+  now compare `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by file
+  name, since Nextflow stages them anew in each task) and, where gene FSC is written, E1
+  aggregation, against the record before writing anything, and refuse a difference with a message
+  naming it. `fsc_e1_aggregation` is new in the record (run-all writes it), and `fsc` gains
+  `--disable-e1-aggregation` so a run-all made with it can be repaired by `fsc`. `uxm` and `mfsd`
+  are not checked: their tables do not depend on these. Nextflow cannot be checked this way (each
+  task starts in an empty folder); its docs now say to use a fresh `--outdir` per configuration.
+
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
   `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
   the record helpers (`record_path`, `recorded_status`, `record_names_pon`, `record_pon_used`,

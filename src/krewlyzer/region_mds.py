@@ -237,6 +237,22 @@ def region_mds_stage(
     # stops the run before a table is written.
     from krewlyzer.core.pon_integration import load_requested_pon
 
+    if not owns_sample_record:
+        # Before any work: other settings than the folder's record would leave the first run's
+        # extra tables looking current. run-all owns the record, and checked it already.
+        from krewlyzer.core.output_provenance import refuse_a_different_configuration
+
+        try:
+            refuse_a_different_configuration(
+                output,
+                sample_name,
+                {"genome": genome, "assay": assay},
+                output_format=output_format,
+                compress=compress,
+            )
+        except ValueError as e:  # ConfigurationMismatch
+            raise _usage(e)
+
     try:
         requested_pon = load_requested_pon(
             resolved_pon_path,

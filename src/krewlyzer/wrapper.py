@@ -397,6 +397,30 @@ def run_all(
     # Panel mode detection (based on resolved targets, not raw CLI arg)
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
 
+    # Before anything is written: a rerun with other settings than the folder's record would
+    # leave the first run's extra tables looking current (Greptile on #98).
+    from .core.output_provenance import (
+        ConfigurationMismatch,
+        refuse_a_different_configuration,
+    )
+
+    try:
+        refuse_a_different_configuration(
+            output,
+            sample,
+            {
+                "genome": genome,
+                "assay": resolved_assay,
+                "target_regions": resolved_target_path,
+                "fsc_e1_aggregation": not _resolve_bool(disable_e1_aggregation, False),
+            },
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
+    except ConfigurationMismatch as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     # ═══════════════════════════════════════════════════════════════════
     # STARTUP BANNER: Log comprehensive configuration
     # ═══════════════════════════════════════════════════════════════════

@@ -32,6 +32,7 @@ logger = logging.getLogger("fsd")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.output_provenance import ConfigurationMismatch
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
 
@@ -210,6 +211,11 @@ def fsd(
         if outputs.fsd_ontarget and outputs.fsd_ontarget.exists():
             logger.info(f"✅ FSD on-target: {outputs.fsd_ontarget}")
 
+    except (
+        ConfigurationMismatch
+    ) as e:  # before any work: other settings than the folder's
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)
