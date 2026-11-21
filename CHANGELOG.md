@@ -22,7 +22,108 @@ All notable changes to this project will be documented in this file.
   with its evidence. Today: coordinates correct in all 29 cases; `gc` is 0.0, not null,
   for the two fragments whose GC cannot be resolved.
 
+- **The redesigned GC model, as library code only (GC redesign item 1, #92).** New
+  `rust/src/gc_model.rs`. **No feature reads it yet and no output changes**: every GC-weighted
+  feature keeps reading today's correction factors until spec Step 2 moves the GC tally and the
+  lookups onto the shared fragment record.
+  - **One GC definition**, `gc_key`: the exact fragment length, and the integer GC count over the
+    insert with `trim_k` bp dropped from each end. A, C, G and T count in either case; any other
+    base in the window (N, IUPAC) gives no key, as does a fragment shorter than `2k + 20` bp. The
+    trimmed-off ends are not read.
+  - **`GcModel`**: one float64 weight per (length, GC count) cell, with its provenance (genome,
+    territory and support digests, trim, GC definition version, fit configuration, krewlyzer
+    version) and the fit's QC. `weight()` returns `None`, never 1.0, for an unresolved GC or a
+    cell outside the model. The compatibility hash covers everything but the krewlyzer version,
+    which is recorded but would otherwise invalidate every PON at each patch release.
+  - **A strict Parquet loader**: it refuses a table with no provenance, another GC definition
+    version, a missing, repeated or foreign cell, a non-finite or non-positive weight, or a
+    support that does not match its digest. Write and load round-trip bit-identically.
+  - **Exhaustive expected counts over a territory** (`gc_reference::ExpectedTable`): every start
+    position at every exact length, from prefix sums of GC and of non-ACGT bases, replacing (for
+    the new model only) the 100 bp-step sampler that used one midpoint length per 5 bp bin and
+    left GC holes at short lengths. A window counts only if it lies wholly inside one interval of
+    the `Territory`, which is resolved through `contigs::ContigNames` and refuses an unknown
+    contig, an interval past its contig's end and overlapping intervals; its SHA-256 covers each
+    contig's FASTA name and length, so the same coordinates on another assembly differ. The
+    table is written as Parquet with its provenance and refused on load without it. Additive:
+    `generate_ref_genome_gc`, `LENGTH_BINS` and `get_length_bin_index` are unchanged, because
+    today's fit still reads the shipped `ref_genome_GC` asset.
+  - **The fit** (`gc_model::fit`), deterministic and with no subsampling: per length, the ratio of
+    the observed to the expected GC distribution over the support; a Gaussian-kernel
+    **local-linear** smoother over (length, GC fraction), weighted by the expected count at the
+    sample's depth; raw weight = 1 / smoothed ratio; then each length's weights are divided by
+    their fragment-weighted mean over the whole tally, so every length keeps its total weight
+    (the at-source fix for the scale defect of #92, where today's fit carries
+    `mean(r) / E_expected[r]` per length bin). Local-linear rather than a kernel average, which is
+    biased wherever the expected density has a slope; the remaining curvature bias, about
+    `(κh)²/2`, is estimated and reported. Bandwidths are configuration (defaults 5 bp and 0.02 GC
+    fraction, kernel truncated at 4 SD) until spec Step 3 chooses them. Below 100,000 fragments,
+    or with a length that has no support cell, the fit returns an explicit "cannot fit", never
+    weights of 1. So does an invalid `FitConfig` (a bandwidth not finite and positive, a cap not
+    finite and at least 1, a minimum of 0), which would otherwise panic or fit flat weights.
+    The model's lengths run from max(20, 2k + 20) to 600 bp: 40-600 bp at the default trim of
+    10. `FitQc` counts two kinds of unfitted fragment separately: those with **no key** (too
+    short for the trim, or a non-ACGT base in the window: unresolved) and those whose key's
+    length is **outside the range** (what they get is Step 2's decision). Dense arrays and
+    index-order sums make a rerun bit-identical; `Provenance::digest` is pinned by a golden
+    value, so a change to its canonical form fails a test before it invalidates a PON.
+  - **Guards for Step 2.** A `Tally` records the territory digest and trim it was counted for,
+    and the fit refuses one whose territory or trim differs from the expected table's.
+    `Tally::add_insert` keys an insert with the tally's own trim; `Tally::add` refuses a key no
+    insert can have (a GC count above `length - 2k`, or a length below `2k + 20`) instead of
+    counting it as out of range. `Territory::contains` answers whether a fragment lies wholly
+    inside one interval, the rule the expected counts use; a test checks it agrees with the
+    builder window by window, adjacent intervals included.
+  - **A support from another expected table, and a fit with nothing fitted, are refused.** A
+    support records the digest of the expected table it was built from (genome, territory, trim,
+    GC definition version, lengths and every count; the digest is part of the support's own, so
+    it is in the model's provenance), and the fit refuses a support from another table
+    (`FitError::ForeignSupport`). A support has the right shape for any table of the same
+    lengths and trim, so the shape check alone let a GC-rich territory's support through on an
+    AT-rich one, where it selects only zero-count cells. The fit then left every length unfitted
+    and returned `Ok` with no weight anywhere (`weight()` answered `None`, not 1.0, but nothing
+    said the model was empty); it now returns `FitError::NothingFitted`.
+  - **The loaders refuse a null in a required column**, naming it. Both read through one helper
+    that checked types but not nulls, so a null `expected` count read as whatever bytes sat in
+    the slot. Only a model's `weight` column may hold nulls (an unfitted length).
+  - **Sparse cells.** The support comes from the reference, not from donors (operator decision
+    S1): at each length, the fewest GC cells holding 99.5% of the territory's expected windows. It
+    needs no PON and no depth, and its digest is in the provenance. Raw weights are capped to
+    [1/10, 10] *before* normalisation. A cell outside the support takes its length's nearest
+    in-support value, and its fragments never enter the smoother, so an outlier moves only its own
+    length's normalising scale. The share of the final weight in clamped cells and in capped cells
+    are each reported (`FitQc`), never hidden (AGENTS invariant #3).
+  - **Truth tests on injected bias** (criterion 3, in Rust): a 600 kb reference of 3 kb blocks at
+    35-65% GC, expected counts from the real builder, and a million fragments drawn from it with
+    a peaked size distribution, keyed by `gc_key` and thinned by a known bias that steepens with
+    length. The pass rule (operator, matching validation criterion 1) is that cells within 5% of
+    the true correction (up to a per-length scale) hold at least 98% of fragments, at full and
+    at 10% depth. At 2,000,000 fragments they hold 99.2%; in the no-bias control, cells with
+    |w - 1| < 0.05 hold 99.7%. **At 10% depth (about 200,000 fragments) they hold 97.7%, short
+    of the rule**; the shortfall is pinned by a test that fails once it is closed. (On the
+    synthetic grid, 10% of 3,000,000 fragments reaches 98.2%.) A test shows
+    that the injected-bias check rejects weights of 1 and a fit with four times the GC
+    bandwidth, and that the control rejects a curve fitted to unbiased data. That a kernel
+    average in place of local-linear also fails was checked by mutating the code once; it is
+    not kept as a test.
+  - `docs/guides/gc-correction.md` describes the model in a section marked "not yet used by any
+    feature (spec Step 2)". Every constant it quotes (trim, length range, minimum trimmed window,
+    support share, cap, minimum fragments, bandwidths, kernel reach) is registered in
+    `validate/claims.py`.
+
 ### Removed
+
+- **Dead GC code, and the Python entry point `_core.wps.calculate_wps`** (GC redesign register
+  D2). None had a caller in `rust/src`, `src/`, `tests/`, `nextflow/` or `scripts/`:
+  - `gc_correction::correct_gc_bias` and `correct_gc_bias_wps`, a per-region LOESS correction that
+    nothing called, with their two tests and the test-only `variance` helper;
+  - `gc_reference::GcCorrectionFactors`, a factor table nothing built or read;
+  - `_core.wps.calculate_wps` (the "legacy" single-tool WPS entry point, absent from `_core.pyi`
+    and called by no Python code: every WPS run goes through `run_unified_pipeline`) and
+    `wps::compute_gc_from_fasta`, which only it called. Removing them orphaned
+    `WpsConsumer::write_output` (the per-position `WPS.tsv.gz` writer, whose `gc_correct` flag
+    was already ignored), the `WpsRow` it wrote, and `Region.gc`, which nothing read; all three
+    are gone too. `docs/guides/gc-correction.md` no longer lists `correct_gc_bias`.
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
   Cargo warned about both on every build of `rust/`, and a build whose output

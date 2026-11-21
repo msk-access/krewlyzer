@@ -87,6 +87,11 @@ impl ContigNames {
         Self::new(contigs)
     }
 
+    /// The length of a contig, by the FASTA's own name for it (as [`Resolution::name`] gives it).
+    pub fn length(&self, fasta_name: &str) -> Option<u64> {
+        self.lengths.get(fasta_name).copied()
+    }
+
     /// Resolve one BAM contig. `bam_len` of 0 means unknown and skips the length check.
     pub fn resolve(&self, bam_name: &str, bam_len: u64) -> Resolution {
         let fasta = if self.lengths.contains_key(bam_name) {

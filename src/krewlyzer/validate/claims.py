@@ -210,6 +210,92 @@ CLAIMS: Tuple[Claim, ...] = (
         RustConst("gc_correction.rs", "NUM_BINS"),
         "5bp bins spanning 60-999bp; see the divergence below",
     ),
+    # -- GC model (redesign item 1; no feature reads it until spec Step 2) ----
+    Claim(
+        "gc_model.min_trimmed_window",
+        "20",
+        RustConst("gc_model.rs", "MIN_TRIMMED_WINDOW"),
+        "a fragment shorter than 2k + 20 bp has no GC key (CHANGELOG, "
+        "gc-correction.md); the tally, the expected counts and the lookup all "
+        "use this one rule",
+    ),
+    Claim(
+        "gc_model.default_trim_k",
+        "10",
+        RustConst("gc_model.rs", "DEFAULT_TRIM_K"),
+        "bp trimmed from each end of the insert before counting GC, until spec "
+        "Step 3 chooses k from {0, 2, 5, 10} by held-out residual",
+    ),
+    Claim(
+        "gc_model.length_min",
+        "20",
+        RustConst("gc_model.rs", "LENGTH_MIN"),
+        "the floor of the model's lengths: at trim k they run from max(20, 2k + 20) "
+        "to 600 bp, so 40-600 bp at the default trim (gc-correction.md, CHANGELOG)",
+    ),
+    Claim(
+        "gc_model.length_max",
+        "600",
+        RustConst("gc_model.rs", "LENGTH_MAX"),
+        "the model's longest fragment length; today's factor table runs to 999 "
+        "bp, so Step 2 must decide what a longer fragment gets",
+    ),
+    Claim(
+        "gc_model.min_fit_fragments",
+        "100_000",
+        RustConst("gc_model.rs", "MIN_FIT_FRAGMENTS"),
+        "below this many fragments the fit reports that it cannot fit rather than "
+        "returning weights of 1 (CHANGELOG, gc-correction.md)",
+    ),
+    Claim(
+        "gc_model.default_bandwidth_length_bp",
+        "5.0",
+        RustConst("gc_model.rs", "DEFAULT_BANDWIDTH_LENGTH_BP"),
+        "the kernel SD along length until spec Step 3 chooses it by held-out "
+        "residual; quoted in the CHANGELOG and gc-correction.md",
+    ),
+    Claim(
+        "gc_model.default_bandwidth_gc",
+        "0.02",
+        RustConst("gc_model.rs", "DEFAULT_BANDWIDTH_GC"),
+        "the kernel SD along GC fraction until spec Step 3 chooses it; with "
+        "kappa = 10 it puts the curvature bias near (kappa h)^2 / 2 = 0.02",
+    ),
+    Claim(
+        "gc_model.support_share",
+        "0.995",
+        RustConst("gc_model.rs", "SUPPORT_SHARE"),
+        "each length's support holds this share of the territory's expected "
+        "windows (decision S1: from the reference, not from donors)",
+    ),
+    Claim(
+        "gc_model.weight_cap",
+        "10.0",
+        RustConst("gc_model.rs", "WEIGHT_CAP"),
+        "raw weights are capped to [1/10, 10] before normalisation (decision "
+        "S5; the proposal allowed 10-20)",
+    ),
+    Claim(
+        "gc_model.gc_definition_version",
+        "1",
+        RustConst("gc_model.rs", "GC_DEFINITION_VERSION"),
+        "gc-correction.md names version 1 as the rule that an N voids the key only "
+        "inside the trimmed window; changing the rule must bump it",
+    ),
+    Claim(
+        "gc_model.truth_share",
+        "0.98",
+        RustConst("gc_model.rs", "TRUTH_SHARE"),
+        "the truth-test pass rule (operator, criterion 1): cells within 5% of the "
+        "true correction hold at least 98% of fragments, at full and 10% depth",
+    ),
+    Claim(
+        "gc_model.kernel_reach_sd",
+        "4.0",
+        RustConst("gc_model.rs", "KERNEL_REACH_SD"),
+        "the kernel is truncated at this many SDs; a length with no fragment in "
+        "reach has no weight (FitQc.lengths_unfitted) rather than an extrapolated one",
+    ),
     # -- PON sigma floor --------------------------------------------------
     Claim(
         "pon.sigma_floor",
