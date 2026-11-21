@@ -200,3 +200,44 @@ def test_region_mds_z_scoring_that_fails_is_recorded_not_swallowed(
         silent=True,
     )
     assert (z.status, z.error_class) == ("failed", "ZeroDivisionError")
+
+
+def test_an_exon_z_score_failure_is_not_a_gene_z_score_failure(tmp_path, monkeypatch):
+    """`region_mds_z` is the z-scoring of `MDS.gene`. An exon scorer failing after the gene
+    table was fully scored must not report `MDS.gene` as missing its z-scores."""
+    from krewlyzer.pon.model import RegionMdsExonBaseline
+    from krewlyzer.region_mds import region_mds_stage
+
+    def broken(self, gene, name, value):
+        raise ZeroDivisionError("exon scorer")
+
+    monkeypatch.setattr(RegionMdsExonBaseline, "compute_zscore", broken)
+    pon = _region_pon(tmp_path / "r.pon.parquet", True)
+    frame = pd.read_parquet(pon)
+    exon = pd.DataFrame(
+        [
+            {
+                "table": "region_mds_exon",
+                "gene": "GENE0",
+                "name": "NM_00000",
+                "mds_mean": 0.9,
+                "mds_std": 0.05,
+                "n_samples": 21,
+            }
+        ]
+    )
+    pd.concat([frame, exon], ignore_index=True).to_parquet(pon)
+    sample = make_sample(tmp_path / "in", BASELINE)
+    out = tmp_path / "out"
+    *_, z = region_mds_stage(
+        sample.bam,
+        sample.reference,
+        out,
+        gene_bed=sample.assets.genes,
+        sample_name="S",
+        pon_model=pon,
+        output_format="parquet",
+        silent=True,
+    )
+    assert z.status == "ran"
+    assert "mds_z" in pd.read_parquet(out / "S.MDS.gene.parquet").columns

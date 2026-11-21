@@ -169,3 +169,36 @@ def test_the_status_columns_are_in_the_contract():
             rule = columns[name]
             assert rule.kind is Kind.STRING and rule.vary is Vary.NEVER
             assert not rule.required, "directories from before this release lack them"
+
+
+@pytest.mark.parametrize(
+    "record_fmt, tool_fmt, tool_compress",
+    [("parquet", "tsv", False), ("tsv", "parquet", False), ("tsv", "tsv", True)],
+)
+def test_a_single_tool_updates_the_record_that_exists_in_its_format(
+    tmp_path, record_fmt, tool_fmt, tool_compress
+):
+    """A single tool run at another `--output-format` must neither leave the record downstream
+    reads unchanged (a new `.tsv` beside the `.parquet`) nor create a completion marker in a
+    directory that has none (a `.parquet` in a TSV directory: invariant #2)."""
+    _marker(tmp_path, record_fmt)
+    before = sorted(p.name for p in tmp_path.iterdir())
+    record_stage_outcomes(
+        tmp_path,
+        "S1",
+        {"uxm": Outcome("ran")},
+        output_format=tool_fmt,
+        compress=tool_compress,
+        owns_record=False,
+    )
+    assert sorted(p.name for p in tmp_path.iterdir()) == before
+    assert _row(tmp_path, record_fmt)["uxm_status"] == "ran"
+
+
+def test_a_single_tool_updates_every_copy_of_the_record(tmp_path):
+    _marker(tmp_path, "both")
+    record_stage_outcomes(
+        tmp_path, "S1", {"uxm": Outcome("ran")}, "tsv", owns_record=False
+    )
+    assert _row(tmp_path, "parquet")["uxm_status"] == "ran"
+    assert _row(tmp_path, "tsv")["uxm_status"] == "ran"

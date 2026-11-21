@@ -359,6 +359,14 @@ def region_mds_stage(
             # separately from the gene block above because the two baselines
             # can be present independently: a PON built before this release
             # has `region_mds` and no `region_mds_exon`.
+        except Exception as e:
+            logger.warning(f"PON z-score computation failed: {e}")
+            z_outcome = Outcome.failed(e)
+
+        # Its own `try`: `region_mds_z` is the z-scoring of MDS.gene, which an exon failure
+        # after a fully scored gene table must not report as missing its z-scores. MDS.exon's
+        # z-score is not in the contract, so this one stays a warning.
+        try:
             if pon.region_mds_exon is None:
                 logger.info(
                     "PON has no region_mds_exon baseline; MDS.exon keeps its raw "
@@ -369,10 +377,8 @@ def region_mds_stage(
                     pon, output_exon, output_exon_base, output_format, compress
                 )
                 scored = scored or n_exon_z > 0
-
         except Exception as e:
-            logger.warning(f"PON z-score computation failed: {e}")
-            z_outcome = Outcome.failed(e)
+            logger.warning(f"MDS.exon z-score computation failed: {e}")
 
         # Outside the try, so a failure to record is not reported as a scoring failure, and a
         # partial score (gene table written, exon step failed) is still recorded.

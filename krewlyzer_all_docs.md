@@ -10807,7 +10807,8 @@ here, so "not requested" and "requested and failed" no longer look the same.
 (the PON z-scores of `MDS`, `MDS.ontarget` and `MDS.gene`). run-all writes every
 status on every run, except that a rerun reusing cached motif tables leaves
 `mds_z*` as the run that wrote those tables recorded them. A single tool records
-only the stages it attempted, and never `not_requested`. `extract` writes this table
+only the stages it attempted, never `not_requested`, into every copy of this
+table that exists (whatever its own `--output-format`), and creates none. `extract` writes this table
 from scratch, so it clears the statuses: a new fragment BED is a new sample. All
 are absent from directories written before this release, and Nextflow tool-level
 mode writes no metadata table at all, so it records none. `validate-output`

@@ -335,14 +335,19 @@ def record_stage_outcomes(
 ) -> bool:
     """Write `{stage}_status` and `{stage}_error` into `{sample}.metadata.*`. True if written.
 
-    The one writer for stage outcomes. It reads the record this run's format writes
-    (`record_path`), exactly, and writes all of the run's formats, as `stamp_metadata` does.
+    The one writer for stage outcomes.
 
-    ``owns_record`` is True for run-all, which records every stage on every run. A single tool
-    (False) records only the stages it attempted -- ``ran``, ``failed`` or ``unavailable`` --
-    and never ``not_requested``: `krewlyzer fsc` without `--assay` did not ask for gene FSC, but
-    run-all may have, and ran it. For a stage it did attempt, the last writer wins, because it
-    rewrote that stage's tables.
+    ``owns_record`` is True for run-all, which records every stage on every run. It reads the
+    record its own format writes (`record_path`), exactly, and writes all of its formats, as
+    `stamp_metadata` does.
+
+    A single tool (False) records only the stages it attempted -- ``ran``, ``failed`` or
+    ``unavailable`` -- and never ``not_requested``: `krewlyzer fsc` without `--assay` did not ask
+    for gene FSC, but run-all may have, and ran it. For a stage it did attempt, the last writer
+    wins, because it rewrote that stage's tables. It updates every copy of the record that
+    exists, each in its own format, and creates none: a single tool at its default `-F tsv`
+    beside a Parquet run-all left the `.parquet` downstream reads unchanged, and one at
+    `-F parquet` in a TSV directory created a completion marker for a sample with no Parquet.
 
     A no-op when there is no metadata table: a single tool run into an empty directory writes no
     completion marker.
@@ -359,29 +364,42 @@ def record_stage_outcomes(
     if not outcomes:
         return False
 
-    existing = record_path(output_dir, sample, output_format, compress)
-    if existing is None:
+    base = output_dir / f"{sample}.metadata"
+    if owns_record:
+        existing = record_path(output_dir, sample, output_format, compress)
+        targets = [(existing, output_format, compress)] if existing is not None else []
+    else:
+        targets = [
+            (path, fmt, gz)
+            for path, fmt, gz in (
+                (Path(f"{base}.parquet"), "parquet", False),
+                (Path(f"{base}.tsv.gz"), "tsv", True),
+                (Path(f"{base}.tsv"), "tsv", False),
+            )
+            if path.exists()
+        ]
+    if not targets:
         logger.debug(f"No metadata table for {sample}; stage outcomes not recorded.")
         return False
+
     text = {name: str for name in _RECORD_TEXT}
     text.update({f"{s}_{f}": str for s in STAGES for f in ("status", "error")})
-    frame = read_exact_table(existing, dtype=text)
-    if frame is None or frame.empty:
-        logger.warning(
-            f"{existing.name} could not be read; stage outcomes not recorded. "
-            "Downstream cannot tell a failed stage from one that was not requested."
-        )
+    written = False
+    for path, fmt, gz in targets:
+        frame = read_exact_table(path, dtype=text)
+        if frame is None or frame.empty:
+            logger.warning(
+                f"{path.name} could not be read; stage outcomes not recorded in it. "
+                "Downstream cannot tell a failed stage from one that was not requested."
+            )
+            continue
+        for stage, outcome in outcomes.items():
+            frame[f"{stage}_status"] = outcome.status
+            frame[f"{stage}_error"] = outcome.error_class
+        write_table(frame, base, output_format=fmt, compress=gz)
+        written = True
+    if not written:
         return False
-
-    for stage, outcome in outcomes.items():
-        frame[f"{stage}_status"] = outcome.status
-        frame[f"{stage}_error"] = outcome.error_class
-    write_table(
-        frame,
-        output_dir / f"{sample}.metadata",
-        output_format=output_format,
-        compress=compress,
-    )
     failed = [
         f"{k} ({o.error_class})" for k, o in outcomes.items() if o.status == "failed"
     ]

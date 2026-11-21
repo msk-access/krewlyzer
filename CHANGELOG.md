@@ -14,7 +14,9 @@ All notable changes to this project will be documented in this file.
   z-scoring) now records `{stage}_status` -- `ran`, `not_requested`, `no_variants`,
   `unavailable` or `failed` -- and `{stage}_error`, the exception's class name only, never its
   message (messages carry input paths; sample directories are named for the patient). One writer,
-  `output_provenance.record_stage_outcomes`, reads the record this run's format writes. run-all
+  `output_provenance.record_stage_outcomes`: run-all reads the record its own format writes and
+  writes its formats; a single tool updates every copy that exists, each in its own format, and
+  creates none, whatever its `--output-format`. run-all
   writes every status on every run, except that a rerun reusing cached motif tables leaves
   `mds_z*` as recorded. A single tool records only the stages it attempted and never
   `not_requested`; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
