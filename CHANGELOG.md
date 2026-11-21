@@ -181,7 +181,9 @@ All notable changes to this project will be documented in this file.
 - **run-all re-runs the motif step when its cached tables were made under another PON.** The
   cache reused the motif tables whatever PON was in use, so a run without a PON followed by one
   with a PON shipped `pon_applied=True` beside an MDS with no z-score. It now reuses them only
-  when the sample's record names the PON now in use (or none, for none). The cache check itself
+  when the sample's record names the PON now in use (or none, for none) and, for a PON with an
+  MDS baseline, records the MDS z-score as `ran`: a single tool can name the PON in the record
+  having scored only its own tables. The cache check itself
   still looks for `.tsv` names only, so it never fires under Parquet or `--compress`; that is
   unchanged, and fixing this did not need it.
 - **`motif` records the PON only if the MDS z-score was written.** It recorded `pon_applied` from

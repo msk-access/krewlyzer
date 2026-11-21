@@ -197,6 +197,26 @@ def record_names_pon(
     )
 
 
+def recorded_status(
+    output_dir: Path,
+    sample: str,
+    stage: str,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Optional[str]:
+    """The status the sample's record holds for ``stage``, or None when it records none."""
+    existing = record_path(output_dir, sample, output_format, compress)
+    column = f"{stage}_status"
+    frame = (
+        read_exact_table(existing, dtype={column: str})
+        if existing is not None
+        else None
+    )
+    if frame is None or frame.empty or column not in frame.columns:
+        return None
+    return _as_text(frame[column].iloc[0]) or None
+
+
 def record_pon_used(
     output_dir: Path,
     sample: str,

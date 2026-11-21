@@ -642,7 +642,7 @@ def run_all(
         # Reusing them under another PON -- or with one after a run without -- ships the old
         # scoring under this run's record (`pon_applied=True` beside an MDS with no `mds_z`).
         if not should_run_engine:
-            from .core.output_provenance import record_names_pon
+            from .core.output_provenance import record_names_pon, recorded_status
 
             if not record_names_pon(
                 output,
@@ -655,6 +655,20 @@ def run_all(
                 logger.info(
                     "Cached motif tables were made against another PON (or none); "
                     "re-running the motif step"
+                )
+                should_run_engine = True
+            elif (
+                pon is not None
+                and getattr(pon, "mds_baseline", None)
+                and recorded_status(
+                    output, sample, "mds_z", resolved_output_format, resolved_compress
+                )
+                != "ran"
+            ):
+                # The record can name this PON because a single tool scored its own tables
+                # with it, while the cached MDS was never scored: do not reuse it.
+                logger.info(
+                    "Cached MDS was not z-scored against this PON; re-running the motif step"
                 )
                 should_run_engine = True
 

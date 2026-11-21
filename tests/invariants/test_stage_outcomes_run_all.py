@@ -508,3 +508,25 @@ def test_cached_motif_tables_made_without_the_pon_now_in_use_are_redone(
     )
     assert _outcomes_tsv(out)["mds_z"] == ("ran", "")
     assert "mds_z" in pd.read_csv(out / "S.MDS.tsv", sep="\t", comment="#").columns
+
+
+def test_cached_motif_tables_are_redone_when_the_record_names_the_pon_but_mds_was_not_scored(
+    sample, tmp_path
+):
+    """A single tool can raise `pon_applied` and name the PON (it scored its own tables), while
+    the motif tables from the earlier run were never scored. A later run-all with that PON must
+    not reuse them (review of #88 PR B)."""
+    import pandas as pd
+
+    from krewlyzer.core.output_provenance import record_pon_used
+    from krewlyzer.core.pon_integration import load_requested_pon
+
+    out = tmp_path / "out"
+    _run_tsv(sample, out)
+    pon_path = _mds_pon(tmp_path / "mds.pon.parquet")
+    record_pon_used(out, "S", load_requested_pon(pon_path), pon_path, "tsv")
+    assert _outcomes_tsv(out)["mds_z"] == ("not_requested", "")
+
+    _run_tsv(sample, out, pon_model=pon_path, skip_pon=False)
+    assert _outcomes_tsv(out)["mds_z"] == ("ran", "")
+    assert "mds_z" in pd.read_csv(out / "S.MDS.tsv", sep="\t", comment="#").columns
