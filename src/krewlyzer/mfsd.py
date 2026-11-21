@@ -299,7 +299,7 @@ def mfsd(
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
     try:
-        mfsd_stage(
+        written = mfsd_stage(
             bam_input,
             input_file,
             output,
@@ -322,3 +322,16 @@ def mfsd(
     except Exception as e:
         logger.error(f"mFSD calculation failed: {e}")
         raise typer.Exit(1)
+    # Into the sample's record, if it has one: rerunning this command is how a stage that failed
+    # under run-all gets fixed. Success only -- a failure here exits non-zero, and may not have
+    # touched the table a good earlier run left.
+    from .core.output_provenance import Outcome, record_stage_outcomes
+
+    record_stage_outcomes(
+        output,
+        written.name[: -len(".mFSD.tsv")],  # the sample name the stage used
+        {"mfsd": Outcome("ran")},
+        output_format=output_format,
+        compress=compress,
+        owns_record=False,
+    )

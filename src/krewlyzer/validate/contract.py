@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 class Vary(str, Enum):
@@ -251,6 +251,52 @@ _WPS_PON_COLS: Tuple[ColumnRule, ...] = (
         ),
         requires_pon=True,
     ),
+)
+
+
+#: The optional stages run-all carries on past, and the tables each one writes.
+#:
+#: run-all keeps going when one of these fails, by design, so that one stage cannot cost a
+#: sample its other features. What happened is recorded per sample as `{stage}_status` and
+#: `{stage}_error` in `{sample}.metadata` (`output_provenance.record_stage_outcomes`), and the
+#: gate reads it: a failed stage is reported with its reason instead of as absent tables, at
+#: ERROR when any of these tables is consumed, else WARN. Every suffix here is in `CONTRACT` or
+#: `NOT_CONSUMED` (asserted), so a failure can never look harmless for want of a declaration.
+STAGE_TABLES: Dict[str, Tuple[str, ...]] = {
+    "uxm": (".UXM.parquet",),
+    "mfsd": (".mFSD.parquet",),
+    "region_mds": (".MDS.gene.parquet", ".MDS.exon.parquet"),
+    "gene_fsc": (
+        ".FSC.gene.parquet",
+        ".FSC.regions.parquet",
+        ".FSC.regions.e1only.parquet",
+    ),
+    "panel_wps": (".WPS.panel.parquet",),
+    "tfbs": (".TFBS.parquet", ".TFBS.ontarget.parquet"),
+    "atac": (".ATAC.parquet", ".ATAC.ontarget.parquet"),
+}
+
+#: Stages that add columns to a table another stage writes, rather than a table of their own:
+#: the whole-sample MDS z-scores, and Region-MDS's PON z-scoring. Which columns, on which
+#: table, is declared once, on the column (`ColumnRule.requires_stage`).
+COLUMN_STAGES: Tuple[str, ...] = ("mds_z", "mds_z_ontarget", "region_mds_z")
+
+STAGES: Tuple[str, ...] = (*STAGE_TABLES, *COLUMN_STAGES)
+
+#: ``ran``; ``not_requested`` (no input for it, e.g. no `--variants`); ``no_variants`` (a
+#: variants file with none in it); ``unavailable`` (asked for, but an input or asset it needs is
+#: missing); ``failed`` (it raised, recorded with the exception's class name only).
+STAGE_STATUSES: Tuple[str, ...] = (
+    "ran",
+    "not_requested",
+    "no_variants",
+    "unavailable",
+    "failed",
+)
+
+_STAGE_STATUS_REASON = (
+    "one pipeline configuration gives every sample the same outcome; a sample that differs "
+    "is the finding, and the gate reports a failed stage itself"
 )
 
 
@@ -511,6 +557,20 @@ CONTRACT: Tuple[TableRule, ...] = (
                     ),
                 )
                 for name in ("fragments_on_missing_contig", "gc_fetch_failed")
+            ),
+            # What each optional stage did (`STAGE_TABLES`, `COLUMN_STAGES`). Not required:
+            # directories from builds before this release lack them, and a single tool run into
+            # an empty directory records nothing.
+            *(
+                ColumnRule(
+                    f"{stage}_{field}",
+                    Kind.STRING,
+                    Vary.NEVER,
+                    required=False,
+                    constant_reason=_STAGE_STATUS_REASON,
+                )
+                for stage in STAGES
+                for field in ("status", "error")
             ),
         ),
         rows=Rows(exactly=1),

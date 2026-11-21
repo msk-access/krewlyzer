@@ -221,7 +221,7 @@ def uxm(
     Output: {sample}.UXM.tsv file with fragment-level methylation scores
     """
     try:
-        uxm_stage(
+        written = uxm_stage(
             bam_input,
             output,
             sample_name,
@@ -239,3 +239,16 @@ def uxm(
 
             traceback.print_exc()
         raise typer.Exit(1)
+    # Into the sample's record, if it has one: rerunning this command is how a stage that failed
+    # under run-all gets fixed. Success only -- a failure here exits non-zero, and may not have
+    # touched the table a good earlier run left.
+    from .core.output_provenance import Outcome, record_stage_outcomes
+
+    record_stage_outcomes(
+        output,
+        written.name[: -len(".UXM.tsv")],  # the sample name the stage used
+        {"uxm": Outcome("ran")},
+        output_format=output_format,
+        compress=compress,
+        owns_record=False,
+    )

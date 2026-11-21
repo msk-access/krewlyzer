@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **What each optional stage did is recorded in `{sample}.metadata`.** run-all carries on past a
+  failed optional stage by design, so one stage cannot cost a sample its other features; the
+  outcome was in the log only, and "not requested" (no `--variants`, no `--assay`) left the same
+  absent table as "requested and failed". Each of `uxm`, `mfsd`, `region_mds`, `gene_fsc`,
+  `panel_wps`, `tfbs`, `atac`, `mds_z`, `mds_z_ontarget` and `region_mds_z` (Region-MDS's PON
+  z-scoring) now records `{stage}_status` -- `ran`, `not_requested`, `no_variants`,
+  `unavailable` or `failed` -- and `{stage}_error`, the exception's class name only, never its
+  message (messages carry input paths; sample directories are named for the patient). One writer,
+  `output_provenance.record_stage_outcomes`, reads the record this run's format writes. run-all
+  writes every status on every run, except that a rerun reusing cached motif tables leaves
+  `mds_z*` as recorded; a single tool records only what it ran and never `not_requested`, and
+  `uxm`, `mfsd` and `region-mds` record `ran` when rerun by hand, which is how a stage that failed
+  under run-all gets fixed. `extract` rewrites the table from scratch and so clears them. The
+  columns are in the output contract as optional strings.
+
 ### Removed
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
@@ -123,6 +140,18 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
+  that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
+  exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly
+  too. Each is now warned about and recorded as `unavailable`. A `--mfsd-bam` that does not exist
+  fails mFSD (`FileNotFoundError`) instead of silently running on the main BAM with duplex
+  weighting off. A panel WPS failure is logged at warning, not debug. Region-MDS's PON z-scoring
+  could fail inside a `try` that logged a warning; an unreadable gene table there is now a failure
+  rather than a skip, and both are recorded.
+- **The whole-sample MDS z-score reads the table this run wrote.** The append read Parquet-first,
+  so a TSV run beside an earlier run's `.MDS.parquet` read that file, found its `mds_z`, and
+  skipped the append: the fresh `.MDS.tsv` shipped with no z-score. It now reads the exact file,
+  as the on-target append already did.
 - **UXM runs under run-all.** run-all called the `uxm` typer command as a plain function and
   passed no `threads`, so a typer `OptionInfo` reached `threads > 0` and raised `TypeError` on
   every run-all given `--bisulfite-bam`. The catch-all logged "UXM failed" and carried on, so no

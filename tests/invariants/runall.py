@@ -89,3 +89,30 @@ def synth_run_all(sample: SynthSample, output: Path, **overrides) -> Optional[in
 def record(output: Path, sample: str = SAMPLE) -> Dict[str, object]:
     """The sample's metadata row."""
     return pd.read_parquet(output / f"{sample}.metadata.parquet").iloc[0].to_dict()
+
+
+def outcomes(output: Path, sample: str = SAMPLE) -> Dict[str, tuple]:
+    """``{stage: (status, error_class)}`` as the sample's record has them."""
+    from krewlyzer.validate.contract import STAGES
+
+    row = record(output, sample)
+    found = {}
+    for stage in STAGES:
+        status = row.get(f"{stage}_status")
+        if isinstance(status, str) and status:
+            error = row.get(f"{stage}_error")
+            found[stage] = (status, error if isinstance(error, str) else "")
+    return found
+
+
+def lfs_pointer(path: Path) -> Path:
+    """What a bundled asset is in a clone that skipped `git lfs pull`: text, not gzip.
+
+    The realistic way for an asset-reading stage to fail, and a real failing input rather than a
+    patched exception.
+    """
+    path.write_text(
+        "version https://git-lfs.github.com/spec/v1\n"
+        "oid sha256:" + "0" * 64 + "\nsize 1024\n"
+    )
+    return path

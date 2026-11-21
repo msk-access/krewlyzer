@@ -547,11 +547,32 @@ def run_all(
             f"Panel mode: GC model will use off-target reads only (targets: {resolved_target_path.name})"
         )
 
-    # Determine which optional tools will run
+    # Determine which optional tools will run, and record what each optional stage did.
+    #
+    # run-all carries on past any of them failing, by design, so the record in
+    # `{sample}.metadata` is the only place a reader can tell "not requested" from
+    # "requested and failed". Written once, after Region-MDS (`record_stage_outcomes`).
+    from .core.output_provenance import Outcome, record_stage_outcomes
+
+    stage_outcomes = {
+        "uxm": Outcome("not_requested"),
+        "mfsd": Outcome("not_requested"),
+    }
     has_uxm = resolved_bisulfite_bam is not None and resolved_bisulfite_bam.exists()
+    if resolved_bisulfite_bam is not None and not has_uxm:
+        logger.warning(
+            f"--bisulfite-bam {resolved_bisulfite_bam.name} does not exist; UXM not run"
+        )
+        stage_outcomes["uxm"] = Outcome("unavailable")
 
     # mFSD: check file exists AND has data lines (not just header/comments)
     has_mfsd = False
+    if resolved_variants is not None and not resolved_variants.exists():
+        # Skipped with no log line at all, before.
+        logger.warning(
+            f"--variants {resolved_variants.name} does not exist; mFSD not run"
+        )
+        stage_outcomes["mfsd"] = Outcome("unavailable")
     if resolved_variants is not None and resolved_variants.exists():
         with open(resolved_variants) as f:
             variant_count = sum(
@@ -566,6 +587,7 @@ def run_all(
             logger.info(f"mFSD: {variant_count} variants in {resolved_variants.name}")
         else:
             logger.info(f"mFSD: 0 variants in {resolved_variants.name} — skipping mFSD")
+            stage_outcomes["mfsd"] = Outcome("no_variants")
 
     # Multi-step progress display
     with Progress(
@@ -596,7 +618,7 @@ def run_all(
         # ═══════════════════════════════════════════════════════════════════
         from .core.sample_processor import (
             extract_sample,
-            write_motif_outputs,
+            write_motif_tables,
             write_extraction_outputs,
             ExtractionResult,
         )
@@ -619,6 +641,9 @@ def run_all(
 
         # extraction_result is initially None; set below if engine runs or cache is valid
         extraction_result: Optional[ExtractionResult] = None
+        # The MDS z-score outcomes, when the motif step runs. A rerun that reuses the motif
+        # tables leaves their record as it was, failures included.
+        motif_outcomes: dict = {}
 
         if not should_run_engine:
             progress.update(
@@ -695,7 +720,7 @@ def run_all(
                             )
 
                 # Write motif outputs (EDM, BPM, MDS with z-score)
-                write_motif_outputs(
+                _, motif_outcomes = write_motif_tables(
                     result=extraction_result,
                     output_dir=output,
                     pon=pon,
@@ -752,10 +777,10 @@ def run_all(
                 enable_fsd=True,
                 enable_wps=True,
                 enable_ocf=assets.ocf_available,  # Skip OCF if not available for genome
-                enable_tfbs=assets.tfbs_available
-                and not no_tfbs,  # TFBS size entropy (--no-tfbs to disable)
-                enable_atac=assets.atac_available
-                and not no_atac,  # ATAC size entropy (--no-atac to disable)
+                # Asked for unless disabled; run_features checks the assets, so a missing
+                # one is recorded as unavailable rather than as not requested.
+                enable_tfbs=not no_tfbs,  # TFBS size entropy (--no-tfbs to disable)
+                enable_atac=not no_atac,  # ATAC size entropy (--no-atac to disable)
                 target_regions=resolved_target_path,
                 assay=resolved_assay,
                 pon_model=resolved_pon_path,
@@ -847,11 +872,13 @@ def run_all(
                     compress=resolved_compress,
                 )
                 progress.update(task_uxm, description="[4/5] UXM ✓", completed=100)
+                stage_outcomes["uxm"] = Outcome("ran")
             except Exception as e:
                 progress.update(
                     task_uxm, description="[4/5] UXM ✗ Error", completed=100
                 )
                 logger.warning(f"UXM failed: {e}")
+                stage_outcomes["uxm"] = Outcome.failed(e)
 
         # 4b. mFSD
         if has_mfsd:
@@ -886,19 +913,17 @@ def run_all(
                     )
                 correction_factors_path = gc_choice.path
 
-                # Resolve which BAM to use for mFSD
+                # Resolve which BAM to use for mFSD. A --mfsd-bam that does not exist fails
+                # the stage (mfsd_stage raises FileNotFoundError): it used to fall back to the
+                # main BAM with duplex weighting off, silently.
                 mfsd_bam_path = (
-                    resolved_mfsd_bam
-                    if resolved_mfsd_bam and resolved_mfsd_bam.exists()
-                    else bam_input
+                    resolved_mfsd_bam if resolved_mfsd_bam is not None else bam_input
                 )
 
                 # Auto-enable duplex if dedicated mfsd_bam provided (Option A per implementation plan)
-                duplex_enabled = duplex or (
-                    resolved_mfsd_bam is not None and resolved_mfsd_bam.exists()
-                )
+                duplex_enabled = duplex or resolved_mfsd_bam is not None
 
-                if resolved_mfsd_bam and resolved_mfsd_bam.exists():
+                if resolved_mfsd_bam is not None:
                     logger.info(f"mFSD using dedicated BAM: {resolved_mfsd_bam.name}")
                     if duplex_enabled and not duplex:
                         logger.info(
@@ -935,16 +960,25 @@ def run_all(
                     compress=resolved_compress,
                 )
                 progress.update(task_mfsd, description="[5/5] mFSD ✓", completed=100)
+                stage_outcomes["mfsd"] = Outcome("ran")
             except Exception as e:
                 progress.update(
                     task_mfsd, description="[5/5] mFSD ✗ Error", completed=100
                 )
                 logger.warning(f"mFSD failed: {e}")
+                stage_outcomes["mfsd"] = Outcome.failed(e)
 
     # ═══════════════════════════════════════════════════════════════════
     # REGION MDS (Per-exon/target Motif Diversity Score)
     # Only runs when assay is specified (implies gene annotations available)
     # ═══════════════════════════════════════════════════════════════════
+    # Its PON z-scoring is a stage of its own (`region_mds_z`): without a PON it was not
+    # requested; with one, a Region-MDS that produced no gene table left nothing to score.
+    z_if_no_table = Outcome(
+        "not_requested" if resolved_pon_path is None else "unavailable"
+    )
+    stage_outcomes["region_mds"] = Outcome("not_requested")
+    stage_outcomes["region_mds_z"] = Outcome("not_requested")
     if resolved_assay:
         try:
             from .region_mds import region_mds_stage
@@ -953,7 +987,7 @@ def run_all(
             gene_bed = assets.get_gene_bed_for_mode(resolved_assay)
             if gene_bed and gene_bed.exists():
                 logger.info(f"Running region-MDS for assay '{resolved_assay}'...")
-                n_regions, n_genes = region_mds_stage(
+                n_regions, n_genes, z_outcome = region_mds_stage(
                     owns_sample_record=True,  # run-all writes the whole sample's record
                     bam_input=bam_input,
                     reference=reference,
@@ -978,16 +1012,34 @@ def run_all(
                 logger.info(
                     f"Region-MDS complete: {n_regions} regions, {n_genes} genes"
                 )
+                stage_outcomes["region_mds"] = Outcome("ran")
+                stage_outcomes["region_mds_z"] = z_outcome
             else:
-                logger.debug(
+                logger.warning(
                     f"Skipping region-MDS: gene BED not available for assay '{resolved_assay}'"
                 )
+                stage_outcomes["region_mds"] = Outcome("unavailable")
+                stage_outcomes["region_mds_z"] = z_if_no_table
         except Exception as e:
             logger.warning(f"Region-MDS failed: {e}")
             if debug:
                 import traceback
 
                 traceback.print_exc()
+            stage_outcomes["region_mds"] = Outcome.failed(e)
+            stage_outcomes["region_mds_z"] = z_if_no_table
+
+    # Before the JSON step (the serializer reads the metadata) and the contract check (which
+    # reads these statuses), so both see this run's outcomes.
+    stage_outcomes.update(motif_outcomes)
+    record_stage_outcomes(
+        output,
+        sample,
+        stage_outcomes,
+        output_format=resolved_output_format,
+        compress=resolved_compress,
+        owns_record=True,  # run-all writes the whole sample
+    )
 
     # ═══════════════════════════════════════════════════════════════════
     # UNIFIED JSON OUTPUT (if requested)

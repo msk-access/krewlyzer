@@ -19,7 +19,7 @@ sharing the expensive extraction logic.
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 import logging
 import time
 from datetime import datetime
@@ -28,13 +28,13 @@ import pandas as pd
 
 from .output_utils import (
     read_exact_table,
-    read_table,
     strip_table_extension,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
+from .output_provenance import Outcome
 from .motif_processor import compute_mds
 from ..assets import AssetManager
 from .gc_assets import (
@@ -466,6 +466,26 @@ def write_motif_outputs(
     output_format: str = "tsv",
     compress: bool = False,
 ) -> Dict[str, Path]:
+    """Write the motif tables; returns ``{kind: path}``. See `write_motif_tables`."""
+    return write_motif_tables(
+        result,
+        output_dir,
+        pon=pon,
+        include_ontarget=include_ontarget,
+        output_format=output_format,
+        compress=compress,
+    )[0]
+
+
+def write_motif_tables(
+    result: ExtractionResult,
+    output_dir: Path,
+    *,
+    pon: Optional[Any] = None,
+    include_ontarget: bool = True,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Tuple[Dict[str, Path], Dict[str, Outcome]]:
     """
     Write motif analysis files from extraction result.
 
@@ -492,8 +512,11 @@ def write_motif_outputs(
         compress: Gzip TSV output when True (default: False)
 
     Returns:
-        Dict mapping output type to file path:
-        {'edm': Path, 'bpm': Path, 'mds': Path, ...}
+        ``(paths, outcomes)``: the dict mapping output type to file path
+        ({'edm': Path, 'bpm': Path, 'mds': Path, ...}), and what the MDS z-scores did, for
+        `record_stage_outcomes` (stages ``mds_z`` and ``mds_z_ontarget``). A z-score that fails
+        is logged and the tables are still written, so the outcome is the only place a caller
+        can learn of it.
 
     Example:
         >>> result = extract_sample(bam, ref)
@@ -546,30 +569,47 @@ def write_motif_outputs(
     logger.debug(f"  Off-target: {total_em:,} EM, {total_bpm:,} BPM, MDS={mds:.4f}")
 
     # Compute MDS z-score if PON provided
-    if pon and hasattr(pon, "mds_baseline") and pon.mds_baseline and mds is not None:
-        mds_z = (mds - pon.mds_baseline.mds_mean) / max(pon.mds_baseline.mds_std, 1e-10)
-        logger.debug(f"  MDS z-score: {mds_z:.3f}")
-
+    outcomes: Dict[str, Outcome] = {
+        "mds_z": Outcome("not_requested"),
+        "mds_z_ontarget": Outcome("not_requested"),
+    }
+    if pon is not None and not getattr(pon, "mds_baseline", None):
+        outcomes["mds_z"] = Outcome("unavailable")  # a BED-built PON has none
+    elif pon is not None and mds is None:
+        outcomes["mds_z"] = Outcome("unavailable")
+    elif pon is not None:
         # Append z-score to MDS file (read output, add column, re-write to base)
         try:
-            mds_df = read_table(mds_output)
-            if mds_df is not None and "mds_z" not in mds_df.columns:
-                mds_df["mds_z"] = mds_z
-                write_table(
-                    mds_df,
-                    mds_base,
-                    output_format=output_format,
-                    compress=compress,
+            mds_z = (mds - pon.mds_baseline.mds_mean) / max(
+                pon.mds_baseline.mds_std, 1e-10
+            )
+            logger.debug(f"  MDS z-score: {mds_z:.3f}")
+            # Exact: `ext` is the extension this run wrote. `read_table` is Parquet-first, so a
+            # TSV run beside an earlier run's `.MDS.parquet` read that file and, finding its
+            # `mds_z`, skipped the append: the fresh TSV shipped with no z-score.
+            mds_df = read_exact_table(mds_output)
+            if mds_df is None:
+                raise OSError(
+                    f"could not read {mds_output.name} to append the MDS z-score"
                 )
-                logger.debug(f"  Appended mds_z={mds_z:.3f} to {mds_output.name}")
-            elif mds_df is None:
-                logger.warning(
-                    f"  Could not read {mds_output.name} to append MDS z-score"
-                )
+            mds_df["mds_z"] = mds_z
+            write_table(
+                mds_df,
+                mds_base,
+                output_format=output_format,
+                compress=compress,
+            )
+            logger.debug(f"  Appended mds_z={mds_z:.3f} to {mds_output.name}")
+            outcomes["mds_z"] = Outcome("ran")
         except Exception as e:
             logger.warning(f"  Could not add MDS z-score: {e}")
+            outcomes["mds_z"] = Outcome.failed(e)
 
     # Write on-target motif files (panel mode)
+    if include_ontarget and result.is_panel_mode and pon is not None:
+        # Asked for; `ran` below if it gets there. No on-target fragments, or no baseline,
+        # means there was nothing to score.
+        outcomes["mds_z_ontarget"] = Outcome("unavailable")
     if (
         include_ontarget
         and result.is_panel_mode
@@ -614,34 +654,37 @@ def write_motif_outputs(
                 bl_name = "genome-wide (fallback)"
 
             if mds_bl:
-                mds_z_on = (mds_on_val - mds_bl.mds_mean) / max(mds_bl.mds_std, 1e-10)
-                logger.debug(
-                    f"  MDS on-target z-score: {mds_z_on:.3f} (baseline: {bl_name})"
-                )
-
                 # Append z-score to on-target MDS file
                 mds_on_output = mds_on_base.parent / (mds_on_base.name + ext)
                 try:
+                    mds_z_on = (mds_on_val - mds_bl.mds_mean) / max(
+                        mds_bl.mds_std, 1e-10
+                    )
+                    logger.debug(
+                        f"  MDS on-target z-score: {mds_z_on:.3f} (baseline: {bl_name})"
+                    )
                     # Exact: `ext` is the extension this run actually wrote, so
                     # resolving could pick a sibling from an earlier run.
                     mds_on_df = read_exact_table(mds_on_output)
-                    if mds_on_df is not None and "mds_z" not in mds_on_df.columns:
-                        mds_on_df["mds_z"] = mds_z_on
-                        write_table(
-                            mds_on_df,
-                            mds_on_base,
-                            output_format=output_format,
-                            compress=compress,
+                    if mds_on_df is None:
+                        raise OSError(
+                            f"could not read {mds_on_output.name} to append the "
+                            "on-target MDS z-score"
                         )
-                        logger.debug(
-                            f"  Appended mds_z={mds_z_on:.3f} to {mds_on_output.name}"
-                        )
-                    elif mds_on_df is None:
-                        logger.warning(
-                            f"  Could not read {mds_on_output.name} to append on-target MDS z-score"
-                        )
+                    mds_on_df["mds_z"] = mds_z_on
+                    write_table(
+                        mds_on_df,
+                        mds_on_base,
+                        output_format=output_format,
+                        compress=compress,
+                    )
+                    logger.debug(
+                        f"  Appended mds_z={mds_z_on:.3f} to {mds_on_output.name}"
+                    )
+                    outcomes["mds_z_ontarget"] = Outcome("ran")
                 except Exception as e:
                     logger.warning(f"  Could not add on-target MDS z-score: {e}")
+                    outcomes["mds_z_ontarget"] = Outcome.failed(e)
 
     # Write 1-mer End Motif (Jagged Index / C-end fraction)
     from .motif_processor import write_end_motif_1mer
@@ -699,7 +742,7 @@ def write_motif_outputs(
             )
 
     logger.info(f"  Wrote {len(outputs)} motif files")
-    return outputs
+    return outputs, outcomes
 
 
 def write_extraction_outputs(

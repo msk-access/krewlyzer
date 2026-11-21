@@ -412,9 +412,11 @@ MEANINGS: Dict[str, Meaning] = {
         why=(
             "Provenance: which inputs produced this directory, and how many fragments survived filtering. Also the completion marker the downstream consumer looks for."
         ),
-        how=("Written at the end of a run, once every other output has been produced."),
+        how=(
+            "Written at extraction, then updated as the run goes on: the PON it was scored against once that is known, and what each optional stage did (`{stage}_status`, `{stage}_error`) once the stage is over. Its presence says extraction finished, not that every later stage succeeded."
+        ),
         what=(
-            "`total_fragments` bounds everything else — a table computed from few fragments is noisy regardless of what it says. Its absence means the sample is silently dropped downstream."
+            "`total_fragments` bounds everything else — a table computed from few fragments is noisy regardless of what it says. Its absence means the sample is silently dropped downstream. A `{stage}_status` of `failed` means that stage's tables are absent, or left from an earlier run."
         ),
     ),
     # -- optional outputs -----------------------------------------------------

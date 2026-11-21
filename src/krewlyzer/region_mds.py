@@ -19,6 +19,7 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
+from .core.output_provenance import Outcome, record_stage_outcomes
 from .core.output_utils import (
     read_exact_table,
     write_table,
@@ -97,6 +98,12 @@ def _apply_exon_zscores(
     return True, n_scored
 
 
+def _derived_sample_name(bam_input: Path) -> str:
+    """The sample name when none is given: the BAM's stem, without a `.sorted` suffix."""
+    name = bam_input.stem
+    return name[: -len(".sorted")] if name.endswith(".sorted") else name
+
+
 def region_mds_stage(
     bam_input: Path,
     reference: Path,
@@ -119,7 +126,10 @@ def region_mds_stage(
     compress: bool = False,
     owns_sample_record: bool = False,
 ):
-    """Per-region MDS for one sample; returns ``(n_regions, n_genes)``. Raises on failure.
+    """Per-region MDS for one sample. Raises on failure.
+
+    Returns ``(n_regions, n_genes, z_outcome)``: the last is what the PON z-scoring of
+    `MDS.gene` did (`output_provenance.Outcome`), which carries on past its own failure.
 
     The body of the `region-mds` command, with plain arguments. run-all called the typer command
     as a function and passed no `pon_variant`, so a typer `OptionInfo` reached the PON resolver in
@@ -201,9 +211,7 @@ def region_mds_stage(
     # When called via run-all, wrapper.py passes the consistent sample ID;
     # standalone CLI can rely on the BAM filename fallback.
     if not sample_name:
-        sample_name = bam_input.stem
-        if sample_name.endswith(".sorted"):
-            sample_name = sample_name[:-7]
+        sample_name = _derived_sample_name(bam_input)
         logger.debug(f"Derived sample name from BAM: {sample_name}")
     else:
         logger.debug(f"Using provided sample name: {sample_name}")
@@ -281,6 +289,9 @@ def region_mds_stage(
     # it already consumed.
     exon_written = False
     scored = False  # any gene or exon z-score written against the PON
+    # What the PON z-scoring of MDS.gene did: `ran` only once its mds_z/mds_e1_z are written.
+    # It carries on past its own failure, so this is the only place that failure is visible.
+    z_outcome = Outcome("not_requested")
 
     # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
@@ -292,13 +303,14 @@ def region_mds_stage(
                 logger.warning(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )
+                z_outcome = Outcome("unavailable")
             else:
                 # Exact, not parquet-first: Rust wrote this file moments ago
                 # and a stale sibling from an earlier run would win (c92ed86).
                 df = read_exact_table(output_gene)
                 if df is None:
-                    logger.warning(
-                        f"Could not read gene output for z-score: {output_gene}"
+                    raise OSError(
+                        f"could not read {output_gene.name} to add its z-scores"
                     )
                 else:
                     # Compute z-scores for each gene
@@ -335,6 +347,7 @@ def region_mds_stage(
                         compress=compress,
                     )
                     scored = n_with_z > 0  # set as soon as the scored table exists
+                    z_outcome = Outcome("ran")
                     # Clean up Rust-produced gene TSV after write_table re-wrote it
                     cleanup_intermediate_tsv(output_gene, output_format, compress)
                     logger.info(f"Added z-scores for {n_with_z}/{len(df)} genes")
@@ -359,6 +372,7 @@ def region_mds_stage(
 
         except Exception as e:
             logger.warning(f"PON z-score computation failed: {e}")
+            z_outcome = Outcome.failed(e)
 
         # Outside the try, so a failure to record is not reported as a scoring failure, and a
         # partial score (gene table written, exon step failed) is still recorded.
@@ -422,7 +436,7 @@ def region_mds_stage(
                 f"region_mds: could not read {output_gene.name} for format conversion"
             )
 
-    return n_regions, n_genes
+    return n_regions, n_genes, z_outcome
 
 
 def region_mds(
@@ -505,7 +519,7 @@ def region_mds(
         krewlyzer region-mds sample.bam ref.fa out/ --gene-bed custom.bed
     """
     try:
-        return region_mds_stage(
+        _, _, z_outcome = region_mds_stage(
             bam_input,
             reference,
             output,
@@ -532,3 +546,14 @@ def region_mds(
     except Exception as e:
         logger.error(f"Region-MDS failed: {e}")
         raise typer.Exit(1)
+    # Into the sample's record, if it has one: rerunning this command is how a Region-MDS that
+    # failed under run-all gets fixed. Success only -- a failure here exits non-zero, and may
+    # not have touched the tables a good earlier run left.
+    record_stage_outcomes(
+        output,
+        sample_name or _derived_sample_name(bam_input),
+        {"region_mds": Outcome("ran"), "region_mds_z": z_outcome},
+        output_format=output_format,
+        compress=compress,
+        owns_record=False,
+    )
