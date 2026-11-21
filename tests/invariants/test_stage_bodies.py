@@ -3,10 +3,9 @@
 run-all called the `uxm`, `mfsd` and `region_mds` typer commands as plain functions. Every
 option it did not pass stayed a typer `OptionInfo`, so UXM's `threads > 0` raised `TypeError`
 on every run-all with a bisulfite BAM, and run-all's catch-all logged it as "UXM failed" and
-carried on: UXM has never run under run-all. Region-MDS was called without `pon_variant`, so it
-resolved the bundled PON for the default variant whatever run-all was asked for. And the
-commands turn every failure into `typer.Exit`, which would hide the real error from anything
-recording it.
+carried on: UXM has not run under run-all since 0.5.0. Region-MDS was called without
+`pon_variant`, so an `OptionInfo` reached the PON lookup in its place. And the commands turn
+every failure into `typer.Exit`, which would hide the real error from anything recording it.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ pytestmark = pytest.mark.invariant
 
 @requires_data
 def test_run_all_runs_uxm(tmp_path):
-    """Pins the TypeError: before the split no run-all ever produced a UXM table."""
+    """Pins the TypeError: before the split no run-all since 0.5.0 produced a UXM table."""
     sample = make_sample(tmp_path / "in", BASELINE)
     out = tmp_path / "out"
     assert synth_run_all(sample, out, bisulfite_bam=sample.bam) is None

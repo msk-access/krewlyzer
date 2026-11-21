@@ -170,7 +170,7 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 | Finding | Severity | When |
 |---------|----------|------|
 | `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, so `--strict-validation` fails exactly the runs it did before |
-| `STAGE.STALE_TABLE` | Same rule | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
+| `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
 | `STAGE.UNEXPECTED_TABLE` | WARN | A table is present although its stage was not requested (or had no input) in this run |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
 

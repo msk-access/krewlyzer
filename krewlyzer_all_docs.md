@@ -185,7 +185,7 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 | Finding | Severity | When |
 |---------|----------|------|
 | `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, so `--strict-validation` fails exactly the runs it did before |
-| `STAGE.STALE_TABLE` | Same rule | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
+| `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
 | `STAGE.UNEXPECTED_TABLE` | WARN | A table is present although its stage was not requested (or had no input) in this run |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
 
@@ -10807,7 +10807,7 @@ here, so "not requested" and "requested and failed" no longer look the same.
 (the PON z-scores of `MDS`, `MDS.ontarget` and `MDS.gene`). run-all writes every
 status on every run, except that a rerun reusing cached motif tables leaves
 `mds_z*` as the run that wrote those tables recorded them. A single tool records
-only the stages it ran, and never `not_requested`. `extract` writes this table
+only the stages it attempted, and never `not_requested`. `extract` writes this table
 from scratch, so it clears the statuses: a new fragment BED is a new sample. All
 are absent from directories written before this release, and Nextflow tool-level
 mode writes no metadata table at all, so it records none. `validate-output`

@@ -371,8 +371,8 @@ def _stage_findings(
     A failed stage is one finding with its reason, at ERROR when anything downstream reads one
     of its tables and WARN otherwise -- the severity its absent tables had, so
     `--strict-validation` fails exactly the runs it failed before. A table present beside a
-    failed stage is a previous run's or a partial one: a deliberate new finding at the same
-    severity. A table beside a stage not asked for is a WARN: left from another configuration.
+    failed stage is a previous run's or a partial one: a deliberate new finding, ERROR when that
+    table is consumed and WARN otherwise. A table beside a stage not asked for is a WARN: left from another configuration.
     """
     findings: List[Finding] = []
     for stage, (status, error) in outcomes.items():

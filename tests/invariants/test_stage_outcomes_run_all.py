@@ -394,3 +394,37 @@ def test_uxm_and_mfsd_not_requested_give_no_finding(not_requested_run):
     _, out = not_requested_run
     tables = {".UXM.parquet", ".mFSD.parquet"}
     assert not [f for f in _validation(out)["findings"] if f["table"] in tables]
+
+
+def test_a_single_region_entropy_after_a_failed_run_all_records_ran(sample, tmp_path):
+    """`region-entropy` writes the TFBS and ATAC tables without `run_features`; rerunning it
+    must clear run-all's `failed`, or the fixed tables read as stale."""
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    out = tmp_path / "out"
+    pointer = lfs_pointer(tmp_path / "regions.bed.gz")
+    patch = ((AssetManager, "tfbs_regions", property(lambda self: pointer)),)
+    assert _run(sample, out, patch, no_tfbs=False)["tfbs"][0] == "failed"
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "region-entropy",
+            "-i",
+            str(out / "S.bed.gz"),
+            "-o",
+            str(out),
+            "-s",
+            "S",
+            "--no-atac",
+            "--skip-pon",
+            "--no-gc-correct",
+            "--output-format",
+            "parquet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert outcomes(out)["tfbs"] == ("ran", "")
+    assert outcomes(out)["atac"] == ("not_requested", ""), "not touched: it was not run"

@@ -16,9 +16,9 @@ All notable changes to this project will be documented in this file.
   message (messages carry input paths; sample directories are named for the patient). One writer,
   `output_provenance.record_stage_outcomes`, reads the record this run's format writes. run-all
   writes every status on every run, except that a rerun reusing cached motif tables leaves
-  `mds_z*` as recorded; a single tool records only what it ran and never `not_requested`, and
-  `uxm`, `mfsd` and `region-mds` record `ran` when rerun by hand, which is how a stage that failed
-  under run-all gets fixed. `extract` rewrites the table from scratch and so clears them. The
+  `mds_z*` as recorded. A single tool records only the stages it attempted and never
+  `not_requested`; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
+  hand, which is how a stage that failed under run-all gets fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
   columns are in the output contract as optional strings.
 
 ### Removed
@@ -59,7 +59,8 @@ All notable changes to this project will be documented in this file.
   own change. A table present beside a stage not requested is a WARN (`STAGE.UNEXPECTED_TABLE`).
   `mds_z` in `MDS` and `MDS.ontarget`, never declared, is now required where the record says it
   was computed (`ColumnRule.requires_stage`), and only there: requiring it whenever a PON was
-  applied would be a false ERROR for a BED-built PON, which has no MDS baseline.
+  applied would be a false ERROR for a BED-built PON, which has no MDS baseline. Being declared,
+  it is also fingerprinted, so `validate-cohort` now checks it for degeneracy where present.
 
   Two cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed table
   **present** beside a stage that failed in the same run (`STAGE.STALE_TABLE`: a previous run's
@@ -176,7 +177,7 @@ All notable changes to this project will be documented in this file.
 - **UXM runs under run-all.** run-all called the `uxm` typer command as a plain function and
   passed no `threads`, so a typer `OptionInfo` reached `threads > 0` and raised `TypeError` on
   every run-all given `--bisulfite-bam`. The catch-all logged "UXM failed" and carried on, so no
-  run-all has written a UXM table. Region-MDS was called the same way without `pon_variant`, so an
+  run-all since 0.5.0 (when `genome` was inserted before `threads`) has written a UXM table. Region-MDS was called the same way without `pon_variant`, so an
   `OptionInfo` reached the PON lookup in place of `--pon-variant`. `uxm`, `mfsd` and `region-mds`
   now each have a stage function (`uxm_stage`, `mfsd_stage`, `region_mds_stage`) that takes plain
   arguments and raises the real exception; the commands wrap it and exit as before, and run-all
