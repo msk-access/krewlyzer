@@ -19,6 +19,7 @@ logger = logging.getLogger("krewlyzer.region_mds")
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_pon_model
 from .core.logging import log_startup_banner, ResolvedAsset
+from .core.output_provenance import Outcome, record_stage_outcomes
 from .core.output_utils import (
     read_exact_table,
     write_table,
@@ -97,89 +98,53 @@ def _apply_exon_zscores(
     return True, n_scored
 
 
-def region_mds(
-    bam_input: Path = typer.Argument(..., help="Input BAM file (indexed)"),
-    reference: Path = typer.Argument(..., help="Reference FASTA file"),
-    output: Path = typer.Argument(..., help="Output directory"),
-    gene_bed: Optional[Path] = typer.Option(
-        None, "--gene-bed", "-g", help="Gene/exon BED file (panel or WGS format)"
-    ),
-    genome: str = typer.Option(
-        "hg19", "--genome", "-G", help="Genome build (hg19/hg38)"
-    ),
-    assay: Optional[str] = typer.Option(
-        None, "--assay", "-a", help="Assay code (xs1, xs2, wgs) for bundled gene BED"
-    ),
-    sample_name: Optional[str] = typer.Option(
-        None,
-        "--sample-name",
-        "-s",
-        help="Sample name for output files (default: derived from BAM filename)",
-    ),
-    e1_only: bool = typer.Option(
-        False, "--e1-only", help="Only output E1 (first exon) results"
-    ),
-    mapq: int = typer.Option(20, "--mapq", help="Minimum mapping quality"),
-    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
-    maxlen: int = typer.Option(
-        1000,
-        "--maxlen",
-        help="Maximum fragment length (default: 1000 for consistency with run-all)",
-    ),
-    pon_model: Optional[Path] = typer.Option(
-        None, "--pon-model", "-P", help="PON model for z-score computation"
-    ),
-    pon_variant: str = typer.Option(
-        "all_unique",
-        "--pon-variant",
-        help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)",
-    ),
-    skip_pon: bool = typer.Option(
-        False,
-        "--skip-pon",
-        help="Skip PON z-score normalization (for PON samples used as ML negatives)",
-    ),
-    threads: int = typer.Option(
-        0, "--threads", "-t", help="Number of threads (0 = use all available cores)"
-    ),
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Enable verbose logging"
-    ),
-    silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
-    output_format: str = typer.Option(
-        "tsv",
-        "--output-format",
-        "-F",
-        help="Output format: tsv | parquet | both (default: tsv)",
-    ),
-    compress: bool = typer.Option(
-        False,
-        "--compress",
-        help="Gzip-compress TSV output (only applies when format is tsv or both)",
-    ),
-    owns_sample_record: bool = typer.Option(
-        False,
-        hidden=True,
-        help="Set by run-all, which owns the sample's record: skip the second-PON check.",
-    ),
+def _usage(exc: Exception) -> Exception:
+    """Mark ``exc`` as a usage error -- an argument path that does not exist, or a PON that
+    cannot be resolved or used -- which the command reports as `BadParameter` (exit 2), as it
+    did before the stage split. Anything else the stage raises exits 1, as it always did; the
+    class is kept either way, for the sample's record."""
+    exc.usage_error = True  # type: ignore[attr-defined]
+    return exc
+
+
+def _derived_sample_name(bam_input: Path) -> str:
+    """The sample name when none is given: the BAM's stem, without a `.sorted` suffix."""
+    name = bam_input.stem
+    return name[: -len(".sorted")] if name.endswith(".sorted") else name
+
+
+def region_mds_stage(
+    bam_input: Path,
+    reference: Path,
+    output: Path,
+    gene_bed: Optional[Path] = None,
+    genome: str = "hg19",
+    assay: Optional[str] = None,
+    sample_name: Optional[str] = None,
+    e1_only: bool = False,
+    mapq: int = 20,
+    minlen: int = 65,
+    maxlen: int = 1000,
+    pon_model: Optional[Path] = None,
+    pon_variant: str = "all_unique",
+    skip_pon: bool = False,
+    threads: int = 0,
+    verbose: bool = False,
+    silent: bool = False,
+    output_format: str = "tsv",
+    compress: bool = False,
+    owns_sample_record: bool = False,
 ):
-    """
-    Calculate per-region Motif Diversity Score (MDS).
+    """Per-region MDS for one sample. Raises on failure.
 
-    MDS measures the diversity of 4-mer end motifs at each genomic region.
-    Higher MDS indicates more diverse motif usage; lower MDS may indicate
-    aberrant fragmentation patterns associated with disease.
+    Returns ``(n_regions, n_genes, z_outcome)``: the last is what the PON z-scoring of
+    `MDS.gene` did (`output_provenance.Outcome`), which carries on past its own failure.
 
-    Examples:
-
-        # Panel mode with bundled gene BED
-        krewlyzer region-mds sample.bam ref.fa out/ --assay xs2
-
-        # WGS mode
-        krewlyzer region-mds sample.bam ref.fa out/ --assay wgs
-
-        # Custom gene BED
-        krewlyzer region-mds sample.bam ref.fa out/ --gene-bed custom.bed
+    The body of the `region-mds` command, with plain arguments. run-all called the typer command
+    as a function and passed no `pon_variant`, so a typer `OptionInfo` reached the PON resolver in
+    its place. Named `region_mds_stage` because `run_region_mds` is the Rust entry point.
+    ``owns_sample_record`` is set by run-all, which owns the sample's record: it skips the
+    second-PON check.
     """
     from krewlyzer import _core
     from krewlyzer.assets import AssetManager
@@ -191,9 +156,9 @@ def region_mds(
 
     # Validate inputs
     if not bam_input.exists():
-        raise typer.BadParameter(f"BAM file not found: {bam_input}")
+        raise _usage(FileNotFoundError(f"BAM file not found: {bam_input}"))
     if not reference.exists():
-        raise typer.BadParameter(f"Reference FASTA not found: {reference}")
+        raise _usage(FileNotFoundError(f"Reference FASTA not found: {reference}"))
 
     # Validate user-provided override files
     from .core.asset_validation import validate_file, FileSchema
@@ -210,7 +175,7 @@ def region_mds(
     if gene_bed:
         # User-provided gene BED
         if not gene_bed.exists():
-            raise typer.BadParameter(f"Gene BED not found: {gene_bed}")
+            raise _usage(FileNotFoundError(f"Gene BED not found: {gene_bed}"))
         resolved_gene_bed = gene_bed
         gene_bed_source = "explicit"
         logger.debug(f"Using user-provided gene BED: {gene_bed}")
@@ -218,8 +183,10 @@ def region_mds(
         # Bundled gene BED from assay
         resolved_gene_bed = assets.get_gene_bed_for_mode(assay)
         if resolved_gene_bed is None:
-            raise typer.BadParameter(
-                f"Gene BED not available for assay '{assay}' and genome '{genome}'"
+            raise _usage(
+                FileNotFoundError(
+                    f"Gene BED not available for assay '{assay}' and genome '{genome}'"
+                )
             )
         gene_bed_source = "bundled"
         logger.debug(f"Using bundled gene BED for assay '{assay}': {resolved_gene_bed}")
@@ -230,8 +197,10 @@ def region_mds(
             gene_bed_source = "bundled"
             logger.debug(f"Using WGS gene BED: {resolved_gene_bed}")
         else:
-            raise typer.BadParameter(
-                "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
+            raise _usage(
+                FileNotFoundError(
+                    "No gene BED specified. Use --gene-bed, --assay, or ensure wgs.genes.bed.gz is available."
+                )
             )
 
     # ═══════════════════════════════════════════════════════════════════
@@ -246,8 +215,10 @@ def region_mds(
             variant=pon_variant,
             log=logger,
         )
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    except (
+        ValueError
+    ) as e:  # --pon-model with --skip-pon, or a --pon-model that is absent
+        raise _usage(e)
 
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
@@ -256,9 +227,7 @@ def region_mds(
     # When called via run-all, wrapper.py passes the consistent sample ID;
     # standalone CLI can rely on the BAM filename fallback.
     if not sample_name:
-        sample_name = bam_input.stem
-        if sample_name.endswith(".sorted"):
-            sample_name = sample_name[:-7]
+        sample_name = _derived_sample_name(bam_input)
         logger.debug(f"Derived sample name from BAM: {sample_name}")
     else:
         logger.debug(f"Using provided sample name: {sample_name}")
@@ -275,8 +244,8 @@ def region_mds(
             output_format=output_format,
             compress=compress,
         )
-    except ValueError as e:
-        raise typer.BadParameter(str(e))
+    except ValueError as e:  # UnusablePonError, or a second PON for this sample
+        raise _usage(e)
 
     output_exon_base = output / f"{sample_name}.MDS.exon"
     output_gene_base = output / f"{sample_name}.MDS.gene"
@@ -339,6 +308,9 @@ def region_mds(
     # it already consumed.
     exon_written = False
     scored = False  # any gene or exon z-score written against the PON
+    # What the PON z-scoring of MDS.gene did: `ran` only once its mds_z/mds_e1_z are written.
+    # It carries on past its own failure, so this is the only place that failure is visible.
+    z_outcome = Outcome("not_requested")
 
     # PON z-score normalization — read back Rust's TSV, append z-scores, re-write in selected format
     if resolved_pon_path and resolved_pon_path.exists():
@@ -350,13 +322,14 @@ def region_mds(
                 logger.warning(
                     "PON model does not have region_mds baseline - skipping z-scores"
                 )
+                z_outcome = Outcome("unavailable")
             else:
                 # Exact, not parquet-first: Rust wrote this file moments ago
                 # and a stale sibling from an earlier run would win (c92ed86).
                 df = read_exact_table(output_gene)
                 if df is None:
-                    logger.warning(
-                        f"Could not read gene output for z-score: {output_gene}"
+                    raise OSError(
+                        f"could not read {output_gene.name} to add its z-scores"
                     )
                 else:
                     # Compute z-scores for each gene
@@ -393,6 +366,7 @@ def region_mds(
                         compress=compress,
                     )
                     scored = n_with_z > 0  # set as soon as the scored table exists
+                    z_outcome = Outcome("ran")
                     # Clean up Rust-produced gene TSV after write_table re-wrote it
                     cleanup_intermediate_tsv(output_gene, output_format, compress)
                     logger.info(f"Added z-scores for {n_with_z}/{len(df)} genes")
@@ -404,6 +378,14 @@ def region_mds(
             # separately from the gene block above because the two baselines
             # can be present independently: a PON built before this release
             # has `region_mds` and no `region_mds_exon`.
+        except Exception as e:
+            logger.warning(f"PON z-score computation failed: {e}")
+            z_outcome = Outcome.failed(e)
+
+        # Its own `try`: `region_mds_z` is the z-scoring of MDS.gene, which an exon failure
+        # after a fully scored gene table must not report as missing its z-scores. MDS.exon's
+        # z-score is not in the contract, so this one stays a warning.
+        try:
             if pon.region_mds_exon is None:
                 logger.info(
                     "PON has no region_mds_exon baseline; MDS.exon keeps its raw "
@@ -414,9 +396,8 @@ def region_mds(
                     pon, output_exon, output_exon_base, output_format, compress
                 )
                 scored = scored or n_exon_z > 0
-
         except Exception as e:
-            logger.warning(f"PON z-score computation failed: {e}")
+            logger.warning(f"MDS.exon z-score computation failed: {e}")
 
         # Outside the try, so a failure to record is not reported as a scoring failure, and a
         # partial score (gene table written, exon step failed) is still recorded.
@@ -480,4 +461,123 @@ def region_mds(
                 f"region_mds: could not read {output_gene.name} for format conversion"
             )
 
-    return n_regions, n_genes
+    return n_regions, n_genes, z_outcome
+
+
+def region_mds(
+    bam_input: Path = typer.Argument(..., help="Input BAM file (indexed)"),
+    reference: Path = typer.Argument(..., help="Reference FASTA file"),
+    output: Path = typer.Argument(..., help="Output directory"),
+    gene_bed: Optional[Path] = typer.Option(
+        None, "--gene-bed", "-g", help="Gene/exon BED file (panel or WGS format)"
+    ),
+    genome: str = typer.Option(
+        "hg19", "--genome", "-G", help="Genome build (hg19/hg38)"
+    ),
+    assay: Optional[str] = typer.Option(
+        None, "--assay", "-a", help="Assay code (xs1, xs2, wgs) for bundled gene BED"
+    ),
+    sample_name: Optional[str] = typer.Option(
+        None,
+        "--sample-name",
+        "-s",
+        help="Sample name for output files (default: derived from BAM filename)",
+    ),
+    e1_only: bool = typer.Option(
+        False, "--e1-only", help="Only output E1 (first exon) results"
+    ),
+    mapq: int = typer.Option(20, "--mapq", help="Minimum mapping quality"),
+    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
+    maxlen: int = typer.Option(
+        1000,
+        "--maxlen",
+        help="Maximum fragment length (default: 1000 for consistency with run-all)",
+    ),
+    pon_model: Optional[Path] = typer.Option(
+        None, "--pon-model", "-P", help="PON model for z-score computation"
+    ),
+    pon_variant: str = typer.Option(
+        "all_unique",
+        "--pon-variant",
+        help="PON variant: 'all_unique' (default, max coverage) or 'duplex' (highest accuracy)",
+    ),
+    skip_pon: bool = typer.Option(
+        False,
+        "--skip-pon",
+        help="Skip PON z-score normalization (for PON samples used as ML negatives)",
+    ),
+    threads: int = typer.Option(
+        0, "--threads", "-t", help="Number of threads (0 = use all available cores)"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Enable verbose logging"
+    ),
+    silent: bool = typer.Option(False, "--silent", help="Suppress progress bar"),
+    output_format: str = typer.Option(
+        "tsv",
+        "--output-format",
+        "-F",
+        help="Output format: tsv | parquet | both (default: tsv)",
+    ),
+    compress: bool = typer.Option(
+        False,
+        "--compress",
+        help="Gzip-compress TSV output (only applies when format is tsv or both)",
+    ),
+):
+    """
+    Calculate per-region Motif Diversity Score (MDS).
+
+    MDS measures the diversity of 4-mer end motifs at each genomic region.
+    Higher MDS indicates more diverse motif usage; lower MDS may indicate
+    aberrant fragmentation patterns associated with disease.
+
+    Examples:
+
+        # Panel mode with bundled gene BED
+        krewlyzer region-mds sample.bam ref.fa out/ --assay xs2
+
+        # WGS mode
+        krewlyzer region-mds sample.bam ref.fa out/ --assay wgs
+
+        # Custom gene BED
+        krewlyzer region-mds sample.bam ref.fa out/ --gene-bed custom.bed
+    """
+    try:
+        _, _, z_outcome = region_mds_stage(
+            bam_input,
+            reference,
+            output,
+            gene_bed=gene_bed,
+            genome=genome,
+            assay=assay,
+            sample_name=sample_name,
+            e1_only=e1_only,
+            mapq=mapq,
+            minlen=minlen,
+            maxlen=maxlen,
+            pon_model=pon_model,
+            pon_variant=pon_variant,
+            skip_pon=skip_pon,
+            threads=threads,
+            verbose=verbose,
+            silent=silent,
+            output_format=output_format,
+            compress=compress,
+        )
+    except Exception as e:
+        if getattr(e, "usage_error", False):
+            raise typer.BadParameter(str(e))  # exit 2, as before the split
+        logger.error(f"Region-MDS failed: {e}")
+        raise typer.Exit(1)
+    # Into the sample's record, if it has one: rerunning this command (at run-all's --output-format) is how a Region-MDS that
+    # failed under run-all gets fixed. Success only -- a failure here exits non-zero, and may
+    # not have touched the tables a good earlier run left.
+    record_stage_outcomes(
+        output,
+        sample_name or _derived_sample_name(bam_input),
+        {"region_mds": Outcome("ran"), "region_mds_z": z_outcome},
+        output_format=output_format,
+        compress=compress,
+        owns_record=False,
+    )

@@ -256,7 +256,7 @@ def motif(
         logger.info(f"Extracting motif features from {bam_input.name}")
 
         # Use unified extract_sample() for extraction
-        from .core.sample_processor import extract_sample, write_motif_outputs
+        from .core.sample_processor import extract_sample, write_motif_tables
 
         result = extract_sample(
             input_path=bam_input,
@@ -290,7 +290,7 @@ def motif(
             pon = requested_pon  # loaded, and checked, before the extraction
 
         # Write motif outputs using shared function
-        write_motif_outputs(
+        _, motif_outcomes = write_motif_tables(
             result=result,
             output_dir=output,
             pon=pon,
@@ -298,10 +298,21 @@ def motif(
             output_format=output_format,
             compress=compress,
         )
-        from .core.output_provenance import record_pon_used
+        from .core.output_provenance import record_pon_used, record_stage_outcomes
 
-        # Recorded as scored only if MDS was z-scored: a PON with no MDS baseline scored nothing.
-        scored_with = pon if pon is not None and pon.mds_baseline else None
+        # What the MDS z-scores did, as run-all records it; a single tool, so only what it tried.
+        record_stage_outcomes(
+            output,
+            sample_name,
+            motif_outcomes,
+            output_format=output_format,
+            compress=compress,
+            owns_record=False,
+        )
+
+        # Recorded as scored only if the MDS z-score reached the table: from the outcome, not
+        # from the PON having a baseline, which also held when the z-score then failed.
+        scored_with = pon if motif_outcomes["mds_z"].status == "ran" else None
         record_pon_used(
             output, sample_name, scored_with, resolved_pon_path, output_format, compress
         )

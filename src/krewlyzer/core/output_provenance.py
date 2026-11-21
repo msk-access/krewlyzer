@@ -34,14 +34,20 @@ columns. (A PON that was asked for and cannot be used stops the run instead:
 `pon_integration.UnusablePonError`.) Recording
 the distinction is also what lets `validate-output` require the PON-derived
 columns when — and only when — a PON was actually used.
+
+The same problem one level down is the optional stages run-all carries on past (UXM, mFSD,
+Region-MDS, gene FSC, panel WPS, TFBS, ATAC, and the MDS z-scores): "not requested" and
+"requested and failed" both leave a table absent. `record_stage_outcomes` writes which, as
+`{stage}_status` and `{stage}_error`.
 """
 
 from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 from .output_utils import read_exact_table, resolve_table_path, write_table
 
@@ -158,6 +164,59 @@ def refuse_a_second_pon(
         )
 
 
+def record_names_pon(
+    output_dir: Path,
+    sample: str,
+    pon: Any,
+    pon_path: Optional[Path],
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> bool:
+    """Whether the sample's record says it was scored against exactly this PON (or, for
+    ``pon=None``, against none).
+
+    For a cache: a table made under one PON is not reusable under another. run-all reused its
+    motif tables whatever the PON, so a run without one and then a run with one shipped
+    ``pon_applied=True`` beside an MDS with no z-score. No record, or one without provenance,
+    names nothing, so nothing cached can be trusted against it.
+    """
+    existing = record_path(output_dir, sample, output_format, compress)
+    text = {"pon_model": str, "pon_cohort_digest": str}
+    frame = read_exact_table(existing, dtype=text) if existing is not None else None
+    if frame is None or frame.empty or "pon_applied" not in frame.columns:
+        return False
+    ours = provenance_fields(pon, pon_path)
+    if _flag(frame["pon_applied"].iloc[0]) != ours["pon_applied"]:
+        return False
+    if not ours["pon_applied"]:
+        return True
+    return all(
+        _as_text(frame[key].iloc[0] if key in frame.columns else None)
+        == _as_text(ours[key])
+        for key in ("pon_model", "pon_cohort_digest")
+    )
+
+
+def recorded_status(
+    output_dir: Path,
+    sample: str,
+    stage: str,
+    output_format: str = "tsv",
+    compress: bool = False,
+) -> Optional[str]:
+    """The status the sample's record holds for ``stage``, or None when it records none."""
+    existing = record_path(output_dir, sample, output_format, compress)
+    column = f"{stage}_status"
+    frame = (
+        read_exact_table(existing, dtype={column: str})
+        if existing is not None
+        else None
+    )
+    if frame is None or frame.empty or column not in frame.columns:
+        return None
+    return _as_text(frame[column].iloc[0]) or None
+
+
 def record_pon_used(
     output_dir: Path,
     sample: str,
@@ -267,4 +326,139 @@ def stamp_metadata(
             f"Provenance: krewlyzer {fields['krewlyzer_version']}, no PON applied — "
             "every z-score column is absent by design, not by failure."
         )
+    return True
+
+
+#: Columns read back from a TSV record as text: a digit-only cohort digest such as '0123…' read
+#: back as an integer, and a status column must never become a number either.
+_RECORD_TEXT = (
+    "pon_model",
+    "pon_cohort_digest",
+    "pon_krewlyzer_version",
+    "krewlyzer_version",
+)
+
+#: What a single tool may record about a stage: only what it attempted. It cannot know what
+#: run-all was asked for, so `not_requested` (or `no_variants`) from it would overwrite a record
+#: of a stage that did run.
+_ATTEMPTED = ("ran", "failed", "unavailable")
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """What one optional stage did: a status from `contract.STAGE_STATUSES`, and for a failure
+    the exception's **class name**.
+
+    Never the message. Messages carry BAM, reference and output paths, and sample directories
+    are named for the patient (invariant #4); the full message stays in the log.
+    """
+
+    status: str
+    error_class: str = ""
+
+    def __post_init__(self) -> None:
+        from krewlyzer.validate.contract import STAGE_STATUSES
+
+        if self.status not in STAGE_STATUSES:
+            raise ValueError(
+                f"unknown stage status {self.status!r}; one of {STAGE_STATUSES}"
+            )
+        if (self.status == "failed") != bool(self.error_class):
+            raise ValueError(
+                "a failed outcome carries the exception's class name, and only a failed one"
+            )
+        if self.error_class and not self.error_class.isidentifier():
+            raise ValueError(
+                "error_class is an exception's class name, never its message: "
+                f"{self.error_class[:40]!r}"
+            )
+
+    @classmethod
+    def failed(cls, exc: BaseException) -> "Outcome":
+        return cls("failed", type(exc).__name__)
+
+
+def record_stage_outcomes(
+    output_dir: Path,
+    sample: str,
+    outcomes: Mapping[str, Outcome],
+    output_format: str = "tsv",
+    compress: bool = False,
+    owns_record: bool = True,
+) -> bool:
+    """Write `{stage}_status` and `{stage}_error` into `{sample}.metadata.*`. True if written.
+
+    The one writer for stage outcomes.
+
+    ``owns_record`` is True for run-all, which records every stage on every run. It reads the
+    record its own format writes (`record_path`), exactly, and writes all of its formats, as
+    `stamp_metadata` does.
+
+    A single tool (False) records only the stages it attempted -- ``ran``, ``failed`` or
+    ``unavailable`` -- and never ``not_requested``: `krewlyzer fsc` without `--assay` did not ask
+    for gene FSC, but run-all may have, and ran it. For a stage it did attempt, the last writer
+    wins, because it rewrote that stage's tables -- in the format it wrote them. So it updates
+    only the copies of the record in its own format(s) (`tsv` the `.tsv`, or the `.tsv.gz`
+    with `--compress`; `parquet` the `.parquet`; `both` both), and creates none. A tool at
+    `-F tsv` after a Parquet run-all rewrote `.TFBS.tsv`, not the `.TFBS.parquet` downstream
+    reads; recording `ran` in `.metadata.parquet` would have hidden that stale table from the
+    gate. And a `.metadata.parquet` created in a TSV directory is a completion marker.
+
+    A no-op when there is no metadata table: a single tool run into an empty directory writes no
+    completion marker.
+    """
+    from krewlyzer.validate.contract import STAGES
+
+    unknown = sorted(set(outcomes) - set(STAGES))
+    if unknown:
+        raise ValueError(
+            f"unknown stage(s) {unknown}; declare them in validate/contract.py first"
+        )
+    if not owns_record:
+        outcomes = {k: o for k, o in outcomes.items() if o.status in _ATTEMPTED}
+    if not outcomes:
+        return False
+
+    base = output_dir / f"{sample}.metadata"
+    if owns_record:
+        existing = record_path(output_dir, sample, output_format, compress)
+        targets = [(existing, output_format, compress)] if existing is not None else []
+    else:
+        written_by_this_run = []
+        if output_format in ("parquet", "both"):
+            written_by_this_run.append((Path(f"{base}.parquet"), "parquet", False))
+        if output_format in ("tsv", "both"):
+            tsv = Path(f"{base}.tsv.gz" if compress else f"{base}.tsv")
+            written_by_this_run.append((tsv, "tsv", compress))
+        targets = [t for t in written_by_this_run if t[0].exists()]
+    if not targets:
+        logger.debug(f"No metadata table for {sample}; stage outcomes not recorded.")
+        return False
+
+    text = {name: str for name in _RECORD_TEXT}
+    text.update({f"{s}_{f}": str for s in STAGES for f in ("status", "error")})
+    written = False
+    for path, fmt, gz in targets:
+        frame = read_exact_table(path, dtype=text)
+        if frame is None or frame.empty:
+            logger.warning(
+                f"{path.name} could not be read; stage outcomes not recorded in it. "
+                "Downstream cannot tell a failed stage from one that was not requested."
+            )
+            continue
+        for stage, outcome in outcomes.items():
+            frame[f"{stage}_status"] = outcome.status
+            frame[f"{stage}_error"] = outcome.error_class
+        write_table(frame, base, output_format=fmt, compress=gz)
+        written = True
+    if not written:
+        return False
+    failed = [
+        f"{k} ({o.error_class})" for k, o in outcomes.items() if o.status == "failed"
+    ]
+    logger.info(
+        "Stage outcomes: "
+        + ", ".join(f"{k}={o.status}" for k, o in outcomes.items())
+        + (f"; failed: {', '.join(failed)}" if failed else "")
+    )
     return True

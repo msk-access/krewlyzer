@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **What each optional stage did is recorded in `{sample}.metadata`.** run-all carries on past a
+  failed optional stage by design, so one stage cannot cost a sample its other features; the
+  outcome was in the log only, and "not requested" (no `--variants`, no `--assay`) left the same
+  absent table as "requested and failed". Each of `uxm`, `mfsd`, `region_mds`, `gene_fsc`,
+  `panel_wps`, `tfbs`, `atac`, `mds_z`, `mds_z_ontarget` and `region_mds_z` (Region-MDS's PON
+  z-scoring) now records `{stage}_status` -- `ran`, `not_requested`, `no_variants`,
+  `unavailable` or `failed` -- and `{stage}_error`, the exception's class name only, never its
+  message (messages carry input paths; sample directories are named for the patient). One writer,
+  `output_provenance.record_stage_outcomes`: run-all reads the record its own format writes and
+  writes its formats; a single tool updates only the copies in the format(s) it wrote its tables
+  in (so a `-F tsv` rerun beside a Parquet run-all leaves `.metadata.parquet`, and the stale
+  `.parquet` table beside it, as they were) and creates none. run-all writes every status on
+  every run, except that a rerun reusing cached motif tables (same PON) leaves `mds_z*` as
+  recorded. A single tool records only the stages it attempted and never
+  `not_requested`; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
+  hand at run-all's `--output-format`, which is how a stage that failed under run-all gets
+  fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
+  columns are in the output contract as optional strings.
+
 ### Removed
 
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
@@ -31,6 +52,32 @@ All notable changes to this project will be documented in this file.
   mentions either field. `package.repository` stays, and is what cargo says is
   sufficient.
 ### Changed
+
+- **`validate-output` reads what each optional stage did.** A stage recorded `failed` is one
+  `STAGE.FAILED` finding naming the stage and the exception's class, instead of an unexplained
+  "absent" for each of its tables; ERROR when anything downstream reads one of those tables
+  (Region-MDS, gene FSC, panel WPS, TFBS, ATAC, the MDS z-scores), WARN when nothing does (UXM,
+  mFSD), which is the severity the absent tables had. A stage not requested gives no finding when
+  nothing reads its tables -- no `--variants` was a WARN on every such run -- while a consumed
+  table such as `MDS.gene` is still reported absent; making those conditional on `--assay` is its
+  own change. A table present beside a stage that did not run in this run (`not_requested`,
+  `no_variants`, `unavailable`) is `STAGE.UNEXPECTED_TABLE`: ERROR when downstream reads it,
+  which it does as this run's, else WARN.
+  `mds_z` in `MDS` and `MDS.ontarget`, never declared, is now required where the record says it
+  was computed (`ColumnRule.requires_stage`), and only there: requiring it whenever a PON was
+  applied would be a false ERROR for a BED-built PON, which has no MDS baseline. Being declared,
+  it is also fingerprinted, so `validate-cohort` now checks it for degeneracy where present.
+
+  Three cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed
+  table **present** beside a stage that failed in the same run (`STAGE.STALE_TABLE`: a previous
+  run's table, or a partial one, that downstream would read as this run's) or beside a stage that
+  did not run in it (`STAGE.UNEXPECTED_TABLE`: left from an earlier configuration), and a failed
+  MDS z-score.
+  One requirement is **loosened**: `MDS.gene`'s `mds_z` and `mds_e1_z` were required
+  unconditionally, though they are written only with a PON that has a `region_mds` baseline, so
+  every run without one was an ERROR. They are now required only where `region_mds_z_status` is
+  `ran` -- which means **not at all for directories written before this release**. A directory
+  without the status columns otherwise validates as before.
 
 - **Reviews ask five standing questions, over the whole branch.** Every gate passed on #89, and so
   did our own reviews, each of one commit's diff; the automated PR review read the whole branch
@@ -123,6 +170,36 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
+  that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
+  exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly
+  too. Each is now warned about and recorded as `unavailable`. A `--mfsd-bam` that does not exist
+  fails mFSD (`FileNotFoundError`) instead of silently running on the main BAM with duplex
+  weighting off. A panel WPS failure is logged at warning, not debug. Region-MDS's PON z-scoring
+  could fail inside a `try` that logged a warning; an unreadable gene table there is now a failure
+  rather than a skip, and both are recorded.
+- **run-all re-runs the motif step when its cached tables were made under another PON.** The
+  cache reused the motif tables whatever PON was in use, so a run without a PON followed by one
+  with a PON shipped `pon_applied=True` beside an MDS with no z-score. It now reuses them only
+  when the sample's record names the PON now in use (or none, for none) and, for a PON with an
+  MDS baseline, records the MDS z-score as `ran`: a single tool can name the PON in the record
+  having scored only its own tables. The cache check itself
+  still looks for `.tsv` names only, so it never fires under Parquet or `--compress`; that is
+  unchanged, and fixing this did not need it.
+- **`motif` records the PON only if the MDS z-score was written.** It recorded `pon_applied` from
+  the PON having an MDS baseline, which held even when the z-score then failed.
+- **The whole-sample MDS z-score reads the table this run wrote.** The append read Parquet-first,
+  so a TSV run beside an earlier run's `.MDS.parquet` read that file, found its `mds_z`, and
+  skipped the append: the fresh `.MDS.tsv` shipped with no z-score. It now reads the exact file,
+  as the on-target append already did.
+- **UXM runs under run-all.** run-all called the `uxm` typer command as a plain function and
+  passed no `threads`, so a typer `OptionInfo` reached `threads > 0` and raised `TypeError` on
+  every run-all given `--bisulfite-bam`. The catch-all logged "UXM failed" and carried on, so no
+  run-all since 0.5.0 (when `genome` was inserted before `threads`) has written a UXM table. Region-MDS was called the same way without `pon_variant`, so an
+  `OptionInfo` reached the PON lookup in place of `--pon-variant`. `uxm`, `mfsd` and `region-mds`
+  now each have a stage function (`uxm_stage`, `mfsd_stage`, `region_mds_stage`) that takes plain
+  arguments and raises the real exception; the commands wrap it and exit as before, and run-all
+  calls the stage.
 - **A PON you asked for that cannot be used stops the run.** An unreadable PON, one the version
   guard refused, and a `--pon-model` path that does not exist all used to end in a warning and an
   **unscored** run, recorded as `pon_applied=False` -- the same as a deliberate `--skip-pon` -- so

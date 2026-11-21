@@ -342,11 +342,13 @@ def test_run_all_owns_the_record_for_region_mds():
     from krewlyzer import wrapper
 
     source = inspect.getsource(wrapper)
-    assert "owns_sample_record=True" in source.split("_region_mds(", 1)[1].split(
+    assert "owns_sample_record=True" in source.split("region_mds_stage(", 1)[1].split(
         ")", 1
     )[0] or (
         "owns_sample_record=True"
-        in source[source.index("_region_mds(") : source.index("_region_mds(") + 1500]
+        in source[
+            source.index("region_mds_stage(") : source.index("region_mds_stage(") + 1500
+        ]
     )
 
 
@@ -440,7 +442,7 @@ def test_the_standalone_scorers_record_only_what_they_scored():
 
     from krewlyzer import motif, region_entropy, region_mds
 
-    assert "pon.mds_baseline else None" in inspect.getsource(motif)
+    assert 'motif_outcomes["mds_z"].status == "ran"' in inspect.getsource(motif)
     assert "n_scored" in inspect.getsource(region_entropy)
     src = inspect.getsource(region_mds)
     assert "if scored" in src or "requested_pon if scored" in src

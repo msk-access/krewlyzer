@@ -1185,6 +1185,27 @@ mean.
 | `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
 
+**Optional stages.** run-all carries on when an optional stage fails, so that one
+stage cannot cost a sample its other features. What each one did is recorded
+here, so "not requested" and "requested and failed" no longer look the same.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `{stage}_status` | str | `ran`; `not_requested` (nothing asked for it, e.g. no `--variants`); `no_variants` (mFSD: a variants file with none in it); `unavailable` (asked for, but an input or asset it needs is missing, e.g. a `--bisulfite-bam` path that does not exist); `failed` (it raised; run-all carried on) |
+| `{stage}_error` | str | For `failed`, the exception's **class name** (`FileNotFoundError`), never its message: messages carry input paths, and sample directories are named for the patient. The full message is in the log. Empty otherwise |
+
+`{stage}` is one of `uxm`, `mfsd`, `region_mds`, `gene_fsc`, `panel_wps`, `tfbs`,
+`atac` (each writes its own tables), and `mds_z`, `mds_z_ontarget` and `region_mds_z`
+(the PON z-scores of `MDS`, `MDS.ontarget` and `MDS.gene`). run-all writes every
+status on every run, except that a rerun reusing cached motif tables leaves
+`mds_z*` as the run that wrote those tables recorded them. A single tool records
+only the stages it attempted, never `not_requested`, and only into the copies of
+this table in the format(s) it wrote its own tables in; it creates none. `extract` writes this table
+from scratch, so it clears the statuses: a new fragment BED is a new sample. All
+are absent from directories written before this release, and Nextflow tool-level
+mode writes no metadata table at all, so it records none. `validate-output`
+reads them: see [`validate-output`](../cli/index.md#validate-output).
+
 **Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
 and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
 produced by one build against one baseline.
