@@ -53,6 +53,17 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **Writers and readers of a sample's outputs take the format from the caller, with no default.**
+  `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
+  the record helpers (`record_path`, `recorded_status`, `record_names_pon`, `record_pon_used`,
+  `refuse_a_second_pon`, `stamp_metadata`), `load_requested_pon`, `run_features` and
+  `process_sample` defaulted to `output_format="tsv"`, so a caller that left it out wrote -- or
+  read -- TSV beside a Parquet run (invariant #6). `process_sample` did exactly that: its own
+  `run_features` call passed no format (harmless only because the PON build passes TSV). They now
+  require `output_format` and `compress` by keyword, so mypy reports a call without them. A writer
+  in that form needs no `scripts/check_output_format.py` rule; the rule in
+  `.agents/rules/development.md` says so, and names the older processor writers that still default.
+
 - **`validate-output` reads what each optional stage did.** A stage recorded `failed` is one
   `STAGE.FAILED` finding naming the stage and the exception's class, instead of an unexplained
   "absent" for each of its tables; ERROR when anything downstream reads one of those tables

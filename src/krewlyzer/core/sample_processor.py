@@ -463,8 +463,8 @@ def write_motif_outputs(
     *,
     pon: Optional[Any] = None,
     include_ontarget: bool = True,
-    output_format: str = "tsv",
-    compress: bool = False,
+    output_format: str,
+    compress: bool,
 ) -> Dict[str, Path]:
     """Write the motif tables; returns ``{kind: path}``. See `write_motif_tables`."""
     return write_motif_tables(
@@ -483,8 +483,8 @@ def write_motif_tables(
     *,
     pon: Optional[Any] = None,
     include_ontarget: bool = True,
-    output_format: str = "tsv",
-    compress: bool = False,
+    output_format: str,
+    compress: bool,
 ) -> Tuple[Dict[str, Path], Dict[str, Outcome]]:
     """
     Write motif analysis files from extraction result.
@@ -903,8 +903,8 @@ def process_sample(
     assay: Optional[str] = None,
     temp_dir: Optional[Path] = None,
     # Output format (forwarded to GC factor writes; feature outputs use run_features params)
-    output_format: str = "tsv",
-    compress: bool = False,
+    output_format: str,
+    compress: bool,
     write_motif_files: bool = False,
 ) -> SampleOutputs:
     """
@@ -1128,6 +1128,8 @@ def process_sample(
         wps_background=params.wps_background,
         ocf_regions=params.ocf_regions,
         threads=params.threads,
+        output_format=output_format,
+        compress=compress,
     )
 
     outputs.feature_outputs = feature_outputs

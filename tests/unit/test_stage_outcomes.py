@@ -61,6 +61,7 @@ def test_each_stage_records_its_status_and_error_class(tmp_path, fmt):
             "region_mds": Outcome("ran"),
         },
         output_format=fmt,
+        compress=False,
     )
     row = _row(tmp_path, fmt)
     assert row["mfsd_status"] == "failed" and row["mfsd_error"] == "RuntimeError"
@@ -73,10 +74,20 @@ def test_two_outcomes_give_two_records(tmp_path):
     """Invariant #1, for the record itself: a failed run and a clean one must not read alike."""
     _marker(tmp_path)
     record_stage_outcomes(
-        tmp_path, "S1", {"mfsd": Outcome.failed(OSError("x"))}, "parquet"
+        tmp_path,
+        "S1",
+        {"mfsd": Outcome.failed(OSError("x"))},
+        output_format="parquet",
+        compress=False,
     )
     failed = _row(tmp_path)
-    record_stage_outcomes(tmp_path, "S1", {"mfsd": Outcome("ran")}, "parquet")
+    record_stage_outcomes(
+        tmp_path,
+        "S1",
+        {"mfsd": Outcome("ran")},
+        output_format="parquet",
+        compress=False,
+    )
     ran = _row(tmp_path)
     assert (failed["mfsd_status"], failed["mfsd_error"]) == ("failed", "OSError")
     assert (ran["mfsd_status"], ran["mfsd_error"]) == ("ran", "")
@@ -108,7 +119,13 @@ def test_an_outcome_is_one_of_the_declared_statuses():
 def test_an_unknown_stage_is_refused(tmp_path):
     _marker(tmp_path)
     with pytest.raises(ValueError, match="unknown stage"):
-        record_stage_outcomes(tmp_path, "S1", {"mfds": Outcome("ran")}, "parquet")
+        record_stage_outcomes(
+            tmp_path,
+            "S1",
+            {"mfds": Outcome("ran")},
+            output_format="parquet",
+            compress=False,
+        )
 
 
 def test_a_single_tool_never_writes_not_requested(tmp_path):
@@ -116,14 +133,19 @@ def test_a_single_tool_never_writes_not_requested(tmp_path):
     `--assay` must not record gene FSC as not requested over run-all's `ran`."""
     _marker(tmp_path)
     record_stage_outcomes(
-        tmp_path, "S1", {"gene_fsc": Outcome("ran"), "tfbs": Outcome("ran")}, "parquet"
+        tmp_path,
+        "S1",
+        {"gene_fsc": Outcome("ran"), "tfbs": Outcome("ran")},
+        output_format="parquet",
+        compress=False,
     )
     record_stage_outcomes(
         tmp_path,
         "S1",
         {"gene_fsc": Outcome("not_requested"), "tfbs": Outcome.failed(OSError("x"))},
-        "parquet",
+        output_format="parquet",
         owns_record=False,
+        compress=False,
     )
     row = _row(tmp_path)
     assert row["gene_fsc_status"] == "ran"
@@ -133,7 +155,12 @@ def test_a_single_tool_never_writes_not_requested(tmp_path):
 
 def test_no_metadata_table_is_not_a_failure(tmp_path):
     """A single-feature run into an empty directory writes no completion marker."""
-    assert record_stage_outcomes(tmp_path, "S1", {"uxm": Outcome("ran")}) is False
+    assert (
+        record_stage_outcomes(
+            tmp_path, "S1", {"uxm": Outcome("ran")}, output_format="tsv", compress=False
+        )
+        is False
+    )
 
 
 def test_a_run_reads_the_record_of_its_own_format(tmp_path):
@@ -146,7 +173,9 @@ def test_a_run_reads_the_record_of_its_own_format(tmp_path):
     pd.DataFrame([{"sample_id": "S1", "total_fragments": 2}]).to_parquet(
         tmp_path / "S1.metadata.parquet"
     )
-    record_stage_outcomes(tmp_path, "S1", {"uxm": Outcome("ran")}, "both")
+    record_stage_outcomes(
+        tmp_path, "S1", {"uxm": Outcome("ran")}, output_format="both", compress=False
+    )
     assert _row(tmp_path, "tsv")["total_fragments"] == "2"
     assert _row(tmp_path, "parquet")["uxm_status"] == "ran"
 
@@ -205,7 +234,12 @@ def test_a_single_tool_updates_only_the_copies_in_its_own_format(
 ):
     _marker(tmp_path, "both")
     record_stage_outcomes(
-        tmp_path, "S1", {"uxm": Outcome("ran")}, tool_fmt, owns_record=False
+        tmp_path,
+        "S1",
+        {"uxm": Outcome("ran")},
+        output_format=tool_fmt,
+        owns_record=False,
+        compress=False,
     )
     assert _row(tmp_path, updated)["uxm_status"] == "ran"
     assert "uxm_status" not in _row(tmp_path, untouched)
@@ -214,7 +248,12 @@ def test_a_single_tool_updates_only_the_copies_in_its_own_format(
 def test_a_single_tool_writing_both_updates_both(tmp_path):
     _marker(tmp_path, "both")
     record_stage_outcomes(
-        tmp_path, "S1", {"uxm": Outcome("ran")}, "both", owns_record=False
+        tmp_path,
+        "S1",
+        {"uxm": Outcome("ran")},
+        output_format="both",
+        owns_record=False,
+        compress=False,
     )
     assert _row(tmp_path, "parquet")["uxm_status"] == "ran"
     assert _row(tmp_path, "tsv")["uxm_status"] == "ran"

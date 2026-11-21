@@ -429,7 +429,12 @@ def region_entropy(
         # As run-all records them: rerunning this command (at run-all's --output-format) is how a TFBS or ATAC stage that
         # failed under run-all gets fixed. What it wrote, and nothing else.
         record_stage_outcomes(
-            output, sample_name, ran, output_format, compress, owns_record=False
+            output,
+            sample_name,
+            ran,
+            output_format=output_format,
+            compress=compress,
+            owns_record=False,
         )
         record_pon_used(
             output,
@@ -438,8 +443,8 @@ def region_entropy(
                 requested_pon if n_scored else None
             ),  # recorded as scored only if something was
             entropy_pon_parquet,
-            output_format,
-            compress,
+            output_format=output_format,
+            compress=compress,
         )
     except FileNotFoundError as e:
         logger.error(str(e))

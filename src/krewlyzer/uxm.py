@@ -64,8 +64,9 @@ def uxm_stage(
     genome: str = "hg19",
     threads: int = 0,
     verbose: bool = False,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Path:
     """Compute UXM for one sample and return the table written. Raises on failure.
 

@@ -301,7 +301,17 @@ python scripts/check_output_format.py
 | `write_extraction_outputs()` | `core/sample_processor.py` |
 | `_core.run_unified_pipeline()` | Rust via `_core` |
 
-**If you add a new output-writing function**, update `scripts/check_output_format.py` to add it to `RULES` before implementing callers. This puts the gate in place before any call sites exist.
+**If you add a new output-writing function, give `output_format` and `compress` no default**
+(keyword-only, `*, output_format: str, compress: bool`) and add it to
+`tests/unit/test_format_args_required.py`. The signature then makes every caller choose, and mypy
+reports a call that does not -- at any length, which the script's fixed lookahead cannot. No `RULES`
+entry is needed for such a function.
+
+`RULES` remains for the older writers that still default to `"tsv"`: the ones in the table above,
+and about twenty processor writers that no gate covers yet (in `core/fsc_processor.py`,
+`fsd_processor.py`, `fsr_processor.py`, `motif_processor.py`, `motif_pon.py`, `ocf_processor.py`).
+Moving those to required arguments is tracked as its own change; until then, a call to one of them
+that omits the format writes TSV silently.
 
 **Known intentional out-of-scope exception:**
 - `pon/build.py` → `process_sample()`: PON building always writes TSV (no user-facing format choice). Excluded in the script via `RULES` exceptions.

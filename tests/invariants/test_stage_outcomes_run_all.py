@@ -213,6 +213,7 @@ def test_a_single_tool_never_writes_not_requested_over_run_all(sample, tmp_path)
         gc_correct=False,
         output_format="parquet",
         threads=1,
+        compress=False,
     )
     assert outcomes(out) == before
 
@@ -524,7 +525,14 @@ def test_cached_motif_tables_are_redone_when_the_record_names_the_pon_but_mds_wa
     out = tmp_path / "out"
     _run_tsv(sample, out)
     pon_path = _mds_pon(tmp_path / "mds.pon.parquet")
-    record_pon_used(out, "S", load_requested_pon(pon_path), pon_path, "tsv")
+    record_pon_used(
+        out,
+        "S",
+        load_requested_pon(pon_path, output_format="tsv", compress=False),
+        pon_path,
+        output_format="tsv",
+        compress=False,
+    )
     assert _outcomes_tsv(out)["mds_z"] == ("not_requested", "")
 
     _run_tsv(sample, out, pon_model=pon_path, skip_pon=False)

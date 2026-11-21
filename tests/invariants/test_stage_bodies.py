@@ -56,13 +56,42 @@ def test_the_stage_bodies_raise_the_real_error(tmp_path):
     sample = make_sample(tmp_path / "in", BASELINE)
     missing = tmp_path / "absent.bam"
     with pytest.raises(FileNotFoundError):
-        uxm_stage(missing, tmp_path / "out", "S", None, "hg19")
+        uxm_stage(
+            missing,
+            tmp_path / "out",
+            "S",
+            None,
+            "hg19",
+            output_format="tsv",
+            compress=False,
+        )
     with pytest.raises(FileNotFoundError):
-        mfsd_stage(missing, write_vcf(tmp_path / "v.vcf"), tmp_path / "out", "S")
+        mfsd_stage(
+            missing,
+            write_vcf(tmp_path / "v.vcf"),
+            tmp_path / "out",
+            "S",
+            output_format="tsv",
+            compress=False,
+        )
     with pytest.raises(FileNotFoundError):
-        mfsd_stage(sample.bam, tmp_path / "absent.vcf", tmp_path / "out", "S")
+        mfsd_stage(
+            sample.bam,
+            tmp_path / "absent.vcf",
+            tmp_path / "out",
+            "S",
+            output_format="tsv",
+            compress=False,
+        )
     with pytest.raises(FileNotFoundError):
-        region_mds_stage(missing, sample.reference, tmp_path / "out", sample_name="S")
+        region_mds_stage(
+            missing,
+            sample.reference,
+            tmp_path / "out",
+            sample_name="S",
+            output_format="tsv",
+            compress=False,
+        )
 
 
 def test_the_commands_still_exit_on_failure(tmp_path):

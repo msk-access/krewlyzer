@@ -53,8 +53,9 @@ def mfsd_stage(
     min_baseq: int = 20,
     verbose: bool = False,
     threads: int = 0,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Path:
     """Compute mFSD for one sample and return the table written. Raises on failure.
 

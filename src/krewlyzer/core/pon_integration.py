@@ -81,8 +81,9 @@ def load_requested_pon(
     pon_path: Optional[Path],
     record_dir: Optional[Path] = None,
     sample: Optional[str] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ):
     """The PON a run resolved, loaded **before any work**; None when no PON was resolved.
 
@@ -101,7 +102,12 @@ def load_requested_pon(
         from .output_provenance import refuse_a_second_pon
 
         refuse_a_second_pon(
-            Path(record_dir), sample, pon, Path(pon_path), output_format, compress
+            Path(record_dir),
+            sample,
+            pon,
+            Path(pon_path),
+            output_format=output_format,
+            compress=compress,
         )
     return pon
 

@@ -51,7 +51,12 @@ def _write(extracted, out, pon, fmt="parquet"):
     from krewlyzer.core.sample_processor import write_motif_tables
 
     _, outcomes = write_motif_tables(
-        extracted, out, pon=pon, include_ontarget=True, output_format=fmt
+        extracted,
+        out,
+        pon=pon,
+        include_ontarget=True,
+        output_format=fmt,
+        compress=False,
     )
     return outcomes
 
@@ -153,6 +158,7 @@ def test_region_mds_returns_what_its_z_scoring_did(tmp_path, with_baseline, expe
         pon_model=pon,
         output_format="parquet",
         silent=True,
+        compress=False,
     )
     assert z.status == expected
     columns = pd.read_parquet(out / "S.MDS.gene.parquet").columns
@@ -171,6 +177,7 @@ def test_region_mds_without_a_pon_did_not_request_z_scores(tmp_path):
         sample_name="S",
         output_format="parquet",
         silent=True,
+        compress=False,
     )
     assert z.status == "not_requested"
 
@@ -198,6 +205,7 @@ def test_region_mds_z_scoring_that_fails_is_recorded_not_swallowed(
         pon_model=_region_pon(tmp_path / "r.pon.parquet", True),
         output_format="parquet",
         silent=True,
+        compress=False,
     )
     assert (z.status, z.error_class) == ("failed", "ZeroDivisionError")
 
@@ -238,6 +246,7 @@ def test_an_exon_z_score_failure_is_not_a_gene_z_score_failure(tmp_path, monkeyp
         pon_model=pon,
         output_format="parquet",
         silent=True,
+        compress=False,
     )
     assert z.status == "ran"
     assert "mds_z" in pd.read_parquet(out / "S.MDS.gene.parquet").columns

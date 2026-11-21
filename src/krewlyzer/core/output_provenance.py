@@ -94,7 +94,7 @@ def provenance_fields(
 
 
 def record_path(
-    output_dir: Path, sample: str, output_format: str = "tsv", compress: bool = False
+    output_dir: Path, sample: str, *, output_format: str, compress: bool
 ) -> Optional[Path]:
     """The metadata file a run of this format reads its record from: its own, else whatever exists.
 
@@ -132,8 +132,9 @@ def refuse_a_second_pon(
     sample: str,
     pon: Any,
     pon_path: Path,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> None:
     """Refuse to score a sample against a PON other than the one its record names.
 
@@ -142,7 +143,9 @@ def refuse_a_second_pon(
     """
     from .pon_integration import UnusablePonError
 
-    existing = record_path(output_dir, sample, output_format, compress)
+    existing = record_path(
+        output_dir, sample, output_format=output_format, compress=compress
+    )
     # As text: a digit-only cohort digest such as '0123…' read back from TSV as an integer.
     text = {"pon_model": str, "pon_cohort_digest": str}
     frame = read_exact_table(existing, dtype=text) if existing is not None else None
@@ -169,8 +172,9 @@ def record_names_pon(
     sample: str,
     pon: Any,
     pon_path: Optional[Path],
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> bool:
     """Whether the sample's record says it was scored against exactly this PON (or, for
     ``pon=None``, against none).
@@ -180,7 +184,9 @@ def record_names_pon(
     ``pon_applied=True`` beside an MDS with no z-score. No record, or one without provenance,
     names nothing, so nothing cached can be trusted against it.
     """
-    existing = record_path(output_dir, sample, output_format, compress)
+    existing = record_path(
+        output_dir, sample, output_format=output_format, compress=compress
+    )
     text = {"pon_model": str, "pon_cohort_digest": str}
     frame = read_exact_table(existing, dtype=text) if existing is not None else None
     if frame is None or frame.empty or "pon_applied" not in frame.columns:
@@ -201,11 +207,14 @@ def recorded_status(
     output_dir: Path,
     sample: str,
     stage: str,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Optional[str]:
     """The status the sample's record holds for ``stage``, or None when it records none."""
-    existing = record_path(output_dir, sample, output_format, compress)
+    existing = record_path(
+        output_dir, sample, output_format=output_format, compress=compress
+    )
     column = f"{stage}_status"
     frame = (
         read_exact_table(existing, dtype={column: str})
@@ -222,8 +231,9 @@ def record_pon_used(
     sample: str,
     pon: Any,
     pon_path: Optional[Path],
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> bool:
     """A standalone scorer's entry in the sample's record, after it has scored.
 
@@ -247,8 +257,9 @@ def stamp_metadata(
     sample: str,
     pon: Any = None,
     pon_path: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
     gc_factors: Optional[dict] = None,
     owns_record: bool = True,
 ) -> bool:
@@ -275,7 +286,9 @@ def stamp_metadata(
     # Read the file this run's format writes (`record_path`), then write all of them. Resolving
     # `.tsv` first and then reading Parquet-first meant a TSV run beside an earlier run's
     # `.parquet` read the stale row and wrote it back over this run's.
-    existing = record_path(output_dir, sample, output_format, compress)
+    existing = record_path(
+        output_dir, sample, output_format=output_format, compress=compress
+    )
     if existing is None:
         logger.debug(
             f"No metadata table for {sample}; skipping provenance stamp. "
@@ -382,8 +395,9 @@ def record_stage_outcomes(
     output_dir: Path,
     sample: str,
     outcomes: Mapping[str, Outcome],
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
     owns_record: bool = True,
 ) -> bool:
     """Write `{stage}_status` and `{stage}_error` into `{sample}.metadata.*`. True if written.
@@ -421,7 +435,9 @@ def record_stage_outcomes(
 
     base = output_dir / f"{sample}.metadata"
     if owns_record:
-        existing = record_path(output_dir, sample, output_format, compress)
+        existing = record_path(
+            output_dir, sample, output_format=output_format, compress=compress
+        )
         targets = [(existing, output_format, compress)] if existing is not None else []
     else:
         written_by_this_run = []

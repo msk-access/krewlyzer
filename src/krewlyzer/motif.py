@@ -314,7 +314,12 @@ def motif(
         # from the PON having a baseline, which also held when the z-score then failed.
         scored_with = pon if motif_outcomes["mds_z"].status == "ran" else None
         record_pon_used(
-            output, sample_name, scored_with, resolved_pon_path, output_format, compress
+            output,
+            sample_name,
+            scored_with,
+            resolved_pon_path,
+            output_format=output_format,
+            compress=compress,
         )
 
         # Additional aberrant k-mer analysis if PON provided

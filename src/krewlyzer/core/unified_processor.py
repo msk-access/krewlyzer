@@ -145,8 +145,8 @@ def run_features(
     threads: int = 0,
     verbose: bool = False,
     # Output format control
-    output_format: str = "tsv",  # "tsv" | "parquet" | "both"
-    compress: bool = False,  # Gzip TSV outputs when True
+    output_format: str,
+    compress: bool,
     owns_sample_record: bool = False,  # run-all and the PON build: rewrite the sample's record
 ) -> FeatureOutputs:
     """

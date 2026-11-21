@@ -76,7 +76,14 @@ def run_pipeline(
     bed_gz = extract_to_bedgz(sample, directory / "extract")
     out_dir = directory / "features"
 
-    flags = {"enable_fsc": True, "enable_fsr": True, "enable_fsd": True}
+    # The format is the caller's to choose; TSV unless it says otherwise.
+    flags = {
+        "enable_fsc": True,
+        "enable_fsr": True,
+        "enable_fsd": True,
+        "output_format": "tsv",
+        "compress": False,
+    }
     flags.update(feature_flags)
 
     outputs = run_features(

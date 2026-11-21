@@ -649,8 +649,8 @@ def run_all(
                 sample,
                 pon,
                 resolved_pon_path if pon is not None else None,
-                resolved_output_format,
-                resolved_compress,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
             ):
                 logger.info(
                     "Cached motif tables were made against another PON (or none); "
@@ -661,7 +661,11 @@ def run_all(
                 pon is not None
                 and getattr(pon, "mds_baseline", None)
                 and recorded_status(
-                    output, sample, "mds_z", resolved_output_format, resolved_compress
+                    output,
+                    sample,
+                    "mds_z",
+                    output_format=resolved_output_format,
+                    compress=resolved_compress,
                 )
                 != "ran"
             ):

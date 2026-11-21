@@ -131,8 +131,9 @@ def region_mds_stage(
     threads: int = 0,
     verbose: bool = False,
     silent: bool = False,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
     owns_sample_record: bool = False,
 ):
     """Per-region MDS for one sample. Raises on failure.
@@ -408,8 +409,8 @@ def region_mds_stage(
             sample_name,
             requested_pon if scored else None,
             resolved_pon_path,
-            output_format,
-            compress,
+            output_format=output_format,
+            compress=compress,
         )
 
     # Post-process exon output: convert format and/or compress.
