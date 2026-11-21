@@ -587,3 +587,122 @@ def test_a_parquet_run_with_a_pon_does_not_reuse_unscored_motif_tables(
         is None
     )
     assert "mds_z" in pd.read_parquet(out / "S.MDS.parquet").columns
+
+
+# -- a rewritten table owns its z-score stage (Greptile on #98, F1) ---------------------------
+
+
+def _mds_z_findings(out: Path) -> list:
+    return [
+        f
+        for f in _validation(out)["findings"]
+        if f["column"] in ("mds_z", "mds_e1_z") or "mds_z" in f["message"]
+    ]
+
+
+def test_motif_without_a_pon_after_a_scored_run_records_its_mds_z_as_not_requested(
+    sample, tmp_path
+):
+    """`motif --skip-pon` rewrites `MDS` with no `mds_z`. Its `not_requested` was dropped as
+    "not attempted", so run-all's `mds_z=ran` stayed and the gate required the missing column.
+    """
+    out = tmp_path / "out"
+    pon = _mds_pon(tmp_path / "mds.pon.parquet")
+    assert synth_run_all(sample, out, pon_model=pon, skip_pon=False) is None
+    assert outcomes(out)["mds_z"] == ("ran", "")
+
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "motif",
+            "-i",
+            str(sample.bam),
+            "--reference",
+            str(sample.reference),
+            "-o",
+            str(out),
+            "--sample-name",
+            "S",
+            "--skip-pon",
+            "--skip-target-regions",
+            "--output-format",
+            "parquet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert outcomes(out)["mds_z"] == ("not_requested", "")
+    assert not _mds_z_findings(out), _mds_z_findings(out)
+
+
+def test_region_mds_without_a_pon_records_its_z_scores_as_not_requested(
+    sample, tmp_path
+):
+    """The same for `region-mds --skip-pon` and `MDS.gene`."""
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+    from krewlyzer.core.output_provenance import Outcome, record_stage_outcomes
+
+    out = tmp_path / "out"
+    _run(sample, out, assay="xs1")
+    # As a run-all scored against a PON with a Region-MDS baseline leaves it.
+    record_stage_outcomes(
+        out,
+        "S",
+        {"region_mds_z": Outcome("ran")},
+        output_format="parquet",
+        compress=False,
+    )
+    result = CliRunner().invoke(
+        app,
+        [
+            "region-mds",
+            str(sample.bam),
+            str(sample.reference),
+            str(out),
+            "--assay",
+            "xs1",
+            "--sample-name",
+            "S",
+            "--skip-pon",
+            "--output-format",
+            "parquet",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert outcomes(out)["region_mds_z"] == ("not_requested", "")
+
+
+def test_a_single_tool_still_leaves_a_table_stage_it_did_not_run_alone(
+    sample, tmp_path
+):
+    """Guard: only a stage whose outputs a tool rewrote is recorded. `fsc` without an assay did
+    not run gene FSC, whatever the record says about it."""
+    from krewlyzer.core.output_provenance import Outcome, record_stage_outcomes
+    from krewlyzer.core.unified_processor import run_features
+
+    out = tmp_path / "out"
+    _run(sample, out)
+    record_stage_outcomes(
+        out,
+        "S",
+        {"gene_fsc": Outcome.failed(RuntimeError("x"))},
+        output_format="parquet",
+        compress=False,
+    )
+    run_features(
+        bed_path=out / "S.bed.gz",
+        output_dir=out,
+        sample_name="S",
+        enable_fsc=True,
+        fsc_bins=sample.assets.bins,
+        gc_correct=False,
+        threads=1,
+        output_format="parquet",
+        compress=False,
+    )
+    assert outcomes(out)["gene_fsc"] == ("failed", "RuntimeError")

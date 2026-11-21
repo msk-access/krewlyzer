@@ -467,12 +467,6 @@ def _read_record(path: Optional[Path]):
     return read_exact_table(path, dtype=text)
 
 
-#: What a single tool may record about a stage: only what it attempted. It cannot know what
-#: run-all was asked for, so `not_requested` (or `no_variants`) from it would overwrite a record
-#: of a stage that did run.
-_ATTEMPTED = ("ran", "failed", "unavailable")
-
-
 @dataclass(frozen=True)
 class Outcome:
     """What one optional stage did: a status from `contract.STAGE_STATUSES`, and for a failure
@@ -524,10 +518,13 @@ def record_stage_outcomes(
     record its own format writes (`record_path`), exactly, and writes all of its formats, as
     `stamp_metadata` does.
 
-    A single tool (False) records only the stages it attempted -- ``ran``, ``failed`` or
-    ``unavailable`` -- and never ``not_requested``: `krewlyzer fsc` without `--assay` did not ask
-    for gene FSC, but run-all may have, and ran it. For a stage it did attempt, the last writer
-    wins, because it rewrote that stage's tables -- in the format it wrote them. So it updates
+    A single tool (False) passes only the stages whose outputs it rewrote, and records each as it
+    passes it, whatever the status. `krewlyzer fsc` without `--assay` did not run gene FSC, so it
+    passes no `gene_fsc` (run-all may have run it). `motif --skip-pon` rewrote `MDS` without
+    `mds_z`, so it passes `mds_z=not_requested`: the z-score stage lives in a table the tool just
+    rewrote, and run-all's `ran` there would describe a column that is gone. (A filter here once
+    dropped every `not_requested` from a single tool, which kept that `ran` -- Greptile on #98.)
+    The last writer wins, because it rewrote that stage's outputs -- in the format it wrote them. So it updates
     only the copies of the record in its own format(s) (`tsv` the `.tsv`, or the `.tsv.gz`
     with `--compress`; `parquet` the `.parquet`; `both` both), and creates none. A tool at
     `-F tsv` after a Parquet run-all rewrote `.TFBS.tsv`, not the `.TFBS.parquet` downstream
@@ -544,8 +541,6 @@ def record_stage_outcomes(
         raise ValueError(
             f"unknown stage(s) {unknown}; declare them in validate/contract.py first"
         )
-    if not owns_record:
-        outcomes = {k: o for k, o in outcomes.items() if o.status in _ATTEMPTED}
     if not outcomes:
         return False
 

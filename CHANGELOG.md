@@ -19,8 +19,9 @@ All notable changes to this project will be documented in this file.
   in (so a `-F tsv` rerun beside a Parquet run-all leaves `.metadata.parquet`, and the stale
   `.parquet` table beside it, as they were) and creates none. run-all writes every status on
   every run, except that a rerun reusing cached motif tables (same PON) leaves `mds_z*` as
-  recorded. A single tool records only the stages it attempted and never
-  `not_requested`; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
+  recorded. A single tool records only the stages whose outputs it rewrote, each as it ended --
+  `not_requested` included, as `motif --skip-pon` does for `mds_z` in the `MDS` it rewrote
+  without one; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
   hand at run-all's `--output-format`, which is how a stage that failed under run-all gets
   fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
   columns are in the output contract as optional strings.

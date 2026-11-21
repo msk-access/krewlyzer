@@ -128,29 +128,31 @@ def test_an_unknown_stage_is_refused(tmp_path):
         )
 
 
-def test_a_single_tool_never_writes_not_requested(tmp_path):
-    """A single tool knows what it ran, not what run-all was asked for: `krewlyzer fsc` without
-    `--assay` must not record gene FSC as not requested over run-all's `ran`."""
+def test_a_single_tool_records_what_it_passes_and_nothing_else(tmp_path):
+    """A single tool passes the stages whose outputs it rewrote, and each is recorded as passed:
+    `not_requested` included (`motif --skip-pon` rewrote `MDS` without `mds_z`). A stage it did
+    not pass keeps run-all's record. Which stages a tool passes is held by the run-level tests
+    (`test_a_single_tool_still_leaves_a_table_stage_it_did_not_run_alone`)."""
     _marker(tmp_path)
     record_stage_outcomes(
         tmp_path,
         "S1",
-        {"gene_fsc": Outcome("ran"), "tfbs": Outcome("ran")},
+        {"gene_fsc": Outcome("ran"), "tfbs": Outcome("ran"), "mds_z": Outcome("ran")},
         output_format="parquet",
         compress=False,
     )
     record_stage_outcomes(
         tmp_path,
         "S1",
-        {"gene_fsc": Outcome("not_requested"), "tfbs": Outcome.failed(OSError("x"))},
+        {"mds_z": Outcome("not_requested"), "tfbs": Outcome.failed(OSError("x"))},
         output_format="parquet",
         owns_record=False,
         compress=False,
     )
     row = _row(tmp_path)
-    assert row["gene_fsc_status"] == "ran"
-    # What it did attempt, it records: it rewrote those tables, so the last writer wins.
+    assert row["mds_z_status"] == "not_requested"
     assert (row["tfbs_status"], row["tfbs_error"]) == ("failed", "OSError")
+    assert row["gene_fsc_status"] == "ran", "not passed, so not touched"
 
 
 def test_no_metadata_table_is_not_a_failure(tmp_path):
