@@ -1202,7 +1202,8 @@ status on every run, except that a rerun reusing cached motif tables leaves
 only the stages it ran, and never `not_requested`. `extract` writes this table
 from scratch, so it clears the statuses: a new fragment BED is a new sample. All
 are absent from directories written before this release, and Nextflow tool-level
-mode writes no metadata table at all, so it records none.
+mode writes no metadata table at all, so it records none. `validate-output`
+reads them: see [`validate-output`](../cli/index.md#validate-output).
 
 **Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
 and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was

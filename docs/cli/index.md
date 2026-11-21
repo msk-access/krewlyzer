@@ -164,6 +164,24 @@ Three layers: every consumed table present and shaped correctly; domain
 invariants; and **anti-degeneracy** — a metric identical across every sample is
 an error, not a pass.
 
+It also reads what each optional stage did, from the `{stage}_status` columns
+of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
+
+| Finding | Severity | When |
+|---------|----------|------|
+| `STAGE.FAILED` | ERROR if anything downstream reads one of the stage's tables, else WARN | The stage was run and failed. Replaces the "absent" finding for its tables, with the exception's class as the reason, so `--strict-validation` fails exactly the runs it did before |
+| `STAGE.STALE_TABLE` | Same rule | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
+| `STAGE.UNEXPECTED_TABLE` | WARN | A table is present although its stage was not requested (or had no input) in this run |
+| `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
+
+A stage that was not requested gives no finding when nothing downstream reads its
+tables (UXM, mFSD); a consumed table such as `MDS.gene` is still reported absent.
+The z-score columns other stages add — `mds_z` in `MDS` and `MDS.ontarget`,
+`mds_z` / `mds_e1_z` in `MDS.gene` — are required where the record says that
+z-scoring ran, and not otherwise. A directory written before these columns
+existed behaves as it did, except that `MDS.gene`'s z columns are no longer
+required there.
+
 | Exit | Meaning |
 |------|---------|
 | `0` | Contract satisfied |

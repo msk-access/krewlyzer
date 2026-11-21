@@ -120,8 +120,14 @@ def unavailable(sample, tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def not_requested(sample, tmp_path_factory):
-    return _run(sample, tmp_path_factory.mktemp("not_requested") / "out")
+def not_requested_run(sample, tmp_path_factory):
+    out = tmp_path_factory.mktemp("not_requested") / "out"
+    return _run(sample, out), out
+
+
+@pytest.fixture(scope="module")
+def not_requested(not_requested_run):
+    return not_requested_run[0]
 
 
 @pytest.mark.parametrize("stage", ("uxm", "mfsd", *ASSET_STAGES))
@@ -302,3 +308,89 @@ def _outcomes_tsv(out: Path) -> dict:
         for c in row.columns
         if c.endswith("_status")
     }
+
+
+# ---------------------------------------------------------------------------
+# What run-all's own validation.json makes of the record
+# ---------------------------------------------------------------------------
+
+
+def _validation(out: Path) -> dict:
+    import json
+
+    return json.loads((out / "S.validation.json").read_text())
+
+
+def _stage_findings(out: Path, finding_id: str) -> list:
+    return [f for f in _validation(out)["findings"] if f["id"] == finding_id]
+
+
+def test_run_all_reports_each_failed_stage_with_its_reason(failed):
+    """At ERROR when the stage's tables are consumed, else WARN: under `--strict-validation`
+    this is exactly today's outcome, with the reason instead of "absent"."""
+    failed_outcomes, out = failed
+    reported = {
+        stage: f["severity"]
+        for f in _stage_findings(out, "STAGE.FAILED")
+        for stage in failed_outcomes
+        if f["message"].startswith(f"{stage} ")
+    }
+    assert reported == {
+        "uxm": "warn",
+        "mfsd": "warn",
+        "region_mds": "error",
+        "gene_fsc": "error",
+        "panel_wps": "error",
+        "tfbs": "error",
+        "atac": "error",
+    }
+    absent = {
+        f["id"] for f in _validation(out)["findings"] if f["id"].endswith(".ABSENT")
+    }
+    assert not absent & {
+        "MDS.gene.ABSENT",
+        "FSC.gene.ABSENT",
+        "TFBS.ABSENT",
+        "mFSD.ABSENT",
+    }
+
+
+def test_a_recorded_error_never_reaches_validation_json_as_a_path(failed):
+    """Checked where it is published, not only where it is written (invariant #4)."""
+    _, out = failed
+    text = (out / "S.validation.json").read_text()
+    assert str(out.parent) not in text
+    for finding in _stage_findings(out, "STAGE.FAILED"):
+        assert "/" not in finding["message"], finding["message"]
+
+
+def test_a_table_left_beside_a_failed_rerun_is_an_error(sample, tmp_path):
+    """The rerun failed, so `MDS.gene` is the first run's: downstream would read it as this one."""
+    out = tmp_path / "out"
+    _run(sample, out, assay="xs1")
+    pointer = lfs_pointer(tmp_path / "genes.bed.gz")
+    patch = ((AssetManager, "get_gene_bed_for_mode", lambda self, assay=None: pointer),)
+    _run(sample, out, patch, assay="xs1")
+    stale = {f["table"] for f in _stage_findings(out, "STAGE.STALE_TABLE")}
+    assert {".MDS.gene.parquet", ".MDS.exon.parquet"} <= stale
+    assert all(
+        f["severity"] == "error" for f in _stage_findings(out, "STAGE.STALE_TABLE")
+    )
+
+
+def test_no_mds_baseline_is_not_a_missing_z_score(sample, tmp_path):
+    out = tmp_path / "out"
+    pon = _pon_without_mds_baseline(tmp_path / "no_mds.pon.parquet")
+    _run(sample, out, pon_model=pon, skip_pon=False)
+    about_mds_z = [
+        f
+        for f in _validation(out)["findings"]
+        if f["column"] == "mds_z" or "mds_z" in f["message"]
+    ]
+    assert not about_mds_z, about_mds_z
+
+
+def test_uxm_and_mfsd_not_requested_give_no_finding(not_requested_run):
+    _, out = not_requested_run
+    tables = {".UXM.parquet", ".mFSD.parquet"}
+    assert not [f for f in _validation(out)["findings"] if f["table"] in tables]

@@ -49,6 +49,27 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **`validate-output` reads what each optional stage did.** A stage recorded `failed` is one
+  `STAGE.FAILED` finding naming the stage and the exception's class, instead of an unexplained
+  "absent" for each of its tables; ERROR when anything downstream reads one of those tables
+  (Region-MDS, gene FSC, panel WPS, TFBS, ATAC, the MDS z-scores), WARN when nothing does (UXM,
+  mFSD), which is the severity the absent tables had. A stage not requested gives no finding when
+  nothing reads its tables -- no `--variants` was a WARN on every such run -- while a consumed
+  table such as `MDS.gene` is still reported absent; making those conditional on `--assay` is its
+  own change. A table present beside a stage not requested is a WARN (`STAGE.UNEXPECTED_TABLE`).
+  `mds_z` in `MDS` and `MDS.ontarget`, never declared, is now required where the record says it
+  was computed (`ColumnRule.requires_stage`), and only there: requiring it whenever a PON was
+  applied would be a false ERROR for a BED-built PON, which has no MDS baseline.
+
+  Two cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed table
+  **present** beside a stage that failed in the same run (`STAGE.STALE_TABLE`: a previous run's
+  table, or a partial one, that downstream would read as this run's), and a failed MDS z-score.
+  One requirement is **loosened**: `MDS.gene`'s `mds_z` and `mds_e1_z` were required
+  unconditionally, though they are written only with a PON that has a `region_mds` baseline, so
+  every run without one was an ERROR. They are now required only where `region_mds_z_status` is
+  `ran` -- which means **not at all for directories written before this release**. A directory
+  without the status columns otherwise validates as before.
+
 - **Reviews ask five standing questions, over the whole branch.** Every gate passed on #89, and so
   did our own reviews, each of one commit's diff; the automated PR review read the whole branch
   and found four real defects, all in its first commit. `.agents/rules/validation-gates.md` now

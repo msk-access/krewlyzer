@@ -29,7 +29,15 @@ import pyarrow.parquet as pq
 
 from . import checks as check_registry
 from . import degeneracy
-from .contract import CONTRACT, COMPLETION_MARKER, Kind, NOT_CONSUMED, TableRule
+from .contract import (
+    CONTRACT,
+    COMPLETION_MARKER,
+    Kind,
+    NOT_CONSUMED,
+    STAGE_TABLES,
+    STAGES,
+    TableRule,
+)
 from .degeneracy import Observation
 from .findings import Category, Finding, Severity
 
@@ -184,6 +192,7 @@ def _check_table(
     df: pd.DataFrame,
     n_rows: int,
     pon_applied: Optional[bool] = None,
+    stage_status: Optional[Dict[str, str]] = None,
 ) -> Tuple[List[Finding], Dict[str, Observation]]:
     family = rule.family.replace(".parquet", "")
     findings: List[Finding] = []
@@ -208,13 +217,24 @@ def _check_table(
             # A PON-derived column is required only when the sample says it was
             # scored. Absent provenance (a pre-0.9.0 directory) is `None`, and
             # is not evidence either way, so it stays quiet.
-            expected = col.required and (not col.requires_pon or pon_applied is True)
+            expected = (
+                col.required
+                and (not col.requires_pon or pon_applied is True)
+                and (
+                    col.requires_stage is None
+                    or (stage_status or {}).get(col.requires_stage) == "ran"
+                )
+            )
             if expected:
                 why = (
                     " -- this sample records pon_applied=True, so PON scoring "
                     "ran and its output should be here"
                     if col.requires_pon
-                    else ""
+                    else (
+                        f" -- this sample records {col.requires_stage}_status=ran"
+                        if col.requires_stage
+                        else ""
+                    )
                 )
                 findings.append(
                     Finding(
@@ -301,6 +321,163 @@ def _pon_applied(sample_dir: Path, sample: str) -> Optional[bool]:
     return bool(frame["pon_applied"].iloc[0])
 
 
+def _stage_outcomes(sample_dir: Path, sample: str) -> Dict[str, Tuple[str, str]]:
+    """``{stage: (status, error_class)}`` from `{sample}.metadata.parquet`, for the stages it
+    records. Empty for a directory written before outcomes were recorded, which then behaves
+    exactly as it did."""
+    marker = sample_dir / f"{sample}{COMPLETION_MARKER}"
+    if not marker.exists():
+        return {}
+    try:
+        present = set(pq.read_schema(marker).names)
+        columns = [
+            f"{stage}_{part}"
+            for stage in STAGES
+            for part in ("status", "error")
+            if f"{stage}_{part}" in present
+        ]
+        frame = pd.read_parquet(marker, columns=columns) if columns else None
+    except Exception:
+        return {}  # an unreadable marker is reported where the contract reads it
+    if frame is None or frame.empty:
+        return {}
+
+    def text(column: str) -> str:
+        value = frame[column].iloc[0] if column in frame.columns else None
+        return value if isinstance(value, str) else ""
+
+    found = {}
+    for stage in STAGES:
+        status = text(f"{stage}_status")
+        if status:
+            found[stage] = (status, text(f"{stage}_error"))
+    return found
+
+
+#: Which stage writes each table (`contract.STAGE_TABLES`, inverted).
+_STAGE_OF = {
+    suffix: stage for stage, suffixes in STAGE_TABLES.items() for suffix in suffixes
+}
+_CONSUMED = {rule.suffix for rule in CONTRACT}
+
+
+def _stage_findings(
+    sample: str,
+    sample_dir: Path,
+    outcomes: Dict[str, Tuple[str, str]],
+) -> List[Finding]:
+    """What the recorded outcomes say, before any table is read.
+
+    A failed stage is one finding with its reason, at ERROR when anything downstream reads one
+    of its tables and WARN otherwise -- the severity its absent tables had, so
+    `--strict-validation` fails exactly the runs it failed before. A table present beside a
+    failed stage is a previous run's or a partial one: a deliberate new finding at the same
+    severity. A table beside a stage not asked for is a WARN: left from another configuration.
+    """
+    findings: List[Finding] = []
+    for stage, (status, error) in outcomes.items():
+        tables = STAGE_TABLES.get(stage, ()) or tuple(
+            rule.suffix
+            for rule in CONTRACT
+            if any(col.requires_stage == stage for col in rule.columns)
+        )
+        consumed = any(t in _CONSUMED for t in tables)
+        severity = Severity.ERROR if consumed else Severity.WARN
+        names = ", ".join(t.lstrip(".").replace(".parquet", "") for t in tables)
+        if status == "failed":
+            findings.append(
+                Finding(
+                    id="STAGE.FAILED",
+                    severity=severity,
+                    category=Category.COMPLETION,
+                    message=(
+                        f"{stage} was run and failed ({error or 'unrecorded'}); run-all "
+                        f"carried on without it, so {names} is missing or incomplete. The "
+                        "run's log has the full error"
+                    ),
+                    table=tables[0] if len(tables) == 1 else None,
+                    samples=[sample],
+                    evidence={"stage": stage, "error": error, "tables": list(tables)},
+                )
+            )
+        elif status == "unavailable" and not consumed:
+            # Its absent tables were an inventory WARN with no reason; this is the reason.
+            findings.append(
+                Finding(
+                    id="STAGE.UNAVAILABLE",
+                    severity=Severity.WARN,
+                    category=Category.MISSING,
+                    message=(
+                        f"{stage} was asked for, but an input it needs was missing; "
+                        f"{names} was not produced"
+                    ),
+                    table=tables[0] if len(tables) == 1 else None,
+                    samples=[sample],
+                    evidence={"stage": stage},
+                )
+            )
+        if stage not in STAGE_TABLES:
+            continue  # a column stage: its table belongs to another stage
+        for suffix in tables:
+            if not (sample_dir / f"{sample}{suffix}").exists():
+                continue
+            name = suffix.lstrip(".").replace(".parquet", "")
+            if status == "failed":
+                findings.append(
+                    Finding(
+                        id="STAGE.STALE_TABLE",
+                        severity=(
+                            Severity.ERROR if suffix in _CONSUMED else Severity.WARN
+                        ),
+                        category=Category.COMPLETION,
+                        message=(
+                            f"{name} is present although {stage} failed in this run: it is "
+                            "left from an earlier run, or partial, and would be read as this "
+                            "run's"
+                        ),
+                        table=suffix,
+                        samples=[sample],
+                        evidence={"stage": stage, "error": error},
+                    )
+                )
+            elif status in ("not_requested", "no_variants", "unavailable"):
+                findings.append(
+                    Finding(
+                        id="STAGE.UNEXPECTED_TABLE",
+                        severity=Severity.WARN,
+                        category=Category.COMPLETION,
+                        message=(
+                            f"{name} is present although {stage} was {status.replace('_', ' ')} "
+                            "in this run: left from an earlier configuration of this directory"
+                        ),
+                        table=suffix,
+                        samples=[sample],
+                        evidence={"stage": stage, "status": status},
+                    )
+                )
+    return findings
+
+
+def _absence_explained(suffix: str, outcomes: Dict[str, Tuple[str, str]]) -> bool:
+    """Whether a recorded outcome already accounts for this table being absent.
+
+    A failed stage's tables are reported once, as `STAGE.FAILED`. A stage that was not asked for
+    (or had no variants, or no input) explains an absent table nothing downstream reads; a
+    consumed table keeps its ABSENT ERROR, since downstream reads it either way.
+    """
+    stage = _STAGE_OF.get(suffix)
+    if stage is None or stage not in outcomes:
+        return False
+    status = outcomes[stage][0]
+    if status == "failed":
+        return True
+    return suffix not in _CONSUMED and status in (
+        "not_requested",
+        "no_variants",
+        "unavailable",
+    )
+
+
 def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerprint]:
     """Everything decidable from one sample, plus its fingerprint.
 
@@ -338,9 +515,16 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
             sample,
         )
 
+    # Also once: what each optional stage did. Empty for an older build's directory.
+    outcomes = _stage_outcomes(sample_dir, sample)
+    findings.extend(_stage_findings(sample, sample_dir, outcomes))
+    stage_status = {stage: status for stage, (status, _) in outcomes.items()}
+
     for rule in CONTRACT:
         path = sample_dir / f"{sample}{rule.suffix}"
         if not path.exists():
+            if _absence_explained(rule.suffix, outcomes):
+                continue
             findings.append(
                 Finding(
                     id=f"{rule.family}.ABSENT".replace(".parquet", ""),
@@ -368,7 +552,12 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
             continue
 
         table_findings, observations = _check_table(
-            sample, rule, df, n_rows, pon_applied=pon_applied
+            sample,
+            rule,
+            df,
+            n_rows,
+            pon_applied=pon_applied,
+            stage_status=stage_status,
         )
         findings.extend(table_findings)
         for name, observation in observations.items():
@@ -384,6 +573,8 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
 
     for suffix in NOT_CONSUMED:
         if not (sample_dir / f"{sample}{suffix}").exists():
+            if _absence_explained(suffix, outcomes):
+                continue
             findings.append(
                 Finding(
                     id=f"{suffix.lstrip('.').replace('.parquet', '')}.ABSENT",
