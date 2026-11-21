@@ -12,6 +12,8 @@ import logging
 import numpy as np
 import pandas as pd
 
+from .provenance import baseline_digest
+
 if TYPE_CHECKING:
     # RegionEntropyBaseline is defined in region_entropy_processor; imported here
     # only for type checking to avoid a circular import at runtime. TfbsBaseline
@@ -926,6 +928,9 @@ class PonModel:
     # exactly the signal the version guard refuses on.
     krewlyzer_version: str = ""
     cohort_digest: str = ""
+    #: sha256 of the baseline rows (`provenance.baseline_digest`), computed on load rather than
+    #: stored, so every PON has one -- the shipped ones included.
+    pon_digest: str = ""
     cohort_label: str = ""
     #: What the cohort was made of: "bam", "bed", "mixed" or "outputs".
     #: Empty for models built before the field existed. `validate-pon` uses it
@@ -1445,6 +1450,7 @@ class PonModel:
             target_regions_file=str(meta.get("target_regions_file", "")),
             krewlyzer_version=str(meta.get("krewlyzer_version", "")),
             cohort_digest=str(meta.get("cohort_digest", "")),
+            pon_digest=baseline_digest(df_all),
             cohort_label=str(meta.get("cohort_label", "")),
             input_kind=str(meta.get("input_kind", "") or ""),
             gc_bias=gc_bias,

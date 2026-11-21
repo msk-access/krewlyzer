@@ -525,6 +525,13 @@ CONTRACT: Tuple[TableRule, ...] = (
                 constant_reason="one PON per cohort, by cohort digest",
             ),
             ColumnRule(
+                "pon_digest",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason="one PON per cohort, by the content of its baselines",
+            ),
+            ColumnRule(
                 "pon_krewlyzer_version",
                 Kind.STRING,
                 Vary.NEVER,

@@ -10795,6 +10795,7 @@ mean.
 | `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon` and for no PON, both legitimately unscored. A PON that cannot be used (unreadable, refused by the version guard, or a `--pon-model` path that does not exist) stops the run, so it never appears here. Written by run-all; a single tool fills it in when it is absent and may otherwise only raise it, never lower it |
 | `pon_model` | str | The PON, by **basename** — never the full path |
 | `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
+| `pon_digest` | str | sha256 of the PON's baseline rows: answers "the same baselines?". A PON rebuilt from the same donors keeps its name and cohort digest and gets a new `pon_digest`; `stamp-pon` leaves it unchanged. run-all reuses cached motif tables only under the same `pon_digest`, and a single tool refuses a PON with another one. Absent from directories written before this release |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
 
 **Optional stages.** run-all carries on when an optional stage fails, so that one
@@ -10819,7 +10820,7 @@ mode writes no metadata table at all, so it records none. `validate-output`
 reads them: see [`validate-output`](../cli/index.md#validate-output).
 
 **Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
-and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
+and by `krewlyzer_version` / `pon_digest` to be sure a cohort was
 produced by one build against one baseline.
 
 ---

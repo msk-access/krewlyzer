@@ -60,6 +60,7 @@ PROVENANCE_COLUMNS = (
     "pon_applied",
     "pon_model",
     "pon_cohort_digest",
+    "pon_digest",
     "pon_krewlyzer_version",
 )
 
@@ -87,6 +88,9 @@ def provenance_fields(
         "pon_cohort_digest": (
             str(getattr(pon, "cohort_digest", "") or "") if applied else ""
         ),
+        # What the PON holds, not who it was fitted to: a PON rebuilt from the same donors keeps
+        # its name and cohort digest and changes this.
+        "pon_digest": str(getattr(pon, "pon_digest", "") or "") if applied else "",
         "pon_krewlyzer_version": (
             str(getattr(pon, "krewlyzer_version", "") or "") if applied else ""
         ),
@@ -146,9 +150,7 @@ def refuse_a_second_pon(
     existing = record_path(
         output_dir, sample, output_format=output_format, compress=compress
     )
-    # As text: a digit-only cohort digest such as '0123…' read back from TSV as an integer.
-    text = {"pon_model": str, "pon_cohort_digest": str}
-    frame = read_exact_table(existing, dtype=text) if existing is not None else None
+    frame = _read_record(existing)
     if frame is None or frame.empty or "pon_applied" not in frame.columns:
         return
     if not _flag(frame["pon_applied"].iloc[0]):
@@ -156,9 +158,15 @@ def refuse_a_second_pon(
     ours = provenance_fields(pon, pon_path)
     recorded = {
         key: frame[key].iloc[0] if key in frame.columns else None
-        for key in ("pon_model", "pon_cohort_digest")
+        for key in ("pon_model", "pon_cohort_digest", "pon_digest")
     }
-    if any(_as_text(recorded[k]) != _as_text(ours[k]) for k in recorded):
+    # The digest when both sides have one; a record written before it existed falls back to the
+    # name and cohort digest, so a single tool still runs in a directory an older run-all scored.
+    if _as_text(recorded["pon_digest"]) and ours["pon_digest"]:
+        compared: tuple = ("pon_digest",)
+    else:
+        compared = ("pon_model", "pon_cohort_digest")
+    if any(_as_text(recorded[k]) != _as_text(ours[k]) for k in compared):
         raise UnusablePonError(
             f"{sample} was scored against {recorded['pon_model']} "
             f"(cohort {recorded['pon_cohort_digest']}); refusing to score it against "
@@ -187,8 +195,7 @@ def record_names_pon(
     existing = record_path(
         output_dir, sample, output_format=output_format, compress=compress
     )
-    text = {"pon_model": str, "pon_cohort_digest": str}
-    frame = read_exact_table(existing, dtype=text) if existing is not None else None
+    frame = _read_record(existing)
     if frame is None or frame.empty or "pon_applied" not in frame.columns:
         return False
     ours = provenance_fields(pon, pon_path)
@@ -196,11 +203,12 @@ def record_names_pon(
         return False
     if not ours["pon_applied"]:
         return True
-    return all(
-        _as_text(frame[key].iloc[0] if key in frame.columns else None)
-        == _as_text(ours[key])
-        for key in ("pon_model", "pon_cohort_digest")
+    # By content only. A record without a digest (written before it existed) cannot show the PON
+    # is unchanged, so nothing cached under it is reused.
+    recorded = _as_text(
+        frame["pon_digest"].iloc[0] if "pon_digest" in frame.columns else None
     )
+    return bool(recorded) and recorded == ours["pon_digest"]
 
 
 def recorded_status(
@@ -216,11 +224,7 @@ def recorded_status(
         output_dir, sample, output_format=output_format, compress=compress
     )
     column = f"{stage}_status"
-    frame = (
-        read_exact_table(existing, dtype={column: str})
-        if existing is not None
-        else None
-    )
+    frame = _read_record(existing)
     if frame is None or frame.empty or column not in frame.columns:
         return None
     return _as_text(frame[column].iloc[0]) or None
@@ -296,7 +300,7 @@ def stamp_metadata(
         )
         return False
 
-    frame = read_exact_table(existing)
+    frame = _read_record(existing)
     if frame is None or frame.empty:
         logger.warning(
             f"{existing.name} could not be read; provenance not recorded. "
@@ -347,9 +351,27 @@ def stamp_metadata(
 _RECORD_TEXT = (
     "pon_model",
     "pon_cohort_digest",
+    "pon_digest",
     "pon_krewlyzer_version",
     "krewlyzer_version",
 )
+
+
+def _read_record(path: Optional[Path]):
+    """A sample record, its text columns read as text, every stage column included.
+
+    As text: a digit-only digest such as '0123…' reads back from TSV as an integer, and an empty
+    one as NaN. One dtype map for every reader, so a column added to the record is read the same
+    way everywhere.
+    """
+    if path is None:
+        return None
+    from krewlyzer.validate.contract import STAGES
+
+    text = {name: str for name in _RECORD_TEXT}
+    text.update({f"{s}_{f}": str for s in STAGES for f in ("status", "error")})
+    return read_exact_table(path, dtype=text)
+
 
 #: What a single tool may record about a stage: only what it attempted. It cannot know what
 #: run-all was asked for, so `not_requested` (or `no_variants`) from it would overwrite a record
@@ -451,11 +473,9 @@ def record_stage_outcomes(
         logger.debug(f"No metadata table for {sample}; stage outcomes not recorded.")
         return False
 
-    text = {name: str for name in _RECORD_TEXT}
-    text.update({f"{s}_{f}": str for s in STAGES for f in ("status", "error")})
     written = False
     for path, fmt, gz in targets:
-        frame = read_exact_table(path, dtype=text)
+        frame = _read_record(path)
         if frame is None or frame.empty:
             logger.warning(
                 f"{path.name} could not be read; stage outcomes not recorded in it. "

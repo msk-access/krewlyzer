@@ -118,7 +118,9 @@ def test_an_empty_escape_hatch_does_not_count(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _pon(tmp_path, version):
+def _pon(tmp_path, version, fitted=1.0):
+    """A minimal PON. ``fitted`` stands for its baselines: two PONs that differ in it are two
+    PONs, whatever they are called (`pon_digest` hashes the baseline rows)."""
     frame = pd.DataFrame(
         [
             {
@@ -127,7 +129,8 @@ def _pon(tmp_path, version):
                 "assay": "xs1",
                 "n_samples": 21.0,
                 "krewlyzer_version": version,
-            }
+            },
+            {"table": "test_baseline", "fitted": fitted},
         ]
     )
     path = tmp_path / "t.pon.parquet"
@@ -289,7 +292,7 @@ def test_a_single_tool_refuses_to_score_a_sample_against_a_second_pon(tmp_path):
 
     x_dir, y_dir = tmp_path / "x", tmp_path / "y"
     x_dir.mkdir(), y_dir.mkdir()
-    pon_x, pon_y = _pon(x_dir, "0.9.0"), _pon(y_dir, "0.9.0")
+    pon_x, pon_y = _pon(x_dir, "0.9.0"), _pon(y_dir, "0.9.0", fitted=2.0)
     pon_y = pon_y.rename(y_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
@@ -325,7 +328,7 @@ def test_the_refusal_reads_the_record_this_run_writes_not_a_stale_copy(tmp_path)
     x_dir, y_dir = tmp_path / "x", tmp_path / "y"
     x_dir.mkdir(), y_dir.mkdir()
     pon_x = _pon(x_dir, "0.9.0")
-    pon_y = _pon(y_dir, "0.9.0").rename(y_dir / "other.pon.parquet")
+    pon_y = _pon(y_dir, "0.9.0", fitted=2.0).rename(y_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(
@@ -414,7 +417,7 @@ def test_a_pon_recorded_by_a_standalone_scorer_stops_a_later_tool_using_another(
     a_dir, b_dir = tmp_path / "a", tmp_path / "b"
     a_dir.mkdir(), b_dir.mkdir()
     pon_a = _pon(a_dir, "0.9.0")
-    pon_b = _pon(b_dir, "0.9.0").rename(b_dir / "other.pon.parquet")
+    pon_b = _pon(b_dir, "0.9.0", fitted=2.0).rename(b_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(

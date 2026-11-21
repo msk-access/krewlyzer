@@ -32,7 +32,10 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import TYPE_CHECKING, Iterable, Optional
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 #: Domain separator. Public by design, and stable: changing it changes every
 #: digest and silently breaks "same cohort?" comparisons against older models.
@@ -59,6 +62,76 @@ def cohort_digest(sample_paths: Iterable[Path]) -> str:
         digest.update(b"\x00")
         digest.update(stem.encode("utf-8"))
     return digest.hexdigest()[:DIGEST_CHARS]
+
+
+#: Domain separator and version of the baseline digest's serialisation. Changing how cells are
+#: encoded changes every digest, which makes every recorded PON look foreign: bump this with it.
+BASELINE_DIGEST_TAG = b"krewlyzer-pon-baseline-v1"
+
+
+def baseline_digest(frame: "pd.DataFrame") -> str:
+    """The sha256 of a PON's baseline rows: what it measures against, not what it is called.
+
+    The cohort digest says *who* a PON was fitted to; a PON rebuilt from the same donors keeps it
+    while its fitted values change. This one changes with the values. It is the identity a sample
+    record compares, for the motif cache and the one-PON-per-sample check.
+
+    Every row except ``table == "metadata"``, in file order, so `stamp-pon` -- which rewrites only
+    that row at each release -- does not change it. A column null or ``""`` in every baseline row
+    is skipped for the same reason (the stamp backfills a missing ``krewlyzer_version`` with
+    ``""``). Columns in name order; each cell encoded exactly:
+
+    - numbers as little-endian float64, with a null mask;
+    - array cells (the WPS profiles) as their float64 bytes, length-prefixed;
+    - dict cells (the k-mer baselines) as JSON with sorted keys (floats by ``repr``, round-trip
+      exact);
+    - text as UTF-8.
+
+    Not CSV or ``str()``, which round floats (numpy's ``str`` keeps 8 digits, so a small change in a
+    fitted value would leave the digest unchanged) and are slow; not Parquet bytes, which embed the
+    writer's version; not `hash_pandas_object`, which depends on the dtype.
+    """
+    import json
+
+    import numpy as np
+    import pandas as pd
+
+    rows = frame[frame["table"] != "metadata"]
+    digest = hashlib.sha256(BASELINE_DIGEST_TAG)
+    digest.update(b"rows=%d\x00" % len(rows))
+    for name in sorted(rows.columns):
+        col = rows[name]
+        missing = col.isna().to_numpy()
+        if missing.all():
+            continue
+        if pd.api.types.is_numeric_dtype(col) or pd.api.types.is_bool_dtype(col):
+            values = col.astype("float64").to_numpy(copy=True)
+            values[missing] = 0.0
+            digest.update(name.encode("utf-8") + b"\x00n\x00")
+            digest.update(np.packbits(missing).tobytes())
+            digest.update(values.astype("<f8").tobytes())
+            continue
+        cells = col.to_numpy()
+        present = [cell for cell, m in zip(cells, missing) if not m]
+        if all(isinstance(cell, str) and cell == "" for cell in present):
+            continue
+        digest.update(name.encode("utf-8") + b"\x00o\x00")
+        for cell, m in zip(cells, missing):
+            if m:
+                digest.update(b"N")
+            elif isinstance(cell, (np.ndarray, list)):
+                raw = np.asarray(cell, dtype="<f8").tobytes()
+                digest.update(b"A%d:" % len(raw) + raw)
+            elif isinstance(cell, dict):
+                raw = json.dumps(cell, sort_keys=True).encode("utf-8")
+                digest.update(b"D%d:" % len(raw) + raw)
+            elif isinstance(cell, str):
+                raw = cell.encode("utf-8")
+                digest.update(b"S%d:" % len(raw) + raw)
+            else:
+                raw = repr(cell).encode("utf-8")
+                digest.update(b"R%d:" % len(raw) + raw)
+    return digest.hexdigest()
 
 
 def build_provenance(

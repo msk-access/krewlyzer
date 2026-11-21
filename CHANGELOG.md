@@ -197,6 +197,16 @@ All notable changes to this project will be documented in this file.
   having scored only its own tables. The cache check itself
   still looks for `.tsv` names only, so it never fires under Parquet or `--compress`; that is
   unchanged, and fixing this did not need it.
+- **A PON is identified by its baselines, not its name.** The record named a PON by basename and
+  `pon_cohort_digest`, a hash of the donors' names, so a PON rebuilt in place from the same donors
+  passed as the same PON: run-all reused motif tables z-scored under the old baselines beside
+  features scored under the new, and the one-PON-per-sample check let a single tool through. The
+  record now carries `pon_digest`, a sha256 of the PON's baseline rows computed on load (about 1.5 s
+  for the largest bundled model), which `stamp-pon` does not change. The motif cache requires it;
+  the one-PON check compares it, falling back to name and cohort digest for a record written before
+  it existed. Array and dict cells (WPS profiles, k-mer baselines) are hashed as exact float64 and
+  sorted JSON: a string form rounds to eight digits and would miss a change in the ninth.
+  A copy of the same PON under another file name is now the same PON, as its baselines are.
 - **`motif` records the PON only if the MDS z-score was written.** It recorded `pon_applied` from
   the PON having an MDS baseline, which held even when the z-score then failed.
 - **The whole-sample MDS z-score reads the table this run wrote.** The append read Parquet-first,
