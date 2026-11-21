@@ -56,6 +56,13 @@ METHY_THRESHOLD = 0.75
 UNMETHY_THRESHOLD = 0.25
 
 
+def _sample_name(bam_input: Path, sample_name: Optional[str]) -> str:
+    """The given sample name, or one derived from the BAM's file name."""
+    return (
+        sample_name if sample_name is not None else bam_input.stem.replace(".bam", "")
+    )
+
+
 def uxm_stage(
     bam_input: Path,
     output: Path,
@@ -123,9 +130,7 @@ def uxm_stage(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
 
-    # Derive sample name (use provided or derive from input filename)
-    if sample_name is None:
-        sample_name = bam_input.stem.replace(".bam", "")
+    sample_name = _sample_name(bam_input, sample_name)
 
     output_file = output / f"{sample_name}.UXM.tsv"
 
@@ -221,6 +226,26 @@ def uxm(
     Input: Bisulfite BAM file
     Output: {sample}.UXM.tsv file with fragment-level methylation scores
     """
+    # Before any work: UXM chooses its marker file by genome, so a folder written for another one
+    # would get UXM over the wrong markers, recorded as `ran`. run-all owns the record and checks
+    # its own genome; it calls `uxm_stage`, not this command.
+    from .core.output_provenance import (
+        ConfigurationMismatch,
+        refuse_a_different_configuration,
+    )
+
+    try:
+        refuse_a_different_configuration(
+            output,
+            _sample_name(bam_input, sample_name),
+            {"genome": genome},
+            output_format=output_format,
+            compress=compress,
+        )
+    except ConfigurationMismatch as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     try:
         written = uxm_stage(
             bam_input,

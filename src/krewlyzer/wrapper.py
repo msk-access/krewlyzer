@@ -412,7 +412,16 @@ def run_all(
                 "genome": genome,
                 "assay": resolved_assay,
                 "target_regions": resolved_target_path,
-                "fsc_e1_aggregation": not _resolve_bool(disable_e1_aggregation, False),
+                # E1 decides a table only gene FSC writes, which needs an assay: as run_features.
+                **(
+                    {
+                        "fsc_e1_aggregation": not _resolve_bool(
+                            disable_e1_aggregation, False
+                        )
+                    }
+                    if resolved_assay
+                    else {}
+                ),
             },
             output_format=resolved_output_format,
             compress=resolved_compress,

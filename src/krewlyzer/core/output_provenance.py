@@ -211,6 +211,20 @@ def _setting(field: str, value: Any) -> str:
     return "true" if text.lower() in ("true", "1", "1.0") else "false"
 
 
+def recorded_settings(
+    output_dir: Path, sample: str, *, output_format: str, compress: bool
+) -> Dict[str, Any]:
+    """The `CONFIGURATION_FIELDS` the folder's record holds, for a writer that replaces the record
+    but does not decide all of them: `extract` takes no E1 setting, and dropping run-all's would
+    let a later rerun with the other one pass `refuse_a_different_configuration`."""
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    if frame is None or frame.empty:
+        return {}
+    return {f: frame[f].iloc[0] for f in CONFIGURATION_FIELDS if f in frame.columns}
+
+
 def refuse_a_different_configuration(
     output_dir: Path,
     sample: str,

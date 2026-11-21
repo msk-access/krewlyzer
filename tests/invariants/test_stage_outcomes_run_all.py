@@ -593,10 +593,14 @@ def test_a_parquet_run_with_a_pon_does_not_reuse_unscored_motif_tables(
 
 
 def _mds_z_findings(out: Path) -> list:
+    """The gate run now, on the folder as it is: `S.validation.json` is what run-all wrote, before
+    any single tool ran after it."""
+    from krewlyzer.validate.gate import check_sample
+
     return [
-        f
-        for f in _validation(out)["findings"]
-        if f["column"] in ("mds_z", "mds_e1_z") or "mds_z" in f["message"]
+        f.to_dict()
+        for f in check_sample("S", out)[0]
+        if f.column in ("mds_z", "mds_e1_z") or "mds_z" in f.message
     ]
 
 
@@ -635,7 +639,10 @@ def test_motif_without_a_pon_after_a_scored_run_records_its_mds_z_as_not_request
     )
     assert result.exit_code == 0, result.output
     assert outcomes(out)["mds_z"] == ("not_requested", "")
-    assert not _mds_z_findings(out), _mds_z_findings(out)
+    # The record is now true, and the gate still flags the table: the sample stays recorded as
+    # PON-scored, and downstream would read its MDS so (review of the branch).
+    flagged = [f for f in _mds_z_findings(out) if f["table"] == ".MDS.parquet"]
+    assert flagged and all("not_requested" in f["message"] for f in flagged), flagged
 
 
 def test_region_mds_without_a_pon_records_its_z_scores_as_not_requested(

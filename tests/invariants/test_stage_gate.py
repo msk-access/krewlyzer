@@ -194,3 +194,35 @@ def test_a_consumed_table_beside_a_stage_that_did_not_run_is_an_error(tmp_path, 
     found = [f for f in _findings(directory) if f.id == "STAGE.UNEXPECTED_TABLE"]
     assert {f.table for f in found} == set(STAGE_TABLES["region_mds"])
     assert all(f.severity is Severity.ERROR for f in found)
+
+
+@pytest.mark.parametrize(
+    "suffix, stage",
+    [
+        (".MDS.parquet", "mds_z"),
+        (".MDS.ontarget.parquet", "mds_z_ontarget"),
+        (".MDS.gene.parquet", "region_mds_z"),
+    ],
+)
+def test_a_table_rewritten_unscored_in_a_scored_sample_is_an_error(
+    tmp_path, suffix, stage
+):
+    """`motif --skip-pon` into a folder run-all scored: `MDS` loses `mds_z`, the record says
+    `mds_z=not_requested` (true), and `pon_applied` stays True (a single tool may only raise it).
+    Downstream reads a scored sample with an unscored table -- flagged, not hidden. In an unscored
+    sample, `not_requested` is simply the truth and needs no column."""
+    family = suffix.lstrip(".").replace(".parquet", "")
+    found = {}
+    for applied in (True, False):
+        directory = _sample(tmp_path / str(applied), **{stage: "not_requested"})
+        marker = directory / "S0.metadata.parquet"
+        frame = pd.read_parquet(marker)
+        frame["pon_applied"] = applied
+        frame.to_parquet(marker, index=False)
+        _drop_column(directory, suffix, "mds_z")
+        found[applied] = {f.id: f for f in _findings(directory)}
+
+    missing = f"{family}.MISSING_COLUMN.mds_z"
+    assert missing in found[True] and found[True][missing].severity is Severity.ERROR
+    assert "not_requested" in found[True][missing].message
+    assert missing not in found[False]

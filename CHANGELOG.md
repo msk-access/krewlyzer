@@ -63,8 +63,10 @@ All notable changes to this project will be documented in this file.
   name, since Nextflow stages them anew in each task) and, where gene FSC is written, E1
   aggregation, against the record before writing anything, and refuse a difference with a message
   naming it. `fsc_e1_aggregation` is new in the record (run-all writes it), and `fsc` gains
-  `--disable-e1-aggregation` so a run-all made with it can be repaired by `fsc`. `uxm` and `mfsd`
-  are not checked: their tables do not depend on these. Nextflow cannot be checked this way (each
+  `--disable-e1-aggregation` so a run-all made with it can be repaired by `fsc`. `uxm` compares the
+  genome only, which picks its marker file; `mfsd` takes none of these. `extract`, which rewrites
+  the record from scratch, keeps the recorded E1 setting it does not decide, so a later run-all
+  with the other one is still refused. Nextflow cannot be checked this way (each
   task starts in an empty folder); its docs now say to use a fresh `--outdir` per configuration.
 
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
@@ -89,8 +91,11 @@ All notable changes to this project will be documented in this file.
   `no_variants`, `unavailable`) is `STAGE.UNEXPECTED_TABLE`: ERROR when downstream reads it,
   which it does as this run's, else WARN.
   `mds_z` in `MDS` and `MDS.ontarget`, never declared, is now required where the record says it
-  was computed (`ColumnRule.requires_stage`), and only there: requiring it whenever a PON was
-  applied would be a false ERROR for a BED-built PON, which has no MDS baseline. Being declared,
+  was computed (`ColumnRule.requires_stage`), and where a single tool rewrote the table without
+  the PON (`not_requested`) in a sample still recorded as `pon_applied=True` -- downstream reads
+  that sample as scored; the message says to rerun with the sample's PON. Not otherwise:
+  requiring it whenever a PON was applied would be a false ERROR for a BED-built PON, which has
+  no MDS baseline (`unavailable`). The same holds for `MDS.gene`'s `mds_z`/`mds_e1_z`. Being declared,
   it is also fingerprinted, so `validate-cohort` now checks it for degeneracy where present.
 
   Three cases newly fail under `--strict-validation` (off by default in Nextflow): a consumed

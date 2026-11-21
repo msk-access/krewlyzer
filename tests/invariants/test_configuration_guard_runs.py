@@ -167,3 +167,57 @@ def test_the_in_process_pon_build_is_never_refused(sample, tmp_path):
         output_format="parquet",
         compress=False,
     )
+
+
+def test_extract_keeps_the_settings_it_does_not_decide(sample, tmp_path):
+    """`extract` rewrites the record from scratch, and does not take E1. Dropping run-all's
+    `fsc_e1_aggregation` let a later run-all with the other setting pass the check, and the first
+    run's E1 table read as current (review of the branch)."""
+    import pandas as pd
+
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, assay="xs1") is None
+    result = _cli(
+        "extract",
+        "-i",
+        sample.bam,
+        "--reference",
+        sample.reference,
+        "--output",
+        out,
+        "--sample-name",
+        "S",
+        "--assay",
+        "xs1",
+        "--skip-target-regions",
+        "--output-format",
+        "parquet",
+    )
+    assert result.exit_code == 0, result.output
+    assert bool(
+        pd.read_parquet(out / "S.metadata.parquet")["fsc_e1_aggregation"].iloc[0]
+    )
+    assert synth_run_all(sample, out, assay="xs1", disable_e1_aggregation=True) == 1
+
+
+def test_uxm_with_another_genome_is_refused(sample, tmp_path):
+    """UXM chooses its marker file by genome: an hg38 run into an hg19 folder would compute UXM
+    over the wrong markers and record it as `ran` (review of the branch)."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+    result = _cli(
+        "uxm", "-i", sample.bam, "-o", out, "--sample-name", "S", "-G", "hg38"
+    )
+    assert result.exit_code == 1, result.output
+    assert "genome" in result.output and "Traceback" not in result.output
+    assert _files(out) == before
+
+
+def test_e1_aggregation_does_not_matter_without_gene_fsc(sample, tmp_path):
+    """Guard: without an assay no gene FSC is written, so E1 decides no table. run-all compared it
+    anyway and refused a WGS rerun that differed only in it; `run_features` did not (review of the
+    branch)."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    assert synth_run_all(sample, out, disable_e1_aggregation=True) is None

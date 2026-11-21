@@ -26,6 +26,8 @@ REQUIRED = {
         "recorded_status",
         "record_names_pon",
         "stamp_metadata",
+        "refuse_a_different_configuration",
+        "recorded_settings",
     ),
     "krewlyzer.uxm": ("uxm_stage",),
     "krewlyzer.mfsd": ("mfsd_stage",),

@@ -521,7 +521,9 @@ def write_motif_tables(
 
     Example:
         >>> result = extract_sample(bam, ref)
-        >>> outputs = write_motif_outputs(result, Path("./output"))
+        >>> outputs, _ = write_motif_tables(
+        ...     result, Path("./output"), output_format="parquet", compress=False
+        ... )
         >>> print(f"MDS file: {outputs['mds']}")
     """
     from .motif_processor import process_motif_outputs
@@ -850,6 +852,16 @@ def write_extraction_outputs(
             )
         except Exception as e:
             logger.debug(f"  GC factor computation failed: {e}")
+
+    # The record is rewritten from scratch, but a setting extraction does not decide (run-all's E1
+    # aggregation) is the folder's, not this run's: carried over, so a later rerun with the other
+    # value is still refused (`refuse_a_different_configuration`).
+    from .output_provenance import recorded_settings
+
+    for name, value in recorded_settings(
+        output_dir, sample, output_format=output_format, compress=compress
+    ).items():
+        meta_flat.setdefault(name, value)
 
     # Write metadata (after GC compute so gc_correction_computed is accurate)
     # TSV/Parquet only — consistent with all other feature outputs.

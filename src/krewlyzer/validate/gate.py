@@ -217,25 +217,36 @@ def _check_table(
             # A PON-derived column is required only when the sample says it was
             # scored. Absent provenance (a pre-0.9.0 directory) is `None`, and
             # is not evidence either way, so it stays quiet.
+            status = (stage_status or {}).get(col.requires_stage or "")
+            # A z-score stage's column is required where the stage ran, and also where a single
+            # tool rewrote its table unscored (`not_requested`) in a sample recorded as scored:
+            # downstream reads that sample as PON-scored. (`unavailable`, a PON with no baseline
+            # for it, and `failed`, reported as STAGE.FAILED, need no column.)
+            rewritten_unscored = status == "not_requested" and pon_applied is True
             expected = (
                 col.required
                 and (not col.requires_pon or pon_applied is True)
                 and (
-                    col.requires_stage is None
-                    or (stage_status or {}).get(col.requires_stage) == "ran"
+                    col.requires_stage is None or status == "ran" or rewritten_unscored
                 )
             )
             if expected:
-                why = (
-                    " -- this sample records pon_applied=True, so PON scoring "
-                    "ran and its output should be here"
-                    if col.requires_pon
-                    else (
-                        f" -- this sample records {col.requires_stage}_status=ran"
-                        if col.requires_stage
-                        else ""
+                if col.requires_pon:
+                    why = (
+                        " -- this sample records pon_applied=True, so PON scoring "
+                        "ran and its output should be here"
                     )
-                )
+                elif rewritten_unscored:
+                    why = (
+                        f" -- this sample records pon_applied=True but "
+                        f"{col.requires_stage}_status=not_requested: the table was rewritten "
+                        "without the PON (a single tool with --skip-pon?). Rerun it with the "
+                        "sample's PON, or rerun run-all"
+                    )
+                elif col.requires_stage:
+                    why = f" -- this sample records {col.requires_stage}_status=ran"
+                else:
+                    why = ""
                 findings.append(
                     Finding(
                         id=f"{family}.MISSING_COLUMN.{col.name}",

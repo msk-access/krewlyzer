@@ -1191,7 +1191,8 @@ mean.
 recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
 file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
 feature tool that takes these settings refuse a run with others before writing anything, naming
-the setting. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
+but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
 the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
 this way, since each task starts in an empty work folder; there, publish a different
