@@ -194,9 +194,14 @@ All notable changes to this project will be documented in this file.
   with a PON shipped `pon_applied=True` beside an MDS with no z-score. It now reuses them only
   when the sample's record names the PON now in use (or none, for none) and, for a PON with an
   MDS baseline, records the MDS z-score as `ran`: a single tool can name the PON in the record
-  having scored only its own tables. The cache check itself
-  still looks for `.tsv` names only, so it never fires under Parquet or `--compress`; that is
-  unchanged, and fixing this did not need it.
+  having scored only its own tables.
+- **The run-all motif cache looks for this run's format.** It checked hard-coded `.tsv` names, so a
+  Parquet run-all into a folder a TSV run had used found them, skipped the motif step, and wrote
+  **no Parquet motif tables** -- the only kind downstream reads; and under Parquet or `--compress`
+  alone it never reused anything. It now requires every motif table the run writes (`EndMotif`,
+  `EndMotif1mer`, `BreakPointMotif`, `MDS`, and their on-target tables in panel mode) in every
+  format it writes. `output_utils.table_paths` states those file names once, for the cache, the
+  record readers, the stage-outcome writer and the motif writer, which each spelled them out.
 - **A PON is identified by its baselines, not its name.** The record named a PON by basename and
   `pon_cohort_digest`, a hash of the donors' names, so a PON rebuilt in place from the same donors
   passed as the same PON: run-all reused motif tables z-scored under the old baselines beside

@@ -29,6 +29,7 @@ import pandas as pd
 from .output_utils import (
     read_exact_table,
     strip_table_extension,
+    table_extensions,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
 
@@ -532,11 +533,8 @@ def write_motif_tables(
     outputs = {}
 
     # Output base paths (write_table adds the correct extension)
-    ext = (
-        ".parquet"
-        if output_format == "parquet"
-        else (".tsv.gz" if compress else ".tsv")
-    )
+    # The TSV one under `both`, as before: the paths returned are the ones a caller reads back.
+    ext = table_extensions(output_format=output_format, compress=compress)[-1]
     edm_base = output_dir / f"{sample}.EndMotif"
     bpm_base = output_dir / f"{sample}.BreakPointMotif"
     mds_base = output_dir / f"{sample}.MDS"

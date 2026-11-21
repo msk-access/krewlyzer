@@ -49,7 +49,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
-from .output_utils import read_exact_table, resolve_table_path, write_table
+from .output_utils import (
+    read_exact_table,
+    resolve_table_path,
+    table_paths,
+    write_table,
+)
 
 logger = logging.getLogger("core.output_provenance")
 
@@ -106,11 +111,7 @@ def record_path(
     TSV run beside an earlier run's `.parquet`, or the reverse).
     """
     base = output_dir / f"{sample}.metadata"
-    own = Path(
-        f"{base}.parquet"
-        if output_format in ("parquet", "both")
-        else f"{base}.tsv.gz" if compress else f"{base}.tsv"
-    )
+    own = table_paths(base, output_format=output_format, compress=compress)[0]
     return own if own.exists() else resolve_table_path(base)
 
 
@@ -462,12 +463,16 @@ def record_stage_outcomes(
         )
         targets = [(existing, output_format, compress)] if existing is not None else []
     else:
-        written_by_this_run = []
-        if output_format in ("parquet", "both"):
-            written_by_this_run.append((Path(f"{base}.parquet"), "parquet", False))
-        if output_format in ("tsv", "both"):
-            tsv = Path(f"{base}.tsv.gz" if compress else f"{base}.tsv")
-            written_by_this_run.append((tsv, "tsv", compress))
+        written_by_this_run = [
+            (
+                (path, "parquet", False)
+                if path.suffix == ".parquet"
+                else (path, "tsv", compress)
+            )
+            for path in table_paths(
+                base, output_format=output_format, compress=compress
+            )
+        ]
         targets = [t for t in written_by_this_run if t[0].exists()]
     if not targets:
         logger.debug(f"No metadata table for {sample}; stage outcomes not recorded.")

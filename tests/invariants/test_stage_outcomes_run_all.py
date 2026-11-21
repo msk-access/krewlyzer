@@ -538,3 +538,49 @@ def test_cached_motif_tables_are_redone_when_the_record_names_the_pon_but_mds_wa
     _run_tsv(sample, out, pon_model=pon_path, skip_pon=False)
     assert _outcomes_tsv(out)["mds_z"] == ("ran", "")
     assert "mds_z" in pd.read_csv(out / "S.MDS.tsv", sep="\t", comment="#").columns
+
+
+# -- the motif cache, by format (Greptile on #98 review, F5) ---------------------------------
+
+_MOTIF_TABLES = ("EndMotif", "EndMotif1mer", "BreakPointMotif", "MDS")
+
+
+def test_a_parquet_run_after_a_tsv_run_writes_its_parquet_motif_tables(
+    sample, tmp_path
+):
+    """The cache looked for `.tsv` names only: a Parquet run-all into a folder a TSV run used
+    found them, skipped the motif step, and wrote no Parquet motif tables -- the only kind
+    downstream reads."""
+    out = tmp_path / "out"
+    _run_tsv(sample, out)
+    assert synth_run_all(sample, out, output_format="parquet") is None
+    missing = [t for t in _MOTIF_TABLES if not (out / f"S.{t}.parquet").exists()]
+    assert not missing, f"no Parquet table for {missing}"
+
+
+def test_a_parquet_run_reuses_its_own_motif_tables(sample, tmp_path):
+    """The other half: under Parquet the cache never fired at all."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, output_format="parquet") is None
+    before = {t: (out / f"S.{t}.parquet").stat().st_mtime_ns for t in _MOTIF_TABLES}
+    assert synth_run_all(sample, out, output_format="parquet") is None
+    after = {t: (out / f"S.{t}.parquet").stat().st_mtime_ns for t in _MOTIF_TABLES}
+    assert after == before, "the motif step ran again with nothing changed"
+
+
+def test_a_parquet_run_with_a_pon_does_not_reuse_unscored_motif_tables(
+    sample, tmp_path
+):
+    """Guard: a format-aware cache must still check the PON."""
+    import pandas as pd
+
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, output_format="parquet") is None
+    pon_path = _mds_pon(tmp_path / "mds.pon.parquet")
+    assert (
+        synth_run_all(
+            sample, out, output_format="parquet", pon_model=pon_path, skip_pon=False
+        )
+        is None
+    )
+    assert "mds_z" in pd.read_parquet(out / "S.MDS.parquet").columns

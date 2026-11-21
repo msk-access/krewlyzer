@@ -625,18 +625,33 @@ def run_all(
 
         bedgz_file = output / f"{sample}.bed.gz"
 
-        # Motif Outputs (for caching check)
-        edm_output = output / f"{sample}.EndMotif.tsv"
-        bpm_output = output / f"{sample}.BreakPointMotif.tsv"
-        mds_output = output / f"{sample}.MDS.tsv"
+        # The motif cache: reuse only if every motif table this run would write is there, in
+        # every format it writes. Hard-coded `.tsv` names meant a Parquet run-all after a TSV run
+        # reused the TSV tables and wrote no Parquet ones -- the only ones downstream reads -- and
+        # a Parquet run never reused anything.
+        from .core.output_utils import table_paths
+
+        motif_tables = ["EndMotif", "EndMotif1mer", "BreakPointMotif", "MDS"]
+        if is_panel_mode:
+            motif_tables += [
+                "EndMotif.ontarget",
+                "BreakPointMotif.ontarget",
+                "MDS.ontarget",
+            ]
+        cached_motif_tables = [
+            path
+            for table in motif_tables
+            for path in table_paths(
+                output / f"{sample}.{table}",
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+        ]
 
         # Caching logic: determine what needs to run
         should_run_extract = not bedgz_file.exists()
-        should_run_engine = (
-            not bedgz_file.exists()
-            or not edm_output.exists()
-            or not bpm_output.exists()
-            or not mds_output.exists()
+        should_run_engine = not bedgz_file.exists() or not all(
+            path.exists() for path in cached_motif_tables
         )
         # Cached motif tables were scored (or not) against the PON of the run that made them.
         # Reusing them under another PON -- or with one after a run without -- ships the old

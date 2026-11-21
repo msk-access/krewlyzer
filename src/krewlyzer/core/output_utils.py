@@ -27,7 +27,7 @@ import io
 import zlib
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -196,6 +196,33 @@ def _read_gzip_member_prefix(path: Path) -> "str | None":
 
 
 TABLE_EXTENSIONS = (".tsv", ".tsv.gz", ".parquet")
+
+
+def table_extensions(*, output_format: str, compress: bool) -> List[str]:
+    """The extensions a run of this format writes, Parquet first: exactly, never a fallback.
+
+    ``parquet`` -> ``.parquet``; ``tsv`` -> ``.tsv`` (``.tsv.gz`` with ``compress``); ``both`` ->
+    both. The one statement of what `write_table` produces, for every reader that must find *this*
+    run's file rather than whatever an earlier run left (`resolve_table_path` and `read_table`
+    take the first that exists, in their own order).
+    """
+    if output_format not in ("tsv", "parquet", "both"):
+        raise ValueError(f"unknown output format {output_format!r}")
+    tsv = ".tsv.gz" if compress else ".tsv"
+    return {"parquet": [".parquet"], "tsv": [tsv], "both": [".parquet", tsv]}[
+        output_format
+    ]
+
+
+def table_paths(base: Path, *, output_format: str, compress: bool) -> List[Path]:
+    """The files a run of this format writes for ``base`` (a path without its extension).
+
+    By name, not `Path.with_suffix`: compound names such as ``S.EndMotif`` would lose a segment.
+    """
+    return [
+        base.parent / (base.name + ext)
+        for ext in table_extensions(output_format=output_format, compress=compress)
+    ]
 
 
 def strip_table_extension(name: str) -> str:
