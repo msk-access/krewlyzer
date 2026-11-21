@@ -74,6 +74,18 @@ All notable changes to this project will be documented in this file.
     counting it as out of range. `Territory::contains` answers whether a fragment lies wholly
     inside one interval, the rule the expected counts use; a test checks it agrees with the
     builder window by window, adjacent intervals included.
+  - **A support from another expected table, and a fit with nothing fitted, are refused.** A
+    support records the digest of the expected table it was built from (genome, territory, trim,
+    GC definition version, lengths and every count; the digest is part of the support's own, so
+    it is in the model's provenance), and the fit refuses a support from another table
+    (`FitError::ForeignSupport`). A support has the right shape for any table of the same
+    lengths and trim, so the shape check alone let a GC-rich territory's support through on an
+    AT-rich one, where it selects only zero-count cells. The fit then left every length unfitted
+    and returned `Ok` with no weight anywhere (`weight()` answered `None`, not 1.0, but nothing
+    said the model was empty); it now returns `FitError::NothingFitted`.
+  - **The loaders refuse a null in a required column**, naming it. Both read through one helper
+    that checked types but not nulls, so a null `expected` count read as whatever bytes sat in
+    the slot. Only a model's `weight` column may hold nulls (an unfitted length).
   - **Sparse cells.** The support comes from the reference, not from donors (operator decision
     S1): at each length, the fewest GC cells holding 99.5% of the territory's expected windows. It
     needs no PON and no depth, and its digest is in the provenance. Raw weights are capped to

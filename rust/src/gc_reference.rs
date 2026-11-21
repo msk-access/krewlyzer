@@ -802,6 +802,21 @@ impl ExpectedTable {
         &self.provenance
     }
 
+    /// SHA-256 of the table: its genome, territory digest, trim, GC definition version, length
+    /// range and every count in index order (not the krewlyzer version that built it). A support
+    /// records it, so a fit can refuse a support built from another table.
+    pub fn digest(&self) -> String {
+        let p = &self.provenance;
+        let mut bytes = format!(
+            "genome={}\nterritory_sha256={}\ntrim_k={}\ngc_definition_version={}\nlengths={}..={}\n",
+            p.genome, p.territory_sha256, p.trim_k, p.gc_definition_version,
+            self.counts.min_len(), self.counts.max_len()).into_bytes();
+        for c in self.counts.cells() {
+            bytes.extend_from_slice(&c.to_le_bytes());
+        }
+        sha256_hex(&bytes)
+    }
+
     /// One row per cell: `length`, `gc` (UInt16), `expected` (UInt64); the provenance and the
     /// length range in the file's key-value metadata.
     pub fn write_parquet<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -1061,6 +1076,36 @@ mod expected_tests {
         crate::output_utils::write_parquet_batch(&p, schema, arrays).unwrap();
         let err = format!("{:#}", ExpectedTable::load_parquet(&p).unwrap_err());
         assert!(err.contains(EXPECTED_META_PROVENANCE), "{err}");
+    }
+
+    #[test]
+    fn a_null_expected_count_is_refused() {
+        use arrow::array::{ArrayRef, UInt16Array, UInt64Array};
+        use arrow::datatypes::{DataType, Field, Schema};
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("e.parquet");
+        let t = table(&recs(&[("1", 0, 1_000)]), 30, 60, 2);
+        t.write_parquet(&good).unwrap();
+        let (meta, _) = crate::gc_model::read_parquet_with_metadata(&good).unwrap();
+        let keys: Vec<_> = t.counts().keys().collect();
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("length", DataType::UInt16, false),
+            Field::new("gc", DataType::UInt16, false),
+            Field::new("expected", DataType::UInt64, true),
+        ]));
+        let expected: Vec<Option<u64>> = t.counts().cells().iter().enumerate()
+            .map(|(i, &c)| if i == 5 { None } else { Some(c) }).collect();
+        let arrays: Vec<ArrayRef> = vec![
+            Arc::new(UInt16Array::from_iter_values(keys.iter().map(|k| k.length))),
+            Arc::new(UInt16Array::from_iter_values(keys.iter().map(|k| k.gc))),
+            Arc::new(UInt64Array::from(expected)),
+        ];
+        let bad = dir.path().join("null.parquet");
+        let meta: Vec<(&str, String)> = meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        crate::gc_model::write_parquet_with_metadata(&bad, schema, arrays, meta).unwrap();
+        let err = format!("{:#}", ExpectedTable::load_parquet(&bad).unwrap_err());
+        assert!(err.contains("`expected`") && err.contains("null"), "{err}");
     }
 
     /// Synthetic-scale timing for the expected-count builder (`cargo test --release -- --ignored`).

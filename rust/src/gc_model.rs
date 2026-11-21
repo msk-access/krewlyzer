@@ -229,11 +229,20 @@ pub const SUPPORT_SHARE: f64 = 0.995;
 pub struct CellSet {
     cells: GcGrid<bool>,
     share: f64,
+    /// [`crate::gc_reference::ExpectedTable::digest`] of the table it was built from: a support
+    /// has the right shape for any table of the same lengths and trim, so the shape alone cannot
+    /// tell a foreign one.
+    expected_sha256: String,
 }
 
 impl CellSet {
-    pub(crate) fn from_grid(cells: GcGrid<bool>, share: f64) -> Self {
-        Self { cells, share }
+    pub(crate) fn from_grid(cells: GcGrid<bool>, share: f64, expected_sha256: &str) -> Self {
+        Self { cells, share, expected_sha256: expected_sha256.to_string() }
+    }
+
+    /// The digest of the expected table this support was built from.
+    pub fn expected_sha256(&self) -> &str {
+        &self.expected_sha256
     }
 
     /// The support from the reference (decision S1): at each length, the fewest GC cells holding
@@ -260,7 +269,7 @@ impl CellSet {
                 out[g] = true;
             }
         }
-        Ok(Self { cells, share })
+        Ok(Self { cells, share, expected_sha256: expected.digest() })
     }
 
     pub fn contains(&self, length: u16, gc: u16) -> bool {
@@ -276,9 +285,11 @@ impl CellSet {
         self.share
     }
 
-    /// SHA-256 over the shape, the share and every cell's membership in index order.
+    /// SHA-256 over the shape, the share, the source table's digest and every cell's membership
+    /// in index order.
     pub fn digest(&self) -> String {
-        let mut bytes = format!("{} share={:?}\n", self.cells.shape_string(), self.share).into_bytes();
+        let mut bytes = format!("{} share={:?} expected_sha256={}\n", self.cells.shape_string(), self.share,
+                                self.expected_sha256).into_bytes();
         bytes.extend(self.cells.cells().iter().map(|&b| if b { b'1' } else { b'0' }));
         sha256_hex(&bytes)
     }
@@ -467,6 +478,7 @@ impl GcModel {
             (META_QC, serde_json::to_string(&self.qc)?),
             (META_SHAPE, serde_json::to_string(&shape)?),
             (META_SUPPORT_SHARE, serde_json::to_string(&self.support.share())?),
+            (META_SUPPORT_SOURCE, serde_json::to_string(self.support.expected_sha256())?),
         ];
         write_parquet_with_metadata(path, schema, arrays, meta)?;
         info!("gc_model: wrote {} cells -> {:?}", keys.len(), path);
@@ -502,15 +514,11 @@ impl GcModel {
         for batch in &batches {
             let length = column::<UInt16Array>(batch, "length", path)?;
             let gc = column::<UInt16Array>(batch, "gc", path)?;
-            let weight = column::<Float64Array>(batch, "weight", path)?;
+            let weight = nullable_column::<Float64Array>(batch, "weight", path)?;
             let in_support = column::<BooleanArray>(batch, "in_support", path)?;
             let cap = column::<BooleanArray>(batch, "capped", path)?;
             for r in 0..batch.num_rows() {
                 let i = claim_cell(&weights, &mut seen, length.value(r), gc.value(r), path)?;
-                if in_support.is_null(r) || cap.is_null(r) {
-                    return Err(anyhow!("GC model {:?}: null flag at length {} gc {}",
-                        path, length.value(r), gc.value(r)));
-                }
                 if !weight.is_null(r) {
                     let w = weight.value(r);
                     if !(w.is_finite() && w > 0.0) {
@@ -524,7 +532,8 @@ impl GcModel {
             }
         }
         require_every_cell(&seen, path)?;
-        let support = CellSet::from_grid(support, read_share(&meta, path)?);
+        let source: String = parse_meta(&meta, META_SUPPORT_SOURCE, path)?;
+        let support = CellSet::from_grid(support, read_share(&meta, path)?, &source);
         Self::from_parts(weights, capped, support, provenance, qc)
             .with_context(|| format!("GC model {:?}", path))
     }
@@ -533,6 +542,8 @@ impl GcModel {
 /// The support share is stored in the provenance's support digest only, so the loader needs it
 /// separately to recompute that digest.
 const META_SUPPORT_SHARE: &str = "krewlyzer.gc_model.support_share";
+/// Likewise the digest of the expected table the support was built from.
+const META_SUPPORT_SOURCE: &str = "krewlyzer.gc_model.support_expected_sha256";
 
 fn read_share(meta: &HashMap<String, String>, path: &Path) -> Result<f64> {
     parse_meta(meta, META_SUPPORT_SHARE, path)
@@ -588,9 +599,21 @@ pub(crate) fn parse_meta<T: for<'de> Deserialize<'de>>(
     serde_json::from_str(raw).with_context(|| format!("GC table {:?}: malformed `{}` metadata", path, key))
 }
 
-/// A column by name with exactly the type the writer uses; anything else is an error, never a
-/// default (architecture.md, "three traps").
+/// A required column by name, with exactly the type the writer uses and **no null**: a wrong type
+/// or a null is an error, never a default (architecture.md, "three traps"). An Arrow array's
+/// `value(i)` at a null slot returns whatever bytes are there, so an unchecked null would be read
+/// as a real count.
 pub(crate) fn column<'a, A: Array + 'static>(batch: &'a RecordBatch, name: &str, path: &Path) -> Result<&'a A> {
+    let col = nullable_column::<A>(batch, name, path)?;
+    if col.null_count() > 0 {
+        return Err(anyhow!("GC table {:?}: required column `{}` has {} null value(s)", path, name,
+                           col.null_count()));
+    }
+    Ok(col)
+}
+
+/// A column whose nulls mean something (a model's `weight`: null where a length is unfitted).
+pub(crate) fn nullable_column<'a, A: Array + 'static>(batch: &'a RecordBatch, name: &str, path: &Path) -> Result<&'a A> {
     let col = batch.column_by_name(name)
         .ok_or_else(|| anyhow!("GC table {:?} has no `{}` column", path, name))?;
     col.as_any().downcast_ref::<A>().ok_or_else(|| anyhow!(
@@ -819,6 +842,10 @@ pub enum FitError {
     TerritoryMismatch { tally: String, expected: String },
     /// The fit configuration cannot define a model.
     InvalidConfig(String),
+    /// The support was built from another expected table than the one being fitted against.
+    ForeignSupport { support_from: String, expected: String },
+    /// No length had anything within the kernel's reach: every weight would be `None`.
+    NothingFitted,
 }
 
 impl std::fmt::Display for FitError {
@@ -833,6 +860,12 @@ impl std::fmt::Display for FitError {
                 f, "cannot fit a GC model: the tally was counted over territory {tally}, the \
                     expected table over {expected}"),
             FitError::InvalidConfig(why) => write!(f, "cannot fit a GC model: {why}"),
+            FitError::ForeignSupport { support_from, expected } => write!(
+                f, "cannot fit a GC model: the support was built from expected table {support_from}, \
+                    not {expected}"),
+            FitError::NothingFitted => write!(
+                f, "cannot fit a GC model: no length had a fragment in the support within the \
+                    kernel's reach"),
         }
     }
 }
@@ -898,6 +931,12 @@ fn fit_with_scales(
         return Err(FitError::ShapeMismatch(format!(
             "tally {}, expected table {}, support {}",
             obs.shape_string(), exp.shape_string(), sup.shape_string())));
+    }
+    if support.expected_sha256() != expected.digest() {
+        return Err(FitError::ForeignSupport {
+            support_from: support.expected_sha256().to_string(),
+            expected: expected.digest(),
+        });
     }
     if observed.territory_sha256() != expected.provenance().territory_sha256 {
         return Err(FitError::TerritoryMismatch {
@@ -1038,6 +1077,9 @@ fn fit_with_scales(
     if total > 0.0 {
         qc.clamped_weight_share = from_edge / total;
         qc.capped_weight_share = at_cap / total;
+    }
+    if qc.lengths_unfitted as usize == lengths.len() {
+        return Err(FitError::NothingFitted);
     }
     let (mean, p95) = smoothing_bias(&lengths, &smoothed, exp, obs, cfg);
     qc.smoothing_bias_mean = mean;
@@ -1293,7 +1335,7 @@ pub(crate) mod tests {
             support.cells_mut()[i] = (5..=15).contains(&k.gc) && k.gc != 9;
             capped.cells_mut()[i] = k.gc == 0;
         }
-        let support = CellSet::from_grid(support, 0.995);
+        let support = CellSet::from_grid(support, 0.995, "expected-table");
         let qc = FitQc { fragments: 123_456, clamped_weight_share: 0.0123, capped_weight_share: 0.004,
                          smoothing_bias_mean: 0.001, smoothing_bias_p95: 0.01,
                          lengths_unobserved: 0, lengths_unfitted: 1, fragments_outside_lengths: 0,
@@ -1415,6 +1457,41 @@ pub(crate) mod tests {
         for (what, needle, edit) in cases {
             let err = load_edited(&m, edit);
             assert!(err.contains(needle), "{what}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_null_in_a_required_column_is_refused() {
+        let m = small_model("t");
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("m.parquet");
+        m.write_parquet(&src).unwrap();
+        let (meta, _) = read_parquet_with_metadata(&src).unwrap();
+        let keys: Vec<GcKey> = m.weights().keys().collect();
+        for null_in in ["gc", "in_support"] {
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("length", DataType::UInt16, false),
+                Field::new("gc", DataType::UInt16, true),
+                Field::new("weight", DataType::Float64, true),
+                Field::new("in_support", DataType::Boolean, true),
+                Field::new("capped", DataType::Boolean, false),
+            ]));
+            let gc: Vec<Option<u16>> = keys.iter().enumerate()
+                .map(|(i, k)| if null_in == "gc" && i == 3 { None } else { Some(k.gc) }).collect();
+            let sup: Vec<Option<bool>> = m.support().grid().cells().iter().enumerate()
+                .map(|(i, &b)| if null_in == "in_support" && i == 3 { None } else { Some(b) }).collect();
+            let arrays: Vec<ArrayRef> = vec![
+                Arc::new(UInt16Array::from_iter_values(keys.iter().map(|k| k.length))),
+                Arc::new(UInt16Array::from(gc)),
+                Arc::new(Float64Array::from(m.weights().cells().to_vec())),
+                Arc::new(BooleanArray::from(sup)),
+                Arc::new(BooleanArray::from(m.capped().cells().to_vec())),
+            ];
+            let dst = dir.path().join(format!("null_{null_in}.parquet"));
+            let meta: Vec<(&str, String)> = meta.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+            write_parquet_with_metadata(&dst, schema, arrays, meta).unwrap();
+            let err = format!("{:#}", GcModel::load_parquet(&dst).unwrap_err());
+            assert!(err.contains(&format!("`{null_in}`")) && err.contains("null"), "{null_in}: {err}");
         }
     }
 
@@ -1550,7 +1627,7 @@ pub(crate) mod fit_tests {
         for (i, &c) in e.counts().cells().iter().enumerate() {
             g.cells_mut()[i] = c > 0;
         }
-        CellSet::from_grid(g, 1.0)
+        CellSet::from_grid(g, 1.0, &e.digest())
     }
 
     /// A peaked size distribution (mode 167 bp).
@@ -1769,7 +1846,7 @@ pub(crate) mod fit_tests {
         let e = expected_table(genome_shaped);
         let mut g = nonzero_support(&e).grid().clone();
         g.row_mut(150).iter_mut().for_each(|c| *c = false);
-        let s = CellSet::from_grid(g, 1.0);
+        let s = CellSet::from_grid(g, 1.0, &e.digest());
         let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
         assert_eq!(fit(&t, &e, &s, &FitConfig::default()).unwrap_err(), FitError::NoSupport { length: 150 });
     }
@@ -1854,6 +1931,37 @@ pub(crate) mod fit_tests {
         t.add_insert(&[b'A'; 250]);
         let q = fit(&t, &e, &nonzero_support(&e), &FitConfig::default()).unwrap().qc().clone();
         assert_eq!((q.fragments_without_key, q.fragments_outside_lengths), (2, 1));
+    }
+
+    #[test]
+    fn a_support_from_another_expected_table_is_refused() {
+        let (a, b) = (expected_table(genome_shaped), expected_table(uniform_ref));
+        assert_ne!(a.digest(), b.digest());
+        let foreign = CellSet::from_expected(&b, SUPPORT_SHARE).unwrap();
+        let t = tally_from(&a, &mean_tally(&a, 2e6, &steep(4.0)), None);
+        assert!(matches!(fit(&t, &a, &foreign, &FitConfig::default()), Err(FitError::ForeignSupport { .. })));
+        assert!(fit(&t, &a, &CellSet::from_expected(&a, SUPPORT_SHARE).unwrap(), &FitConfig::default()).is_ok());
+        // The source is part of the support's digest, so it reaches the model's provenance.
+        let same_cells = CellSet::from_grid(foreign.grid().clone(), foreign.share(), &a.digest());
+        assert_ne!(same_cells.digest(), foreign.digest());
+    }
+
+    #[test]
+    fn a_fit_with_every_length_unfitted_is_refused() {
+        // A support of only zero-expected cells (the extreme GC counts) informs nothing.
+        let e = expected_table(genome_shaped);
+        let mut g = GcGrid::new(LO, HI, K, false).unwrap();
+        for len in LO..=HI {
+            let row = e.counts().row(len);
+            let out = g.row_mut(len);
+            for (gc, &c) in row.iter().enumerate() {
+                out[gc] = c == 0;
+            }
+            assert!(out.iter().any(|&b| b), "length {len} needs a zero-expected cell");
+        }
+        let s = CellSet::from_grid(g, 1.0, &e.digest());
+        let t = tally_from(&e, &mean_tally(&e, 2e6, &steep(4.0)), None);
+        assert_eq!(fit(&t, &e, &s, &FitConfig::default()).unwrap_err(), FitError::NothingFitted);
     }
 
     #[test]
