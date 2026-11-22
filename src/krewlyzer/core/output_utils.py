@@ -214,6 +214,16 @@ def table_extensions(*, output_format: str, compress: bool) -> List[str]:
     ]
 
 
+def table_formats(*, output_format: str, compress: bool) -> str:
+    """`table_extensions` as one recorded value, e.g. ``.parquet`` or ``.parquet,.tsv``.
+
+    What a folder's tables are written in, so a rerun in another format can be refused: two
+    settings become one value, and ``-F parquet --compress`` equals ``-F parquet`` because
+    compression changes no Parquet file.
+    """
+    return ",".join(table_extensions(output_format=output_format, compress=compress))
+
+
 def table_paths(base: Path, *, output_format: str, compress: bool) -> List[Path]:
     """The files a run of this format writes for ``base`` (a path without its extension).
 

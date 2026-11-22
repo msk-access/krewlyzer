@@ -543,6 +543,17 @@ CONTRACT: Tuple[TableRule, ...] = (
                 ),
             ),
             ColumnRule(
+                "table_formats",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason=(
+                    "the extensions the folder's tables are written in (--output-format, "
+                    "--compress), recorded so a rerun in another format is refused; one "
+                    "pipeline configuration gives every sample the same value"
+                ),
+            ),
+            ColumnRule(
                 "pon_krewlyzer_version",
                 Kind.STRING,
                 Vary.NEVER,

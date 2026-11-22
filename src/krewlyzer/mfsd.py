@@ -36,6 +36,11 @@ logger = logging.getLogger("mfsd")
 from krewlyzer import _core
 
 
+def _sample_name(bam_input: Path, sample_name: Optional[str]) -> str:
+    """The name given, else the BAM's: one rule for the stage and the folder check."""
+    return sample_name or bam_input.stem.replace(".bam", "")
+
+
 def mfsd_stage(
     bam_input: Path,
     input_file: Path,
@@ -99,9 +104,7 @@ def mfsd_stage(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
 
-    # Derive sample name (use provided or derive from input filename)
-    if sample_name is None:
-        sample_name = bam_input.stem.replace(".bam", "")
+    sample_name = _sample_name(bam_input, sample_name)
 
     output_file = output / f"{sample_name}.mFSD.tsv"
 
@@ -299,6 +302,26 @@ def mfsd(
     - {sample}.mFSD.tsv: Summary statistics (46 columns)
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
+    # Before any work: mFSD's tables depend on no assay or targets, but a run in another format
+    # than the folder's leaves its earlier tables beside the new ones, and downstream reads the
+    # Parquet. run-all checks its own folder; it calls `mfsd_stage`, not this command.
+    from .core.output_provenance import (
+        ConfigurationMismatch,
+        refuse_a_different_configuration,
+    )
+
+    try:
+        refuse_a_different_configuration(
+            output,
+            _sample_name(bam_input, sample_name),
+            {},
+            output_format=output_format,
+            compress=compress,
+        )
+    except ConfigurationMismatch as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     try:
         written = mfsd_stage(
             bam_input,

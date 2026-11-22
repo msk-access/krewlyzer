@@ -3,7 +3,8 @@
 The leftover Greptile found needs a second run into a folder an earlier run used, with settings
 that write fewer tables. Each entry point that writes a settings-dependent set of tables checks
 the folder's record first: run-all, `extract` (which rewrites the record), the `run_features`
-tools, `motif`, `region-entropy` and `region-mds`. The comparison rules are pinned in
+tools, `motif`, `region-entropy`, `region-mds`, `uxm` and `mfsd`. The output format is one such
+setting for every one of them. The comparison rules are pinned in
 `tests/unit/test_configuration_guard.py`; these pin who checks, and that nothing is written.
 """
 
@@ -15,7 +16,7 @@ from typer.testing import CliRunner
 from conftest import requires_data
 from krewlyzer.cli import app
 
-from .runall import synth_run_all
+from .runall import record, synth_run_all, write_vcf
 from .synth import BASELINE, make_sample
 
 pytestmark = [pytest.mark.invariant, requires_data]
@@ -142,10 +143,14 @@ def test_a_tool_that_writes_no_gene_fsc_ignores_the_e1_setting(sample, tmp_path)
 
 
 def test_uxm_is_never_refused(sample, tmp_path):
-    """Guard: its tables do not depend on assay or targets."""
+    """Guard: its tables do not depend on assay or targets. At the folder's own format: any tool
+    is refused another one (`test_a_tool_without_the_format_into_a_parquet_folder_is_refused`).
+    """
     out = tmp_path / "out"
     assert synth_run_all(sample, out, assay="xs1") is None
-    result = _cli("uxm", "-i", sample.bam, "-o", out, "--sample-name", "S")
+    result = _cli(
+        "uxm", "-i", sample.bam, "-o", out, "--sample-name", "S", "-F", "parquet"
+    )
     assert "fresh output folder" not in result.output
 
 
@@ -221,3 +226,117 @@ def test_e1_aggregation_does_not_matter_without_gene_fsc(sample, tmp_path):
     out = tmp_path / "out"
     assert synth_run_all(sample, out) is None
     assert synth_run_all(sample, out, disable_e1_aggregation=True) is None
+
+
+# The output format. Every CLI defaults to `-F tsv` and Nextflow writes Parquet, so a tool run by
+# hand without `-F` into a Nextflow folder rewrote its tables as TSV and left the Parquet ones,
+# which downstream reads, from the earlier run.
+
+
+def _fsc(out, sample, *format_args):
+    return _cli(
+        "fsc",
+        "-i",
+        out / "S.bed.gz",
+        "-o",
+        out,
+        "-s",
+        "S",
+        "--skip-target-regions",
+        "--skip-pon",
+        "-b",
+        sample.assets.bins,
+        *format_args,
+    )
+
+
+def test_a_tool_without_the_format_into_a_parquet_folder_is_refused(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+    result = _fsc(out, sample)
+    assert result.exit_code == 1, result.output
+    assert "table_formats" in result.output and "Traceback" not in result.output
+    assert "--output-format parquet" in " ".join(result.output.split())
+    assert _files(out) == before, "a refused run wrote into the folder"
+
+
+def test_a_tool_at_the_folder_format_is_allowed(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    result = _fsc(out, sample, "--output-format", "parquet")
+    assert result.exit_code == 0, result.output
+
+
+def test_a_both_folder_allows_a_both_tool(sample, tmp_path):
+    """Guard: `both` writes two records, which are not by themselves a mixed folder."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, output_format="both") is None
+    result = _fsc(out, sample, "--output-format", "both")
+    assert result.exit_code == 0, result.output
+
+
+def test_a_tsv_run_all_then_a_parquet_run_all_is_refused(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, output_format="tsv") is None
+    before = _files(out)
+    assert synth_run_all(sample, out) == 1
+    assert _files(out) == before
+
+
+def test_mfsd_without_the_format_into_a_parquet_folder_is_refused(sample, tmp_path):
+    """`mfsd` was no configuration check site: its tables depend on no assay or targets. Their
+    format still decides which copy downstream reads."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    vcf = write_vcf(tmp_path / "variants.vcf")
+    before = _files(out)
+    result = _cli(
+        "mfsd",
+        "-i",
+        sample.bam,
+        "-V",
+        vcf,
+        "-o",
+        out,
+        "-s",
+        "S",
+        "-g",
+        sample.reference,
+    )
+    assert result.exit_code == 1, result.output
+    assert "table_formats" in result.output and "Traceback" not in result.output
+    assert _files(out) == before
+
+
+def test_the_record_says_the_format_it_was_written_in(sample, tmp_path):
+    """Invariant #1: two formats, two recorded values."""
+    assert synth_run_all(sample, tmp_path / "p") is None
+    assert synth_run_all(sample, tmp_path / "b", output_format="both") is None
+    assert record(tmp_path / "p")["table_formats"] == ".parquet"
+    assert record(tmp_path / "b")["table_formats"] == ".parquet,.tsv"
+
+
+def test_extract_records_its_own_format(sample, tmp_path):
+    """`extract` writes the record from scratch and takes `-F`: it decides this one itself."""
+    import pandas as pd
+
+    out = tmp_path / "out"
+    result = _cli(
+        "extract",
+        "-i",
+        sample.bam,
+        "--reference",
+        sample.reference,
+        "--output",
+        out,
+        "--sample-name",
+        "S",
+        "--skip-target-regions",
+        "--output-format",
+        "tsv",
+        "--compress",
+    )
+    assert result.exit_code == 0, result.output
+    row = pd.read_csv(out / "S.metadata.tsv.gz", sep="\t").iloc[0]
+    assert row["table_formats"] == ".tsv.gz"

@@ -30,12 +30,13 @@ from .output_utils import (
     read_exact_table,
     strip_table_extension,
     table_extensions,
+    table_formats,
     write_table,
 )  # Unified TSV/Parquet reader + writer for metadata
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
-from .output_provenance import Outcome
+from .output_provenance import TABLE_FORMATS, Outcome
 from .motif_processor import compute_mds
 from ..assets import AssetManager
 from .gc_assets import (
@@ -825,6 +826,8 @@ def write_extraction_outputs(
         ),
         "gc_fetch_failed": int(result.contig_guard.get("gc_fetch_failed", 0)),
         "timestamp": datetime.now().isoformat(),
+        # What this folder's tables are written in, so a rerun in another format is refused.
+        TABLE_FORMATS: table_formats(output_format=output_format, compress=compress),
     }
 
     # Compute GC correction factors

@@ -475,6 +475,87 @@ def _stage_findings(
     return findings
 
 
+#: Every table the contract or a stage names, and the record, without its extension: the files
+#: `FORMAT.MIXED` looks at. BED, JSON, logs and intermediates are not tables anything reads.
+_TABLE_BASES = tuple(
+    sorted(
+        {rule.suffix[: -len(".parquet")] for rule in CONTRACT}
+        | {s[: -len(".parquet")] for tables in STAGE_TABLES.values() for s in tables}
+        | {COMPLETION_MARKER[: -len(".parquet")]}
+    )
+)
+_TABLE_EXTENSIONS = (".parquet", ".tsv", ".tsv.gz")
+
+
+def _format_findings(sample: str, sample_dir: Path) -> List[Finding]:
+    """Tables in an extension outside the record's `table_formats` (`FORMAT.MIXED`).
+
+    The configuration guard refuses a rerun in another format before it writes, except under
+    Nextflow: each task starts in an empty folder, and `publishDir` copies a rerun's files over an
+    `--outdir` that may hold an earlier format. A table in another extension means a later run
+    wrote here in another format, so the Parquet downstream reads may be the earlier run's. A
+    record written before `table_formats` existed cannot tell a `both` folder from a mixed one;
+    when it holds tables in more than one extension that is said (`FORMAT.UNJUDGED`), not passed.
+    """
+    marker = sample_dir / f"{sample}{COMPLETION_MARKER}"
+    if not marker.exists():
+        return []  # COMPLETION.MARKER_ABSENT says so
+    try:
+        if "table_formats" in pq.read_schema(marker).names:
+            value = (
+                pq.read_table(marker, columns=["table_formats"]).column(0)[0].as_py()
+            )
+        else:
+            value = None
+    except Exception as exc:  # the contract loop reports an unreadable marker
+        logger.debug("%s: table_formats unreadable (%s)", marker.name, exc)
+        return []
+    present: Dict[str, List[str]] = defaultdict(list)
+    for base in _TABLE_BASES:
+        for ext in _TABLE_EXTENSIONS:
+            name = f"{sample}{base}{ext}"
+            if (sample_dir / name).exists():
+                present[ext].append(name)
+    if value:
+        recorded = value.split(",")
+        stray = sorted(
+            n for ext, names in present.items() if ext not in recorded for n in names
+        )
+        if not stray:
+            return []
+        return [
+            Finding(
+                id="FORMAT.MIXED",
+                severity=Severity.ERROR,
+                category=Category.COMPLETION,
+                message=(
+                    f"{len(stray)} table(s) in another format than this sample's record "
+                    f"({value}): a later run wrote here with another --output-format, so the "
+                    "Parquet tables downstream reads may be an earlier run's. Rerun the sample "
+                    "into a fresh output folder"
+                ),
+                samples=[sample],
+                evidence={"table_formats": value, "files": stray},
+            )
+        ]
+    if len(present) > 1:
+        return [
+            Finding(
+                id="FORMAT.UNJUDGED",
+                severity=Severity.SKIP,
+                category=Category.COMPLETION,
+                message=(
+                    f"tables in {', '.join(sorted(present))}, and a record from before "
+                    "table_formats was recorded: a --output-format both run and two runs in "
+                    "different formats look the same, so this folder could not be checked"
+                ),
+                samples=[sample],
+                evidence={"extensions": sorted(present)},
+            )
+        ]
+    return []
+
+
 def _absence_explained(suffix: str, outcomes: Dict[str, Tuple[str, str]]) -> bool:
     """Whether a recorded outcome already accounts for this table being absent.
 
@@ -535,6 +616,7 @@ def check_sample(sample: str, sample_dir: Path) -> Tuple[List[Finding], Fingerpr
     # Also once: what each optional stage did. Empty for an older build's directory.
     outcomes = _stage_outcomes(sample_dir, sample)
     findings.extend(_stage_findings(sample, sample_dir, outcomes))
+    findings.extend(_format_findings(sample, sample_dir))
     stage_status = {stage: status for stage, (status, _) in outcomes.items()}
 
     for rule in CONTRACT:

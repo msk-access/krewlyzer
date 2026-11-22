@@ -69,6 +69,22 @@ All notable changes to this project will be documented in this file.
   with the other one is still refused. Nextflow cannot be checked this way (each
   task starts in an empty folder); its docs now say to use a fresh `--outdir` per configuration.
 
+- **A rerun into a sample's folder must also use the output format recorded there.** A rerun in
+  another format rewrote its tables in that format and left the first run's beside them, and each
+  reader then picked by its own rule: downstream, which reads only Parquet, the earlier run's
+  Parquet; `resolve_table_path` (the PON build from outputs) the earlier run's TSV. Every CLI
+  defaults to `-F tsv` and Nextflow writes Parquet, so a tool run by hand without `-F` into a
+  Nextflow folder did this. The record gains `table_formats` (`.parquet`, `.tsv.gz`,
+  `.parquet,.tsv`, ...), written by every writer of the record from its own `--output-format` and
+  `--compress`; the configuration check compares it on every call, so every entry point refuses
+  another format and names the option to pass. `mfsd` now runs the check too, for the format
+  alone. A record from before this release is judged by its record files (one `.parquet` record
+  is Parquet; a `.parquet` and a `.tsv` are `both`). A hand rerun without `-F` into a Parquet
+  folder that worked before is now refused: each one left stale Parquet. For Nextflow, where no
+  task can see the published folder, `validate-output` reports a table in an extension outside
+  `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with tables in two
+  extensions as `FORMAT.UNJUDGED` (skip).
+
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
   `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
   the record helpers (`record_path`, `recorded_status`, `record_names_pon`, `record_pon_used`,

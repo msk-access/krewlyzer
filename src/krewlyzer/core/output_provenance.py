@@ -52,6 +52,7 @@ from typing import Any, Dict, Mapping, Optional
 from .output_utils import (
     read_exact_table,
     resolve_table_path,
+    table_formats,
     table_paths,
     write_table,
 )
@@ -188,6 +189,46 @@ class ConfigurationMismatch(ValueError):
 #: `target_regions` are written at extraction; `fsc_e1_aggregation` by run-all's own stamp.
 CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation")
 
+#: The record column naming the extensions the folder's tables are written in (`table_formats`).
+#: Not one of `CONFIGURATION_FIELDS`: every run decides its own format, so the guard takes it from
+#: the run's `output_format`/`compress` rather than from ``given``, and every writer of the record
+#: records it. A rerun in another format leaves the first run's tables beside its own, and each
+#: reader then picks by its own rule: downstream reads the old Parquet.
+TABLE_FORMATS = "table_formats"
+
+#: Every extension a record can have, in `table_extensions` order, so that the extensions present
+#: join into the value a run of that format records.
+_RECORD_EXTENSIONS = (".parquet", ".tsv", ".tsv.gz")
+
+
+def _recorded_table_formats(output_dir: Path, sample: str, frame: Any) -> str:
+    """The folder's `table_formats`: as recorded, else the extensions of the record files present.
+
+    A record written before the field existed (every 0.9.0 folder) still says what it is by its
+    own extension, and `write_table` writes the record in every format a run writes: one
+    ``.parquet`` record is ``.parquet``, a ``.parquet`` and a ``.tsv`` are ``both``. The residual:
+    a Parquet run followed by a TSV run also leaves two records, and reads as ``both``.
+    """
+    if TABLE_FORMATS in frame.columns:
+        value = _as_text(frame[TABLE_FORMATS].iloc[0])
+        if value:
+            return value
+    base = Path(output_dir) / f"{sample}.metadata"
+    return ",".join(
+        ext for ext in _RECORD_EXTENSIONS if (base.parent / (base.name + ext)).exists()
+    )
+
+
+def _format_flags(value: str) -> Optional[str]:
+    """The options a run needs to write `table_formats` ``value``, or None for a mixed folder."""
+    for output_format in ("parquet", "tsv", "both"):
+        for compress in (False, True):
+            if table_formats(output_format=output_format, compress=compress) == value:
+                return f"--output-format {output_format}" + (
+                    " --compress" if compress else ""
+                )
+    return None
+
 
 def _setting(field: str, value: Any) -> str:
     """A setting in the form two runs can compare."""
@@ -236,11 +277,16 @@ def refuse_a_different_configuration(
     """Refuse a run whose settings differ from the ones the folder's record holds.
 
     Called by every entry point that writes a settings-dependent set of tables, before it writes
-    anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy` and
-    `region-mds` (not run-all's own calls or the PON build, which own the record they write).
+    anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy`,
+    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (the format alone); not
+    run-all's own calls or the PON build, which own the record they write.
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
     record does not hold (written before the field existed).
+
+    The output format is always compared, from ``output_format``/``compress``, and is not a
+    ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
+    its record files (`_recorded_table_formats`).
 
     Raises `ConfigurationMismatch`, naming each differing setting with both values, and saying to
     use a fresh output folder: a legitimate change of settings changes every table anyway.
@@ -262,12 +308,25 @@ def refuse_a_different_configuration(
             differing.append(
                 f"{field}={recorded or '(none)'} there, {ours or '(none)'} here"
             )
+    rerun_with = ""
+    recorded_formats = _recorded_table_formats(output_dir, sample, frame)
+    our_formats = table_formats(output_format=output_format, compress=compress)
+    if recorded_formats != our_formats:
+        differing.append(
+            f"{TABLE_FORMATS}={recorded_formats} there, {our_formats} here"
+        )
+        flags = _format_flags(recorded_formats)
+        rerun_with = (
+            f" This folder's tables are {recorded_formats}: rerun with {flags}."
+            if flags
+            else f" This folder already holds tables in {recorded_formats}."
+        )
     if differing:
         raise ConfigurationMismatch(
             f"{sample} in {Path(output_dir).name}/ was written with other settings: "
             + "; ".join(differing)
             + ". A rerun with other settings would leave the first run's extra tables looking "
-            "current. Use a fresh output folder, or remove this one."
+            "current." + rerun_with + " Use a fresh output folder, or remove this one."
         )
 
 
@@ -438,6 +497,7 @@ def stamp_metadata(
         tag = population.replace("_", "")  # off_target -> offtarget
         frame[f"gc_factors_{tag}"] = choice.record()
         frame[f"gc_correction_applied_{tag}"] = bool(choice.found)
+    frame[TABLE_FORMATS] = table_formats(output_format=output_format, compress=compress)
 
     write_table(frame, base, output_format=output_format, compress=compress)
 
@@ -592,6 +652,10 @@ def record_stage_outcomes(
         for stage, outcome in outcomes.items():
             frame[f"{stage}_status"] = outcome.status
             frame[f"{stage}_error"] = outcome.error_class
+        # The run's formats, not this copy's: one copy of a `both` record is `.parquet`.
+        frame[TABLE_FORMATS] = table_formats(
+            output_format=output_format, compress=compress
+        )
         write_table(frame, base, output_format=fmt, compress=gz)
         written = True
     if not written:

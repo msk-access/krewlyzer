@@ -14,9 +14,11 @@ nextflow run msk-access/krewlyzer \
 !!! warning "One `--outdir` per configuration"
     Results are copied into `{outdir}/{sample}/`, and a later run copies its files over the
     earlier one's without removing any the later run did not make. Rerunning a sample with
-    different settings (another `--assay`, no targets) into the same `--outdir` would leave the
-    first run's extra tables beside the second run's record, read as current. The CLI refuses
-    such a rerun; the pipeline cannot see the published folder, so use a fresh `--outdir`.
+    different settings (another `--assay`, no targets, another `output_format`) into the same
+    `--outdir` would leave the first run's extra tables beside the second run's record, read as
+    current. The CLI refuses such a rerun; the pipeline cannot see the published folder, so use a
+    fresh `--outdir`. `krewlyzer validate-output` on the published folder reports tables in two
+    formats as `FORMAT.MIXED`; another assay or targets it cannot see.
 
 ## Workflow Architecture
 
