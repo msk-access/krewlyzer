@@ -38,6 +38,8 @@ from .contract import (
     STAGES,
     TableRule,
 )
+from ..core.output_provenance import TABLE_FORMATS
+from ..core.output_utils import TABLE_EXTENSIONS
 from .degeneracy import Observation
 from .findings import Category, Finding, Severity
 
@@ -484,7 +486,6 @@ _TABLE_BASES = tuple(
         | {COMPLETION_MARKER[: -len(".parquet")]}
     )
 )
-_TABLE_EXTENSIONS = (".parquet", ".tsv", ".tsv.gz")
 
 
 def _format_findings(sample: str, sample_dir: Path) -> List[Finding]:
@@ -501,10 +502,8 @@ def _format_findings(sample: str, sample_dir: Path) -> List[Finding]:
     if not marker.exists():
         return []  # COMPLETION.MARKER_ABSENT says so
     try:
-        if "table_formats" in pq.read_schema(marker).names:
-            value = (
-                pq.read_table(marker, columns=["table_formats"]).column(0)[0].as_py()
-            )
+        if TABLE_FORMATS in pq.read_schema(marker).names:
+            value = pq.read_table(marker, columns=[TABLE_FORMATS]).column(0)[0].as_py()
         else:
             value = None
     except Exception as exc:  # the contract loop reports an unreadable marker
@@ -512,7 +511,7 @@ def _format_findings(sample: str, sample_dir: Path) -> List[Finding]:
         return []
     present: Dict[str, List[str]] = defaultdict(list)
     for base in _TABLE_BASES:
-        for ext in _TABLE_EXTENSIONS:
+        for ext in TABLE_EXTENSIONS:
             name = f"{sample}{base}{ext}"
             if (sample_dir / name).exists():
                 present[ext].append(name)

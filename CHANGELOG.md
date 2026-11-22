@@ -79,7 +79,10 @@ All notable changes to this project will be documented in this file.
   `--compress`; the configuration check compares it on every call, so every entry point refuses
   another format and names the option to pass. `mfsd` now runs the check too, for the format
   alone. A record from before this release is judged by its record files (one `.parquet` record
-  is Parquet; a `.parquet` and a `.tsv` are `both`). A hand rerun without `-F` into a Parquet
+  is Parquet; a `.parquet` and a `.tsv` are `both`, though no refusal then advises `-F both`, since
+  two runs look the same). A copy of the record in an extension the field does not name (a TSV
+  run published over a Parquet one) makes the folder mixed, refused whatever the format. A hand
+  rerun without `-F` into a Parquet
   folder that worked before is now refused: each one left stale Parquet. For Nextflow, where no
   task can see the published folder, `validate-output` reports a table in an extension outside
   `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with tables in two
@@ -215,6 +218,17 @@ All notable changes to this project will be documented in this file.
   the base since, and the result is a tree nobody has tested.
 
 ### Fixed
+
+- **mFSD and UXM leave only the run's formats.** Rust writes each as `.tsv`; both stages converted
+  it and never removed it, so every Parquet run left a `.mFSD.tsv` / `.UXM.tsv` beside the
+  `.parquet` (and `both --compress` a plain `.tsv` beside the `.tsv.gz`), and `-F tsv --compress`
+  never gzipped `mFSD.distributions`. A stray format is what `resolve_table_path` readers pick
+  first and what `validate-output` now reports (`FORMAT.MIXED`). One helper,
+  `output_utils.convert_rust_tsv`, converts and removes the raw TSV unless it is an output, and
+  raises when Rust wrote nothing: the stage used to log a warning and be recorded as `ran` with
+  no table. The tool-level Nextflow `mfsd` and `uxm` modules declared a required `.tsv` output,
+  met only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
+  `table`). The other tool-level modules still declare `.tsv` outputs under a Parquet default.
 
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not

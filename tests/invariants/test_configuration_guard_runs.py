@@ -142,7 +142,7 @@ def test_a_tool_that_writes_no_gene_fsc_ignores_the_e1_setting(sample, tmp_path)
     )
 
 
-def test_uxm_is_never_refused(sample, tmp_path):
+def test_uxm_is_not_refused_for_the_assay_or_targets(sample, tmp_path):
     """Guard: its tables do not depend on assay or targets. At the folder's own format: any tool
     is refused another one (`test_a_tool_without_the_format_into_a_parquet_folder_is_refused`).
     """
@@ -151,7 +151,7 @@ def test_uxm_is_never_refused(sample, tmp_path):
     result = _cli(
         "uxm", "-i", sample.bam, "-o", out, "--sample-name", "S", "-F", "parquet"
     )
-    assert "fresh output folder" not in result.output
+    assert result.exit_code == 0, result.output
 
 
 def test_the_in_process_pon_build_is_never_refused(sample, tmp_path):

@@ -21,8 +21,9 @@ process KREWLYZER_MFSD {
     path correction_factors       // Optional: pre-computed GC correction factors
 
     output:
-    tuple val(meta), path("*.mFSD.tsv")              , emit: mfsd
-    tuple val(meta), path("*.mFSD.distributions.tsv"), emit: distributions, optional: true
+    // In params.output_format: krewlyzer leaves only the run's formats, not Rust's raw TSV.
+    tuple val(meta), path("*.mFSD.{parquet,tsv,tsv.gz}")              , emit: mfsd
+    tuple val(meta), path("*.mFSD.distributions.{parquet,tsv,tsv.gz}"), emit: distributions, optional: true
     tuple val(meta), path("*.filtered.maf")          , emit: filtered_maf, optional: true
     path "versions.yml"                              , emit: versions
 

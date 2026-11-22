@@ -17,8 +17,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .core.output_utils import (
-    read_exact_table,
-    write_table,
+    convert_rust_tsv,
+    table_paths,
 )  # Unified I/O for Parquet support
 
 console = Console(stderr=True)
@@ -147,64 +147,22 @@ def mfsd_stage(
         min_baseq=min_baseq,
     )
 
-    # Rust always writes TSV; convert to Parquet/both afterward if requested.
-    # This two-step approach avoids re-implementing Arrow schema in Rust for mFSD.
+    # Rust always writes TSV; it becomes exactly the run's formats here (Parquet, gzip), and the
+    # raw TSV goes unless it is one of them. This two-step approach avoids re-implementing the
+    # Arrow schema in Rust for mFSD.
     logger.info(f"mFSD complete: {output_file} (raw TSV from Rust)")
     logger.debug(
         f"mFSD post-process: output_format={output_format!r}, compress={compress}"
     )
-    if output_format != "tsv":
-        logger.debug(f"mFSD: converting {output_file.name} → format={output_format!r}")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df,
-                output_file.with_suffix(""),
-                output_format=output_format,
-                compress=compress,
-            )
-        else:
-            logger.warning(
-                f"mFSD: could not read {output_file.name} for format conversion"
-            )
-    elif compress:
-        # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
-        logger.debug(f"mFSD: compressing {output_file.name} → .tsv.gz")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df, output_file.with_suffix(""), output_format="tsv", compress=True
-            )
+    convert_rust_tsv(output_file, output_format=output_format, compress=compress)
 
     if output_distributions:
         dist_file = output_file.with_suffix(".distributions.tsv")
         logger.info(f"Distributions: {dist_file}")
-        if output_format != "tsv":
-            logger.debug(
-                f"mFSD: converting {dist_file.name} → format={output_format!r}"
-            )
-            # read_exact_table: Rust wrote this exact TSV. read_table is
-            # parquet-first and would prefer a stale `.parquet` sibling from an
-            # earlier run into the same directory (c92ed86).
-            df_dist = read_exact_table(dist_file)
-            if df_dist is not None:
-                write_table(
-                    df_dist,
-                    dist_file.with_suffix(""),
-                    output_format=output_format,
-                    compress=compress,
-                )
-            else:
-                logger.warning(
-                    f"mFSD: could not read {dist_file.name} for format conversion"
-                )
-    return output_file
+        convert_rust_tsv(dist_file, output_format=output_format, compress=compress)
+    return table_paths(
+        output_file.with_suffix(""), output_format=output_format, compress=compress
+    )[0]
 
 
 def mfsd(
@@ -323,7 +281,7 @@ def mfsd(
         raise typer.Exit(1)
 
     try:
-        written = mfsd_stage(
+        mfsd_stage(
             bam_input,
             input_file,
             output,
@@ -353,7 +311,7 @@ def mfsd(
 
     record_stage_outcomes(
         output,
-        written.name[: -len(".mFSD.tsv")],  # the sample name the stage used
+        _sample_name(bam_input, sample_name),
         {"mfsd": Outcome("ran")},
         output_format=output_format,
         compress=compress,

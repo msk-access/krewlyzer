@@ -149,6 +149,6 @@ workflow TOOL_LEVEL {
     ocf      = KREWLYZER_OCF.out.tsv
     mds      = KREWLYZER_MOTIF.out.mds
     mfsd     = KREWLYZER_MFSD.out.mfsd
-    uxm      = KREWLYZER_UXM.out.tsv
+    uxm      = KREWLYZER_UXM.out.table
     versions = ch_versions
 }

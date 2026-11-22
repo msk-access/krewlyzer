@@ -1005,6 +1005,7 @@ Per-tissue × per-size fragment distributions.
 ### mFSD (Mutant Fragment Size Distribution)
 
 **File:** `{sample}.mFSD.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** `--maf` / `run-all` with MAF input
 
 Per-variant fragment size analysis. Compares ALT-bearing fragments vs REF, NonREF, and N (uncertain) allele classes.
@@ -1067,6 +1068,7 @@ Per-variant raw size histograms for manual inspection.
 ### UXM (Methylation)
 
 **File:** `{sample}.UXM.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** Methylation-enabled BAM input
 
 CpG methylation classification per genomic region. Each fragment is classified as Unmethylated (U), Partially-methylated (X), or fully Methylated (M).

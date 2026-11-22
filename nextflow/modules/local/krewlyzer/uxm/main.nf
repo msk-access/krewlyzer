@@ -17,7 +17,8 @@ process KREWLYZER_UXM {
     path fasta
 
     output:
-    tuple val(meta), path("*.UXM.tsv"), emit: tsv
+    // In params.output_format: krewlyzer leaves only the run's formats, not Rust's raw TSV.
+    tuple val(meta), path("*.UXM.{parquet,tsv,tsv.gz}"), emit: table
     path "versions.yml"               , emit: versions
 
     when:

@@ -21,8 +21,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .core.output_utils import (
-    read_exact_table,
-    write_table,
+    convert_rust_tsv,
+    table_paths,
 )  # Unified I/O for Parquet support
 
 console = Console(stderr=True)
@@ -148,41 +148,17 @@ def uxm_stage(
         "SE",  # pe_type (single-end default)
     )
 
-    # Rust always writes TSV; convert to Parquet/both afterward if requested.
-    # This two-step approach avoids re-implementing Arrow schema in Rust for UXM.
+    # Rust always writes TSV; it becomes exactly the run's formats here (Parquet, gzip), and the
+    # raw TSV goes unless it is one of them. This two-step approach avoids re-implementing the
+    # Arrow schema in Rust for UXM.
     logger.info(f"UXM complete: {output_file} (raw TSV from Rust)")
     logger.debug(
         f"UXM post-process: output_format={output_format!r}, compress={compress}"
     )
-    if output_format != "tsv":
-        logger.debug(f"UXM: converting {output_file.name} → format={output_format!r}")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df,
-                output_file.with_suffix(""),
-                output_format=output_format,
-                compress=compress,
-            )
-        else:
-            logger.warning(
-                f"UXM: could not read {output_file.name} for format conversion"
-            )
-    elif compress:
-        # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
-        logger.debug(f"UXM: compressing {output_file.name} → .tsv.gz")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df, output_file.with_suffix(""), output_format="tsv", compress=True
-            )
-    return output_file
+    convert_rust_tsv(output_file, output_format=output_format, compress=compress)
+    return table_paths(
+        output_file.with_suffix(""), output_format=output_format, compress=compress
+    )[0]
 
 
 def uxm(
@@ -247,7 +223,7 @@ def uxm(
         raise typer.Exit(1)
 
     try:
-        written = uxm_stage(
+        uxm_stage(
             bam_input,
             output,
             sample_name,
@@ -272,7 +248,7 @@ def uxm(
 
     record_stage_outcomes(
         output,
-        written.name[: -len(".UXM.tsv")],  # the sample name the stage used
+        _sample_name(bam_input, sample_name),
         {"uxm": Outcome("ran")},
         output_format=output_format,
         compress=compress,

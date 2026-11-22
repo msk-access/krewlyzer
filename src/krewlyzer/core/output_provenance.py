@@ -47,11 +47,13 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .output_utils import (
     read_exact_table,
+    TABLE_EXTENSIONS,
     resolve_table_path,
+    table_extensions,
     table_formats,
     table_paths,
     write_table,
@@ -196,27 +198,44 @@ CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation
 #: reader then picks by its own rule: downstream reads the old Parquet.
 TABLE_FORMATS = "table_formats"
 
-#: Every extension a record can have, in `table_extensions` order, so that the extensions present
-#: join into the value a run of that format records.
-_RECORD_EXTENSIONS = (".parquet", ".tsv", ".tsv.gz")
+
+def _as_table_formats(extensions: Sequence[str]) -> str:
+    """The `table_formats` a run writing exactly these extensions records, else the extensions
+    joined: a set no single run writes, which equals no run's value."""
+    for output_format in ("parquet", "tsv", "both"):
+        for compress in (False, True):
+            if set(
+                table_extensions(output_format=output_format, compress=compress)
+            ) == set(extensions):
+                return table_formats(output_format=output_format, compress=compress)
+    return ",".join(sorted(extensions))
 
 
-def _recorded_table_formats(output_dir: Path, sample: str, frame: Any) -> str:
-    """The folder's `table_formats`: as recorded, else the extensions of the record files present.
+def _recorded_table_formats(
+    output_dir: Path, sample: str, frame: Any
+) -> Tuple[str, bool]:
+    """The folder's `table_formats`, and whether it is certain enough to advise a rerun with it.
 
-    A record written before the field existed (every 0.9.0 folder) still says what it is by its
-    own extension, and `write_table` writes the record in every format a run writes: one
-    ``.parquet`` record is ``.parquet``, a ``.parquet`` and a ``.tsv`` are ``both``. The residual:
-    a Parquet run followed by a TSV run also leaves two records, and reads as ``both``.
+    As recorded, unless a copy of the record exists in an extension the value does not name: a
+    run in another format wrote that copy (a TSV run published over a Parquet one), so the folder
+    is mixed, and the value says so and equals no run's. A record written before the field
+    existed (every 0.9.0 folder) is judged by its own extensions, since `write_table` writes the
+    record in every format a run writes: one ``.parquet`` record is ``.parquet``, a ``.parquet``
+    and a ``.tsv`` are ``both``. The residual: an older Parquet run followed by an older TSV run
+    also leaves two records, so a ``both`` rerun is let through, and no refusal advises one.
     """
-    if TABLE_FORMATS in frame.columns:
-        value = _as_text(frame[TABLE_FORMATS].iloc[0])
-        if value:
-            return value
     base = Path(output_dir) / f"{sample}.metadata"
-    return ",".join(
-        ext for ext in _RECORD_EXTENSIONS if (base.parent / (base.name + ext)).exists()
+    present = [e for e in TABLE_EXTENSIONS if (base.parent / (base.name + e)).exists()]
+    value = (
+        _as_text(frame[TABLE_FORMATS].iloc[0]) if TABLE_FORMATS in frame.columns else ""
     )
+    if value:
+        named = value.split(",")
+        stray = [e for e in present if e not in named]
+        if stray:
+            return f"{_as_table_formats(named + stray)} (mixed)", False
+        return value, True
+    return _as_table_formats(present), len(present) <= 1
 
 
 def _format_flags(value: str) -> Optional[str]:
@@ -309,13 +328,13 @@ def refuse_a_different_configuration(
                 f"{field}={recorded or '(none)'} there, {ours or '(none)'} here"
             )
     rerun_with = ""
-    recorded_formats = _recorded_table_formats(output_dir, sample, frame)
+    recorded_formats, certain = _recorded_table_formats(output_dir, sample, frame)
     our_formats = table_formats(output_format=output_format, compress=compress)
     if recorded_formats != our_formats:
         differing.append(
             f"{TABLE_FORMATS}={recorded_formats} there, {our_formats} here"
         )
-        flags = _format_flags(recorded_formats)
+        flags = _format_flags(recorded_formats) if certain else None
         rerun_with = (
             f" This folder's tables are {recorded_formats}: rerun with {flags}."
             if flags

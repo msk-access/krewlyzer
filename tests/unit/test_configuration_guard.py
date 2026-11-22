@@ -187,3 +187,27 @@ def test_the_table_format_is_not_a_given_setting(tmp_path):
         refuse_a_different_configuration(
             out, "s", {"table_formats": ".parquet"}, **_FORMAT
         )
+
+
+def test_a_record_copy_in_a_format_the_field_does_not_name_is_mixed(tmp_path):
+    """A TSV run published over a Parquet one leaves two records that disagree; reading only its
+    own copy, a `-F tsv` rerun matched and ran (review of the branch)."""
+    _records(tmp_path, ".parquet", table_formats=".parquet")
+    _records(tmp_path, ".tsv", table_formats=".tsv")
+    with pytest.raises(ConfigurationMismatch, match="table_formats") as refused:
+        refuse_a_different_configuration(
+            tmp_path, "s", {}, output_format="tsv", compress=False
+        )
+    assert "--output-format" not in str(refused.value)
+
+
+def test_an_older_two_record_folder_is_not_told_to_rerun_as_both(tmp_path):
+    """Two old records may be a `both` run or two runs: `-F both` would keep both runs' stale
+    tables, so the only advice is a fresh folder."""
+    out = _records(tmp_path, ".parquet", ".tsv")
+    with pytest.raises(ConfigurationMismatch) as refused:
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="parquet", compress=False
+        )
+    assert "--output-format both" not in str(refused.value)
+    assert "fresh output folder" in str(refused.value)
