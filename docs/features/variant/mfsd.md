@@ -101,6 +101,8 @@ krewlyzer run-all -i sample.all_unique.bam --mfsd-bam sample.duplex.bam \
 !!! note
     When `--mfsd-bam` is provided, duplex weighting is **auto-enabled**.
     If no duplex tags (cD/Marianas) are found, a warning is logged but processing continues with weight=1.0.
+    A `--mfsd-bam` that does not exist fails mFSD (`mfsd_status=failed` in the metadata) rather
+    than falling back to the main BAM with duplex weighting off, as it once did silently.
 
 ### Via Nextflow Samplesheet
 

@@ -37,6 +37,7 @@ logger = logging.getLogger("wps")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.output_provenance import ConfigurationMismatch
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
 
@@ -237,6 +238,11 @@ def wps(
         if outputs.wps_panel and outputs.wps_panel.exists():
             logger.info(f"✅ WPS panel: {outputs.wps_panel}")
 
+    except (
+        ConfigurationMismatch
+    ) as e:  # before any work: other settings than the folder's
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)

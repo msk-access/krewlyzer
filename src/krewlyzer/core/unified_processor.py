@@ -28,7 +28,7 @@ Usage:
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 import logging
 import time
 
@@ -44,6 +44,7 @@ from .fsd_processor import process_fsd
 from .wps_processor import post_process_wps
 from .pon_integration import load_requested_pon
 from .gene_bed import load_gene_bed
+from .output_provenance import Outcome
 
 # Rust backend
 from krewlyzer import _core
@@ -144,8 +145,8 @@ def run_features(
     threads: int = 0,
     verbose: bool = False,
     # Output format control
-    output_format: str = "tsv",  # "tsv" | "parquet" | "both"
-    compress: bool = False,  # Gzip TSV outputs when True
+    output_format: str,
+    compress: bool,
     owns_sample_record: bool = False,  # run-all and the PON build: rewrite the sample's record
 ) -> FeatureOutputs:
     """
@@ -238,6 +239,27 @@ def run_features(
     # Resolve optional Path parameters (handles typer.OptionInfo when called directly)
     resolved_target_regions = _resolve_path(target_regions)
     resolved_pon_model = _resolve_path(pon_model)
+    resolved_assay = _resolve_str(assay)
+    gene_fsc_requested = bool(enable_fsc and resolved_assay)
+    # Before any work: a single tool with other settings than the folder's record would leave the
+    # first run's extra tables looking current. run-all and the PON build own the record.
+    if not owns_sample_record:
+        from .output_provenance import refuse_a_different_configuration
+
+        settings: Dict[str, Any] = {
+            "genome": genome,
+            "assay": resolved_assay,
+            "target_regions": resolved_target_regions,
+        }
+        if gene_fsc_requested:  # E1 decides a table only gene FSC writes
+            settings["fsc_e1_aggregation"] = not disable_e1_aggregation
+        refuse_a_different_configuration(
+            output_dir,
+            sample_name,
+            settings,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
     # Before any work: an unusable PON stops the run before a table is written.
     loaded_pon = load_requested_pon(
         resolved_pon_model,
@@ -255,7 +277,6 @@ def run_features(
 
     # Resolve optional bool and string parameters
     resolved_wps_empty = _resolve_bool(wps_empty, False)
-    resolved_assay = _resolve_str(assay)
 
     # Configure thread pool (may fail if already configured by parent process)
     if resolved_threads > 0:
@@ -652,6 +673,10 @@ def run_features(
     outputs.gc_factors_choice = {"off_target": gc_off, "on_target": gc_on}
     outputs.panel_mode = bool(is_panel_mode)
 
+    # What each optional stage below did, recorded once at the end (`record_stage_outcomes`).
+    # Each one carries on past its own failure, so this is the only place it is visible.
+    stage_outcomes: Dict[str, Outcome] = {}
+
     # Gene-centric FSC (if assay provided)
     # Uses on-target GC correction factors for accurate copy number analysis
     if resolved_assay and enable_fsc:
@@ -792,8 +817,10 @@ def run_features(
                     )
             elif not disable_e1_aggregation:
                 logger.warning("FSC E1-only skipped: no FSC regions file to filter")
+            stage_outcomes["gene_fsc"] = Outcome("ran")
         except Exception as e:
             logger.warning(f"Gene FSC aggregation failed: {e}")
+            stage_outcomes["gene_fsc"] = Outcome.failed(e)
 
     # Process FSD
     # Use pon_parquet only when skip_pon_zscore is False, consistent with
@@ -936,8 +963,16 @@ def run_features(
                     )
                     logger.info(f"✓ WPS panel: {n_panel} anchors scored vs PON")
                 logger.info(f"✓ WPS panel: {outputs.wps_panel.name}")
+                stage_outcomes["panel_wps"] = Outcome("ran")
+            else:
+                logger.warning(
+                    f"Panel WPS skipped: no WPS anchors for assay '{resolved_assay}'"
+                )
+                stage_outcomes["panel_wps"] = Outcome("unavailable")
         except Exception as e:
-            logger.debug(f"Panel WPS not available: {e}")
+            # Warning, not debug: this stage failing used to leave no trace at the default level.
+            logger.warning(f"Panel WPS failed: {e}")
+            stage_outcomes["panel_wps"] = Outcome.failed(e)
 
     # Move OCF files from temp dir to final locations
     # Rust OCF now produces 6 files in panel mode:
@@ -1279,8 +1314,13 @@ def run_features(
                                 f"{outputs.tfbs_sync_ontarget.name}"
                             )
 
+                stage_outcomes["tfbs"] = Outcome("ran")
             except Exception as e:
                 logger.warning(f"TFBS entropy failed: {e}")
+                stage_outcomes["tfbs"] = Outcome.failed(e)
+        elif enable_tfbs:
+            logger.warning(f"TFBS entropy skipped: no TFBS regions for {genome}")
+            stage_outcomes["tfbs"] = Outcome("unavailable")
 
         # ATAC Entropy - Dual output architecture:
         # 1. Genome-wide: Uses all ATAC regions for WGS-comparable output
@@ -1415,8 +1455,13 @@ def run_features(
                                 f"{outputs.atac_sync_ontarget.name}"
                             )
 
+                stage_outcomes["atac"] = Outcome("ran")
             except Exception as e:
                 logger.warning(f"ATAC entropy failed: {e}")
+                stage_outcomes["atac"] = Outcome.failed(e)
+        elif enable_atac:
+            logger.warning(f"ATAC entropy skipped: no ATAC regions for {genome}")
+            stage_outcomes["atac"] = Outcome("unavailable")
 
     # =========================================================================
     # 7. SUMMARY
@@ -1453,7 +1498,7 @@ def run_features(
     # `pon_for_zscore`, not `pon`: a model that loaded but was withheld by
     # --skip-pon scored nothing, and recording it as applied would be a lie
     # about the columns in this directory.
-    from .output_provenance import stamp_metadata
+    from .output_provenance import record_stage_outcomes, stamp_metadata
 
     stamp_metadata(
         output_dir,
@@ -1463,6 +1508,22 @@ def run_features(
         output_format=resolved_output_format,
         compress=resolved_compress,
         gc_factors=outputs.gc_factors_choice,
+        owns_record=owns_sample_record,
+        settings={"fsc_e1_aggregation": not disable_e1_aggregation},
+    )
+    # A separate call: the stamp returns early for a single tool that keeps the record, and a
+    # single tool's own stages must still be recorded. Only what this run attempted: gene FSC
+    # and panel WPS need an assay, TFBS and ATAC need enabling. run-all, owning the record,
+    # also says which were not requested; a single tool never does.
+    if owns_sample_record:
+        for stage in ("gene_fsc", "panel_wps", "tfbs", "atac"):
+            stage_outcomes.setdefault(stage, Outcome("not_requested"))
+    record_stage_outcomes(
+        output_dir,
+        sample_name,
+        stage_outcomes,
+        output_format=resolved_output_format,
+        compress=resolved_compress,
         owns_record=owns_sample_record,
     )
 

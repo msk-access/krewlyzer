@@ -51,6 +51,7 @@ def test_a_scored_sample_records_what_it_was_scored_against(tmp_path):
         pon=_Pon(),
         pon_path=Path("/data/pon/xs1.all_unique.pon.parquet"),
         output_format="parquet",
+        compress=False,
     )
 
     row = pd.read_parquet(marker).iloc[0]
@@ -80,6 +81,7 @@ def test_the_pon_path_is_never_recorded_in_full(tmp_path):
         pon=_Pon(),
         pon_path=Path("/mnt/scratch/analyst-a/private/xs1.duplex.pon.parquet"),
         output_format="parquet",
+        compress=False,
     )
     recorded = str(
         pd.read_parquet(tmp_path / "S1.metadata.parquet")["pon_model"].iloc[0]
@@ -95,7 +97,7 @@ def test_an_unscored_run_says_so_rather_than_saying_nothing(tmp_path):
     columns cannot tell them from a run whose scoring silently failed.
     """
     _marker(tmp_path)
-    stamp_metadata(tmp_path, "S1", output_format="parquet")
+    stamp_metadata(tmp_path, "S1", output_format="parquet", compress=False)
     row = pd.read_parquet(tmp_path / "S1.metadata.parquet").iloc[0]
     assert bool(row["pon_applied"]) is False
     assert row["pon_model"] == ""
@@ -115,7 +117,7 @@ def test_a_refused_pon_is_not_an_applied_one():
 
 def test_no_metadata_table_is_not_a_failure(tmp_path):
     """A single-feature CLI run writes one table and no completion marker."""
-    assert stamp_metadata(tmp_path, "S1") is False
+    assert stamp_metadata(tmp_path, "S1", output_format="tsv", compress=False) is False
 
 
 def test_stamping_twice_does_not_accumulate(tmp_path):
@@ -133,6 +135,7 @@ def test_stamping_twice_does_not_accumulate(tmp_path):
             pon=_Pon(),
             pon_path=Path("p.parquet"),
             output_format="parquet",
+            compress=False,
         )
     columns = list(pd.read_parquet(tmp_path / "S1.metadata.parquet").columns)
     assert len(columns) == len(set(columns)), columns
@@ -144,7 +147,7 @@ def test_the_original_columns_survive(tmp_path):
     """The stamp adds; it must not rewrite the marker's existing content."""
     _marker(tmp_path)
     before = pd.read_parquet(tmp_path / "S1.metadata.parquet").iloc[0].to_dict()
-    stamp_metadata(tmp_path, "S1", output_format="parquet")
+    stamp_metadata(tmp_path, "S1", output_format="parquet", compress=False)
     after = pd.read_parquet(tmp_path / "S1.metadata.parquet").iloc[0]
     for key, value in before.items():
         assert after[key] == value, f"{key} changed"
@@ -189,7 +192,9 @@ def test_the_gc_tables_used_are_recorded(tmp_path):
             None, "none", "not found beside the BED or in the output directory"
         ),
     }
-    assert stamp_metadata(tmp_path, "S1", output_format="parquet", gc_factors=choices)
+    assert stamp_metadata(
+        tmp_path, "S1", output_format="parquet", gc_factors=choices, compress=False
+    )
     row = pd.read_parquet(marker).iloc[0]
     assert row["gc_factors_offtarget"] == "parquet"
     assert (
@@ -227,7 +232,7 @@ def test_the_stamp_reads_the_file_this_run_wrote_not_a_stale_sibling(tmp_path):
         [{"sample_id": "S1", "total_fragments": 99, "genome": "hg19"}]
     ).to_parquet(tmp_path / "S1.metadata.parquet")
 
-    assert stamp_metadata(tmp_path, "S1", output_format="tsv")
+    assert stamp_metadata(tmp_path, "S1", output_format="tsv", compress=False)
     frame = pd.read_csv(tmp_path / "S1.metadata.tsv", sep="\t")
     assert frame["total_fragments"].iloc[0] == 10
 
@@ -243,18 +248,29 @@ def test_a_single_tool_keeps_the_record_run_all_wrote(tmp_path):
         pon=_Pon(),
         pon_path=Path("x.pon.parquet"),
         output_format="parquet",
+        compress=False,
     )
     assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])
 
     assert not stamp_metadata(
-        tmp_path, "S1", pon=None, output_format="parquet", owns_record=False
+        tmp_path,
+        "S1",
+        pon=None,
+        output_format="parquet",
+        owns_record=False,
+        compress=False,
     )
     assert bool(
         pd.read_parquet(path)["pon_applied"].iloc[0]
     ), "run-all's record was overwritten"
 
     assert stamp_metadata(
-        tmp_path, "S1", pon=None, output_format="parquet", owns_record=True
+        tmp_path,
+        "S1",
+        pon=None,
+        output_format="parquet",
+        owns_record=True,
+        compress=False,
     )
     assert not bool(pd.read_parquet(path)["pon_applied"].iloc[0])
 
@@ -263,7 +279,12 @@ def test_a_single_tool_fills_in_a_record_that_does_not_exist_yet(tmp_path):
     """After `krewlyzer extract`, the metadata has no provenance: the first tool records it."""
     path = _marker(tmp_path)
     assert stamp_metadata(
-        tmp_path, "S1", pon=None, output_format="parquet", owns_record=False
+        tmp_path,
+        "S1",
+        pon=None,
+        output_format="parquet",
+        owns_record=False,
+        compress=False,
     )
     assert "pon_applied" in pd.read_parquet(path).columns
 
@@ -284,7 +305,14 @@ def test_single_tools_give_the_same_record_in_any_order(tmp_path):
     must not stand, or validate-output stops requiring WPS's z columns. A single tool may raise
     pon_applied, never lower it."""
     path = _marker(tmp_path)
-    stamp_metadata(tmp_path, "S1", pon=None, output_format="parquet", owns_record=False)
+    stamp_metadata(
+        tmp_path,
+        "S1",
+        pon=None,
+        output_format="parquet",
+        owns_record=False,
+        compress=False,
+    )
     assert not bool(pd.read_parquet(path)["pon_applied"].iloc[0])
     stamp_metadata(
         tmp_path,
@@ -293,7 +321,15 @@ def test_single_tools_give_the_same_record_in_any_order(tmp_path):
         pon_path=Path("x.pon.parquet"),
         output_format="parquet",
         owns_record=False,
+        compress=False,
     )
     assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])
-    stamp_metadata(tmp_path, "S1", pon=None, output_format="parquet", owns_record=False)
+    stamp_metadata(
+        tmp_path,
+        "S1",
+        pon=None,
+        output_format="parquet",
+        owns_record=False,
+        compress=False,
+    )
     assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])

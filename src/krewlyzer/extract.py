@@ -230,6 +230,29 @@ def extract(
     if sample_name is None:
         sample_name = bam_input.stem.replace(".bam", "")
 
+    # Before anything is written: `extract` writes the sample's record from scratch, so with other
+    # settings than the folder's it would replace them, and a later rerun would pass the check.
+    from .core.output_provenance import (
+        ConfigurationMismatch,
+        refuse_a_different_configuration,
+    )
+
+    try:
+        refuse_a_different_configuration(
+            output,
+            sample_name,
+            {
+                "genome": genome,
+                "assay": assay,
+                "target_regions": resolved_target_path,
+            },
+            output_format=output_format,
+            compress=compress,
+        )
+    except ConfigurationMismatch as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     # Parse chromosomes
     chromosomes.split(",") if chromosomes else None
 

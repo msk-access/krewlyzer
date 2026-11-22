@@ -34,6 +34,7 @@ logger = logging.getLogger("ocf")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.output_provenance import ConfigurationMismatch
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
 
@@ -214,6 +215,11 @@ def ocf(
         if outputs.ocf_offtarget and outputs.ocf_offtarget.exists():
             logger.info(f"  OCF off-target: {outputs.ocf_offtarget}")
 
+    except (
+        ConfigurationMismatch
+    ) as e:  # before any work: other settings than the folder's
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)

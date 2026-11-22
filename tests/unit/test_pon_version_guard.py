@@ -118,7 +118,9 @@ def test_an_empty_escape_hatch_does_not_count(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def _pon(tmp_path, version):
+def _pon(tmp_path, version, fitted=1.0):
+    """A minimal PON. ``fitted`` stands for its baselines: two PONs that differ in it are two
+    PONs, whatever they are called (`pon_digest` hashes the baseline rows)."""
     frame = pd.DataFrame(
         [
             {
@@ -127,7 +129,8 @@ def _pon(tmp_path, version):
                 "assay": "xs1",
                 "n_samples": 21.0,
                 "krewlyzer_version": version,
-            }
+            },
+            {"table": "test_baseline", "fitted": fitted},
         ]
     )
     path = tmp_path / "t.pon.parquet"
@@ -270,6 +273,8 @@ def test_an_unusable_pon_stops_a_single_tool_before_it_writes_anything(tmp_path)
             gc_correct=False,
             pon_model=junk,
             threads=1,
+            output_format="tsv",
+            compress=False,
         )
     assert not out.exists() or not any(out.iterdir()), sorted(
         p.name for p in out.iterdir()
@@ -287,20 +292,29 @@ def test_a_single_tool_refuses_to_score_a_sample_against_a_second_pon(tmp_path):
 
     x_dir, y_dir = tmp_path / "x", tmp_path / "y"
     x_dir.mkdir(), y_dir.mkdir()
-    pon_x, pon_y = _pon(x_dir, "0.9.0"), _pon(y_dir, "0.9.0")
+    pon_x, pon_y = _pon(x_dir, "0.9.0"), _pon(y_dir, "0.9.0", fitted=2.0)
     pon_y = pon_y.rename(y_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_parquet(out / "s.metadata.parquet")
-    model_x = load_requested_pon(pon_x)
-    stamp_metadata(out, "s", pon=model_x, pon_path=pon_x, output_format="parquet")
+    model_x = load_requested_pon(pon_x, output_format="tsv", compress=False)
+    stamp_metadata(
+        out, "s", pon=model_x, pon_path=pon_x, output_format="parquet", compress=False
+    )
 
-    assert load_requested_pon(pon_x, record_dir=out, sample="s") is not None
+    assert (
+        load_requested_pon(
+            pon_x, record_dir=out, sample="s", output_format="tsv", compress=False
+        )
+        is not None
+    )
     with pytest.raises(
         UnusablePonError,
         match="t.pon.parquet.*other.pon.parquet|other.pon.parquet.*t.pon.parquet",
     ):
-        load_requested_pon(pon_y, record_dir=out, sample="s")
+        load_requested_pon(
+            pon_y, record_dir=out, sample="s", output_format="tsv", compress=False
+        )
 
 
 def test_the_refusal_reads_the_record_this_run_writes_not_a_stale_copy(tmp_path):
@@ -314,22 +328,37 @@ def test_the_refusal_reads_the_record_this_run_writes_not_a_stale_copy(tmp_path)
     x_dir, y_dir = tmp_path / "x", tmp_path / "y"
     x_dir.mkdir(), y_dir.mkdir()
     pon_x = _pon(x_dir, "0.9.0")
-    pon_y = _pon(y_dir, "0.9.0").rename(y_dir / "other.pon.parquet")
+    pon_y = _pon(y_dir, "0.9.0", fitted=2.0).rename(y_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(
         out / "s.metadata.tsv", sep="\t", index=False
     )
     stamp_metadata(
-        out, "s", pon=load_requested_pon(pon_x), pon_path=pon_x, output_format="tsv"
+        out,
+        "s",
+        pon=load_requested_pon(pon_x, output_format="tsv", compress=False),
+        pon_path=pon_x,
+        output_format="tsv",
+        compress=False,
     )
     pd.DataFrame([{"sample_id": "s"}]).to_parquet(out / "s.metadata.parquet")
     stamp_metadata(
-        out, "s", pon=load_requested_pon(pon_y), pon_path=pon_y, output_format="parquet"
+        out,
+        "s",
+        pon=load_requested_pon(pon_y, output_format="tsv", compress=False),
+        pon_path=pon_y,
+        output_format="parquet",
+        compress=False,
     )
 
     refuse_a_second_pon(
-        out, "s", load_requested_pon(pon_y), pon_y, output_format="parquet"
+        out,
+        "s",
+        load_requested_pon(pon_y, output_format="tsv", compress=False),
+        pon_y,
+        output_format="parquet",
+        compress=False,
     )
 
 
@@ -342,11 +371,13 @@ def test_run_all_owns_the_record_for_region_mds():
     from krewlyzer import wrapper
 
     source = inspect.getsource(wrapper)
-    assert "owns_sample_record=True" in source.split("_region_mds(", 1)[1].split(
+    assert "owns_sample_record=True" in source.split("region_mds_stage(", 1)[1].split(
         ")", 1
     )[0] or (
         "owns_sample_record=True"
-        in source[source.index("_region_mds(") : source.index("_region_mds(") + 1500]
+        in source[
+            source.index("region_mds_stage(") : source.index("region_mds_stage(") + 1500
+        ]
     )
 
 
@@ -359,15 +390,17 @@ def test_the_same_pon_is_accepted_again_on_a_tsv_record_with_no_cohort_digest(tm
     from krewlyzer.core.pon_integration import load_requested_pon
 
     pon_path = _pon(tmp_path, "0.9.0")
-    model = load_requested_pon(pon_path)
+    model = load_requested_pon(pon_path, output_format="tsv", compress=False)
     model.cohort_digest = None
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(
         out / "s.metadata.tsv", sep="\t", index=False
     )
-    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
-    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+    stamp_metadata(
+        out, "s", pon=model, pon_path=pon_path, output_format="tsv", compress=False
+    )
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv", compress=False)
 
 
 def test_a_pon_recorded_by_a_standalone_scorer_stops_a_later_tool_using_another(
@@ -384,20 +417,29 @@ def test_a_pon_recorded_by_a_standalone_scorer_stops_a_later_tool_using_another(
     a_dir, b_dir = tmp_path / "a", tmp_path / "b"
     a_dir.mkdir(), b_dir.mkdir()
     pon_a = _pon(a_dir, "0.9.0")
-    pon_b = _pon(b_dir, "0.9.0").rename(b_dir / "other.pon.parquet")
+    pon_b = _pon(b_dir, "0.9.0", fitted=2.0).rename(b_dir / "other.pon.parquet")
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(
         out / "s.metadata.tsv", sep="\t", index=False
     )
 
-    record_pon_used(out, "s", None, None, output_format="tsv")
+    record_pon_used(out, "s", None, None, output_format="tsv", compress=False)
     assert not bool(
         pd.read_csv(out / "s.metadata.tsv", sep="\t")["pon_applied"].iloc[0]
     )
-    record_pon_used(out, "s", load_requested_pon(pon_a), pon_a, output_format="tsv")
+    record_pon_used(
+        out,
+        "s",
+        load_requested_pon(pon_a, output_format="tsv", compress=False),
+        pon_a,
+        output_format="tsv",
+        compress=False,
+    )
     with pytest.raises(UnusablePonError):
-        load_requested_pon(pon_b, record_dir=out, sample="s", output_format="tsv")
+        load_requested_pon(
+            pon_b, record_dir=out, sample="s", output_format="tsv", compress=False
+        )
 
 
 def test_an_empty_pon_applied_cell_is_not_read_as_applied(tmp_path):
@@ -413,7 +455,14 @@ def test_an_empty_pon_applied_cell_is_not_read_as_applied(tmp_path):
         [{"sample_id": "s", "pon_applied": None, "pon_model": "x.pon.parquet"}]
     ).to_csv(out / "s.metadata.tsv", sep="\t", index=False)
     pon = _pon(tmp_path, "0.9.0")
-    refuse_a_second_pon(out, "s", load_requested_pon(pon), pon, output_format="tsv")
+    refuse_a_second_pon(
+        out,
+        "s",
+        load_requested_pon(pon, output_format="tsv", compress=False),
+        pon,
+        output_format="tsv",
+        compress=False,
+    )
 
 
 def test_a_digit_only_cohort_digest_survives_a_tsv_round_trip(tmp_path):
@@ -424,15 +473,17 @@ def test_a_digit_only_cohort_digest_survives_a_tsv_round_trip(tmp_path):
     from krewlyzer.core.pon_integration import load_requested_pon
 
     pon_path = _pon(tmp_path, "0.9.0")
-    model = load_requested_pon(pon_path)
+    model = load_requested_pon(pon_path, output_format="tsv", compress=False)
     model.cohort_digest = "0123456789012345"
     out = tmp_path / "out"
     out.mkdir()
     pd.DataFrame([{"sample_id": "s"}]).to_csv(
         out / "s.metadata.tsv", sep="\t", index=False
     )
-    stamp_metadata(out, "s", pon=model, pon_path=pon_path, output_format="tsv")
-    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv")
+    stamp_metadata(
+        out, "s", pon=model, pon_path=pon_path, output_format="tsv", compress=False
+    )
+    refuse_a_second_pon(out, "s", model, pon_path, output_format="tsv", compress=False)
 
 
 def test_the_standalone_scorers_record_only_what_they_scored():
@@ -440,7 +491,7 @@ def test_the_standalone_scorers_record_only_what_they_scored():
 
     from krewlyzer import motif, region_entropy, region_mds
 
-    assert "pon.mds_baseline else None" in inspect.getsource(motif)
+    assert 'motif_outcomes["mds_z"].status == "ran"' in inspect.getsource(motif)
     assert "n_scored" in inspect.getsource(region_entropy)
     src = inspect.getsource(region_mds)
     assert "if scored" in src or "requested_pon if scored" in src

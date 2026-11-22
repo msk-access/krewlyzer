@@ -11,6 +11,13 @@ nextflow run msk-access/krewlyzer \
     --outdir results/
 ```
 
+!!! warning "One `--outdir` per configuration"
+    Results are copied into `{outdir}/{sample}/`, and a later run copies its files over the
+    earlier one's without removing any the later run did not make. Rerunning a sample with
+    different settings (another `--assay`, no targets) into the same `--outdir` would leave the
+    first run's extra tables beside the second run's record, read as current. The CLI refuses
+    such a rerun; the pipeline cannot see the published folder, so use a fresh `--outdir`.
+
 ## Workflow Architecture
 
 The pipeline uses a Nextflow-native parallel pattern:

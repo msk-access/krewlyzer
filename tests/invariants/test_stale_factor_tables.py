@@ -72,6 +72,8 @@ def test_refitting_from_a_bed_removes_the_earlier_table_in_the_output_directory(
         enable_fsc=True,
         gc_correct=True,
         threads=1,
+        output_format="tsv",
+        compress=False,
     )
     assert [
         p.name

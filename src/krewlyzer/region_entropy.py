@@ -35,6 +35,7 @@ logger = logging.getLogger("region_entropy")
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
 from .core.gc_assets import resolve_gc_factors
 from .core.logging import log_startup_banner, ResolvedAsset
+from .core.output_provenance import Outcome, record_stage_outcomes
 from . import __version__
 
 
@@ -199,6 +200,17 @@ def region_entropy(
             assets=assets,
             log=logger,
         )
+        # Before any work: other settings than the folder's record would leave the first run's
+        # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
+        from .core.output_provenance import refuse_a_different_configuration
+
+        refuse_a_different_configuration(
+            output,
+            sample_name,
+            {"genome": genome, "assay": assay, "target_regions": resolved_target_path},
+            output_format=output_format,
+            compress=compress,
+        )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
@@ -232,6 +244,7 @@ def region_entropy(
     )
 
     n_scored = 0  # labels z-scored against the PON, across TFBS and ATAC
+    ran = {}  # the stages this run wrote tables for, for the sample's record
 
     # Build list of enabled features
     features = []
@@ -306,6 +319,7 @@ def region_entropy(
                 )
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ TFBS: {out_final} ({n_off} TFs)")
+                ran["tfbs"] = Outcome("ran")
 
             else:
                 logger.warning("TFBS regions not available for this genome")
@@ -380,6 +394,7 @@ def region_entropy(
                 )
                 out_raw.unlink(missing_ok=True)
                 logger.info(f"✅ ATAC: {out_final} ({n_off} cancer types)")
+                ran["atac"] = Outcome("ran")
 
             else:
                 logger.warning("ATAC regions not available for this genome")
@@ -422,6 +437,16 @@ def region_entropy(
 
         from .core.output_provenance import record_pon_used
 
+        # As run-all records them: rerunning this command (at run-all's --output-format) is how a TFBS or ATAC stage that
+        # failed under run-all gets fixed. What it wrote, and nothing else.
+        record_stage_outcomes(
+            output,
+            sample_name,
+            ran,
+            output_format=output_format,
+            compress=compress,
+            owns_record=False,
+        )
         record_pon_used(
             output,
             sample_name,
@@ -429,8 +454,8 @@ def region_entropy(
                 requested_pon if n_scored else None
             ),  # recorded as scored only if something was
             entropy_pon_parquet,
-            output_format,
-            compress,
+            output_format=output_format,
+            compress=compress,
         )
     except FileNotFoundError as e:
         logger.error(str(e))

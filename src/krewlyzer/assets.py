@@ -63,6 +63,19 @@ def bundled_data_dir() -> Path:
     return base_path
 
 
+def genome_build(genome: str) -> str:
+    """The build a genome name means: ``hg19`` and ``GRCh37`` are one build, as are ``hg38`` and
+    ``GRCh38``. Raises ValueError for anything else."""
+    name = genome.lower()
+    if name in ("hg19", "grch37"):
+        return "GRCh37"
+    if name in ("hg38", "grch38"):
+        return "GRCh38"
+    raise ValueError(
+        f"Unsupported genome: {genome}. Must be hg19/GRCh37 or hg38/GRCh38."
+    )
+
+
 class AssetManager:
     """
     Manages access to bundled data assets for specific genomes.
@@ -71,16 +84,8 @@ class AssetManager:
 
     def __init__(self, genome: str):
         self.raw_genome = genome
-        if genome.lower() in ("hg19", "grch37"):
-            self.genome_dir = "GRCh37"
-            self.file_prefix = "hg19"
-        elif genome.lower() in ("hg38", "grch38"):
-            self.genome_dir = "GRCh38"
-            self.file_prefix = "hg38"
-        else:
-            raise ValueError(
-                f"Unsupported genome: {genome}. Must be hg19/GRCh37 or hg38/GRCh38."
-            )
+        self.genome_dir = genome_build(genome)
+        self.file_prefix = {"GRCh37": "hg19", "GRCh38": "hg38"}[self.genome_dir]
 
         # KREWLYZER_DATA_DIR first, then the bundled copy. One rule, shared
         # with the other resolvers -- see bundled_data_dir above.

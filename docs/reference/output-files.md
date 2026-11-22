@@ -1183,10 +1183,46 @@ mean.
 | `pon_applied` | bool | Whether any feature was z-scored. `False` for `--skip-pon` and for no PON, both legitimately unscored. A PON that cannot be used (unreadable, refused by the version guard, or a `--pon-model` path that does not exist) stops the run, so it never appears here. Written by run-all; a single tool fills it in when it is absent and may otherwise only raise it, never lower it |
 | `pon_model` | str | The PON, by **basename** — never the full path |
 | `pon_cohort_digest` | str | The salted digest of the healthy cohort that PON was fitted to; answers "the same cohort?" without naming anyone |
+| `pon_digest` | str | sha256 of the PON's baseline rows: answers "the same baselines?". A PON rebuilt from the same donors keeps its name and cohort digest and gets a new `pon_digest`; `stamp-pon` leaves it unchanged. run-all reuses cached motif tables only under the same `pon_digest`, and a single tool refuses a PON with another one. Absent from directories written before this release |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
+| `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
+
+**One folder, one configuration.** A rerun into a sample's folder must use the settings
+recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
+file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
+feature tool that takes these settings refuse a run with others before writing anything, naming
+the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
+but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
+the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+this way, since each task starts in an empty work folder; there, publish a different
+configuration to a different `--outdir`.
+
+**Optional stages.** run-all carries on when an optional stage fails, so that one
+stage cannot cost a sample its other features. What each one did is recorded
+here, so "not requested" and "requested and failed" no longer look the same.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `{stage}_status` | str | `ran`; `not_requested` (nothing asked for it, e.g. no `--variants`); `no_variants` (mFSD: a variants file with none in it); `unavailable` (asked for, but an input or asset it needs is missing, e.g. a `--bisulfite-bam` path that does not exist); `failed` (it raised; run-all carried on) |
+| `{stage}_error` | str | For `failed`, the exception's **class name** (`FileNotFoundError`), never its message: messages carry input paths, and sample directories are named for the patient. The full message is in the log. Empty otherwise |
+
+`{stage}` is one of `uxm`, `mfsd`, `region_mds`, `gene_fsc`, `panel_wps`, `tfbs`,
+`atac` (each writes its own tables), and `mds_z`, `mds_z_ontarget` and `region_mds_z`
+(the PON z-scores of `MDS`, `MDS.ontarget` and `MDS.gene`). run-all writes every
+status on every run, except that a rerun reusing cached motif tables leaves
+`mds_z*` as the run that wrote those tables recorded them. A single tool records
+only the stages whose outputs it rewrote, each as it ended -- `not_requested`
+included, as `motif --skip-pon` records `mds_z` for the `MDS` it rewrote without
+one -- and only into the copies of this table in the format(s) it wrote its own
+tables in; it creates none. `extract` writes this table
+from scratch, so it clears the statuses: a new fragment BED is a new sample. All
+are absent from directories written before this release, and Nextflow tool-level
+mode writes no metadata table at all, so it records none. `validate-output`
+reads them: see [`validate-output`](../cli/index.md#validate-output).
 
 **Use**: Filter samples by QC before ML training (e.g. `total_fragments > 5e6`),
-and by `krewlyzer_version` / `pon_cohort_digest` to be sure a cohort was
+and by `krewlyzer_version` / `pon_digest` to be sure a cohort was
 produced by one build against one baseline.
 
 ---

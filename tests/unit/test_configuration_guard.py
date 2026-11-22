@@ -1,0 +1,116 @@
+"""A second configuration may not write into a folder the first one owns (Greptile on #98, F2).
+
+A rerun with different settings writes a different set of tables: a panel folder rerun without
+its assay rewrites `TFBS` and not `TFBS.ontarget`, and the old on-target table then reads as this
+run's under one `tfbs=ran`. Refusing the second configuration before anything is written means no
+such leftover can arise. These pin the comparison itself; the run-level sequences are in
+`tests/invariants/test_configuration_guard_runs.py`.
+"""
+
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from krewlyzer.core.output_provenance import (
+    ConfigurationMismatch,
+    refuse_a_different_configuration,
+)
+
+pytestmark = pytest.mark.unit
+
+_FORMAT = dict(output_format="parquet", compress=False)
+
+
+def _record(tmp_path, **fields):
+    row = {
+        "sample_id": "s",
+        "genome": "hg19",
+        "assay": "xs1",
+        "target_regions": "/somewhere/staged/xs1.targets.bed",
+    }
+    row.update(fields)
+    pd.DataFrame([row]).to_parquet(tmp_path / "s.metadata.parquet")
+    return tmp_path
+
+
+def test_a_different_assay_is_refused_and_named(tmp_path):
+    out = _record(tmp_path)
+    with pytest.raises(ConfigurationMismatch, match="assay"):
+        refuse_a_different_configuration(out, "s", {"assay": None}, **_FORMAT)
+
+
+def test_different_targets_are_refused(tmp_path):
+    out = _record(tmp_path)
+    with pytest.raises(ConfigurationMismatch, match="target_regions"):
+        refuse_a_different_configuration(out, "s", {"target_regions": None}, **_FORMAT)
+
+
+def test_the_same_settings_are_allowed(tmp_path):
+    out = _record(tmp_path)
+    refuse_a_different_configuration(
+        out,
+        "s",
+        {"genome": "hg19", "assay": "xs1", "target_regions": "xs1.targets.bed"},
+        **_FORMAT,
+    )
+
+
+def test_one_build_under_two_names_is_the_same_genome(tmp_path):
+    """Nextflow defaults to hg19; a hand repair may say GRCh37."""
+    out = _record(tmp_path)
+    refuse_a_different_configuration(out, "s", {"genome": "GRCh37"}, **_FORMAT)
+    with pytest.raises(ConfigurationMismatch, match="genome"):
+        refuse_a_different_configuration(out, "s", {"genome": "hg38"}, **_FORMAT)
+
+
+def test_targets_compare_by_file_name_not_path(tmp_path):
+    """Nextflow stages the target BED at a new path in every task."""
+    out = _record(tmp_path)
+    refuse_a_different_configuration(
+        out, "s", {"target_regions": "/work/ab/12/xs1.targets.bed"}, **_FORMAT
+    )
+
+
+def test_an_assay_compares_without_case(tmp_path):
+    out = _record(tmp_path)
+    refuse_a_different_configuration(out, "s", {"assay": "XS1"}, **_FORMAT)
+
+
+def test_e1_aggregation_is_compared_when_given(tmp_path):
+    out = _record(tmp_path, fsc_e1_aggregation=False)
+    refuse_a_different_configuration(out, "s", {"fsc_e1_aggregation": False}, **_FORMAT)
+    with pytest.raises(ConfigurationMismatch, match="fsc_e1_aggregation"):
+        refuse_a_different_configuration(
+            out, "s", {"fsc_e1_aggregation": True}, **_FORMAT
+        )
+
+
+def test_a_tsv_record_reads_e1_aggregation_as_a_bool(tmp_path):
+    """`bool("False")` is True: read naively, a TSV record's False would refuse its own setting."""
+    pd.DataFrame(
+        [{"sample_id": "s", "genome": "hg19", "fsc_e1_aggregation": False}]
+    ).to_csv(tmp_path / "s.metadata.tsv", sep="\t", index=False)
+    refuse_a_different_configuration(
+        tmp_path,
+        "s",
+        {"fsc_e1_aggregation": False},
+        output_format="tsv",
+        compress=False,
+    )
+
+
+def test_a_field_the_record_does_not_hold_is_not_compared(tmp_path):
+    """A record written before `fsc_e1_aggregation` existed."""
+    out = _record(tmp_path)
+    refuse_a_different_configuration(out, "s", {"fsc_e1_aggregation": True}, **_FORMAT)
+
+
+def test_a_fresh_folder_has_nothing_to_compare(tmp_path):
+    refuse_a_different_configuration(tmp_path, "s", {"assay": "xs2"}, **_FORMAT)
+
+
+def test_an_unknown_setting_is_a_programming_error(tmp_path):
+    out = _record(tmp_path)
+    with pytest.raises(ValueError, match="unknown setting"):
+        refuse_a_different_configuration(out, "s", {"mapq": 20}, **_FORMAT)

@@ -12,6 +12,11 @@ Checks:
   - compute_and_write_gc_factors() calls missing output_format=
   - write_extraction_outputs() calls missing output_format=
   - _core.run_unified_pipeline() calls missing output_format
+
+A writer with no format *default* needs no rule here: its signature makes the caller choose, and
+mypy (`scripts/lint.sh`) reports any call that does not, however long the call is. That is the
+form new writers take (`tests/unit/test_format_args_required.py` lists them). This script covers
+the older writers that still default to TSV; see `.agents/rules/development.md` section 6.
 """
 
 from __future__ import annotations

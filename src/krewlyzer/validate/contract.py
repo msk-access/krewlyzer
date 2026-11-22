@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 class Vary(str, Enum):
@@ -63,6 +63,13 @@ class ColumnRule:
     #: extreme: PON scoring could vanish entirely and the gate would pass.
     #: `{sample}.metadata.pon_applied` is what tells the two apart.
     requires_pon: bool = False
+    #: Required only when `{sample}.metadata` records this stage (`COLUMN_STAGES`) as `ran`.
+    #:
+    #: For a column another stage adds to the table: `mds_z` is written only when the PON has
+    #: an MDS baseline, which a BED-built PON does not, so `requires_pon` would be a false
+    #: ERROR -- and leaving it undeclared let a failed z-score pass. A directory without the
+    #: record (an older build) does not require it.
+    requires_stage: Optional[str] = None
 
     def __post_init__(self) -> None:
         # The whole point of the gate. Silencing a degeneracy finding must cost
@@ -254,6 +261,52 @@ _WPS_PON_COLS: Tuple[ColumnRule, ...] = (
 )
 
 
+#: The optional stages run-all carries on past, and the tables each one writes.
+#:
+#: run-all keeps going when one of these fails, by design, so that one stage cannot cost a
+#: sample its other features. What happened is recorded per sample as `{stage}_status` and
+#: `{stage}_error` in `{sample}.metadata` (`output_provenance.record_stage_outcomes`), and the
+#: gate reads it: a failed stage is reported with its reason instead of as absent tables, at
+#: ERROR when any of these tables is consumed, else WARN. Every suffix here is in `CONTRACT` or
+#: `NOT_CONSUMED` (asserted), so a failure can never look harmless for want of a declaration.
+STAGE_TABLES: Dict[str, Tuple[str, ...]] = {
+    "uxm": (".UXM.parquet",),
+    "mfsd": (".mFSD.parquet",),
+    "region_mds": (".MDS.gene.parquet", ".MDS.exon.parquet"),
+    "gene_fsc": (
+        ".FSC.gene.parquet",
+        ".FSC.regions.parquet",
+        ".FSC.regions.e1only.parquet",
+    ),
+    "panel_wps": (".WPS.panel.parquet",),
+    "tfbs": (".TFBS.parquet", ".TFBS.ontarget.parquet"),
+    "atac": (".ATAC.parquet", ".ATAC.ontarget.parquet"),
+}
+
+#: Stages that add columns to a table another stage writes, rather than a table of their own:
+#: the whole-sample MDS z-scores, and Region-MDS's PON z-scoring. Which columns, on which
+#: table, is declared once, on the column (`ColumnRule.requires_stage`).
+COLUMN_STAGES: Tuple[str, ...] = ("mds_z", "mds_z_ontarget", "region_mds_z")
+
+STAGES: Tuple[str, ...] = (*STAGE_TABLES, *COLUMN_STAGES)
+
+#: ``ran``; ``not_requested`` (no input for it, e.g. no `--variants`); ``no_variants`` (a
+#: variants file with none in it); ``unavailable`` (asked for, but an input or asset it needs is
+#: missing); ``failed`` (it raised, recorded with the exception's class name only).
+STAGE_STATUSES: Tuple[str, ...] = (
+    "ran",
+    "not_requested",
+    "no_variants",
+    "unavailable",
+    "failed",
+)
+
+_STAGE_STATUS_REASON = (
+    "one pipeline configuration gives every sample the same outcome; a sample that differs "
+    "is the finding, and the gate reports a failed stage itself"
+)
+
+
 CONTRACT: Tuple[TableRule, ...] = (
     # -- fragment size ------------------------------------------------------
     TableRule(
@@ -343,8 +396,16 @@ CONTRACT: Tuple[TableRule, ...] = (
         rows=Rows(exactly=4),
         checks=("acgt_bases", "fraction_sums_to_one"),
     ),
-    TableRule(".MDS.parquet", (metric("MDS"),), rows=Rows(exactly=1)),
-    TableRule(".MDS.ontarget.parquet", (metric("MDS"),), rows=Rows(exactly=1)),
+    TableRule(
+        ".MDS.parquet",
+        (metric("MDS"), ColumnRule("mds_z", requires_stage="mds_z")),
+        rows=Rows(exactly=1),
+    ),
+    TableRule(
+        ".MDS.ontarget.parquet",
+        (metric("MDS"), ColumnRule("mds_z", requires_stage="mds_z_ontarget")),
+        rows=Rows(exactly=1),
+    ),
     TableRule(
         ".MDS.gene.parquet",
         (
@@ -352,8 +413,10 @@ CONTRACT: Tuple[TableRule, ...] = (
             metric("mds_mean", Vary.BOTH),
             metric("mds_e1", Vary.BOTH),
             metric("mds_std", Vary.BOTH),
-            metric("mds_z", Vary.BOTH),
-            metric("mds_e1_z", Vary.BOTH),
+            # Written only by a PON with a `region_mds` baseline. Required unconditionally
+            # until `region_mds_z` was recorded, which made every run without one an ERROR.
+            ColumnRule("mds_z", vary=Vary.BOTH, requires_stage="region_mds_z"),
+            ColumnRule("mds_e1_z", vary=Vary.BOTH, requires_stage="region_mds_z"),
         ),
     ),
     TableRule(".MDS.exon.parquet", (label("gene", _ID), metric("mds", Vary.BOTH))),
@@ -462,6 +525,24 @@ CONTRACT: Tuple[TableRule, ...] = (
                 constant_reason="one PON per cohort, by cohort digest",
             ),
             ColumnRule(
+                "pon_digest",
+                Kind.STRING,
+                Vary.NEVER,
+                required=False,
+                constant_reason="one PON per cohort, by the content of its baselines",
+            ),
+            ColumnRule(
+                "fsc_e1_aggregation",
+                Kind.NUMERIC,
+                Vary.NEVER,
+                required=False,
+                constant_reason=(
+                    "a run setting (run-all's --disable-e1-aggregation), recorded so a rerun "
+                    "with another one is refused; one pipeline configuration gives every "
+                    "sample the same value"
+                ),
+            ),
+            ColumnRule(
                 "pon_krewlyzer_version",
                 Kind.STRING,
                 Vary.NEVER,
@@ -511,6 +592,20 @@ CONTRACT: Tuple[TableRule, ...] = (
                     ),
                 )
                 for name in ("fragments_on_missing_contig", "gc_fetch_failed")
+            ),
+            # What each optional stage did (`STAGE_TABLES`, `COLUMN_STAGES`). Not required:
+            # directories from builds before this release lack them, and a single tool run into
+            # an empty directory records nothing.
+            *(
+                ColumnRule(
+                    f"{stage}_{field}",
+                    Kind.STRING,
+                    Vary.NEVER,
+                    required=False,
+                    constant_reason=_STAGE_STATUS_REASON,
+                )
+                for stage in STAGES
+                for field in ("status", "error")
             ),
         ),
         rows=Rows(exactly=1),

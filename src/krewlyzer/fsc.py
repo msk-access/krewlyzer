@@ -36,6 +36,7 @@ logger = logging.getLogger("fsc")
 
 # Import asset resolution functions
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.output_provenance import ConfigurationMismatch
 
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
@@ -89,6 +90,11 @@ def fsc(
     ),
     genome: str = typer.Option(
         "hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"
+    ),
+    disable_e1_aggregation: bool = typer.Option(
+        False,
+        "--disable-e1-aggregation",
+        help="Skip E1-only FSC region filtering (first exon per gene), as run-all's option",
     ),
     gc_correct: bool = typer.Option(
         True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"
@@ -216,6 +222,7 @@ def fsc(
             fsc_bins=bin_input,
             fsc_windows=windows,
             fsc_continue_n=continue_n,
+            disable_e1_aggregation=disable_e1_aggregation,
             gc_correct=gc_correct,
             threads=threads,
             verbose=verbose,
@@ -231,6 +238,11 @@ def fsc(
         if outputs.fsc_gene and outputs.fsc_gene.exists():
             logger.info(f"✅ FSC gene: {outputs.fsc_gene}")
 
+    except (
+        ConfigurationMismatch
+    ) as e:  # before any work: other settings than the folder's
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
     except FileNotFoundError as e:
         logger.error(str(e))
         raise typer.Exit(1)
