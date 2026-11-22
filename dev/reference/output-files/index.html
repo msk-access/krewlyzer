@@ -7115,14 +7115,71 @@ mean.</p>
 <td>The salted digest of the healthy cohort that <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> was fitted to; answers "the same cohort?" without naming anyone</td>
 </tr>
 <tr>
+<td><code>pon_digest</code></td>
+<td>str</td>
+<td>sha256 of the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>'s baseline rows: answers "the same baselines?". A <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> rebuilt from the same donors keeps its name and cohort digest and gets a new <code>pon_digest</code>; <code>stamp-pon</code> leaves it unchanged. run-all reuses cached motif tables only under the same <code>pon_digest</code>, and a single tool refuses a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> with another one. Absent from directories written before this release</td>
+</tr>
+<tr>
 <td><code>pon_krewlyzer_version</code></td>
 <td>str</td>
 <td>The release the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> was stamped with</td>
 </tr>
+<tr>
+<td><code>fsc_e1_aggregation</code></td>
+<td>bool</td>
+<td>run-all's E1 setting (<code>False</code> with <code>--disable-e1-aggregation</code>). Recorded so a rerun with the other setting is refused; absent from directories written before this release</td>
+</tr>
 </tbody>
 </table>
+<p><strong>One folder, one configuration.</strong> A rerun into a sample's folder must use the settings
+recorded there: <code>genome</code> (<code>hg19</code> and <code>GRCh37</code> are one build), <code>assay</code>, the target regions (by
+file name) and, where gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> is written, <code>fsc_e1_aggregation</code>. run-all, <code>extract</code> and every
+feature tool that takes these settings refuse a run with others before writing anything, naming
+the setting; <code>uxm</code> compares the genome, which picks its markers. <code>extract</code> rewrites this table
+but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+assay) left the first run's extra tables -- <code>TFBS.ontarget</code>, <code>FSC.regions.e1only</code> -- reading as
+the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+this way, since each task starts in an empty work folder; there, publish a different
+configuration to a different <code>--outdir</code>.</p>
+<p><strong>Optional stages.</strong> run-all carries on when an optional stage fails, so that one
+stage cannot cost a sample its other features. What each one did is recorded
+here, so "not requested" and "requested and failed" no longer look the same.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>{stage}_status</code></td>
+<td>str</td>
+<td><code>ran</code>; <code>not_requested</code> (nothing asked for it, e.g. no <code>--variants</code>); <code>no_variants</code> (<abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>: a variants file with none in it); <code>unavailable</code> (asked for, but an input or asset it needs is missing, e.g. a <code>--bisulfite-bam</code> path that does not exist); <code>failed</code> (it raised; run-all carried on)</td>
+</tr>
+<tr>
+<td><code>{stage}_error</code></td>
+<td>str</td>
+<td>For <code>failed</code>, the exception's <strong>class name</strong> (<code>FileNotFoundError</code>), never its message: messages carry input paths, and sample directories are named for the patient. The full message is in the log. Empty otherwise</td>
+</tr>
+</tbody>
+</table>
+<p><code>{stage}</code> is one of <code>uxm</code>, <code>mfsd</code>, <code>region_mds</code>, <code>gene_fsc</code>, <code>panel_wps</code>, <code>tfbs</code>,
+<code>atac</code> (each writes its own tables), and <code>mds_z</code>, <code>mds_z_ontarget</code> and <code>region_mds_z</code>
+(the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-scores of <code>MDS</code>, <code>MDS.ontarget</code> and <code>MDS.gene</code>). run-all writes every
+status on every run, except that a rerun reusing cached motif tables leaves
+<code>mds_z*</code> as the run that wrote those tables recorded them. A single tool records
+only the stages whose outputs it rewrote, each as it ended -- <code>not_requested</code>
+included, as <code>motif --skip-pon</code> records <code>mds_z</code> for the <code>MDS</code> it rewrote without
+one -- and only into the copies of this table in the format(s) it wrote its own
+tables in; it creates none. <code>extract</code> writes this table
+from scratch, so it clears the statuses: a new fragment <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> is a new sample. All
+are absent from directories written before this release, and Nextflow tool-level
+mode writes no metadata table at all, so it records none. <code>validate-output</code>
+reads them: see <a href="../../cli/#validate-output"><code>validate-output</code></a>.</p>
 <p><strong>Use</strong>: Filter samples by QC before ML training (e.g. <code>total_fragments &gt; 5e6</code>),
-and by <code>krewlyzer_version</code> / <code>pon_cohort_digest</code> to be sure a cohort was
+and by <code>krewlyzer_version</code> / <code>pon_digest</code> to be sure a cohort was
 produced by one build against one baseline.</p>
 <hr>
 <h3 id="features-json">Features JSON</h3>
@@ -7223,7 +7280,7 @@ produced by one build against one baseline.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 20, 2026 22:23:13 UTC"><span class="timeago" datetime="2026-11-20T22:23:13+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 20, 2026 22:23:13 UTC">2026-11-20</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 21, 2026 06:04:46 UTC"><span class="timeago" datetime="2026-11-21T06:04:46+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 21, 2026 06:04:46 UTC">2026-11-21</span>
   </span>
 
     
