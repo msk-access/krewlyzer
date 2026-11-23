@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 from typer.testing import CliRunner
 
+from conftest import requires_data
 from krewlyzer.cli import app
 
 pytestmark = pytest.mark.unit
@@ -36,6 +37,9 @@ def calls(monkeypatch):
     return seen
 
 
+# Asserts the genome's bundled blacklist is applied: needs the data package, not its LFS
+# pointers (a pointer used to pass as the blacklist, and this test with it).
+@requires_data
 def test_the_run_filters_reach_the_check_and_the_extraction(tmp_path, calls):
     bam, ref = tmp_path / "S.bam", tmp_path / "ref.fa"
     bam.write_bytes(b"")

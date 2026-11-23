@@ -16,7 +16,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--outdir` | `./results` | Output directory |
 | `--asset_dir` | | Base directory for PON/targets (enables assay resolution) |
 | `--targets` | | Global target BED (fallback if not in samplesheet) |
-| `--genome` | `hg19` | Genome build (`hg19` or `hg38`) |
+| `--genome` | `hg19` | Genome build: `hg19`, `GRCh37`, `hg38` or `GRCh38` (the enum in `nextflow_schema.json`). Anything else stops the run at launch |
 | `--threads` | `8` | Threads per process |
 | `--verbose` | `false` | Enable verbose logging |
 

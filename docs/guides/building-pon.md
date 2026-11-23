@@ -32,7 +32,7 @@ This model is used for bias correction and z-score normalization during sample p
 
 | Option | Description |
 |--------|-------------|
-| `-a, --assay` | Assay name (e.g., `msk-access-v2`) |
+| `-a, --assay` | Assay name (e.g., `msk-access-v2`). `xs1` and `xs2` load their bundled targets; any other name except `wgs` needs `--target-regions`, or `--skip-target-regions` for a WGS PON, and is an error without one |
 | `-r, --reference` | Reference FASTA file (indexed) |
 | `-o, --output` | Output PON model file (`.pon.parquet`) |
 
@@ -114,6 +114,7 @@ flowchart TB
 ```bash
 krewlyzer build-pon healthy_samples.txt \
     --assay wgs-hg19 \
+    --skip-target-regions \
     --reference hg19.fa \
     --output wgs.pon.parquet
 ```

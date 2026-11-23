@@ -179,8 +179,8 @@ def extract(
     # The genome's assets: the assay's targets and the blacklist come from them whatever
     # --gc-correct says, as in run-all; the flag decides only whether factors are computed.
     # A genome AssetManager does not know is an error, as in run-all: carrying on would mean
-    # no targets and no blacklist, not just no GC correction. A known genome whose bundled
-    # files are missing is not caught here (resolve_target_regions treats it as WGS).
+    # no targets and no blacklist, not just no GC correction. A missing or unfetched (LFS
+    # pointer) target set or blacklist is an error in the two resolvers below.
     try:
         assets = AssetManager(genome)
         logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")

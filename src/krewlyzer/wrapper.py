@@ -417,7 +417,7 @@ def run_all(
             log=logger,
         )
     except ValueError as e:
-        # Mutual exclusivity error (--target-regions + --skip-target-regions)
+        # --target-regions with --skip-target-regions, or a named assay without its targets
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 

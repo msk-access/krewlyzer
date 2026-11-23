@@ -122,7 +122,14 @@ Asset resolution follows this priority order:
 1. **Explicit path** (`--target-regions path/to/file.bed`) - highest priority
 2. **Skip flag** (`--skip-target-regions`) - forces WGS mode
 3. **Bundled asset** (auto-loaded from `--assay`)
-4. **None** - WGS mode (no targets)
+4. **None** - WGS mode (no targets): `--assay wgs`, or no `--assay`
+
+A named assay other than `wgs` whose bundled targets are missing (a pip install
+without the data clone, or a data folder that lacks them) is an error, not WGS:
+it would otherwise measure a panel sample as WGS. The error says where it
+looked; pass `--target-regions`, or `--skip-target-regions` if WGS is meant.
+The genome's bundled blacklist is required the same way unless
+`--exclude-regions` is given.
 
 
 ## How It Works

@@ -10,7 +10,7 @@ The Panel of Normals (PON) is a unified model built from healthy plasma samples 
 
 ```bash
 # Build PON from healthy samples
-krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
 
 # Use PON for sample processing
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -P pon.parquet

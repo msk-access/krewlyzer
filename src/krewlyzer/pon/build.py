@@ -400,7 +400,7 @@ def build_pon(
     - FSD/WPS include separate on-target stats
 
     Example:
-        krewlyzer build-pon bams.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+        krewlyzer build-pon bams.txt --assay xs2 -r hg19.fa -o pon.parquet
         krewlyzer build-pon samples.txt -a msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
     """
 
@@ -1734,10 +1734,18 @@ def build_pon(
         # cache could not in fact be reused until it started carrying the
         # motif tables. Re-aggregating is minutes; re-extracting is hours.
         logger.info(f"Kept per-sample outputs in {temp_output_dir}")
+        # With the targets and the genome this build used: without them the rebuild
+        # resolves its own, a named assay's bundled set or an error, and hg19.
+        if target_source == "explicit":
+            target_arg = f" -T {resolved_target_path}"
+        elif target_source == "skipped":
+            target_arg = " --skip-target-regions"
+        else:
+            target_arg = ""
         logger.info(
             "  Rebuild from them without re-reading a BAM:\n"
             f"    krewlyzer build-pon --from-outputs {temp_output_dir} "
-            f"--assay {assay} -r {reference} -o {output}"
+            f"--assay {assay} -G {genome}{target_arg} -r {reference} -o {output}"
         )
     elif temp_output_dir and Path(temp_output_dir).exists():
         shutil.rmtree(temp_output_dir)

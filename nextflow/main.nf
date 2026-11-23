@@ -48,7 +48,7 @@ def helpMessage() {
 
      Options:
      --outdir          Output directory (default: ./results)
-     --genome          Genome build: hg19, hg38 (default: hg19)
+     --genome          Genome build: hg19, GRCh37, hg38, GRCh38 (default: hg19)
      --mapq            Min MAPQ (default: 20)
      --minlen          Min fragment length (default: 65)
      --maxlen          Max fragment length (default: 1000)
@@ -96,6 +96,17 @@ workflow NFCORE_KREWLYZER {
     if (!params.ref) {
         log.error "ERROR: --ref is required"
         helpMessage()
+        System.exit(1)
+    }
+
+    // The genome builds the CLI has assets for, listed once, in the schema. An
+    // unknown one failed every extract task instead, and the institutional
+    // retry-then-ignore policy turned that into a run that "finished" with no
+    // samples. Nothing validates params against the schema, so check it here.
+    def genomes = new groovy.json.JsonSlurper()
+        .parseText(file("${projectDir}/nextflow_schema.json").text)['properties']['genome']['enum']
+    if (!(params.genome in genomes)) {
+        log.error "ERROR: --genome '${params.genome}' is not one of: ${genomes.join(', ')}"
         System.exit(1)
     }
 

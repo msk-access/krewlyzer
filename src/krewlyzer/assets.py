@@ -28,6 +28,12 @@ class Genome(str, Enum):
     GRCH38 = "GRCh38"
 
 
+_CLONE_HINT = (
+    "Clone data with: git clone --depth 1 https://github.com/msk-access/krewlyzer.git "
+    "~/.krewlyzer-data && cd ~/.krewlyzer-data && git lfs pull"
+)
+
+
 def bundled_data_dir() -> Path:
     """The directory bundled data is read from.
 
@@ -36,18 +42,26 @@ def bundled_data_dir() -> Path:
     wheel excludes ``data/`` to stay under PyPI's 100 MB limit, so the env var
     is how those users point at a separate clone (README, "pip + Data Clone").
 
-    Shared rather than reimplemented. It used to live only in ``AssetManager``,
-    and the two other resolvers in the codebase each grew their own version
-    without it: ``core/gene_bed.py`` and ``build_gc_reference.py`` both went
-    straight to a path relative to their own ``__file__``. The result was a
+    It used to live only in ``AssetManager``, and the two other resolvers in
+    the codebase each grew their own version without it: ``core/gene_bed.py``
+    and ``build_gc_reference.py`` both went straight to a path relative to
+    their own ``__file__``. Both now consult it for ``KREWLYZER_DATA_DIR``;
+    with the variable unset, ``gene_bed`` still finds the package's copy
+    through ``importlib.resources``. The result was a
     partial contract -- with the env var set, AssetManager assets resolved and
     bundled gene BEDs came back ``None``, silently, from a debug-level log.
     Nothing caught it because the tests that would have were skipped in CI for
     the very same reason: no data in the installed package.
 
+    The package's own folder is returned whether or not it is there: a pip
+    install has none (the wheel leaves ``data/`` out), and a command given
+    every input explicitly needs nothing from it. A lookup that does need it
+    says so: ``AssetManager.missing_data_reason`` is what the resolvers report.
+
     Raises:
-        ValueError: if KREWLYZER_DATA_DIR is set but does not exist. Set and
-            wrong is a mistake worth reporting; unset is a supported default.
+        ValueError: if KREWLYZER_DATA_DIR is set to something that is not a
+            directory. Set and wrong is a mistake worth reporting; unset is a
+            supported default.
     """
     env_data_dir = os.environ.get("KREWLYZER_DATA_DIR")
     if not env_data_dir:
@@ -56,11 +70,28 @@ def bundled_data_dir() -> Path:
     base_path = Path(env_data_dir).expanduser()
     if not base_path.exists():
         raise ValueError(
-            f"KREWLYZER_DATA_DIR does not exist: {env_data_dir}\n"
-            f"Clone data with: git clone --depth 1 https://github.com/msk-access/krewlyzer.git ~/.krewlyzer-data && cd ~/.krewlyzer-data && git lfs pull"
+            f"KREWLYZER_DATA_DIR does not exist: {env_data_dir}\n{_CLONE_HINT}"
+        )
+    if not base_path.is_dir():
+        raise ValueError(
+            f"KREWLYZER_DATA_DIR is not a directory: {env_data_dir}\n{_CLONE_HINT}"
         )
     logger.info(f"Using external data directory: {base_path}")
     return base_path
+
+
+_LFS_POINTER_PREFIX = b"version https://git-lfs.github.com/spec/v1"
+
+
+def is_lfs_pointer(path: Path) -> bool:
+    """True for a Git LFS pointer: what a bundled file is in a clone that skipped
+    ``git lfs pull``. It exists, so an existence check passes it, and it is not the data.
+    """
+    path = Path(path)
+    if not path.is_file():
+        return False
+    with path.open("rb") as handle:
+        return handle.read(len(_LFS_POINTER_PREFIX)) == _LFS_POINTER_PREFIX
 
 
 def genome_build(genome: str) -> str:
@@ -90,6 +121,21 @@ class AssetManager:
         # KREWLYZER_DATA_DIR first, then the bundled copy. One rule, shared
         # with the other resolvers -- see bundled_data_dir above.
         self.base_path = bundled_data_dir()
+
+    def missing_data_reason(self) -> Optional[str]:
+        """Why no bundled asset can be found here, if the data folder itself is absent.
+
+        Not raised on construction: a command given every input explicitly needs
+        nothing bundled. Said by whichever lookup does need it, so the error
+        names the folder rather than only the one file it could not find.
+        """
+        if self.base_path.is_dir():
+            return None
+        return (
+            f"there is no data folder at {self.base_path}: a pip install carries none "
+            f"(the wheel leaves data/ out, for PyPI's 100 MB limit). Point "
+            f"KREWLYZER_DATA_DIR at a data clone. {_CLONE_HINT}"
+        )
 
     def _get_path(self, category_dir: str, filename: str) -> Path:
         path = self.base_path / category_dir / self.genome_dir / filename
@@ -285,15 +331,20 @@ class AssetManager:
         """
         # Try .bed.gz first (BGZF compressed), then .bed
         path_gz = self._get_path("targets", f"{assay}.targets.bed.gz")
-        if path_gz.exists():
-            return path_gz
-
         path = self._get_path("targets", f"{assay}.targets.bed")
-        if path.exists():
-            return path
+        for candidate in (path_gz, path):
+            if candidate.exists():
+                if is_lfs_pointer(candidate):
+                    raise FileNotFoundError(
+                        f"{candidate} is a Git LFS pointer, not the targets: run "
+                        f"`git lfs pull` in the data clone"
+                    )
+                return candidate
 
+        reason = self.missing_data_reason()
         raise FileNotFoundError(
             f"Target BED not found for assay '{assay}': tried {path_gz} and {path}"
+            + (f"; {reason}" if reason else "")
         )
 
     def get_wps_anchors(self, assay: Optional[str] = None) -> Path:

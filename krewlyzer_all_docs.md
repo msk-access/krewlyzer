@@ -1861,12 +1861,12 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--input` | `-i` | PATH | *required* | Input BAM file |
 | `--reference` | `-r` | PATH | *required* | Reference genome FASTA (indexed) |
 | `--output` | `-o` | PATH | *required* | Output directory |
-| `--genome` | `-G` | TEXT | hg19 | Genome build for bundled assets (targets, blacklist, GC reference); an unknown build is an error. A known build whose bundled files are missing is not yet caught: `--assay` targets then resolve to none (WGS mode) and a missing blacklist is only warned about, in `extract` and `run-all` alike |
-| `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for auto-loading bundled targets |
+| `--genome` | `-G` | TEXT | hg19 | Genome build for bundled assets (targets, blacklist, GC reference); an unknown build is an error, and so is a bundled file the run needs that is missing (see `--assay` and `--exclude-regions`) |
+| `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for auto-loading bundled targets. A named assay whose bundled targets are missing is an error, not WGS; `wgs` has none by design |
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
 | `--skip-target-regions` | | FLAG | | Disable panel mode even when --assay is specified |
 | `--gc-correct` | | FLAG | True | Compute GC correction factors. `--no-gc-correct` skips only the factor tables: `--assay` targets and the blacklist still apply, as in `run-all` |
-| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`). To exclude nothing, pass an empty file |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`; if it is missing, that is an error). To exclude nothing, pass an empty file |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length |
@@ -6528,7 +6528,11 @@ echo 'export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data' >> ~/.bash
 
 !!! warning "Required for pip Install"
     The `KREWLYZER_DATA_DIR` environment variable is **required** when installing via pip.
-    Without it, asset auto-loading will fail. You can still use explicit paths like `--pon-model`.
+    The wheel carries no `data/` folder. Without the variable, an assay's bundled targets
+    and the genome's default blacklist cannot be found, and a run that needs either stops
+    with an error naming the missing folder. Passing them explicitly (`-T`, `-x`) clears
+    those two errors only: the PON, GC reference, gene BED and WPS anchors are bundled too,
+    and a run without them records each stage it could not do.
 
 ---
 
@@ -6791,7 +6795,7 @@ This model is used for bias correction and z-score normalization during sample p
 
 | Option | Description |
 |--------|-------------|
-| `-a, --assay` | Assay name (e.g., `msk-access-v2`) |
+| `-a, --assay` | Assay name (e.g., `msk-access-v2`). `xs1` and `xs2` load their bundled targets; any other name except `wgs` needs `--target-regions`, or `--skip-target-regions` for a WGS PON, and is an error without one |
 | `-r, --reference` | Reference FASTA file (indexed) |
 | `-o, --output` | Output PON model file (`.pon.parquet`) |
 
@@ -6873,6 +6877,7 @@ flowchart TB
 ```bash
 krewlyzer build-pon healthy_samples.txt \
     --assay wgs-hg19 \
+    --skip-target-regions \
     --reference hg19.fa \
     --output wgs.pon.parquet
 ```
@@ -7754,7 +7759,14 @@ Asset resolution follows this priority order:
 1. **Explicit path** (`--target-regions path/to/file.bed`) - highest priority
 2. **Skip flag** (`--skip-target-regions`) - forces WGS mode
 3. **Bundled asset** (auto-loaded from `--assay`)
-4. **None** - WGS mode (no targets)
+4. **None** - WGS mode (no targets): `--assay wgs`, or no `--assay`
+
+A named assay other than `wgs` whose bundled targets are missing (a pip install
+without the data clone, or a data folder that lacks them) is an error, not WGS:
+it would otherwise measure a panel sample as WGS. The error says where it
+looked; pass `--target-regions`, or `--skip-target-regions` if WGS is meant.
+The genome's bundled blacklist is required the same way unless
+`--exclude-regions` is given.
 
 
 ## How It Works
@@ -8419,7 +8431,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--outdir` | `./results` | Output directory |
 | `--asset_dir` | | Base directory for PON/targets (enables assay resolution) |
 | `--targets` | | Global target BED (fallback if not in samplesheet) |
-| `--genome` | `hg19` | Genome build (`hg19` or `hg38`) |
+| `--genome` | `hg19` | Genome build: `hg19`, `GRCh37`, `hg38` or `GRCh38` (the enum in `nextflow_schema.json`). Anything else stops the run at launch |
 | `--threads` | `8` | Threads per process |
 | `--verbose` | `false` | Enable verbose logging |
 
@@ -8891,7 +8903,8 @@ Asset resolution follows this priority:
 1. **Explicit path** (`--target-regions`, `--pon-model`) - highest
 2. **Skip flag** (`--skip-target-regions`, `--skip-pon`)
 3. **Bundled asset** (auto-loaded from `--assay`)
-4. **None** - WGS mode
+4. **None** - WGS mode (`--assay wgs`, or no `--assay`). A named assay whose
+   bundled targets are missing is an error, not WGS
 
 | Assay | WPS Anchors | Target Genes | PON |
 |-------|:-----------:|:------------:|:---:|
@@ -10975,7 +10988,7 @@ The Panel of Normals (PON) is a unified model built from healthy plasma samples 
 
 ```bash
 # Build PON from healthy samples
-krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -o pon.parquet
+krewlyzer build-pon samples.txt --assay msk-access-v2 -r hg19.fa -T targets.bed -o pon.parquet
 
 # Use PON for sample processing
 krewlyzer run-all -i sample.bam -r hg19.fa -o out/ -P pon.parquet

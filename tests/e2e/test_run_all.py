@@ -4,6 +4,7 @@ import pysam
 import pytest
 from pathlib import Path
 
+from conftest import requires_data
 from krewlyzer.wrapper import run_all
 
 
@@ -83,6 +84,8 @@ def create_dummy_data(temp_dir):
     return bam, ref, out_dir, bins, arms, ocr, wps
 
 
+# Takes the genome's bundled blacklist (no -x): needs the data package.
+@requires_data
 @pytest.mark.slow
 def test_run_all_unified():
     with tempfile.TemporaryDirectory() as temp_dir:

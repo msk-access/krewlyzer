@@ -247,11 +247,41 @@ All notable changes to this project will be documented in this file.
   file excludes nothing. An unknown genome (`-G hg99`) or a `KREWLYZER_DATA_DIR` that does not
   exist is an error, as in run-all: with `--gc-correct`, `extract` used to warn, disable GC
   correction and carry on without the targets and the blacklist, and with `--no-gc-correct` it
-  ran without them. A known genome whose bundled files are missing is not yet caught, in either
-  mode: a named assay's targets then resolve to none (WGS mode) and a missing blacklist is only
-  warned about. Held by
+  ran without them. Held by
   `tests/invariants/test_extract_assets_without_gc.py`, which also runs run-all on the same
   sample and compares the regions each hands to extraction.
+- **A named assay or the default blacklist whose bundled file is missing is an error, not WGS.**
+  For a genome krewlyzer knows whose data folder lacks the files, `resolve_target_regions` took a
+  named panel assay's missing targets for WGS, at debug level, and `resolve_exclude_regions` only
+  warned that the blacklist was missing. So `extract -A xs1` and `run-all -A xs1` exited 0 with
+  `assay=xs1` and `panel_mode=False` in the record and the blacklisted fragments kept: a panel
+  sample measured as WGS. Every tool that takes `--assay` (`extract`, `run-all`, `fsc`, `fsd`,
+  `fsr`, `wps`, `ocf`, `region-entropy`, `motif`, `build-pon`) now stops with an error naming
+  where it looked: pass `--target-regions`, or `--skip-target-regions` or `--assay wgs` if WGS is
+  meant. `wgs` has no bundled targets by design and is unchanged. `build-pon` with a custom assay
+  name and no `-T` built a WGS-mode PON under that name; it now needs `-T` or
+  `--skip-target-regions`, and its "rebuild from the kept outputs" hint carries `-T` or
+  `--skip-target-regions` and `-G`. A missing bundled blacklist is an error in `extract`,
+  `run-all` and `motif` unless `-x/--exclude-regions` is given (an empty file excludes nothing).
+  A bundled targets file or blacklist that is a Git LFS pointer (a clone that skipped
+  `git lfs pull`) counts as missing: it passed the existence check, so the targets were read as
+  a panel of nothing and the blacklist excluded nothing. An explicit `-T/--target-regions` that
+  does not exist is an error too: it was warned about and the sample then ran as WGS. When the
+  data folder itself is absent (a pip install without the data clone: the wheel has no `data/`),
+  these errors say so and name `KREWLYZER_DATA_DIR`; a command that needs nothing bundled still
+  runs. A `KREWLYZER_DATA_DIR` that names a file rather than a directory is an error. Held by
+  `tests/invariants/test_missing_bundled_assets.py`, which points `KREWLYZER_DATA_DIR` at a folder
+  with every genome directory and none of the files, then at one holding LFS pointers, and runs
+  extract (with and without `--gc-correct`) and run-all. An explicit `-T` or `-x` that is an LFS
+  pointer is refused the same way. Five tests that take the bundled blacklist by default are now
+  marked `requires_data` (without the data, or with only its LFS pointers, they had run without
+  one), and the synthetic motif test passes the harness's own blacklist.
+- **Nextflow: an unknown `--genome` stops the run at launch.** It failed every extract task
+  instead, which the institutional retry-then-ignore error strategy turned into a run that
+  finished with no samples. `nextflow_schema.json` now lists the builds as an enum, and `main.nf`
+  checks `params.genome` against that list before any task is submitted (nothing validated
+  params against the schema). Held by `tests/unit/test_nextflow_genome.py`, which also checks
+  the enum against the builds the CLI accepts.
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
