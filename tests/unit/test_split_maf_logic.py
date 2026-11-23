@@ -13,6 +13,7 @@ it, and the cohort is short with nothing to show for it -- the same silent loss
 
 from __future__ import annotations
 
+import gzip
 import re
 import subprocess
 import textwrap
@@ -54,9 +55,13 @@ def _script(sample_ids, single, maf_name):
     return body.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
 
 
-def _run(tmp_path, sample_ids, rows, single=False):
+def _run(tmp_path, sample_ids, rows, single=False, gz=False):
     maf = tmp_path / "cohort.maf"
-    maf.write_text(_HEADER + "\n" + "".join(rows))
+    text = _HEADER + "\n" + "".join(rows)
+    if gz:
+        maf.write_bytes(gzip.compress(text.encode()))
+    else:
+        maf.write_text(text)
     (tmp_path / "ids.txt").write_text("\n".join(sample_ids) + "\n")
     script = tmp_path / "split.py"
     script.write_text(_script(sample_ids, single, "cohort.maf"))
@@ -152,3 +157,18 @@ def test_the_caller_groups_on_single_sample_not_just_the_maf(tmp_path):
         "alone, a pass-through sample and a filtered one sharing a file would "
         "be handled under one mode and one of them would be wrong."
     )
+
+
+def test_a_gzipped_maf_splits_as_the_plain_one(tmp_path):
+    """Recognised from its first bytes, as mFSD's reader does: the name says `.maf`."""
+    ids = ["sample_01", "sample_02"]
+    rows = [_row("sample_01"), _row("sample_02", "KRAS"), _row("sample_01", "EGFR")]
+    plain, gz = tmp_path / "plain", tmp_path / "gz"
+    plain.mkdir(), gz.mkdir()
+    proc, out = _run(plain, ids, rows)
+    assert proc.returncode == 0, proc.stderr
+    proc, gz_out = _run(gz, ids, rows, gz=True)
+    assert proc.returncode == 0, proc.stderr
+    for sid in ids:
+        name = f"{sid}.filtered.maf"
+        assert (gz_out / name).read_text() == (out / name).read_text()

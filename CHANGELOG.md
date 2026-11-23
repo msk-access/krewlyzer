@@ -217,7 +217,10 @@ All notable changes to this project will be documented in this file.
   count raised `UnicodeDecodeError` and stopped the whole run, with no stage recorded. Both now
   recognise gzip from the file's first two bytes, not its name, and read every bgzip block. A
   single-member decoder would stop after the first block and drop the remaining variants without
-  an error.
+  an error. The pipeline's SPLIT_MAF (run-all) and FILTER_MAF (tool-level) steps read the MAF
+  before mFSD does, also as plain text, so a `.maf.gz` in the samplesheet failed there; they now
+  recognise gzip the same way. `tests/unit/test_split_maf_logic.py` and
+  `tests/unit/test_filter_maf_logic.py` run each script on a plain and a gzipped copy.
 - **`--skip_pon` and `--skip_target_regions` no longer fail the task in the Nextflow pipeline.**
   The input_check resolvers (`resolvePon`, `resolveTargets`) still returned the samplesheet's
   file, the assay's bundled file or `--pon_model` / `--targets` when the matching skip flag was

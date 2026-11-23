@@ -42,13 +42,21 @@ process FILTER_MAF {
     // --- MODE 2: Single-sample MAF — pass through all rows, warn on TSB issues ---
     """
     #!/usr/bin/env python3
+    import gzip
     import sys
     import platform
+
+    def open_maf(path):
+        # Gzip (bgzip included) is recognised from the first two bytes, not the
+        # name, as mFSD's reader does; gzip.open reads every bgzip member.
+        with open(path, 'rb') as raw:
+            compressed = raw.read(2) == bytes([0x1f, 0x8b])
+        return gzip.open(path, 'rt') if compressed else open(path, 'r')
 
     sample_id = '${prefix}'
     sample_id_lower = sample_id.lower()
 
-    with open('${maf}', 'r') as infile, open('${prefix}.filtered.maf', 'w') as outfile:
+    with open_maf('${maf}') as infile, open('${prefix}.filtered.maf', 'w') as outfile:
         tsb_col = None
         unique_tsbs = set()
 
@@ -83,15 +91,23 @@ process FILTER_MAF {
     // --- MODE 1: Multi-sample MAF — filter by Tumor_Sample_Barcode ---
     """
     #!/usr/bin/env python3
+    import gzip
     import sys
     import platform
+
+    def open_maf(path):
+        # Gzip (bgzip included) is recognised from the first two bytes, not the
+        # name, as mFSD's reader does; gzip.open reads every bgzip member.
+        with open(path, 'rb') as raw:
+            compressed = raw.read(2) == bytes([0x1f, 0x8b])
+        return gzip.open(path, 'rt') if compressed else open(path, 'r')
 
     sample_id = '${prefix}'
     sample_id_lower = sample_id.lower()
     variant_count = 0
     total_rows = 0
 
-    with open('${maf}', 'r') as infile, open('${prefix}.filtered.maf', 'w') as outfile:
+    with open_maf('${maf}') as infile, open('${prefix}.filtered.maf', 'w') as outfile:
         header_written = False
         tsb_col = None
 

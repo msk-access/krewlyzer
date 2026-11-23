@@ -57,9 +57,17 @@ process SPLIT_MAF {
     def single_flag = single_sample ? 'true' : 'false'
     """
     #!/usr/bin/env python3
+    import gzip
     import os
     import platform
     import sys
+
+    def open_maf(path):
+        # Gzip (bgzip included) is recognised from the first two bytes, not the
+        # name, as mFSD's reader does; gzip.open reads every bgzip member.
+        with open(path, 'rb') as raw:
+            compressed = raw.read(2) == bytes([0x1f, 0x8b])
+        return gzip.open(path, 'rt') if compressed else open(path, 'r')
 
     os.makedirs('split', exist_ok=True)
 
@@ -94,7 +102,7 @@ process SPLIT_MAF {
             handles[sid] = h
         return h
 
-    with open('${maf}', 'r') as infile:
+    with open_maf('${maf}') as infile:
         for line in infile:
             if line.startswith('#'):
                 continue
