@@ -200,6 +200,20 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`--skip_pon` and `--skip_target_regions` no longer fail the task in the Nextflow pipeline.**
+  The input_check resolvers (`resolvePon`, `resolveTargets`) still returned the samplesheet's
+  file, the assay's bundled file or `--pon_model` / `--targets` when the matching skip flag was
+  set, so a module was handed `--pon-model X` and `--skip-pon` together (or `--target-regions X`
+  and `--skip-target-regions`), a pair `asset_resolution` rejects with `ValueError`. Under a
+  retry-then-ignore error strategy the run reported complete with those tables missing. Each
+  resolver now returns nothing when its skip flag is set, ahead of every other source, the
+  samplesheet included, and the once-per-run PON validation no longer runs under `--skip_pon`, so
+  a missing or invalid `--pon_model` cannot stop a run that will not use it. This covers run-all
+  and the tool-level `extract`, `fsc`, `fsr`, `region-entropy` and `region-mds`, which take their
+  PON and targets from the resolvers. Not yet the tool-level `fsd`, `ocf` and `wps`, which read
+  `--targets` directly, nor `fsd`, `fsc`, `fsr`, `ocf` and `wps`, which read `--pon_model`
+  directly and never pass `--skip-pon`. `tests/unit/test_nextflow_skip_flags.py` pins both guards
+  and the resolvers' order.
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
   exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly
