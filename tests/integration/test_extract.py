@@ -221,6 +221,11 @@ def test_extract_target_regions_panel_mode(tmp_path):
         f.write("ACGT" * 500 + "\n")  # 2000bp with varying GC
     pysam.faidx(str(genome_file))
 
+    # No blacklist: the bundled hg19 one starts with chr1:0-750100, which holds every
+    # fragment here. (`--no-gc-correct` used to skip the blacklist too; it no longer does.)
+    no_exclude = tmp_path / "no_exclude.bed"
+    no_exclude.write_text("")
+
     output_dir = tmp_path / "output"
 
     # Run extract with --target-regions (panel mode)
@@ -237,6 +242,8 @@ def test_extract_target_regions_panel_mode(tmp_path):
             str(output_dir),
             "--target-regions",
             str(target_file),
+            "--exclude-regions",
+            str(no_exclude),
             "--no-gc-correct",  # Skip GC factor computation for this test
         ],
     )

@@ -57,7 +57,7 @@ def extract(
         "hg19",
         "-G",
         "--genome",
-        help="Genome build for GC correction assets (hg19/GRCh37/hg38/GRCh38)",
+        help="Genome build for bundled assets: targets, blacklist, GC reference (hg19/GRCh37/hg38/GRCh38)",
     ),
     gc_correct: bool = typer.Option(
         True, "--gc-correct/--no-gc-correct", help="Compute GC correction factors"
@@ -176,47 +176,40 @@ def extract(
         logger.error(f"Reference genome not found: {genome_reference}")
         raise typer.Exit(1)
 
-    # Initialize Asset Manager for GC correction
-    assets = None
-    if gc_correct:
-        try:
-            assets = AssetManager(genome)
-            logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
-        except ValueError as e:
-            logger.warning(f"AssetManager error: {e}. GC correction disabled.")
-            gc_correct = False
+    # The genome's assets: the assay's targets and the blacklist come from them whatever
+    # --gc-correct says, as in run-all; the flag decides only whether factors are computed.
+    # A genome AssetManager does not know is an error, as in run-all: carrying on would mean
+    # no targets and no blacklist, not just no GC correction. A known genome whose bundled
+    # files are missing is not caught here (resolve_target_regions treats it as WGS).
+    try:
+        assets = AssetManager(genome)
+        logger.info(f"Genome: {assets.raw_genome} -> {assets.genome_dir}")
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
 
     # Resolve target regions (auto-load from --assay if not explicit)
-    resolved_target_path = target_regions
-    if assets:
-        try:
-            resolved_target_path, target_source = resolve_target_regions(
-                explicit_path=target_regions,
-                assay=assay,
-                skip_target_regions=skip_target_regions,
-                assets=assets,
-                log=logger,
+    try:
+        resolved_target_path, target_source = resolve_target_regions(
+            explicit_path=target_regions,
+            assay=assay,
+            skip_target_regions=skip_target_regions,
+            assets=assets,
+            log=logger,
+        )
+        if resolved_target_path and target_source == "bundled":
+            logger.info(
+                f"Auto-loaded target regions for assay '{assay}': {resolved_target_path.name}"
             )
-            if resolved_target_path and target_source == "bundled":
-                logger.info(
-                    f"Auto-loaded target regions for assay '{assay}': {resolved_target_path.name}"
-                )
-        except ValueError as e:
-            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
-            raise typer.Exit(1)
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
 
-    # The blacklist, by the rule run-all and motif use. (Without assets, i.e. --no-gc-correct,
-    # only an explicit one applies.)
-    if assets:
-        try:
-            exclude_regions, _ = resolve_exclude_regions(
-                exclude_regions, assets, logger
-            )
-        except ValueError as e:
-            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
-            raise typer.Exit(1)
-    elif exclude_regions and not exclude_regions.exists():
-        logger.error(f"Exclude regions file not found: {exclude_regions}")
+    # The blacklist, by the rule run-all and motif use.
+    try:
+        exclude_regions, _ = resolve_exclude_regions(exclude_regions, assets, logger)
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 
     # Create output directory
@@ -329,7 +322,7 @@ def extract(
             output_dir=output,
             genome=genome,
             assay=assay,
-            compute_gc_factors=gc_correct and assets is not None,
+            compute_gc_factors=gc_correct,
             output_format=output_format,
             compress=compress,
         )
@@ -338,7 +331,6 @@ def extract(
         if (
             resolved_target_path
             and gc_correct
-            and assets
             and len(result.gc_observations_ontarget) > 0
         ):
             try:

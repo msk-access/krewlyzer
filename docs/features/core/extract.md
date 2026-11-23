@@ -52,12 +52,12 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--input` | `-i` | PATH | *required* | Input BAM file |
 | `--reference` | `-r` | PATH | *required* | Reference genome FASTA (indexed) |
 | `--output` | `-o` | PATH | *required* | Output directory |
-| `--genome` | `-G` | TEXT | hg19 | Genome build for GC assets |
+| `--genome` | `-G` | TEXT | hg19 | Genome build for bundled assets (targets, blacklist, GC reference); an unknown build is an error. A known build whose bundled files are missing is not yet caught: `--assay` targets then resolve to none (WGS mode) and a missing blacklist is only warned about, in `extract` and `run-all` alike |
 | `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for auto-loading bundled targets |
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
 | `--skip-target-regions` | | FLAG | | Disable panel mode even when --assay is specified |
-| `--gc-correct` | | FLAG | True | Compute GC correction factors |
-| `--exclude-regions` | `-x` | PATH | | BED file of regions to exclude |
+| `--gc-correct` | | FLAG | True | Compute GC correction factors. `--no-gc-correct` skips only the factor tables: `--assay` targets and the blacklist still apply, as in `run-all` |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`). To exclude nothing, pass an empty file |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length |

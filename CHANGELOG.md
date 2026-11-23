@@ -237,6 +237,21 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`krewlyzer extract --no-gc-correct` applies the assay's targets and the bundled blacklist.**
+  `extract` built its AssetManager only under `--gc-correct`, and both the assay's bundled
+  targets and the genome's blacklist are resolved through it. So `extract --no-gc-correct -A xs1`
+  ran in WGS mode with no blacklist and exited 0, while run-all, which always builds the
+  AssetManager, ran the same sample in panel mode with the blacklist applied. `extract` now
+  builds it whatever the flag says; `--no-gc-correct` turns off the factor tables and nothing
+  else. So `--no-gc-correct` now applies the genome's bundled blacklist by default; an empty `-x`
+  file excludes nothing. An unknown genome (`-G hg99`) or a `KREWLYZER_DATA_DIR` that does not
+  exist is an error, as in run-all: with `--gc-correct`, `extract` used to warn, disable GC
+  correction and carry on without the targets and the blacklist, and with `--no-gc-correct` it
+  ran without them. A known genome whose bundled files are missing is not yet caught, in either
+  mode: a named assay's targets then resolve to none (WGS mode) and a missing blacklist is only
+  warned about. Held by
+  `tests/invariants/test_extract_assets_without_gc.py`, which also runs run-all on the same
+  sample and compares the regions each hands to extraction.
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
