@@ -4,6 +4,7 @@ Asset resolution for krewlyzer CLI tools.
 Provides centralized logic for resolving bundled assets from CLI arguments:
 - Target regions (for panel mode)
 - PON models (for z-score normalization)
+- Exclude regions (the blacklist)
 
 This module ensures consistent auto-loading behavior across all CLI tools,
 whether invoked via `run-all` or individually.
@@ -265,6 +266,42 @@ def resolve_pon_model(
     # DEFAULT: No PON configured
     # ==========================================================================
     log.debug("PON resolution: No PON model configured, outputting raw features")
+    return None, "none"
+
+
+# =============================================================================
+# EXCLUDE REGIONS (BLACKLIST) RESOLUTION
+# =============================================================================
+
+
+def resolve_exclude_regions(
+    explicit_path: Optional[Path],
+    assets: "AssetManager",
+    log: Optional[logging.Logger] = None,
+) -> Tuple[Optional[Path], str]:
+    """The blacklist every fragment reader applies: the one given, else the genome's bundled one.
+
+    Shared by `extract`, `run-all` and `motif`, so one sample's tables all exclude the same
+    fragments. `motif` excluded none, so its motif tables counted fragments run-all's dropped.
+
+    Returns ``(path, source)``, source one of ``explicit``, ``bundled`` or ``none``.
+
+    Raises:
+        ValueError: an explicit file that does not exist (it used to be used as given).
+    """
+    log = log or logger
+    if explicit_path is not None:
+        if not Path(explicit_path).exists():
+            raise ValueError(f"Exclude regions file not found: {explicit_path}")
+        log.info(f"Exclude regions: {Path(explicit_path).name} (explicit)")
+        return Path(explicit_path), "explicit"
+    bundled = assets.exclude_regions
+    if bundled.exists():
+        log.info(f"Exclude regions: {bundled.name} (bundled)")
+        return bundled, "bundled"
+    log.warning(
+        f"No bundled exclude regions at {bundled}: blacklisted fragments are kept"
+    )
     return None, "none"
 
 

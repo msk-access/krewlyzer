@@ -1005,6 +1005,7 @@ Per-tissue × per-size fragment distributions.
 ### mFSD (Mutant Fragment Size Distribution)
 
 **File:** `{sample}.mFSD.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** `--maf` / `run-all` with MAF input
 
 Per-variant fragment size analysis. Compares ALT-bearing fragments vs REF, NonREF, and N (uncertain) allele classes.
@@ -1067,6 +1068,7 @@ Per-variant raw size histograms for manual inspection.
 ### UXM (Methylation)
 
 **File:** `{sample}.UXM.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** Methylation-enabled BAM input
 
 CpG methylation classification per genomic region. Each fragment is classified as Unmethylated (U), Partially-methylated (X), or fully Methylated (M).
@@ -1186,6 +1188,7 @@ mean.
 | `pon_digest` | str | sha256 of the PON's baseline rows: answers "the same baselines?". A PON rebuilt from the same donors keeps its name and cohort digest and gets a new `pon_digest`; `stamp-pon` leaves it unchanged. run-all reuses cached motif tables only under the same `pon_digest`, and a single tool refuses a PON with another one. Absent from directories written before this release |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
 | `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
+| `table_formats` | str | The extensions the folder's tables are written in: `.parquet`, `.tsv`, `.tsv.gz`, `.parquet,.tsv` or `.parquet,.tsv.gz` (from `--output-format` and `--compress`; compression changes no Parquet file). Recorded so a rerun in another format is refused; absent from directories written before this release |
 
 **One folder, one configuration.** A rerun into a sample's folder must use the settings
 recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
@@ -1194,7 +1197,13 @@ feature tool that takes these settings refuse a run with others before writing a
 the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
 but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
-the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+the second run's. The output format is one
+of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
+writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
+TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names
+the option to pass (`--output-format parquet`). A folder written before `table_formats` was
+recorded is judged by its record files: `S.metadata.parquet` alone is Parquet, and a
+`.parquet` with a `.tsv` is `both`. To change settings, use a fresh output folder. Nextflow cannot be checked
 this way, since each task starts in an empty work folder; there, publish a different
 configuration to a different `--outdir`.
 

@@ -188,6 +188,8 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 | `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
 | `STAGE.UNEXPECTED_TABLE` | ERROR if that table is read downstream, else WARN | A table is present although its stage was not requested (or had no input) in this run: left from another configuration, and read downstream as this run's |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
+| `FORMAT.MIXED` | ERROR | A table or record is present in an extension outside the record's `table_formats`: a later run wrote into the folder with another `--output-format` (under Nextflow, published over an earlier `--outdir`), so the Parquet downstream reads may be the earlier run's. Only tables the contract names count, not BED, JSON or logs |
+| `FORMAT.UNJUDGED` | SKIP | A record from before `table_formats` was recorded, with tables in more than one extension: a `both` run and two runs in different formats look the same, so the folder could not be checked |
 
 A stage that was not requested gives no finding when nothing downstream reads its
 tables (UXM, mFSD); a consumed table such as `MDS.gene` is still reported absent.
@@ -2171,7 +2173,7 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--skip-target-regions` | | FLAG | | Force WGS mode (ignore bundled targets) |
 | `--assay` | `-A` | TEXT | | Assay type (xs1/xs2) for gene-centric FSC |
 | `--windows` | `-w` | INT | 100000 | Window size for aggregation |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window number |
+| `--continue-n` | `-c` | INT | 1 with target regions, else 50 | 100 kb bins per output row; run-all's rule |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all cores) |
@@ -2908,7 +2910,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for bundled assets |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--windows` | `-w` | INT | 100000 | Window size |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window number |
+| `--continue-n` | `-c` | INT | 1 with target regions, else 50 | 100 kb bins per output row; run-all's rule |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all cores) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
@@ -4547,6 +4549,11 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization |
 | `--kmer` | `-k` | INT | 4 | K-mer size for motif extraction |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | Exclude regions BED (the genome's blacklist, as run-all) |
+| `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
+| `--minlen` | | INT | 65 | Minimum fragment length |
+| `--maxlen` | | INT | 1000 | Maximum fragment length |
+| `--skip-duplicates` | | FLAG | True | Skip duplicate reads (`--no-skip-duplicates` to keep them) |
 | `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--require-proper-pair` | | FLAG | True | Require proper pairs (disable for duplex) |
@@ -8136,9 +8143,11 @@ nextflow run msk-access/krewlyzer \
 !!! warning "One `--outdir` per configuration"
     Results are copied into `{outdir}/{sample}/`, and a later run copies its files over the
     earlier one's without removing any the later run did not make. Rerunning a sample with
-    different settings (another `--assay`, no targets) into the same `--outdir` would leave the
-    first run's extra tables beside the second run's record, read as current. The CLI refuses
-    such a rerun; the pipeline cannot see the published folder, so use a fresh `--outdir`.
+    different settings (another `--assay`, no targets, another `output_format`, another
+    `--use_runall`) into the same `--outdir` would leave the first run's extra tables beside the
+    second run's record, read as current. The CLI refuses such a rerun; the pipeline cannot see
+    the published folder, so use a fresh `--outdir`. `krewlyzer validate-output` on the published folder reports tables in two
+    formats as `FORMAT.MIXED`; another assay or targets it cannot see.
 
 ## Workflow Architecture
 
@@ -8317,6 +8326,40 @@ Skipped entirely for tsv-only runs — see `--output_format` in
     skipped rather than run on a partial set, which would report degeneracy
     findings that are artefacts of the missing samples.
 
+## Tool-level mode (`--use_runall false`)
+
+Each tool runs as its own task. It is given the sample's assay, targets, PON and WPS anchors,
+as run-all is, and publishes its tables into `{outdir}/{sample}/`, the folder run-all publishes
+into.
+
+!!! warning "No completion marker yet"
+    `{sample}.metadata.*` is not published in this mode. Downstream takes that file to mean the
+    sample is complete, and extraction's record would appear before any feature table, without
+    `krewlyzer_version` or `pon_applied`. So a sample from a fresh `--outdir` is not read
+    downstream, and `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all
+    for a cohort. In an `--outdir` an earlier run-all used, that run's record stays and marks the
+    sample complete, describing the earlier run: use a fresh `--outdir`.
+
+Not published: `fsr`'s copy of `fsc_counts` (`fsc` publishes the same table), and the Rust
+intermediates `region-entropy` leaves (`*.raw.tsv`).
+
+Still different from run-all:
+
+- `region-entropy` run on its own writes no `TFBS/ATAC.sync` tables
+  ([#100](https://github.com/msk-access/krewlyzer/issues/100)).
+- mFSD is not GC-corrected. Run-all passes extract's factor table (on-target first on a panel);
+  tool-level passes none until the GC redesign decides how a BAM-only tool chooses its table.
+- `--region_mds_e1_only` is not applied: `krewlyzer region-mds` has no such option.
+- A sample with no variants in the MAF gets a 0-row `mFSD` table. Run-all writes none and records
+  `mfsd_status = no_variants`. Tool-level mode drops only filtered MAFs of 100 bytes or less, and a
+  real MAF's header alone is longer.
+- `--gc_correct false` turns GC correction off in `fsc`, `fsr`, `ocf` and `wps` only. `extract`
+  still writes its factor tables, so `fsd` and `region-entropy` stay corrected, and run-all
+  ignores the parameter. A sample's tables then mix corrected and uncorrected.
+- On a genome with no bundled OCF regions (hg38), `krewlyzer ocf` writes nothing and exits 0, so
+  the `ocf` task fails for want of its tables and, under a retry-then-ignore error strategy, is
+  dropped. Run-all skips OCF on that genome.
+
 ---
 
 ## Output Changes in 0.9.0
@@ -8384,7 +8427,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow |
+| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow: one task per tool, no completion marker yet ([Outputs](outputs.md#tool-level-mode-use_runall-false)) |
 
 ## PON Parameters
 
@@ -8392,7 +8435,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 |-----------|---------|-------------|
 | `--pon_model` | | Global PON model path (fallback) |
 | `--pon_variant` | `all_unique` | PON variant: `all_unique` or `duplex` |
-| `--skip_pon` | `false` | Skip PON z-score normalization. Overrides every PON source: the samplesheet's `pon` column, the assay's bundled PON and `--pon_model` are all ignored, and `--pon_model` is not validated. Exception: with `--use_runall false`, `fsd`, `fsc`, `fsr`, `ocf` and `wps` still read `--pon_model` directly. |
+| `--skip_pon` | `false` | Skip PON z-score normalization. Overrides every PON source: the samplesheet's `pon` column, the assay's bundled PON and `--pon_model` are all ignored, and `--pon_model` is not validated. |
 
 ## Panel & WPS Parameters
 
@@ -8421,7 +8464,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 |-----------|---------|-------------|
 | `--no_tfbs` | `false` | Disable TFBS region entropy |
 | `--no_atac` | `false` | Disable ATAC region entropy |
-| `--skip_target_regions` | `false` | Force WGS mode. Overrides every targets source: the samplesheet's `targets` column, the assay's bundled targets and `--targets` are all ignored. Exception: with `--use_runall false`, `fsd`, `ocf` and `wps` still read `--targets` directly, and fail if it is set alongside this flag. |
+| `--skip_target_regions` | `false` | Force WGS mode. Overrides every targets source: the samplesheet's `targets` column, the assay's bundled targets and `--targets` are all ignored. |
 | `--disable_e1_aggregation` | `false` | Skip E1-only FSC aggregation |
 | `--region_mds_e1_only` | `false` | Run region-MDS on E1 (first exon) only |
 
@@ -8434,7 +8477,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
 | `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
 | `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
-| `--gc_correct` | `true` | Apply GC bias correction during extraction. |
+| `--gc_correct` | `true` | Apply GC bias correction. Read only in tool-level mode (`--use_runall false`), and there only by `fsc`, `fsr`, `ocf` and `wps`: `false` leaves their tables uncorrected, while `fsd`, `region-entropy` and run-all mode still correct (`extract` writes its factor tables regardless). |
 | `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
 | `--long_partition` | `null` | Partition for **retried** `run-all` tasks whose grown time request no longer fits the shortest partition in `--partition`. See below. |
 
@@ -10643,6 +10686,7 @@ Per-tissue × per-size fragment distributions.
 ### mFSD (Mutant Fragment Size Distribution)
 
 **File:** `{sample}.mFSD.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** `--maf` / `run-all` with MAF input
 
 Per-variant fragment size analysis. Compares ALT-bearing fragments vs REF, NonREF, and N (uncertain) allele classes.
@@ -10705,6 +10749,7 @@ Per-variant raw size histograms for manual inspection.
 ### UXM (Methylation)
 
 **File:** `{sample}.UXM.tsv`  
+**Format:** the run's `--output-format`: `.tsv`, `.tsv.gz` (`--compress`), `.parquet`, or both. Rust writes a `.tsv` first; it is removed once converted unless it is one of the run's formats.  
 **Requires:** Methylation-enabled BAM input
 
 CpG methylation classification per genomic region. Each fragment is classified as Unmethylated (U), Partially-methylated (X), or fully Methylated (M).
@@ -10824,6 +10869,7 @@ mean.
 | `pon_digest` | str | sha256 of the PON's baseline rows: answers "the same baselines?". A PON rebuilt from the same donors keeps its name and cohort digest and gets a new `pon_digest`; `stamp-pon` leaves it unchanged. run-all reuses cached motif tables only under the same `pon_digest`, and a single tool refuses a PON with another one. Absent from directories written before this release |
 | `pon_krewlyzer_version` | str | The release the PON was stamped with |
 | `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
+| `table_formats` | str | The extensions the folder's tables are written in: `.parquet`, `.tsv`, `.tsv.gz`, `.parquet,.tsv` or `.parquet,.tsv.gz` (from `--output-format` and `--compress`; compression changes no Parquet file). Recorded so a rerun in another format is refused; absent from directories written before this release |
 
 **One folder, one configuration.** A rerun into a sample's folder must use the settings
 recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
@@ -10832,7 +10878,13 @@ feature tool that takes these settings refuse a run with others before writing a
 the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
 but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
-the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+the second run's. The output format is one
+of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
+writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
+TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names
+the option to pass (`--output-format parquet`). A folder written before `table_formats` was
+recorded is judged by its record files: `S.metadata.parquet` alone is Parquet, and a
+`.parquet` with a `.tsv` is `both`. To change settings, use a fresh output folder. Nextflow cannot be checked
 this way, since each task starts in an empty work folder; there, publish a different
 configuration to a different `--outdir`.
 

@@ -256,6 +256,14 @@ class AssetBundle:
     alu: Path
     anchors: Path
     regions: Path
+    #: The blacklist every run-all and CLI test passes explicitly. Without one they take the
+    #: bundled hg19 blacklist, whose first entry, chr1:0-750100, holds the whole synthetic
+    #: chr1: half the sample was dropped, and every chr1 row compared zeros with zeros.
+    blacklist: Path
+
+
+#: The one window the synthetic blacklist excludes: inside chr1, clear of its ends.
+BLACKLIST_WINDOW = ("chr1", 145_000, 155_000)
 
 
 def make_assets(directory: Path, contigs: Sequence[Contig]) -> AssetBundle:
@@ -290,11 +298,13 @@ def make_assets(directory: Path, contigs: Sequence[Contig]) -> AssetBundle:
                     f"GENE{gi}\t{ei}\t{strand}\n"
                 )
 
+    # BED7, the bundled background's layout: `parse_alu_regions` skips a line without the
+    # seventh (subfamily) column, so a BED6 here gave WPS_background no Alus and no rows.
     alu = directory / "alu.bed"
     with open(alu, "w") as fh:
         for c in contigs:
             for start in range(20_000, c.length - 5_000, 10_000):
-                fh.write(f"{c.name}\t{start}\t{start + 300}\tAluY\t0\t+\n")
+                fh.write(f"{c.name}\t{start}\t{start + 300}\tAluY\t0\t+\tAluY\n")
 
     anchors = directory / "anchors.bed"
     with open(anchors, "w") as fh:
@@ -309,6 +319,12 @@ def make_assets(directory: Path, contigs: Sequence[Contig]) -> AssetBundle:
             for start in range(40_000, c.length - 5_000, 30_000):
                 fh.write(f"{c.name}\t{start}\t{start + 2_000}\tTISSUE_A\n")
 
+    blacklist = directory / "blacklist.bed"
+    chrom, start, end = BLACKLIST_WINDOW
+    with open(blacklist, "w") as fh:
+        if any(c.name == chrom and c.length >= end for c in contigs):
+            fh.write(f"{chrom}\t{start}\t{end}\tSYNTHETIC\n")
+
     return AssetBundle(
         bins=bins,
         arms=arms,
@@ -317,6 +333,7 @@ def make_assets(directory: Path, contigs: Sequence[Contig]) -> AssetBundle:
         alu=alu,
         anchors=anchors,
         regions=regions,
+        blacklist=blacklist,
     )
 
 

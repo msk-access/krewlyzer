@@ -165,9 +165,9 @@ workflow INPUT_CHECK {
         .multiMap {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
 
-            // tool-level: extract path
+            // tool-level: extract path, with the sample's settings for every tool
             extract:
-                [meta, bam, bai, pon ?: [], targets ?: []]
+                [meta, bam, bai, pon ?: [], targets ?: [], wps_anchors ?: []]
 
             // run-all: meta carries ALL paths so join is unnecessary. The VCF
             // rides in meta too: the main workflow routes a VCF-only sample
@@ -188,7 +188,7 @@ workflow INPUT_CHECK {
     // Pre-extracted BEDs (tool_level only — uses bed_samples, not bam_samples)
     ch_beds = ch_branched.bed_samples.map {
         meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-        [meta, bed, pon ?: [], targets ?: []]
+        [meta, bed, pon ?: [], targets ?: [], wps_anchors ?: []]
     }
 
     // Methylation samples (from ch_parsed, not affected by multiMap)
@@ -204,7 +204,9 @@ workflow INPUT_CHECK {
         .filter { it[9] != null && !it[10] }  // maf exists AND not single_sample
         .map {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-            [meta, bam, bai, maf]
+            // run-all's mFSD BAM: the samplesheet's duplex `mfsd_bam` when given, with duplex
+            // weighting on (wrapper.py); else the main BAM.
+            [meta + [mfsd_duplex: mfsd_bam != null], mfsd_bam ?: bam, mfsd_bam ? mfsd_bai : bai, maf]
         }
 
     // MAF samples bypass (single_sample_maf = true) — tool-level mode
@@ -212,7 +214,9 @@ workflow INPUT_CHECK {
         .filter { it[9] != null && it[10] }  // maf exists AND single_sample
         .map {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-            [meta, bam, bai, maf]
+            // run-all's mFSD BAM: the samplesheet's duplex `mfsd_bam` when given, with duplex
+            // weighting on (wrapper.py); else the main BAM.
+            [meta + [mfsd_duplex: mfsd_bam != null], mfsd_bam ?: bam, mfsd_bam ? mfsd_bai : bai, maf]
         }
 
     // VCF samples (no MAF) — tool-level mode. A VCF is not filtered by
@@ -223,7 +227,7 @@ workflow INPUT_CHECK {
         .filter { it[8] && it[9] == null }  // vcf exists AND no maf
         .map {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-            [meta, bam, bai, vcf]
+            [meta + [mfsd_duplex: mfsd_bam != null], mfsd_bam ?: bam, mfsd_bam ? mfsd_bai : bai, vcf]
         }
 
     ch_extract        = ch_bam_outputs.extract

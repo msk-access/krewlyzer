@@ -111,6 +111,40 @@ Skipped entirely for tsv-only runs — see `--output_format` in
     skipped rather than run on a partial set, which would report degeneracy
     findings that are artefacts of the missing samples.
 
+## Tool-level mode (`--use_runall false`)
+
+Each tool runs as its own task. It is given the sample's assay, targets, PON and WPS anchors,
+as run-all is, and publishes its tables into `{outdir}/{sample}/`, the folder run-all publishes
+into.
+
+!!! warning "No completion marker yet"
+    `{sample}.metadata.*` is not published in this mode. Downstream takes that file to mean the
+    sample is complete, and extraction's record would appear before any feature table, without
+    `krewlyzer_version` or `pon_applied`. So a sample from a fresh `--outdir` is not read
+    downstream, and `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all
+    for a cohort. In an `--outdir` an earlier run-all used, that run's record stays and marks the
+    sample complete, describing the earlier run: use a fresh `--outdir`.
+
+Not published: `fsr`'s copy of `fsc_counts` (`fsc` publishes the same table), and the Rust
+intermediates `region-entropy` leaves (`*.raw.tsv`).
+
+Still different from run-all:
+
+- `region-entropy` run on its own writes no `TFBS/ATAC.sync` tables
+  ([#100](https://github.com/msk-access/krewlyzer/issues/100)).
+- mFSD is not GC-corrected. Run-all passes extract's factor table (on-target first on a panel);
+  tool-level passes none until the GC redesign decides how a BAM-only tool chooses its table.
+- `--region_mds_e1_only` is not applied: `krewlyzer region-mds` has no such option.
+- A sample with no variants in the MAF gets a 0-row `mFSD` table. Run-all writes none and records
+  `mfsd_status = no_variants`. Tool-level mode drops only filtered MAFs of 100 bytes or less, and a
+  real MAF's header alone is longer.
+- `--gc_correct false` turns GC correction off in `fsc`, `fsr`, `ocf` and `wps` only. `extract`
+  still writes its factor tables, so `fsd` and `region-entropy` stay corrected, and run-all
+  ignores the parameter. A sample's tables then mix corrected and uncorrected.
+- On a genome with no bundled OCF regions (hg38), `krewlyzer ocf` writes nothing and exits 0, so
+  the `ocf` task fails for want of its tables and, under a retry-then-ignore error strategy, is
+  dropped. Run-all skips OCF on that genome.
+
 ---
 
 ## Output Changes in 0.9.0

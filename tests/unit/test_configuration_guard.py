@@ -114,3 +114,100 @@ def test_an_unknown_setting_is_a_programming_error(tmp_path):
     out = _record(tmp_path)
     with pytest.raises(ValueError, match="unknown setting"):
         refuse_a_different_configuration(out, "s", {"mapq": 20}, **_FORMAT)
+
+
+# The output format (the plan "refuse a rerun in a different output format"). A rerun in another
+# format rewrites its tables in that format and leaves the first run's beside them, and each
+# reader then picks by its own rule: downstream reads the old Parquet, `resolve_table_path` the
+# old TSV. `table_formats` is not a `given` setting: the guard takes it from the run's own
+# `output_format`/`compress`, so no caller can leave it out.
+
+
+def _records(tmp_path, *extensions, **fields):
+    """`s.metadata` in each extension, with the same row."""
+    row = {"sample_id": "s", "genome": "hg19", **fields}
+    for ext in extensions:
+        path = tmp_path / f"s.metadata{ext}"
+        if ext == ".parquet":
+            pd.DataFrame([row]).to_parquet(path)
+        else:
+            pd.DataFrame([row]).to_csv(path, sep="\t", index=False)
+    return tmp_path
+
+
+def test_a_different_table_format_is_refused_and_names_the_flag(tmp_path):
+    out = _records(tmp_path, ".parquet", table_formats=".parquet")
+    with pytest.raises(ConfigurationMismatch, match="table_formats") as refused:
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="tsv", compress=False
+        )
+    assert "--output-format parquet" in str(refused.value)
+
+
+def test_compression_does_not_change_a_parquet_folder(tmp_path):
+    out = _records(tmp_path, ".parquet", table_formats=".parquet")
+    refuse_a_different_configuration(
+        out, "s", {}, output_format="parquet", compress=True
+    )
+
+
+def test_compressed_tsv_is_another_format(tmp_path):
+    out = _records(tmp_path, ".tsv", table_formats=".tsv")
+    with pytest.raises(ConfigurationMismatch, match="table_formats"):
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="tsv", compress=True
+        )
+
+
+def test_without_the_field_the_record_files_say_the_format(tmp_path):
+    """A record written before `table_formats` existed: every 0.9.0 folder."""
+    out = _records(tmp_path, ".parquet")
+    refuse_a_different_configuration(
+        out, "s", {}, output_format="parquet", compress=False
+    )
+    with pytest.raises(ConfigurationMismatch, match="table_formats"):
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="tsv", compress=False
+        )
+
+
+def test_without_the_field_two_records_are_both(tmp_path):
+    """`both` writes the record in both formats, so two records are not by themselves mixed."""
+    out = _records(tmp_path, ".parquet", ".tsv")
+    refuse_a_different_configuration(out, "s", {}, output_format="both", compress=False)
+    with pytest.raises(ConfigurationMismatch, match="table_formats"):
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="parquet", compress=False
+        )
+
+
+def test_the_table_format_is_not_a_given_setting(tmp_path):
+    out = _records(tmp_path, ".parquet")
+    with pytest.raises(ValueError, match="unknown setting"):
+        refuse_a_different_configuration(
+            out, "s", {"table_formats": ".parquet"}, **_FORMAT
+        )
+
+
+def test_a_record_copy_in_a_format_the_field_does_not_name_is_mixed(tmp_path):
+    """A TSV run published over a Parquet one leaves two records that disagree; reading only its
+    own copy, a `-F tsv` rerun matched and ran (review of the branch)."""
+    _records(tmp_path, ".parquet", table_formats=".parquet")
+    _records(tmp_path, ".tsv", table_formats=".tsv")
+    with pytest.raises(ConfigurationMismatch, match="table_formats") as refused:
+        refuse_a_different_configuration(
+            tmp_path, "s", {}, output_format="tsv", compress=False
+        )
+    assert "--output-format" not in str(refused.value)
+
+
+def test_an_older_two_record_folder_is_not_told_to_rerun_as_both(tmp_path):
+    """Two old records may be a `both` run or two runs: `-F both` would keep both runs' stale
+    tables, so the only advice is a fresh folder."""
+    out = _records(tmp_path, ".parquet", ".tsv")
+    with pytest.raises(ConfigurationMismatch) as refused:
+        refuse_a_different_configuration(
+            out, "s", {}, output_format="parquet", compress=False
+        )
+    assert "--output-format both" not in str(refused.value)
+    assert "fresh output folder" in str(refused.value)

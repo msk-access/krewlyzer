@@ -13,17 +13,23 @@ process KREWLYZER_REGION_ENTROPY {
     label 'process_medium'
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
+    // Into the sample's folder, as run-all publishes. `{sample}.metadata.*` is never among a
+    // tool's outputs: it is downstream's completion marker.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
-    tuple val(meta), path(bed), path(gc_factors)  // gc_factors: extract's tables, staged beside the BED ([] if none)
+    // The sample's PON and targets, resolved once by INPUT_CHECK as run-all's are ([] if none).
+    // gc_factors: extract's tables, staged beside the BED ([] if none).
+    tuple val(meta), path(bed), path(gc_factors), path(pon), path(targets)
     path fasta
-    path pon_model          // Optional PON model for z-score normalization
-    path targets            // Optional target regions for panel mode
 
     output:
-    tuple val(meta), path("*.TFBS.tsv")           , emit: tfbs, optional: true
-    tuple val(meta), path("*.ATAC.tsv")           , emit: atac, optional: true
-    tuple val(meta), path("*.TFBS.ontarget.tsv")  , emit: tfbs_ontarget, optional: true
-    tuple val(meta), path("*.ATAC.ontarget.tsv")  , emit: atac_ontarget, optional: true
+    // In params.output_format. Optional: --no-tfbs / --no-atac; on-target only in panel mode.
+    // Not declared, so not published: the Rust intermediates (`*.raw.tsv`) the tool leaves.
+    tuple val(meta), path("*.TFBS.{parquet,tsv,tsv.gz}")         , emit: tfbs, optional: true
+    tuple val(meta), path("*.ATAC.{parquet,tsv,tsv.gz}")         , emit: atac, optional: true
+    tuple val(meta), path("*.TFBS.ontarget.{parquet,tsv,tsv.gz}"), emit: tfbs_ontarget, optional: true
+    tuple val(meta), path("*.ATAC.ontarget.{parquet,tsv,tsv.gz}"), emit: atac_ontarget, optional: true
     path "versions.yml"                           , emit: versions
 
     when:
@@ -33,7 +39,9 @@ process KREWLYZER_REGION_ENTROPY {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
-    def pon_arg = pon_model ? "--pon-model ${pon_model}" : ""
+    def pon_arg = pon ? "--pon-model ${pon}" : ""
+    def assay_arg = meta.assay && meta.assay != 'UNKNOWN' && meta.assay != 'WGS' ? "--assay ${meta.assay.toLowerCase()}" : ""
+    def pon_variant_arg = params.pon_variant != 'all_unique' ? "--pon-variant ${params.pon_variant}" : ""
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
     def targets_arg = targets ? "--target-regions ${targets}" : ""
     def tfbs_arg = params.no_tfbs ? "--no-tfbs" : ""
@@ -48,9 +56,12 @@ process KREWLYZER_REGION_ENTROPY {
         -i $bed \\
         --output ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
         $genome_arg \\
         $pon_arg \\
         $skip_pon_arg \\
+        $assay_arg \\
+        $pon_variant_arg \\
         $targets_arg \\
         $tfbs_arg \\
         $atac_arg \\

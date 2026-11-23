@@ -12,12 +12,17 @@ process KREWLYZER_UXM {
     label 'process_medium'
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
+    // Into the sample's folder, as run-all publishes. `{sample}.metadata.*` is never among a
+    // tool's outputs: it is downstream's completion marker.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
     tuple val(meta), path(bam), path(bai)
     path fasta
 
     output:
-    tuple val(meta), path("*.UXM.tsv"), emit: tsv
+    // In params.output_format: krewlyzer leaves only the run's formats, not Rust's raw TSV.
+    tuple val(meta), path("*.UXM.{parquet,tsv,tsv.gz}"), emit: table
     path "versions.yml"               , emit: versions
 
     when:

@@ -167,6 +167,28 @@ def cleanup_intermediate_tsv(
         logger.debug("Cleaned up intermediate TSV: %s", tsv_path.name)
 
 
+def convert_rust_tsv(tsv_path: Path, *, output_format: str, compress: bool) -> None:
+    """Rewrite a table Rust wrote as ``.tsv`` into exactly this run's formats.
+
+    Reads that exact file (`read_exact_table`, never a sibling an earlier run left), writes it
+    with `write_table`, then removes the raw ``.tsv`` unless it *is* an output
+    (`cleanup_intermediate_tsv`). Leaving it put a second format in the folder, which
+    `validate-output` reads as a later run's (``FORMAT.MIXED``). Raises `FileNotFoundError` when
+    Rust wrote nothing: a stage that converted no table did not run.
+    """
+    if output_format == "tsv" and not compress:
+        if not tsv_path.exists():
+            raise FileNotFoundError(f"{tsv_path.name} was not written")
+        return  # the raw TSV is the output
+    df = read_exact_table(tsv_path)
+    if df is None:
+        raise FileNotFoundError(f"{tsv_path.name} was not written")
+    write_table(
+        df, tsv_path.with_suffix(""), output_format=output_format, compress=compress
+    )
+    cleanup_intermediate_tsv(tsv_path, output_format, compress)
+
+
 # ---------------------------------------------------------------------------
 # Reader
 # ---------------------------------------------------------------------------
@@ -212,6 +234,16 @@ def table_extensions(*, output_format: str, compress: bool) -> List[str]:
     return {"parquet": [".parquet"], "tsv": [tsv], "both": [".parquet", tsv]}[
         output_format
     ]
+
+
+def table_formats(*, output_format: str, compress: bool) -> str:
+    """`table_extensions` as one recorded value, e.g. ``.parquet`` or ``.parquet,.tsv``.
+
+    What a folder's tables are written in, so a rerun in another format can be refused: two
+    settings become one value, and ``-F parquet --compress`` equals ``-F parquet`` because
+    compression changes no Parquet file.
+    """
+    return ",".join(table_extensions(output_format=output_format, compress=compress))
 
 
 def table_paths(base: Path, *, output_format: str, compress: bool) -> List[Path]:

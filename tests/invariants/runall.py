@@ -55,7 +55,8 @@ def synth_run_all(sample: SynthSample, output: Path, **overrides) -> Optional[in
 
     Parquet, no PON, no on/off-target split and no TFBS/ATAC unless a test asks:
     the bundled panel assets are on hg19 coordinates and the synthetic contigs are
-    300 kb, so those stages would only add time.
+    300 kb, so those stages would only add time. The blacklist is the synthetic one
+    (`AssetBundle.blacklist`): the bundled hg19 one covers the whole synthetic chr1.
     """
     import typer
 
@@ -71,6 +72,7 @@ def synth_run_all(sample: SynthSample, output: Path, **overrides) -> Optional[in
         ocr_file=sample.assets.regions,
         wps_anchors=sample.assets.anchors,
         wps_background=sample.assets.alu,
+        exclude_regions=sample.assets.blacklist,
         output_format="parquet",
         skip_pon=True,
         skip_target_regions=True,

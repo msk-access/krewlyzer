@@ -335,6 +335,19 @@ CLAIMS: Tuple[Claim, ...] = (
         "the documented escape hatch; a renamed variable would leave the docs "
         "advertising an override that does nothing",
     ),
+    Claim(
+        "fsc.continue_n.wgs",
+        "50",
+        PyConst("krewlyzer.core.fsc_processor", "WGS_CONTINUE_N"),
+        "the FSC/FSR CLI docs quote it as the WGS default; 5 Mb arm-scale windows",
+    ),
+    Claim(
+        "fsc.continue_n.panel",
+        "1",
+        PyConst("krewlyzer.core.fsc_processor", "PANEL_CONTINUE_N"),
+        "the panel default; the single tools used 50 here, so their panel tables "
+        "held 1/50th of run-all's rows",
+    ),
 )
 
 

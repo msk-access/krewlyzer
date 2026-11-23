@@ -36,7 +36,7 @@ difference. Rebuild before believing either result.
 | `black` / `ruff` / `mypy` | Only `src/krewlyzer/` and `tests/` are checked in CI. `scripts/` is **not** linted |
 | `check_output_format.py` | Whether a CLI *exposes* an option — it only verifies internal call sites forward it |
 | `test_claims_registry.py` | A number that appears in a doc but has no registry entry. The registry only checks what it knows about |
-| `validate-output` | A single sample. Degeneracy is cross-sample by nature; use `validate-cohort` |
+| `validate-output` | A single sample. Degeneracy is cross-sample by nature; use `validate-cohort`. Of a rerun into a used folder it sees only another format (`FORMAT.MIXED`), and only where the record holds `table_formats`; another assay, targets or genome leaves nothing it can read. The pipeline runs no `validate-output` on the published folder, so run it on `--outdir` yourself |
 | `check_phi_guard.sh` | Identifiers inside `.gitleaks.toml` itself — gitleaks skips its own config |
 
 ## What a review has to ask

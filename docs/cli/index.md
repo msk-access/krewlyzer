@@ -173,6 +173,8 @@ of `{sample}.metadata` ([Metadata](../reference/output-files.md#metadata-tsv)):
 | `STAGE.STALE_TABLE` | ERROR if that table is read downstream, else WARN | One of the stage's tables is present although it failed in this run: a previous run's, or partial |
 | `STAGE.UNEXPECTED_TABLE` | ERROR if that table is read downstream, else WARN | A table is present although its stage was not requested (or had no input) in this run: left from another configuration, and read downstream as this run's |
 | `STAGE.UNAVAILABLE` | WARN | UXM or mFSD was asked for but its input was missing; replaces the inventory "absent" WARN |
+| `FORMAT.MIXED` | ERROR | A table or record is present in an extension outside the record's `table_formats`: a later run wrote into the folder with another `--output-format` (under Nextflow, published over an earlier `--outdir`), so the Parquet downstream reads may be the earlier run's. Only tables the contract names count, not BED, JSON or logs |
+| `FORMAT.UNJUDGED` | SKIP | A record from before `table_formats` was recorded, with tables in more than one extension: a `both` run and two runs in different formats look the same, so the folder could not be checked |
 
 A stage that was not requested gives no finding when nothing downstream reads its
 tables (UXM, mFSD); a consumed table such as `MDS.gene` is still reported absent.

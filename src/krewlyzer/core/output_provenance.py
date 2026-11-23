@@ -47,11 +47,14 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 from .output_utils import (
     read_exact_table,
+    TABLE_EXTENSIONS,
     resolve_table_path,
+    table_extensions,
+    table_formats,
     table_paths,
     write_table,
 )
@@ -188,6 +191,63 @@ class ConfigurationMismatch(ValueError):
 #: `target_regions` are written at extraction; `fsc_e1_aggregation` by run-all's own stamp.
 CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation")
 
+#: The record column naming the extensions the folder's tables are written in (`table_formats`).
+#: Not one of `CONFIGURATION_FIELDS`: every run decides its own format, so the guard takes it from
+#: the run's `output_format`/`compress` rather than from ``given``, and every writer of the record
+#: records it. A rerun in another format leaves the first run's tables beside its own, and each
+#: reader then picks by its own rule: downstream reads the old Parquet.
+TABLE_FORMATS = "table_formats"
+
+
+def _as_table_formats(extensions: Sequence[str]) -> str:
+    """The `table_formats` a run writing exactly these extensions records, else the extensions
+    joined: a set no single run writes, which equals no run's value."""
+    for output_format in ("parquet", "tsv", "both"):
+        for compress in (False, True):
+            if set(
+                table_extensions(output_format=output_format, compress=compress)
+            ) == set(extensions):
+                return table_formats(output_format=output_format, compress=compress)
+    return ",".join(sorted(extensions))
+
+
+def _recorded_table_formats(
+    output_dir: Path, sample: str, frame: Any
+) -> Tuple[str, bool]:
+    """The folder's `table_formats`, and whether it is certain enough to advise a rerun with it.
+
+    As recorded, unless a copy of the record exists in an extension the value does not name: a
+    run in another format wrote that copy (a TSV run published over a Parquet one), so the folder
+    is mixed, and the value says so and equals no run's. A record written before the field
+    existed (every 0.9.0 folder) is judged by its own extensions, since `write_table` writes the
+    record in every format a run writes: one ``.parquet`` record is ``.parquet``, a ``.parquet``
+    and a ``.tsv`` are ``both``. The residual: an older Parquet run followed by an older TSV run
+    also leaves two records, so a ``both`` rerun is let through, and no refusal advises one.
+    """
+    base = Path(output_dir) / f"{sample}.metadata"
+    present = [e for e in TABLE_EXTENSIONS if (base.parent / (base.name + e)).exists()]
+    value = (
+        _as_text(frame[TABLE_FORMATS].iloc[0]) if TABLE_FORMATS in frame.columns else ""
+    )
+    if value:
+        named = value.split(",")
+        stray = [e for e in present if e not in named]
+        if stray:
+            return f"{_as_table_formats(named + stray)} (mixed)", False
+        return value, True
+    return _as_table_formats(present), len(present) <= 1
+
+
+def _format_flags(value: str) -> Optional[str]:
+    """The options a run needs to write `table_formats` ``value``, or None for a mixed folder."""
+    for output_format in ("parquet", "tsv", "both"):
+        for compress in (False, True):
+            if table_formats(output_format=output_format, compress=compress) == value:
+                return f"--output-format {output_format}" + (
+                    " --compress" if compress else ""
+                )
+    return None
+
 
 def _setting(field: str, value: Any) -> str:
     """A setting in the form two runs can compare."""
@@ -236,11 +296,16 @@ def refuse_a_different_configuration(
     """Refuse a run whose settings differ from the ones the folder's record holds.
 
     Called by every entry point that writes a settings-dependent set of tables, before it writes
-    anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy` and
-    `region-mds` (not run-all's own calls or the PON build, which own the record they write).
+    anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy`,
+    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (the format alone); not
+    run-all's own calls or the PON build, which own the record they write.
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
     record does not hold (written before the field existed).
+
+    The output format is always compared, from ``output_format``/``compress``, and is not a
+    ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
+    its record files (`_recorded_table_formats`).
 
     Raises `ConfigurationMismatch`, naming each differing setting with both values, and saying to
     use a fresh output folder: a legitimate change of settings changes every table anyway.
@@ -262,12 +327,25 @@ def refuse_a_different_configuration(
             differing.append(
                 f"{field}={recorded or '(none)'} there, {ours or '(none)'} here"
             )
+    rerun_with = ""
+    recorded_formats, certain = _recorded_table_formats(output_dir, sample, frame)
+    our_formats = table_formats(output_format=output_format, compress=compress)
+    if recorded_formats != our_formats:
+        differing.append(
+            f"{TABLE_FORMATS}={recorded_formats} there, {our_formats} here"
+        )
+        flags = _format_flags(recorded_formats) if certain else None
+        rerun_with = (
+            f" This folder's tables are {recorded_formats}: rerun with {flags}."
+            if flags
+            else f" This folder already holds tables in {recorded_formats}."
+        )
     if differing:
         raise ConfigurationMismatch(
             f"{sample} in {Path(output_dir).name}/ was written with other settings: "
             + "; ".join(differing)
             + ". A rerun with other settings would leave the first run's extra tables looking "
-            "current. Use a fresh output folder, or remove this one."
+            "current." + rerun_with + " Use a fresh output folder, or remove this one."
         )
 
 
@@ -438,6 +516,7 @@ def stamp_metadata(
         tag = population.replace("_", "")  # off_target -> offtarget
         frame[f"gc_factors_{tag}"] = choice.record()
         frame[f"gc_correction_applied_{tag}"] = bool(choice.found)
+    frame[TABLE_FORMATS] = table_formats(output_format=output_format, compress=compress)
 
     write_table(frame, base, output_format=output_format, compress=compress)
 
@@ -592,6 +671,10 @@ def record_stage_outcomes(
         for stage, outcome in outcomes.items():
             frame[f"{stage}_status"] = outcome.status
             frame[f"{stage}_error"] = outcome.error_class
+        # The run's formats, not this copy's: one copy of a `both` record is `.parquet`.
+        frame[TABLE_FORMATS] = table_formats(
+            output_format=output_format, compress=compress
+        )
         write_table(frame, base, output_format=fmt, compress=gz)
         written = True
     if not written:

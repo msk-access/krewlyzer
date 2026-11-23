@@ -57,6 +57,9 @@ def _statement(text: str, lhs: str) -> str:
 
 
 def _strip_comments(text: str) -> str:
+    # A whole-line comment goes with its line: left blank, it would end the
+    # `_statement` it sits in, which runs to the next blank line.
+    text = re.sub(r"^[ \t]*//[^\n]*\n", "", text, flags=re.M)
     return re.sub(r"//[^\n]*", "", text)
 
 

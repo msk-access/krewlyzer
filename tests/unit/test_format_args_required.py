@@ -34,6 +34,7 @@ REQUIRED = {
     "krewlyzer.region_mds": ("region_mds_stage",),
     "krewlyzer.core.pon_integration": ("load_requested_pon",),
     "krewlyzer.core.unified_processor": ("run_features",),
+    "krewlyzer.core.output_utils": ("convert_rust_tsv",),
 }
 
 CASES = [(module, name) for module, names in REQUIRED.items() for name in names]

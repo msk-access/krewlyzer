@@ -4,6 +4,7 @@ Unit tests for core/asset_resolution.py
 Tests the centralized asset resolution functions:
 - resolve_target_regions()
 - resolve_pon_model()
+- resolve_exclude_regions()
 - get_target_region_count()
 """
 
@@ -15,6 +16,7 @@ import logging
 from krewlyzer.core.asset_resolution import (
     resolve_target_regions,
     resolve_pon_model,
+    resolve_exclude_regions,
     get_target_region_count,
 )
 
@@ -340,3 +342,47 @@ class TestGetTargetRegionCount:
 
         count = get_target_region_count(bed_file)
         assert count == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# resolve_exclude_regions tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestResolveExcludeRegions:
+    """One blacklist rule for extract, run-all and motif. `motif` applied none, so its tables
+    counted blacklisted fragments that run-all's excluded."""
+
+    def test_explicit_path_takes_priority(self, mock_assets, mock_logger, tmp_path):
+        bed = tmp_path / "mine.bed"
+        bed.write_text("chr1\t0\t10\n")
+        mock_assets.exclude_regions = tmp_path / "bundled.bed.gz"
+        assert resolve_exclude_regions(bed, mock_assets, mock_logger) == (
+            bed,
+            "explicit",
+        )
+
+    def test_an_explicit_file_that_does_not_exist_is_an_error(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        with pytest.raises(ValueError, match="nope.bed"):
+            resolve_exclude_regions(tmp_path / "nope.bed", mock_assets, mock_logger)
+
+    def test_the_genomes_bundled_blacklist_by_default(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        bundled = tmp_path / "hg19-blacklist.v2.bed.gz"
+        bundled.write_bytes(b"")
+        mock_assets.exclude_regions = bundled
+        assert resolve_exclude_regions(None, mock_assets, mock_logger) == (
+            bundled,
+            "bundled",
+        )
+
+    def test_no_bundled_blacklist_is_said_not_assumed(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        """Run-all passed the bundled path whether or not it existed."""
+        mock_assets.exclude_regions = tmp_path / "absent.bed.gz"
+        assert resolve_exclude_regions(None, mock_assets, mock_logger) == (None, "none")
+        assert mock_logger.warning.called

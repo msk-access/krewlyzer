@@ -478,11 +478,12 @@ def test_a_single_region_entropy_after_a_failed_run_all_records_ran(sample, tmp_
     assert outcomes(out)["atac"] == ("not_requested", ""), "not touched: it was not run"
 
 
-def test_a_single_tool_in_another_format_does_not_clear_a_stale_parquet_table(
+def test_a_single_tool_in_another_format_leaves_a_stale_parquet_table_flagged(
     sample, tmp_path
 ):
-    """region-entropy at its default `-F tsv` rewrites `.TFBS.tsv`; the `.TFBS.parquet`
-    downstream reads is still the first run's, and the gate must keep saying so."""
+    """region-entropy at its default `-F tsv` rewrote `.TFBS.tsv`, and the `.TFBS.parquet`
+    downstream reads stayed the first run's. It is now refused before writing (the folder's
+    `table_formats`), and the gate must keep saying the Parquet table is stale."""
     from typer.testing import CliRunner
 
     from krewlyzer.cli import app
@@ -509,8 +510,9 @@ def test_a_single_tool_in_another_format_does_not_clear_a_stale_parquet_table(
             "--no-gc-correct",
         ],
     )
-    assert result.exit_code == 0, result.output
-    assert (out / "S.TFBS.tsv").exists()
+    assert result.exit_code == 1, result.output
+    assert "table_formats" in result.output
+    assert not (out / "S.TFBS.tsv").exists()
     assert outcomes(out)["tfbs"][0] == "failed"
     stale = [f for f in check_sample("S", out)[0] if f.id == "STAGE.STALE_TABLE"]
     assert ".TFBS.parquet" in {f.table for f in stale}
@@ -582,21 +584,13 @@ def test_cached_motif_tables_are_redone_when_the_record_names_the_pon_but_mds_wa
 
 
 # -- the motif cache, by format (Greptile on #98 review, F5) ---------------------------------
+#
+# The cache looked for `.tsv` names only, so a Parquet run-all into a folder a TSV run used
+# skipped the motif step and wrote no Parquet motif tables. That sequence is now refused before
+# anything is written (`test_a_tsv_run_all_then_a_parquet_run_all_is_refused`), so the cache only
+# ever sees its own format.
 
 _MOTIF_TABLES = ("EndMotif", "EndMotif1mer", "BreakPointMotif", "MDS")
-
-
-def test_a_parquet_run_after_a_tsv_run_writes_its_parquet_motif_tables(
-    sample, tmp_path
-):
-    """The cache looked for `.tsv` names only: a Parquet run-all into a folder a TSV run used
-    found them, skipped the motif step, and wrote no Parquet motif tables -- the only kind
-    downstream reads."""
-    out = tmp_path / "out"
-    _run_tsv(sample, out)
-    assert synth_run_all(sample, out, output_format="parquet") is None
-    missing = [t for t in _MOTIF_TABLES if not (out / f"S.{t}.parquet").exists()]
-    assert not missing, f"no Parquet table for {missing}"
 
 
 def test_a_parquet_run_reuses_its_own_motif_tables(sample, tmp_path):

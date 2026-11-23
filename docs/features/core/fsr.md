@@ -109,7 +109,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for bundled assets |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--windows` | `-w` | INT | 100000 | Window size |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window number |
+| `--continue-n` | `-c` | INT | 1 with target regions, else 50 | 100 kb bins per output row; run-all's rule |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all cores) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |

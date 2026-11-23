@@ -17,8 +17,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 
 from .core.output_utils import (
-    read_exact_table,
-    write_table,
+    convert_rust_tsv,
+    table_paths,
 )  # Unified I/O for Parquet support
 
 console = Console(stderr=True)
@@ -34,6 +34,11 @@ logger = logging.getLogger("mfsd")
 
 # Rust backend is required
 from krewlyzer import _core
+
+
+def _sample_name(bam_input: Path, sample_name: Optional[str]) -> str:
+    """The name given, else the BAM's: one rule for the stage and the folder check."""
+    return sample_name or bam_input.stem.replace(".bam", "")
 
 
 def mfsd_stage(
@@ -99,9 +104,7 @@ def mfsd_stage(
     # Create output directory
     output.mkdir(parents=True, exist_ok=True)
 
-    # Derive sample name (use provided or derive from input filename)
-    if sample_name is None:
-        sample_name = bam_input.stem.replace(".bam", "")
+    sample_name = _sample_name(bam_input, sample_name)
 
     output_file = output / f"{sample_name}.mFSD.tsv"
 
@@ -144,64 +147,22 @@ def mfsd_stage(
         min_baseq=min_baseq,
     )
 
-    # Rust always writes TSV; convert to Parquet/both afterward if requested.
-    # This two-step approach avoids re-implementing Arrow schema in Rust for mFSD.
+    # Rust always writes TSV; it becomes exactly the run's formats here (Parquet, gzip), and the
+    # raw TSV goes unless it is one of them. This two-step approach avoids re-implementing the
+    # Arrow schema in Rust for mFSD.
     logger.info(f"mFSD complete: {output_file} (raw TSV from Rust)")
     logger.debug(
         f"mFSD post-process: output_format={output_format!r}, compress={compress}"
     )
-    if output_format != "tsv":
-        logger.debug(f"mFSD: converting {output_file.name} → format={output_format!r}")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df,
-                output_file.with_suffix(""),
-                output_format=output_format,
-                compress=compress,
-            )
-        else:
-            logger.warning(
-                f"mFSD: could not read {output_file.name} for format conversion"
-            )
-    elif compress:
-        # Re-write as gzip TSV (Rust writes uncompressed TSV, Python gzips it)
-        logger.debug(f"mFSD: compressing {output_file.name} → .tsv.gz")
-        # read_exact_table: Rust wrote this exact TSV. read_table is
-        # parquet-first and would prefer a stale `.parquet` sibling from an
-        # earlier run into the same directory (c92ed86).
-        df = read_exact_table(output_file)
-        if df is not None:
-            write_table(
-                df, output_file.with_suffix(""), output_format="tsv", compress=True
-            )
+    convert_rust_tsv(output_file, output_format=output_format, compress=compress)
 
     if output_distributions:
         dist_file = output_file.with_suffix(".distributions.tsv")
         logger.info(f"Distributions: {dist_file}")
-        if output_format != "tsv":
-            logger.debug(
-                f"mFSD: converting {dist_file.name} → format={output_format!r}"
-            )
-            # read_exact_table: Rust wrote this exact TSV. read_table is
-            # parquet-first and would prefer a stale `.parquet` sibling from an
-            # earlier run into the same directory (c92ed86).
-            df_dist = read_exact_table(dist_file)
-            if df_dist is not None:
-                write_table(
-                    df_dist,
-                    dist_file.with_suffix(""),
-                    output_format=output_format,
-                    compress=compress,
-                )
-            else:
-                logger.warning(
-                    f"mFSD: could not read {dist_file.name} for format conversion"
-                )
-    return output_file
+        convert_rust_tsv(dist_file, output_format=output_format, compress=compress)
+    return table_paths(
+        output_file.with_suffix(""), output_format=output_format, compress=compress
+    )[0]
 
 
 def mfsd(
@@ -299,8 +260,28 @@ def mfsd(
     - {sample}.mFSD.tsv: Summary statistics (46 columns)
     - {sample}.mFSD.distributions.tsv: Per-size fragment counts (optional, with -d)
     """
+    # Before any work: mFSD's tables depend on no assay or targets, but a run in another format
+    # than the folder's leaves its earlier tables beside the new ones, and downstream reads the
+    # Parquet. run-all checks its own folder; it calls `mfsd_stage`, not this command.
+    from .core.output_provenance import (
+        ConfigurationMismatch,
+        refuse_a_different_configuration,
+    )
+
     try:
-        written = mfsd_stage(
+        refuse_a_different_configuration(
+            output,
+            _sample_name(bam_input, sample_name),
+            {},
+            output_format=output_format,
+            compress=compress,
+        )
+    except ConfigurationMismatch as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
+    try:
+        mfsd_stage(
             bam_input,
             input_file,
             output,
@@ -330,7 +311,7 @@ def mfsd(
 
     record_stage_outcomes(
         output,
-        written.name[: -len(".mFSD.tsv")],  # the sample name the stage used
+        _sample_name(bam_input, sample_name),
         {"mfsd": Outcome("ran")},
         output_format=output_format,
         compress=compress,

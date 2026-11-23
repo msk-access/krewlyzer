@@ -456,3 +456,52 @@ class TestFscCountsCompressCleanup:
         assert not out.exists(), "Intermediate TSV should be removed with compress=True"
         assert (tmp_path / "sample.fsc_counts.tsv.gz").exists()
         assert (tmp_path / "sample.fsc_counts.parquet").exists()
+
+
+class TestConvertRustTsv:
+    """`convert_rust_tsv`: a Rust TSV becomes exactly the run's formats, and nothing else.
+
+    mFSD and UXM converted Rust's raw `.tsv` and never removed it, so every Parquet run left a
+    TSV beside the Parquet (and `both --compress` a plain `.tsv` beside the `.tsv.gz`): a second
+    format in the folder, which `validate-output` reads as a later run's (review of the branch).
+    """
+
+    @pytest.mark.parametrize(
+        "output_format,compress",
+        [
+            ("tsv", False),
+            ("tsv", True),
+            ("parquet", False),
+            ("parquet", True),
+            ("both", False),
+            ("both", True),
+        ],
+    )
+    def test_leaves_exactly_the_run_formats(
+        self, tmp_path, sample_df, output_format, compress
+    ):
+        from krewlyzer.core.output_utils import convert_rust_tsv, table_extensions
+
+        raw = tmp_path / "S.mFSD.tsv"
+        sample_df.to_csv(raw, sep="\t", index=False)
+        convert_rust_tsv(raw, output_format=output_format, compress=compress)
+        present = sorted(
+            e
+            for e in (".parquet", ".tsv", ".tsv.gz")
+            if (tmp_path / f"S.mFSD{e}").exists()
+        )
+        assert present == sorted(
+            table_extensions(output_format=output_format, compress=compress)
+        )
+        for ext in present:
+            back = read_table(tmp_path / f"S.mFSD{ext}")
+            assert back["score"].tolist() == [1.0, 2.0, 3.0]
+
+    def test_a_missing_rust_table_raises(self, tmp_path):
+        """It returned quietly, and the stage was recorded `ran` with no table."""
+        from krewlyzer.core.output_utils import convert_rust_tsv
+
+        with pytest.raises(FileNotFoundError, match="S.UXM.tsv"):
+            convert_rust_tsv(
+                tmp_path / "S.UXM.tsv", output_format="parquet", compress=False
+            )
