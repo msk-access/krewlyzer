@@ -305,8 +305,8 @@ All notable changes to this project will be documented in this file.
   `gc_correction_computed` was `True` whenever the factor computation returned, including when
   Rust fitted no length bin, returned 0 and wrote no table; it is now `True` only when a table was
   written, and `extract` logs a factor table (and the metadata file, which it named
-  `.metadata.json`) only when it exists. A factor computation that raised (no assets for the
-  genome, an unreadable GC reference) is now warned about rather than logged at debug. Each
+  `.metadata.json`) only when it exists. A factor computation that raised (an unreadable GC reference,
+  for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (`tests/invariants/test_extract_record.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**

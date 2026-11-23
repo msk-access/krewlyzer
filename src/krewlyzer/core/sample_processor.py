@@ -882,8 +882,8 @@ def write_extraction_outputs(
             )
 
     # The record is rewritten from scratch, but a setting extraction does not decide (run-all's E1
-    # aggregation) is the folder's, not this run's: carried over, so a later rerun with the other
-    # value is still refused (`refuse_a_different_configuration`).
+    # aggregation) is the folder's, not this run's. Carried over for run-all re-extracting a deleted
+    # BED: until it stamps its own, a rerun with the other value is still refused.
     from .output_provenance import recorded_settings
 
     for name, value in recorded_settings(

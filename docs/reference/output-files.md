@@ -1194,10 +1194,10 @@ mean.
 recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
 file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
 feature tool that takes these settings refuse a run with others before writing anything, naming
-the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
-only over a record it wrote alone (see *Optional stages* below). Without that, a rerun that writes fewer tables (a panel folder rerun without its
-assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
-the second run's. The output format is one
+the setting; `uxm` compares the genome, which picks its markers. Without that, a rerun that
+writes fewer tables (a panel folder rerun without its assay) left the first run's extra tables
+-- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second run's. `extract` rewrites
+this table only over a record it wrote alone (see *Optional stages* below). The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
 writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
 TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names

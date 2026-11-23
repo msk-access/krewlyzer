@@ -275,8 +275,10 @@ def recorded_settings(
     output_dir: Path, sample: str, *, output_format: str, compress: bool
 ) -> Dict[str, Any]:
     """The `CONFIGURATION_FIELDS` the folder's record holds, for a writer that replaces the record
-    but does not decide all of them: `extract` takes no E1 setting, and dropping run-all's would
-    let a later rerun with the other one pass `refuse_a_different_configuration`."""
+    but does not decide all of them. `extract` no longer reaches here over run-all's record (it
+    refuses it); run-all does, when it re-extracts a deleted BED, and stamps its own settings only
+    after its feature pass. Carrying them over means a run-all killed in between still leaves the
+    folder's E1 setting in the record, so a rerun with the other one is refused."""
     frame = _read_record(
         record_path(output_dir, sample, output_format=output_format, compress=compress)
     )
