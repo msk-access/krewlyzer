@@ -5864,7 +5864,7 @@ ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--input` | `-i` | PATH | *required* | Input BAM file |
-| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants |
+| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants, plain or gzipped (`.vcf.gz` / bgzip) |
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--reference` | `-r` | PATH | | Reference FASTA for GC correction |
@@ -8503,9 +8503,9 @@ sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 | `bam` | PATH | ✓ | WGS/Panel BAM file (all_unique for panels) |
 | `mfsd_bam` | PATH | | Duplex BAM for mFSD (falls back to `bam` if empty) |
 | `meth_bam` | PATH | | Bisulfite BAM for UXM |
-| `vcf` | PATH | | VCF for mFSD |
+| `vcf` | PATH | | VCF for mFSD, used when `maf` is empty |
 | `bed` | PATH | | Pre-extracted .bed.gz |
-| `maf` | PATH | | MAF for mFSD |
+| `maf` | PATH | | MAF for mFSD (takes precedence over `vcf`) |
 | `single_sample_maf` | BOOL | | Skip MAF filtering if `true` |
 | `assay` | TEXT | | Assay code: `XS1`, `XS2`, `WGS` |
 | `pon` | PATH | | Sample-specific PON (overrides assay) |
@@ -8520,6 +8520,25 @@ sample,bam,mfsd_bam,meth_bam,vcf,bed,maf,single_sample_maf,assay,pon,targets
 | `bam` + `mfsd_bam` + `maf` | run-all with dual BAM support |
 | `meth_bam` only | UXM methylation |
 | `bed` only | FSC, FSR, FSD, WPS, OCF (no extract) |
+
+### Variants for mFSD
+
+mFSD reads one variant file per sample, in both `--use_runall true` and
+tool-level mode:
+
+- **`maf`**: filtered to the sample's `Tumor_Sample_Barcode` rows, unless
+  `single_sample_maf` is `true`.
+- **`vcf`**: used as given, every record. The pipeline does not filter a VCF
+  by sample, so give each row a VCF of that sample's calls.
+- **Both set**: the MAF is used and the VCF is ignored, with a warning in the
+  log naming the sample.
+- **Neither set**: run-all receives a header-only placeholder MAF and records
+  `mfsd_status=no_variants` in `{sample}.metadata`; tool-level mode skips the
+  mFSD process.
+
+The file type is detected from the extension: `.vcf` or `.vcf.gz` is read as
+VCF, anything else as MAF. Either may be gzipped (bgzip included); compression
+is recognised from the file's contents.
 
 ## Assay Resolution
 
@@ -8543,7 +8562,7 @@ ACCESS_002,/data/sample2.bam,,,,,,/data/cohort.maf,false,XS2,,
 ACCESS_V2,/data/sample.all_unique.bam,/data/sample.duplex.bam,,,,,maf.tsv,true,XS2,,
 
 # WGS (no targets)
-WGS_001,/data/wgs.bam,,,/data/wgs.vcf,,,,,WGS,,
+WGS_001,/data/wgs.bam,,,/data/wgs.vcf,,,,WGS,,
 
 # Custom PON/targets
 CUSTOM,/data/custom.bam,,,,,,,,,/data/custom.pon.parquet,/data/custom.bed

@@ -127,6 +127,12 @@ workflow INPUT_CHECK {
             def vcf = row.vcf ? file(row.vcf) : []
             def maf = row.maf ? file(row.maf) : null
             def single_sample = row.single_sample_maf?.toLowerCase() in ['true', 'yes', '1']
+
+            // mFSD reads one variant file. A MAF wins over a VCF, and since the
+            // VCF is then ignored, say so once rather than leave no trace.
+            if (maf && vcf) {
+                log.warn "${row.sample}: both maf and vcf are set; mFSD uses the MAF and ignores the VCF"
+            }
             
             // Resolve assets
             def pon = resolvePon(row)
@@ -159,16 +165,13 @@ workflow INPUT_CHECK {
         .multiMap {
             meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
 
-            // run-all: full tuple for KREWLYZER_RUNALL
-            runall:
-                def variants = maf ?: (vcf ?: [])
-                [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
-
             // tool-level: extract path
             extract:
                 [meta, bam, bai, pon ?: [], targets ?: []]
 
-            // run-all FILTER_MAF: meta carries ALL paths so join is unnecessary
+            // run-all: meta carries ALL paths so join is unnecessary. The VCF
+            // rides in meta too: the main workflow routes a VCF-only sample
+            // around FILTER_MAF/SPLIT_MAF, which only read MAF.
             maf_for_filter:
                 def new_meta = meta + [
                     single_sample: single ?: false,
@@ -177,7 +180,7 @@ workflow INPUT_CHECK {
                     _bisulfite: mbam,
                     _pon: pon, _targets: targets,
                     _wps_anchors: wps_anchors, _wps_bg: wps_bg
-                ]
+                ] + (vcf ? [_vcf: vcf] : [:])  // only when set: meta is hashed, so a key on every sample would void -resume for all of them
                 [new_meta, maf ?: []]
         }
         .set { ch_bam_outputs }
@@ -212,16 +215,26 @@ workflow INPUT_CHECK {
             [meta, bam, bai, maf]
         }
 
-    ch_runall         = ch_bam_outputs.runall
+    // VCF samples (no MAF) — tool-level mode. A VCF is not filtered by
+    // sample: mFSD reads every record, as run-all does. A MAF wins when
+    // both are set, hence `it[9] == null`. The BAM is picked as the MAF
+    // channels pick theirs, so mFSD's input does not depend on the format.
+    ch_vcf_only = ch_parsed
+        .filter { it[8] && it[9] == null }  // vcf exists AND no maf
+        .map {
+            meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
+            [meta, bam, bai, vcf]
+        }
+
     ch_extract        = ch_bam_outputs.extract
     ch_maf_for_filter = ch_bam_outputs.maf_for_filter
 
     emit:
-    runall         = ch_runall          // For run-all module
     extract        = ch_extract         // For tool_level extract
     beds           = ch_beds            // Pre-extracted BEDs (tool_level only)
     methyl         = ch_methyl          // Methylation samples
     maf_multi      = ch_maf_multi       // MAFs needing filtering (tool-level mode)
     maf_single     = ch_maf_single      // MAFs bypassing filter (tool-level mode)
-    maf_for_filter = ch_maf_for_filter  // ALL samples for run-all join
+    vcf_only       = ch_vcf_only        // VCFs, no MAF (tool-level mode)
+    maf_for_filter = ch_maf_for_filter  // ALL samples for run-all (MAF or VCF in meta)
 }

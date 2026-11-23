@@ -1047,6 +1047,21 @@ fn confidence_level(n: usize) -> &'static str {
 // PHASE 6: Main Entry Point
 // ============================================================================
 
+/// Open a VCF or MAF for line reading, decompressing it if it is gzip.
+///
+/// Recognised by gzip's magic bytes rather than the name, which is whatever the
+/// caller staged it as. `MultiGzDecoder`, not `GzDecoder`: bgzip writes
+/// concatenated gzip members, and a single-member decoder stops after the first
+/// block, dropping every later variant without an error.
+fn open_variant_file(path: &std::path::Path) -> std::io::Result<Box<dyn BufRead>> {
+    let mut reader = BufReader::new(File::open(path)?);
+    if reader.fill_buf()?.starts_with(&[0x1f, 0x8b]) {
+        Ok(Box::new(BufReader::new(flate2::read::MultiGzDecoder::new(reader))))
+    } else {
+        Ok(Box::new(reader))
+    }
+}
+
 /// Calculate Mutant Fragment Size Distribution (mFSD) - Enhanced Version
 /// 
 /// Supports: SNV, MNV, Insertion, Deletion, Complex variants
@@ -1135,8 +1150,7 @@ pub fn calculate_mfsd(
     };
     // 1. Parse Variants
     let mut variants = Vec::new();
-    let file = File::open(&input_file)?;
-    let reader = BufReader::new(file);
+    let reader = open_variant_file(&input_file)?;
     
     let is_vcf = input_format == "vcf" || 
         (input_format == "auto" && input_file.extension().is_some_and(|e| e == "vcf" || e == "gz"));
@@ -1769,6 +1783,59 @@ pub fn calculate_mfsd(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ======================================================================
+    // Variant file opening
+    // ======================================================================
+
+    const VCF: &str = "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\n1\t100\t.\tA\tT\n2\t200\t.\tC\tG\n";
+
+    fn gzip(text: &str) -> Vec<u8> {
+        use flate2::{write::GzEncoder, Compression};
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(text.as_bytes()).unwrap();
+        enc.finish().unwrap()
+    }
+
+    fn lines_of(path: &std::path::Path) -> Vec<String> {
+        open_variant_file(path).unwrap().lines().map(|l| l.unwrap()).collect()
+    }
+
+    #[test]
+    fn a_gzipped_vcf_reads_the_same_lines_as_the_plain_one() {
+        // A `.vcf.gz` was read as raw bytes: the first line failed UTF-8
+        // decoding and mFSD failed for the sample.
+        let dir = tempfile::tempdir().unwrap();
+        let plain = dir.path().join("s.vcf");
+        let gz = dir.path().join("s.vcf.gz");
+        std::fs::write(&plain, VCF).unwrap();
+        std::fs::write(&gz, gzip(VCF)).unwrap();
+        assert_eq!(lines_of(&gz), lines_of(&plain));
+        assert_eq!(lines_of(&plain).len(), 4);
+    }
+
+    #[test]
+    fn a_bgzipped_vcf_is_read_past_its_first_block() {
+        // bgzip writes concatenated gzip members. A single-member decoder
+        // stops after the first and silently loses every later variant.
+        let dir = tempfile::tempdir().unwrap();
+        let (head, tail) = VCF.split_at(VCF.find("2\t200").unwrap());
+        let mut bytes = gzip(head);
+        bytes.extend(gzip(tail));
+        let gz = dir.path().join("s.vcf.gz");
+        std::fs::write(&gz, bytes).unwrap();
+        assert_eq!(lines_of(&gz).last().unwrap(), "2\t200\t.\tC\tG");
+    }
+
+    #[test]
+    fn a_compressed_file_is_recognised_by_content_not_name() {
+        // Nextflow stages inputs under their own names, so the extension is
+        // whatever the samplesheet gave; gzip's magic bytes are not.
+        let dir = tempfile::tempdir().unwrap();
+        let misnamed = dir.path().join("s.vcf");
+        std::fs::write(&misnamed, gzip(VCF)).unwrap();
+        assert_eq!(lines_of(&misnamed).len(), 4);
+    }
 
     // ======================================================================
     // MAF Header Parsing Tests
