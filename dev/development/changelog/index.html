@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3267,11 +3267,17 @@
   <code>not_requested</code> included, as <code>motif --skip-pon</code> does for <code>mds_z</code> in the <code>MDS</code> it rewrote without
   one; <code>uxm</code>, <code>mfsd</code>, <code>region-mds</code> and <code>region-entropy</code> record <code>ran</code> when rerun by hand at
   run-all's <code>--output-format</code>, which is how a stage that failed under run-all gets fixed, and
-  <code>motif</code> its <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> z-scores. <code>extract</code> rewrites the table from scratch and so clears them. The
-  columns are in the output contract as optional strings.</li>
+  <code>motif</code> its <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> z-scores. <code>extract</code> never clears them: it refuses a record they are in (see
+  <em>Fixed</em>). The columns are in the output contract as optional strings.</li>
 </ul>
 <h3 id="removed">Removed</h3>
 <ul>
+<li><strong><code>krewlyzer extract --chromosomes</code>.</strong> It was parsed and the result discarded, so
+  <code>--chromosomes chr1</code> wrote a whole-genome <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and a sample whose record looked complete. It is
+  now refused as an unknown option (exit 2) rather than ignored. Passing it through was not an
+  option: nothing recorded the subset, and a one-chromosome sample under a completion marker is
+  indistinguishable from a whole one downstream. The docs advised it for memory errors; they now
+  advise <code>--threads</code>. (<code>motif</code> and <code>run-all</code> still declare the same unused option.)</li>
 <li><strong><code>statrs</code>, an unused Rust dependency, and the redundant <code>homepage</code> key.</strong>
   Cargo warned about both on every build of <code>rust/</code>, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04
@@ -3533,6 +3539,27 @@
   checks <code>params.genome</code> against that list before any task is submitted (nothing validated
   params against the schema). Held by <code>tests/unit/test_nextflow_genome.py</code>, which also checks
   the enum against the builds the CLI accepts.</li>
+<li><strong><code>extract</code> no longer replaces a record run-all or a single tool wrote into.</strong> Run into a folder
+  <code>run-all</code> had finished (<code>run-all -A xs1</code>, then <code>extract -A xs1</code>), it rewrote
+  <code>{sample}.metadata.parquet</code>, downstream's completion marker, with extraction's fields alone:
+  about thirty columns dropped, <code>krewlyzer_version</code>, <code>pon_applied</code> and every <code>{stage}_status</code>
+  among them. <code>validate-output</code> errors rose, but a reader of the marker alone still saw a complete
+  sample. It now stops before writing anything when any copy of the record (<code>.tsv</code>, <code>.tsv.gz</code>,
+  <code>.parquet</code>) holds a provenance column or a stage status, which only run-all and the single tools
+  write (<code>output_provenance.refuse_to_replace_a_later_record</code>). Updating only its own fields was
+  not enough: a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from other filters would leave every table made from the old one under
+  its recorded <code>ran</code>. A rerun of <code>extract</code> over a record it wrote alone is still allowed.</li>
+<li><strong>The record's filters and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> flag say what the run did.</strong> <code>write_extraction_outputs</code> wrote
+  <code>filters_mapq</code> 20, <code>filters_min_length</code> 65 and <code>filters_max_length</code> 1000 whatever the run used;
+  they now come from the <code>ExtractionResult</code>, which carries the filters <code>extract_sample</code> applied,
+  and a result without them is refused rather than recorded with a default.
+  <code>gc_correction_computed</code> was <code>True</code> whenever the factor computation returned, including when
+  Rust fitted no length bin, returned 0 and wrote no table; it is now <code>True</code> only when a table was
+  written, and <code>extract</code> logs a factor table (and the metadata file, which it named
+  <code>.metadata.json</code>) only when it exists. A factor computation that raised (an unreadable <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> reference,
+  for one) is now warned about rather than logged at debug. Each
+  record value is pinned by two runs that must record two different values
+  (<code>tests/invariants/test_extract_record.py</code>).</li>
 <li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
