@@ -275,8 +275,10 @@ def recorded_settings(
     output_dir: Path, sample: str, *, output_format: str, compress: bool
 ) -> Dict[str, Any]:
     """The `CONFIGURATION_FIELDS` the folder's record holds, for a writer that replaces the record
-    but does not decide all of them: `extract` takes no E1 setting, and dropping run-all's would
-    let a later rerun with the other one pass `refuse_a_different_configuration`."""
+    but does not decide all of them. `extract` no longer reaches here over run-all's record (it
+    refuses it); run-all does, when it re-extracts a deleted BED, and stamps its own settings only
+    after its feature pass. Carrying them over means a run-all killed in between still leaves the
+    folder's E1 setting in the record, so a rerun with the other one is refused."""
     frame = _read_record(
         record_path(output_dir, sample, output_format=output_format, compress=compress)
     )
@@ -347,6 +349,45 @@ def refuse_a_different_configuration(
             + ". A rerun with other settings would leave the first run's extra tables looking "
             "current." + rerun_with + " Use a fresh output folder, or remove this one."
         )
+
+
+class RecordInUse(ValueError):
+    """A record later stages wrote into, which an extraction would replace. Raised before
+    anything is written."""
+
+
+def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
+    """Refuse an extraction into a folder whose record holds what a later stage wrote.
+
+    `extract` writes the record from scratch, with its own fields only. Over run-all's record it
+    dropped every provenance column and every `{stage}_status` (about thirty columns), and the
+    sample still looked complete to a reader of the completion marker alone. Updating only its own
+    fields, as single tools do, would not do either: a new BED (other filters) would leave every
+    table the later stages made from the old one under their recorded `ran`.
+
+    The later stages are run-all and the single tools, which both add `PROVENANCE_COLUMNS` and
+    stage statuses. A record extraction wrote alone holds neither, so a rerun of `extract` is
+    allowed. Every copy of the record is read, not only this run's format: a single tool updates
+    only the copies in its own (`record_stage_outcomes`).
+    """
+    from krewlyzer.validate.contract import STAGES
+
+    later = set(PROVENANCE_COLUMNS) | {f"{stage}_status" for stage in STAGES}
+    base = Path(output_dir) / f"{sample}.metadata"
+    for ext in TABLE_EXTENSIONS:
+        path = base.parent / (base.name + ext)
+        if not path.exists():
+            continue
+        frame = _read_record(path)
+        found = sorted(later & set(frame.columns)) if frame is not None else []
+        if found:
+            raise RecordInUse(
+                f"{path.name} in {Path(output_dir).name}/ holds what later stages recorded "
+                f"({len(found)} columns, among them {', '.join(found[:3])}). Extracting again "
+                "would replace that record with extraction's alone, and leave the tables those "
+                "stages made from this folder's BED looking current. Use a fresh output folder, "
+                "or remove this one."
+            )
 
 
 def record_names_pon(

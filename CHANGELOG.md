@@ -23,11 +23,17 @@ All notable changes to this project will be documented in this file.
   `not_requested` included, as `motif --skip-pon` does for `mds_z` in the `MDS` it rewrote without
   one; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by hand at
   run-all's `--output-format`, which is how a stage that failed under run-all gets fixed, and
-  `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
-  columns are in the output contract as optional strings.
+  `motif` its MDS z-scores. `extract` never clears them: it refuses a record they are in (see
+  *Fixed*). The columns are in the output contract as optional strings.
 
 ### Removed
 
+- **`krewlyzer extract --chromosomes`.** It was parsed and the result discarded, so
+  `--chromosomes chr1` wrote a whole-genome BED, and a sample whose record looked complete. It is
+  now refused as an unknown option (exit 2) rather than ignored. Passing it through was not an
+  option: nothing recorded the subset, and a one-chromosome sample under a completion marker is
+  indistinguishable from a whole one downstream. The docs advised it for memory errors; they now
+  advise `--threads`. (`motif` and `run-all` still declare the same unused option.)
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
   Cargo warned about both on every build of `rust/`, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04
@@ -282,6 +288,27 @@ All notable changes to this project will be documented in this file.
   checks `params.genome` against that list before any task is submitted (nothing validated
   params against the schema). Held by `tests/unit/test_nextflow_genome.py`, which also checks
   the enum against the builds the CLI accepts.
+- **`extract` no longer replaces a record run-all or a single tool wrote into.** Run into a folder
+  `run-all` had finished (`run-all -A xs1`, then `extract -A xs1`), it rewrote
+  `{sample}.metadata.parquet`, downstream's completion marker, with extraction's fields alone:
+  about thirty columns dropped, `krewlyzer_version`, `pon_applied` and every `{stage}_status`
+  among them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
+  sample. It now stops before writing anything when any copy of the record (`.tsv`, `.tsv.gz`,
+  `.parquet`) holds a provenance column or a stage status, which only run-all and the single tools
+  write (`output_provenance.refuse_to_replace_a_later_record`). Updating only its own fields was
+  not enough: a new BED from other filters would leave every table made from the old one under
+  its recorded `ran`. A rerun of `extract` over a record it wrote alone is still allowed.
+- **The record's filters and GC flag say what the run did.** `write_extraction_outputs` wrote
+  `filters_mapq` 20, `filters_min_length` 65 and `filters_max_length` 1000 whatever the run used;
+  they now come from the `ExtractionResult`, which carries the filters `extract_sample` applied,
+  and a result without them is refused rather than recorded with a default.
+  `gc_correction_computed` was `True` whenever the factor computation returned, including when
+  Rust fitted no length bin, returned 0 and wrote no table; it is now `True` only when a table was
+  written, and `extract` logs a factor table (and the metadata file, which it named
+  `.metadata.json`) only when it exists. A factor computation that raised (an unreadable GC reference,
+  for one) is now warned about rather than logged at debug. Each
+  record value is pinned by two runs that must record two different values
+  (`tests/invariants/test_extract_record.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

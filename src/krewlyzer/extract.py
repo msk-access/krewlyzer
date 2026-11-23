@@ -9,7 +9,7 @@ Uses Rust backend for accelerated extraction.
 Output Files:
     - {sample}.bed.gz: Fragment coordinates (chrom, start, end, strand, gc%, gc_weight)
     - {sample}.correction_factors.{parquet,tsv.gz,tsv}: LOESS-based GC correction factors
-    - {sample}.metadata.json: Processing statistics
+    - {sample}.metadata.{tsv,tsv.gz,parquet}: The sample's record (filters, GC status)
 
 GC Correction: Computes per-fragment GC weights for all downstream tools.
 Panel Mode: GC model trained on off-target reads only for unbiased correction.
@@ -98,10 +98,8 @@ def extract(
         "--require-proper-pair/--no-require-proper-pair",
         help="Require proper pairs",
     ),
-    # Other options
-    chromosomes: Optional[str] = typer.Option(
-        None, "--chromosomes", help="Comma-separated chromosomes to process"
-    ),
+    # Other options. (`--chromosomes` was removed: it was parsed and ignored, so a "chr1 only"
+    # run wrote a whole-genome BED under a complete-looking record.)
     sample_name: Optional[str] = typer.Option(
         None,
         "--sample-name",
@@ -145,7 +143,8 @@ def extract(
     Output:
     - {sample}.bed.gz: Fragment coordinates with GC content
     - {sample}.bed.gz.tbi: Tabix index
-    - {sample}.metadata.json: Fragment count and metadata
+    - {sample}.metadata.{tsv,tsv.gz,parquet}: The sample's record, which extract refuses
+      to replace once run-all or a single tool has written into it
     - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors (if --gc-correct)
     """
     from .assets import AssetManager
@@ -223,7 +222,9 @@ def extract(
     # settings than the folder's it would replace them, and a later rerun would pass the check.
     from .core.output_provenance import (
         ConfigurationMismatch,
+        RecordInUse,
         refuse_a_different_configuration,
+        refuse_to_replace_a_later_record,
     )
 
     try:
@@ -238,17 +239,12 @@ def extract(
             output_format=output_format,
             compress=compress,
         )
-    except ConfigurationMismatch as e:
+        # Then even with the same settings: a record run-all or a single tool wrote into is
+        # theirs. Second, so a run with other settings is told which setting differs.
+        refuse_to_replace_a_later_record(output, sample_name)
+    except (ConfigurationMismatch, RecordInUse) as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
-
-    # Parse chromosomes
-    chromosomes.split(",") if chromosomes else None
-
-    # Output paths
-    output / f"{sample_name}.bed"  # Temp uncompressed
-    output / f"{sample_name}.bed.gz"
-    output / f"{sample_name}.metadata.json"
 
     try:
         # Pre-check BAM compatibility with current filters
@@ -317,7 +313,7 @@ def extract(
         logger.info(f"Extracted {result.fragment_count:,} fragments")
 
         # Write extraction outputs (BED index, metadata, GC factors)
-        write_extraction_outputs(
+        written = write_extraction_outputs(
             result=result,
             output_dir=output,
             genome=genome,
@@ -348,15 +344,21 @@ def extract(
                     output_format=output_format,
                     compress=compress,
                 )
-                logger.info(
-                    f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}"
-                )
+                if n_factors_on > 0:
+                    logger.info(
+                        f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}"
+                    )
+                else:
+                    logger.warning(
+                        "No on-target GC factor could be fitted; no on-target table written"
+                    )
             except Exception as e:
                 logger.warning(f"On-target GC correction failed: {e}")
 
+        # Name only what was written: `written` holds a factor table only when one exists.
         logger.info(f"Output: {result.bed_path}")
-        logger.info(f"Metadata: {output / f'{sample_name}.metadata.json'}")
-        if gc_correct:
+        logger.info(f"Metadata: {written['metadata']}")
+        if "gc_factors" in written:
             logger.info(
                 f"Correction factors: {factor_table_base(output, sample_name, 'off_target')}.*"
             )

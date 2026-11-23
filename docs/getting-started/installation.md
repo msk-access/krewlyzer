@@ -214,8 +214,8 @@ Install htslib development files:
 
 ### Memory Errors
 
-For large BAM files, increase available memory or process chromosomes separately:
+For large BAM files, increase available memory or reduce the thread count:
 
 ```bash
-krewlyzer extract sample.bam -r hg19.fa -o output/ --chromosomes chr1,chr2
+krewlyzer extract -i sample.bam -r hg19.fa -o output/ --threads 4
 ```

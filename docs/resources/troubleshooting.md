@@ -40,9 +40,8 @@ Or use the Docker image for a complete environment.
 **Solutions**:
 1. Increase available RAM (≥16GB recommended)
 2. Reduce thread count: `--threads 4`
-3. Process chromosomes separately:
 ```bash
-krewlyzer extract -i sample.bam -r hg19.fa -o output/ --chromosomes chr1,chr2
+krewlyzer extract -i sample.bam -r hg19.fa -o output/ --threads 4
 ```
 
 ---
