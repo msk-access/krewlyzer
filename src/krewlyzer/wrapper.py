@@ -16,6 +16,7 @@ Key Features:
 Uses shared utilities from core/bam_utils.py for filter compatibility checking.
 """
 
+import gzip
 import typer
 from pathlib import Path
 import logging
@@ -64,6 +65,27 @@ from .core.gc_assets import factor_table_path, resolve_gc_factors
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
+
+
+def _count_variant_records(path: Path) -> int:
+    """Data lines in a VCF or MAF: not comments, the MAF header, or blank.
+
+    Gzip is recognised from the first two bytes, as the Rust reader does, not
+    from the name. A plain-text read of a `.vcf.gz` raised UnicodeDecodeError
+    here and stopped run-all before any stage. Python's gzip reads every
+    member of a bgzip file.
+    """
+    with open(path, "rb") as raw:
+        compressed = raw.read(2) == b"\x1f\x8b"
+    opener = gzip.open if compressed else open
+    with opener(path, "rt") as f:
+        return sum(
+            1
+            for line in f
+            if not line.startswith("#")
+            and not line.startswith("Hugo_Symbol")  # MAF header
+            and line.strip()  # skip blank lines
+        )
 
 
 def run_all(
@@ -617,14 +639,7 @@ def run_all(
         )
         stage_outcomes["mfsd"] = Outcome("unavailable")
     if resolved_variants is not None and resolved_variants.exists():
-        with open(resolved_variants) as f:
-            variant_count = sum(
-                1
-                for line in f
-                if not line.startswith("#")
-                and not line.startswith("Hugo_Symbol")  # MAF header
-                and line.strip()  # skip blank lines
-            )
+        variant_count = _count_variant_records(resolved_variants)
         if variant_count > 0:
             has_mfsd = True
             logger.info(f"mFSD: {variant_count} variants in {resolved_variants.name}")

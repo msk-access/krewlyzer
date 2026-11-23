@@ -13,8 +13,10 @@ a gzipped asset should be.
 
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 import krewlyzer.core.gene_bed as gene_bed_module
@@ -178,6 +180,42 @@ def test_a_variants_file_with_no_variants_records_no_variants(sample, tmp_path):
     out = tmp_path / "out"
     empty = write_vcf(tmp_path / "empty.vcf", n_variants=0)
     assert _run(sample, out, variants=empty)["mfsd"] == ("no_variants", "")
+
+
+def _gzip(path: Path) -> Path:
+    gz = path.with_name(path.name + ".gz")
+    gz.write_bytes(gzip.compress(path.read_bytes()))
+    return gz
+
+
+def _mfsd_table(out: Path) -> pd.DataFrame:
+    (table,) = out.glob("*.mFSD.parquet")
+    return pd.read_parquet(table)
+
+
+def test_a_gzipped_vcf_gives_the_same_mfsd_as_the_plain_one(sample, tmp_path):
+    """A `.vcf.gz` stopped run-all before any stage ran.
+
+    run-all counted the variant lines with a plain-text read, which fails on
+    gzip's first byte, and the Rust reader had the same flaw. Same calls,
+    compressed or not, must give the same table.
+    """
+    plain = write_vcf(tmp_path / "s.vcf", n_variants=3)
+    tables = {}
+    for name, variants in (("plain", plain), ("gz", _gzip(plain))):
+        out = tmp_path / name
+        assert _run(sample, out, variants=variants)["mfsd"] == ("ran", ""), name
+        tables[name] = _mfsd_table(out)
+    assert len(tables["plain"]) == 3
+    pd.testing.assert_frame_equal(tables["gz"], tables["plain"])
+
+
+def test_a_gzipped_vcf_with_no_variants_records_no_variants(sample, tmp_path):
+    empty = _gzip(write_vcf(tmp_path / "empty.vcf", n_variants=0))
+    assert _run(sample, tmp_path / "out", variants=empty)["mfsd"] == (
+        "no_variants",
+        "",
+    )
 
 
 def test_a_recorded_error_never_contains_a_path(failed):

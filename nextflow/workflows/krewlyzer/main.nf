@@ -63,12 +63,18 @@ workflow KREWLYZER {
         //
         // Grouped on (maf, single_sample) so only samples that would have done
         // identical work are batched. Per-sample MAFs yield one task each and
-        // behave exactly as before. Samples with no MAF keep FILTER_MAF, whose
-        // Mode 3 already writes the header-only placeholder.
+        // behave exactly as before. A VCF-only sample bypasses both: SPLIT_MAF
+        // and FILTER_MAF only read MAF, and a VCF is not filtered by sample.
+        // Samples with neither keep FILTER_MAF, whose Mode 3 writes the
+        // header-only placeholder.
+        //
+        // Order is precedence: `branch` takes the first match, so a MAF wins
+        // over a VCF (INPUT_CHECK warns when a row has both).
         ch_maf_split = INPUT_CHECK.out.maf_for_filter
             .branch { meta, maf ->
-                has_maf: maf
-                no_maf : true
+                has_maf    : maf
+                has_vcf    : meta._vcf
+                no_variants: true
             }
 
         // groupTuple is a barrier, and deliberately so: this channel comes
@@ -119,17 +125,20 @@ workflow KREWLYZER {
                 }
             }
 
-        // --- FILTER_MAF: only samples with no MAF (header-only placeholder) ---
-        FILTER_MAF(ch_maf_split.no_maf)
+        // --- FILTER_MAF: only samples with no variants (header-only placeholder) ---
+        FILTER_MAF(ch_maf_split.no_variants)
         ch_versions = ch_versions.mix(FILTER_MAF.out.versions.first())
 
-        // --- Reconstruct RUNALL tuple from meta fields + filtered MAF ---
-        ch_runall = ch_split_paired.mix(FILTER_MAF.out.maf)
-            .map { meta, filtered_maf ->
+        // --- Reconstruct RUNALL tuple from meta fields + variant file ---
+        // The variants slot is the filtered MAF, the placeholder, or the VCF.
+        ch_runall = ch_split_paired
+            .mix(FILTER_MAF.out.maf)
+            .mix(ch_maf_split.has_vcf.map { meta, _maf -> [meta, meta._vcf] })
+            .map { meta, variants ->
                 [meta, meta._bam, meta._bai,
                  meta._mfsd_bam ?: [], meta._mfsd_bai ?: [],
                  meta._bisulfite ?: [],
-                 filtered_maf,
+                 variants,
                  meta._pon ?: [], meta._targets ?: [],
                  meta._wps_anchors ?: [], meta._wps_bg ?: []]
             }
@@ -165,7 +174,10 @@ workflow KREWLYZER {
             .join(ch_filtered_valid.map { meta, filtered_maf -> [meta.id, filtered_maf] })
             .map { id, meta, bam, bai, filtered_maf -> [meta, bam, bai, filtered_maf] }
         
-        ch_mfsd_all = ch_mfsd_filtered.mix(INPUT_CHECK.out.maf_single)
+        // VCFs need no filtering; a MAF on the same row takes precedence.
+        ch_mfsd_all = ch_mfsd_filtered
+            .mix(INPUT_CHECK.out.maf_single)
+            .mix(INPUT_CHECK.out.vcf_only)
         
         TOOL_LEVEL(
             INPUT_CHECK.out.extract,

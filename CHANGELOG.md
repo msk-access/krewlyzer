@@ -297,6 +297,27 @@ All notable changes to this project will be documented in this file.
   only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
   `table`). The other tool-level modules are fixed in the entry above.
 
+- **The Nextflow samplesheet's `vcf` column reaches mFSD.** It was parsed and documented, and
+  ignored in both modes. The only code that routed it, `INPUT_CHECK`'s `runall` emit, was never
+  read by the workflow. Run-all mode built its tuple from the MAF alone, so a VCF-only sample got
+  FILTER_MAF's header-only placeholder and `mfsd_status=no_variants`. Tool-level mode selected
+  mFSD samples by their MAF and dropped VCF-only samples entirely. A VCF now goes straight to
+  run-all's `--variants` and to tool-level `krewlyzer mfsd -V`, skipping SPLIT_MAF and FILTER_MAF,
+  which read only MAF. When a row sets both `maf` and `vcf`, the MAF is used and a warning names
+  the sample. The `runall` emit is gone. A new test fails for any `INPUT_CHECK` emit the workflow
+  does not read, and requires the VCF channel to choose its BAM as the MAF channels do. Samples
+  without a VCF hash as before, so `-resume` still hits for them. The VCF example rows in
+  `docs/nextflow/samplesheet.md` and `nextflow/samplesheet.csv` had one field too many and one too
+  few, which put the assay in the wrong column. Both are corrected.
+- **mFSD reads gzipped variant files.** A `.vcf.gz` (or a gzipped MAF) failed in two places. The
+  Rust reader read the file as plain text, so mFSD failed. Before that, run-all's variant-line
+  count raised `UnicodeDecodeError` and stopped the whole run, with no stage recorded. Both now
+  recognise gzip from the file's first two bytes, not its name, and read every bgzip block. A
+  single-member decoder would stop after the first block and drop the remaining variants without
+  an error. The pipeline's SPLIT_MAF (run-all) and FILTER_MAF (tool-level) steps read the MAF
+  before mFSD does, also as plain text, so a `.maf.gz` in the samplesheet failed there; they now
+  recognise gzip the same way. `tests/unit/test_split_maf_logic.py` and
+  `tests/unit/test_filter_maf_logic.py` run each script on a plain and a gzipped copy.
 - **`--skip_pon` and `--skip_target_regions` no longer fail the task in the Nextflow pipeline.**
   The input_check resolvers (`resolvePon`, `resolveTargets`) still returned the samplesheet's
   file, the assay's bundled file or `--pon_model` / `--targets` when the matching skip flag was
