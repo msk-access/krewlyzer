@@ -655,24 +655,50 @@ pub fn compute_and_write_gc_factors(
     } else {
         output_path
     };
-    if should_write_tsv(fmt) {
-        let tsv_out = if compress {
-            PathBuf::from(format!("{}.tsv.gz", stem))
-        } else {
-            PathBuf::from(format!("{}.tsv", stem))
-        };
-        factors.write_tsv(&tsv_out, compress)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
-        info!("gc_correction: wrote {:?}", tsv_out);
-    }
-    if should_write_parquet(fmt) {
-        let parquet_out = PathBuf::from(format!("{}.parquet", stem));
-        factors.write_parquet(&parquet_out)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
-        info!("gc_correction: wrote {:?}", parquet_out);
+    //
+    // All formats or none: with "both", a TSV written before the Parquet write failed was left
+    // behind, and every tool reading the folder used it while the caller recorded no table.
+    let mut started: Vec<PathBuf> = Vec::new();
+    let written = (|| -> PyResult<()> {
+        if should_write_tsv(fmt) {
+            let tsv_out = if compress {
+                PathBuf::from(format!("{}.tsv.gz", stem))
+            } else {
+                PathBuf::from(format!("{}.tsv", stem))
+            };
+            started.push(tsv_out.clone());
+            factors.write_tsv(&tsv_out, compress)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
+            info!("gc_correction: wrote {:?}", tsv_out);
+        }
+        if should_write_parquet(fmt) {
+            let parquet_out = PathBuf::from(format!("{}.parquet", stem));
+            started.push(parquet_out.clone());
+            factors.write_parquet(&parquet_out)
+                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
+            info!("gc_correction: wrote {:?}", parquet_out);
+        }
+        Ok(())
+    })();
+    if let Err(e) = written {
+        remove_started(&started);
+        return Err(e);
     }
 
     Ok(n_factors)
+}
+
+/// Remove the factor tables a failed write had started, so none is left for a reader to find.
+/// Only files: a path that could not be created because something else is there is not ours.
+fn remove_started(paths: &[std::path::PathBuf]) {
+    for path in paths {
+        if path.is_file() {
+            match std::fs::remove_file(path) {
+                Ok(()) => log::warn!("gc_correction: removed {:?}, written before the failure", path),
+                Err(e) => log::warn!("gc_correction: could not remove {:?}: {}", path, e),
+            }
+        }
+    }
 }
 
 /// Validate a GC correction factor table by loading it exactly as every consumer does
@@ -790,6 +816,20 @@ impl FragmentConsumer for GcObservationConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remove_started_removes_files_and_leaves_what_is_not_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let tsv = dir.path().join("s.correction_factors.tsv");
+        let parquet = dir.path().join("s.correction_factors.parquet");
+        std::fs::write(&tsv, "len_bin\tgc_bin\tfactor\n").unwrap();
+        std::fs::create_dir(&parquet).unwrap();
+
+        remove_started(&[tsv.clone(), parquet.clone()]);
+
+        assert!(!tsv.exists(), "a started table was left");
+        assert!(parquet.is_dir(), "removed what this call did not write");
+    }
     
     #[test]
     fn test_gc_correction_basic() {

@@ -323,6 +323,16 @@ All notable changes to this project will be documented in this file.
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (`tests/invariants/test_extract_record.py`).
+- **A GC factor table exists exactly when the run says it wrote one.** With `-F both`, Rust wrote
+  the TSV factor table and then failed on the Parquet one: the record said
+  `gc_correction_computed=False` while a `.tsv` table sat in the folder, and every tool reading it
+  found and used that table. `compute_and_write_gc_factors` now writes every format or none,
+  removing what it wrote before raising. The on-target writes in run-all and `process_sample`
+  (`build-pon`) logged "Wrote 0 ... GC factors" (the off-target one in `process_sample`, "Computed
+  0") when nothing was fitted or written; every factor write now goes through one helper,
+  `sample_processor.write_gc_factor_table`, which names a table only when it wrote one and warns,
+  per population, when none could be fitted or the computation failed
+  (`tests/invariants/test_factor_table_writes.py`).
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under

@@ -60,7 +60,7 @@ from .core.asset_resolution import (
     resolve_target_regions,
 )
 from .core.fsc_processor import default_continue_n
-from .core.gc_assets import factor_table_path, resolve_gc_factors
+from .core.gc_assets import resolve_gc_factors
 
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
@@ -846,30 +846,17 @@ def run_all(
                         is_panel_mode
                         and len(extraction_result.gc_observations_ontarget) > 0
                     ):
-                        try:
-                            gc_ref = assets.resolve("gc_reference")
-                            valid_regions = assets.resolve("valid_regions")
-                            factors_ontarget = factor_table_path(
-                                output, sample, "on_target"
-                            )
-                            logger.info(
-                                f"Computing on-target GC factors from {len(extraction_result.gc_observations_ontarget)} obs..."
-                            )
-                            n_factors_on = _core.gc.compute_and_write_gc_factors(
-                                extraction_result.gc_observations_ontarget,
-                                str(gc_ref),
-                                str(valid_regions),
-                                str(factors_ontarget),
-                                output_format=resolved_output_format,
-                                compress=resolved_compress,
-                            )
-                            logger.info(
-                                f"Wrote {n_factors_on} on-target GC factors: {factors_ontarget.name}"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"On-target GC factor computation failed: {e}"
-                            )
+                        from .core.sample_processor import write_gc_factor_table
+
+                        write_gc_factor_table(
+                            extraction_result.gc_observations_ontarget,
+                            assets,
+                            output,
+                            sample,
+                            "on_target",
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
+                        )
 
                 # Write motif outputs (EDM, BPM, MDS with z-score)
                 _, motif_outcomes = write_motif_tables(

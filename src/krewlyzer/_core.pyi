@@ -122,6 +122,9 @@ class gc:
     ) -> int:
         """Compute LOESS GC correction factors and write TSV/Parquet output.
 
+        Every format the call asks for is written, or none: when one fails (``"both"``), the
+        tables it had already written are removed before the error is raised.
+
         Returns:
             Number of correction factor bins written (0, and no file, when nothing could be fitted).
         """
