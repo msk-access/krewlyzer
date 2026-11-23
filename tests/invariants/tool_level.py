@@ -2,7 +2,8 @@
 
 `tool_level/main.nf` runs `extract`, then each tool in its own task. A BED-reading tool's task
 holds the BED and extract's GC factor tables, staged as links. The tools get the sample's mode
-and the format options. Shared by the tests that hold tool-level mode to its declarations
+and the format options, and `extract` and `motif`, which read the BAM, the synthetic blacklist
+that run-all is given. Shared by the tests that hold tool-level mode to its declarations
 (`test_tool_level_outputs.py`) and to run-all (`test_tool_level_matches_runall.py`).
 """
 
@@ -54,6 +55,8 @@ def run_tools(
         folders["extract"],
         "-s",
         SAMPLE,
+        "-x",
+        s.assets.blacklist,
         *mode,
         *fmt,
     )
@@ -84,7 +87,17 @@ def run_tools(
         )
 
     bam_tools = {
-        "motif": ["motif", "-i", s.bam, "-r", s.reference, "--skip-pon", *mode],
+        "motif": [
+            "motif",
+            "-i",
+            s.bam,
+            "-r",
+            s.reference,
+            "-x",
+            s.assets.blacklist,
+            "--skip-pon",
+            *mode,
+        ],
         "mfsd": ["mfsd", "-i", s.bam, "-V", vcf, "-g", s.reference],
         "uxm": ["uxm", "-i", s.bam],
     }

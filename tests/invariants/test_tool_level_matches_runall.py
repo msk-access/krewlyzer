@@ -45,8 +45,49 @@ RUN_ALL_ONLY = {
 }
 
 
+#: Compared tables that carry no data on the synthetic sample, by mode, with the reason. Two
+#: empty tables are equal, so for these the comparison holds nothing; each entry says why it
+#: cannot. A table off this list must carry data, and an entry whose table does is stale.
+NO_DATA_ON_THE_SYNTHETIC_SAMPLE = {
+    ("wgs", "*.FSC.parquet"): (
+        "6 bins of 100 kb, and a WGS row is WGS_CONTINUE_N (50) bins: no row. "
+        "Panel mode, one bin per row, compares FSC with rows"
+    ),
+    ("wgs", "*.FSR.parquet"): "as FSC",
+    ("panel", "*.MDS.exon.parquet"): (
+        "region-MDS reads the bundled xs1 gene BED, on hg19 coordinates, none on the "
+        "synthetic contigs; run-all takes no other"
+    ),
+    ("panel", "*.MDS.gene.parquet"): "as MDS.exon",
+    ("panel", "*.WPS.panel.parquet"): (
+        "the bundled xs1 WPS anchors: hg19, none on the synthetic contigs"
+    ),
+    ("panel", "*.TFBS.ontarget.parquet"): (
+        "the bundled xs1 TFBS regions: hg19, none on the synthetic contigs"
+    ),
+    ("panel", "*.ATAC.ontarget.parquet"): (
+        "the bundled xs1 ATAC regions: hg19, none on the synthetic contigs"
+    ),
+    ("panel", "*.UXM.parquet"): (
+        "the bundled hg19 markers, and a BAM without bisulfite conversion: U, X and M are 0"
+    ),
+    ("wgs", "*.UXM.parquet"): "as in panel mode",
+}
+
+#: Where a row is rather than what was measured there: a table of 1725 exons with
+#: `n_fragments` and `mds` all 0 has nonzero `start` and `end`, and carries nothing.
+POSITION_COLUMNS = {"start", "end", "center"}
+
+
 def _ignored(name: str, table: Dict[str, str]) -> bool:
     return any(fnmatch.fnmatchcase(name, g) for g in table)
+
+
+def _carries_data(frame: pd.DataFrame) -> bool:
+    measured = [
+        c for c in frame.select_dtypes("number").columns if c not in POSITION_COLUMNS
+    ]
+    return any((frame[c].fillna(0) != 0).any() for c in measured)
 
 
 @pytest.fixture(scope="module", params=["panel", "wgs"])
@@ -130,3 +171,25 @@ def test_every_published_table_equals_run_all(both):
         elif ours != theirs:
             differ.append(name)
     assert not differ, f"tool-level tables differ from run-all's: {differ}"
+
+
+def test_every_compared_table_carries_data(both, request):
+    """`test_every_published_table_equals_run_all` holds nothing for a table empty on both
+    sides. Each one is named, with its reason, in NO_DATA_ON_THE_SYNTHETIC_SAMPLE."""
+    mode = request.node.callspec.params["both"]
+    runall, published = both
+    expected = {g for m, g in NO_DATA_ON_THE_SYNTHETIC_SAMPLE if m == mode}
+    empty, stale = [], []
+    for name in sorted(published):
+        if not name.endswith(".parquet") or not (runall / name).exists():
+            continue
+        has_data = _carries_data(pd.read_parquet(runall / name))
+        allowed = any(fnmatch.fnmatchcase(name, g) for g in expected)
+        if not has_data and not allowed:
+            empty.append(name)
+        elif has_data and allowed:
+            stale.append(name)
+    assert not empty, f"{mode}: compared tables with no data: {empty}"
+    assert (
+        not stale
+    ), f"{mode}: carry data now, off NO_DATA_ON_THE_SYNTHETIC_SAMPLE: {stale}"

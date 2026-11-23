@@ -274,7 +274,9 @@ All notable changes to this project will be documented in this file.
     `COMPLETION.MARKER_ABSENT`; run-all remains the mode for cohorts. A record an earlier run-all
     left in the same `--outdir` is not removed, and would mark the sample complete.
   - Held by `tests/invariants/test_tool_level_matches_runall.py` (run-all and each tool on the
-    synthetic sample, panel and WGS: the same files, with the same contents),
+    synthetic sample, panel and WGS: the same files, with the same contents; the tables with
+    no data on that sample, so equal by being empty, are named with the reason, and any other
+    that comes out empty fails),
     `tests/invariants/test_tool_level_outputs.py` (every file each tool writes, in three formats
     and both modes, is declared, and every required pattern is written) and
     `tests/unit/test_tool_level_modules.py` (option parity with run-all's module, per-sample
