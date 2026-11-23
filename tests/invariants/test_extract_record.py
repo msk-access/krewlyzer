@@ -22,7 +22,7 @@ from typer.testing import CliRunner
 from conftest import requires_data
 from krewlyzer.cli import app
 
-from .runall import SAMPLE, record, synth_run_all
+from .runall import SAMPLE, record, synth_run_all, write_vcf
 from .synth import BASELINE, make_sample
 
 pytestmark = [pytest.mark.invariant, requires_data]
@@ -103,6 +103,37 @@ def test_extract_into_a_folder_a_single_tool_recorded_into_is_refused(sample, tm
     )
     assert fsr.exit_code == 0, fsr.output
     assert "pon_applied" in record(out)
+    before = _files(out)
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 1, result.output
+    assert _files(out) == before
+
+
+def test_extract_into_a_folder_with_only_a_stage_status_is_refused(sample, tmp_path):
+    """`mfsd` records `mfsd_status` and no provenance column, so only the status half of the
+    check sees it: a refusal reading `pon_applied` alone let this extract through."""
+    out = tmp_path / "out"
+    assert _extract(sample, out).exit_code == 0
+    mfsd = _cli(
+        "mfsd",
+        "-i",
+        sample.bam,
+        "-V",
+        write_vcf(tmp_path / "v.vcf"),
+        "-g",
+        sample.reference,
+        "-o",
+        out,
+        "--sample-name",
+        SAMPLE,
+        "--output-format",
+        "parquet",
+    )
+    assert mfsd.exit_code == 0, mfsd.output
+    kept = record(out)
+    assert "mfsd_status" in kept and "pon_applied" not in kept
     before = _files(out)
 
     result = _extract(sample, out)
@@ -216,5 +247,30 @@ def test_extract_refuses_chromosomes_rather_than_ignoring_it(sample, tmp_path):
     sample marked complete. Refused as an unknown option, before anything is written."""
     out = tmp_path / "out"
     result = _extract(sample, out, "--chromosomes", "chr1")
-    assert result.exit_code != 0, "accepted --chromosomes and ignored it"
+    assert result.exit_code == 2, f"not refused as a usage error: {result.output}"
+    assert "No such option" in result.output
     assert not (out / f"{SAMPLE}.bed.gz").exists()
+
+
+def test_a_failed_gc_computation_is_warned_about(tmp_path, caplog):
+    """A factor computation that raises (a genome without assets, an unreadable GC reference)
+    records `gc_correction_computed=False`, correctly, and was logged at debug only: the run
+    looked like one that had fitted nothing, with nothing at a level anyone reads."""
+    from krewlyzer.core.sample_processor import write_extraction_outputs
+
+    dense = {(b, gc): 10_000 for b in range(188) for gc in range(101)}
+    with caplog.at_level(logging.INFO):
+        write_extraction_outputs(
+            _extraction(tmp_path, dense),
+            tmp_path,
+            genome="hg99",
+            output_format="parquet",
+        )
+    row = pd.read_parquet(tmp_path / f"{SAMPLE}.metadata.parquet").iloc[0]
+    assert bool(row["gc_correction_computed"]) is False
+    warned = [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.WARNING and "GC" in r.getMessage()
+    ]
+    assert warned, "a failed GC computation left no warning"

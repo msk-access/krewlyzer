@@ -305,8 +305,10 @@ All notable changes to this project will be documented in this file.
   `gc_correction_computed` was `True` whenever the factor computation returned, including when
   Rust fitted no length bin, returned 0 and wrote no table; it is now `True` only when a table was
   written, and `extract` logs a factor table (and the metadata file, which it named
-  `.metadata.json`) only when it exists. Each is pinned by two runs that must record two different
-  values (`tests/invariants/test_extract_record.py`).
+  `.metadata.json`) only when it exists. A factor computation that raised (no assets for the
+  genome, an unreadable GC reference) is now warned about rather than logged at debug. Each
+  record value is pinned by two runs that must record two different values
+  (`tests/invariants/test_extract_record.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

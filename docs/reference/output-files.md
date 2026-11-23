@@ -1195,8 +1195,7 @@ recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the targe
 file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
 feature tool that takes these settings refuse a run with others before writing anything, naming
 the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
-only when it wrote it alone (see *Optional stages* below), and keeps any recorded E1 setting,
-which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+only over a record it wrote alone (see *Optional stages* below). Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
 the second run's. The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow

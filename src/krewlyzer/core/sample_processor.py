@@ -876,7 +876,10 @@ def write_extraction_outputs(
                     "so the tools reading this folder find none"
                 )
         except Exception as e:
-            logger.debug(f"  GC factor computation failed: {e}")
+            # Recorded as not computed; warned, since at debug it read like a sample too small to fit.
+            logger.warning(
+                f"  GC factor computation failed for {sample}, no factor table written: {e}"
+            )
 
     # The record is rewritten from scratch, but a setting extraction does not decide (run-all's E1
     # aggregation) is the folder's, not this run's: carried over, so a later rerun with the other
