@@ -1412,14 +1412,14 @@ Use mouse to pan and zoom
 <td><code>-G</code></td>
 <td>TEXT</td>
 <td>hg19</td>
-<td>Genome build for bundled assets (targets, blacklist, <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> reference); an unknown build is an error. A known build whose bundled files are missing is not yet caught: <code>--assay</code> targets then resolve to none (WGS mode) and a missing blacklist is only warned about, in <code>extract</code> and <code>run-all</code> alike</td>
+<td>Genome build for bundled assets (targets, blacklist, <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> reference); an unknown build is an error, and so is a bundled file the run needs that is missing (see <code>--assay</code> and <code>--exclude-regions</code>)</td>
 </tr>
 <tr>
 <td><code>--assay</code></td>
 <td><code>-A</code></td>
 <td>TEXT</td>
 <td></td>
-<td>Assay code (xs1/xs2) for auto-loading bundled targets</td>
+<td>Assay code (xs1/xs2) for auto-loading bundled targets. A named assay whose bundled targets are missing is an error, not WGS; <code>wgs</code> has none by design</td>
 </tr>
 <tr>
 <td><code>--target-regions</code></td>
@@ -1447,7 +1447,7 @@ Use mouse to pan and zoom
 <td><code>-x</code></td>
 <td>PATH</td>
 <td>bundled blacklist</td>
-<td><abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> file of regions to exclude (default: the genome's bundled blacklist, with or without <code>--gc-correct</code>). To exclude nothing, pass an empty file</td>
+<td><abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> file of regions to exclude (default: the genome's bundled blacklist, with or without <code>--gc-correct</code>; if it is missing, that is an error). To exclude nothing, pass an empty file</td>
 </tr>
 <tr>
 <td><code>--mapq</code></td>
@@ -1710,7 +1710,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 02:45:50 UTC"><span class="timeago" datetime="2026-11-23T02:45:50+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 02:45:50 UTC">2026-11-23</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 19:41:07 UTC"><span class="timeago" datetime="2026-11-23T19:41:07+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 19:41:07 UTC">2026-11-23</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">

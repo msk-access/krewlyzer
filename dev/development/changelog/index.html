@@ -3498,11 +3498,41 @@
   file excludes nothing. An unknown genome (<code>-G hg99</code>) or a <code>KREWLYZER_DATA_DIR</code> that does not
   exist is an error, as in run-all: with <code>--gc-correct</code>, <code>extract</code> used to warn, disable <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>
   correction and carry on without the targets and the blacklist, and with <code>--no-gc-correct</code> it
-  ran without them. A known genome whose bundled files are missing is not yet caught, in either
-  mode: a named assay's targets then resolve to none (WGS mode) and a missing blacklist is only
-  warned about. Held by
+  ran without them. Held by
   <code>tests/invariants/test_extract_assets_without_gc.py</code>, which also runs run-all on the same
   sample and compares the regions each hands to extraction.</li>
+<li><strong>A named assay or the default blacklist whose bundled file is missing is an error, not WGS.</strong>
+  For a genome krewlyzer knows whose data folder lacks the files, <code>resolve_target_regions</code> took a
+  named panel assay's missing targets for WGS, at debug level, and <code>resolve_exclude_regions</code> only
+  warned that the blacklist was missing. So <code>extract -A xs1</code> and <code>run-all -A xs1</code> exited 0 with
+  <code>assay=xs1</code> and <code>panel_mode=False</code> in the record and the blacklisted fragments kept: a panel
+  sample measured as WGS. Every tool that takes <code>--assay</code> (<code>extract</code>, <code>run-all</code>, <code>fsc</code>, <code>fsd</code>,
+  <code>fsr</code>, <code>wps</code>, <code>ocf</code>, <code>region-entropy</code>, <code>motif</code>, <code>build-pon</code>) now stops with an error naming
+  where it looked: pass <code>--target-regions</code>, or <code>--skip-target-regions</code> or <code>--assay wgs</code> if WGS is
+  meant. <code>wgs</code> has no bundled targets by design and is unchanged. <code>build-pon</code> with a custom assay
+  name and no <code>-T</code> built a WGS-mode <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> under that name; it now needs <code>-T</code> or
+  <code>--skip-target-regions</code>, and its "rebuild from the kept outputs" hint carries <code>-T</code> or
+  <code>--skip-target-regions</code> and <code>-G</code>. A missing bundled blacklist is an error in <code>extract</code>,
+  <code>run-all</code> and <code>motif</code> unless <code>-x/--exclude-regions</code> is given (an empty file excludes nothing).
+  A bundled targets file or blacklist that is a Git LFS pointer (a clone that skipped
+  <code>git lfs pull</code>) counts as missing: it passed the existence check, so the targets were read as
+  a panel of nothing and the blacklist excluded nothing. An explicit <code>-T/--target-regions</code> that
+  does not exist is an error too: it was warned about and the sample then ran as WGS. When the
+  data folder itself is absent (a pip install without the data clone: the wheel has no <code>data/</code>),
+  these errors say so and name <code>KREWLYZER_DATA_DIR</code>; a command that needs nothing bundled still
+  runs. A <code>KREWLYZER_DATA_DIR</code> that names a file rather than a directory is an error. Held by
+  <code>tests/invariants/test_missing_bundled_assets.py</code>, which points <code>KREWLYZER_DATA_DIR</code> at a folder
+  with every genome directory and none of the files, then at one holding LFS pointers, and runs
+  extract (with and without <code>--gc-correct</code>) and run-all. An explicit <code>-T</code> or <code>-x</code> that is an LFS
+  pointer is refused the same way. Five tests that take the bundled blacklist by default are now
+  marked <code>requires_data</code> (without the data, or with only its LFS pointers, they had run without
+  one), and the synthetic motif test passes the harness's own blacklist.</li>
+<li><strong>Nextflow: an unknown <code>--genome</code> stops the run at launch.</strong> It failed every extract task
+  instead, which the institutional retry-then-ignore error strategy turned into a run that
+  finished with no samples. <code>nextflow_schema.json</code> now lists the builds as an enum, and <code>main.nf</code>
+  checks <code>params.genome</code> against that list before any task is submitted (nothing validated
+  params against the schema). Held by <code>tests/unit/test_nextflow_genome.py</code>, which also checks
+  the enum against the builds the CLI accepts.</li>
 <li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
