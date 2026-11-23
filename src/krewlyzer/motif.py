@@ -96,9 +96,8 @@ def motif(
     skip_duplicates: bool = typer.Option(
         True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads"
     ),
-    chromosomes: Optional[str] = typer.Option(
-        None, "--chromosomes", help="Comma-separated chromosomes to process"
-    ),
+    # (`--chromosomes` was removed: it was parsed and ignored, so a "chr1 only" run counted
+    # motifs over the whole genome.)
     sample_name: Optional[str] = typer.Option(
         None,
         "--sample-name",

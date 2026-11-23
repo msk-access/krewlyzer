@@ -118,7 +118,6 @@ def test_run_all_unified():
                 bisulfite_bam=None,
                 variants=None,
                 duplex=False,
-                chromosomes=None,
                 bait_padding=50,
                 pon_model=None,
                 skip_pon=False,
