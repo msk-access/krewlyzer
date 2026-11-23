@@ -62,6 +62,104 @@ class TestKrewlyzerDataDirEnvVar:
         assert "data" in str(assets.base_path)
 
 
+class TestTheDataFolderIsChecked:
+    """`bundled_data_dir` checked the folder only when KREWLYZER_DATA_DIR named it.
+
+    The default, the package's own `data/`, was returned unchecked, and the wheel has none
+    (PyPI's 100 MB limit). The AssetManager still builds without it -- a command given every
+    input explicitly needs nothing bundled -- but a bundled lookup that fails says the folder
+    itself is missing, rather than only that one file is.
+    """
+
+    def _package_at(self, root, monkeypatch):
+        import krewlyzer.assets as assets_module
+
+        package = root / "site-packages" / "krewlyzer"
+        package.mkdir(parents=True)
+        monkeypatch.setattr(assets_module, "__file__", str(package / "assets.py"))
+        monkeypatch.delenv("KREWLYZER_DATA_DIR", raising=False)
+        return package
+
+    def test_a_package_without_its_data_folder_still_builds(
+        self, tmp_path, monkeypatch
+    ):
+        package = self._package_at(tmp_path, monkeypatch)
+        assets = AssetManager("hg19")
+        assert assets.base_path == package / "data"
+        assert "pip install" in assets.missing_data_reason()
+
+    def test_a_package_with_its_data_folder_has_no_reason(self, tmp_path, monkeypatch):
+        package = self._package_at(tmp_path, monkeypatch)
+        (package / "data").mkdir()
+        assets = AssetManager("hg19")
+        assert assets.base_path == package / "data"
+        assert assets.missing_data_reason() is None
+
+    def test_the_resolvers_name_the_missing_folder(self, tmp_path, monkeypatch):
+        from krewlyzer.core.asset_resolution import (
+            resolve_exclude_regions,
+            resolve_target_regions,
+        )
+
+        package = self._package_at(tmp_path, monkeypatch)
+        assets = AssetManager("hg19")
+        for call in (
+            lambda: resolve_target_regions(None, "xs1", False, assets),
+            lambda: resolve_exclude_regions(None, assets),
+        ):
+            with pytest.raises(ValueError) as exc_info:
+                call()
+            assert f"no data folder at {package / 'data'}" in str(exc_info.value)
+            assert "pip install" in str(exc_info.value)
+
+    def test_env_var_naming_a_file_is_an_error(self, tmp_path, monkeypatch):
+        a_file = tmp_path / "data.tar"
+        a_file.write_text("")
+        monkeypatch.setenv("KREWLYZER_DATA_DIR", str(a_file))
+        with pytest.raises(ValueError, match="KREWLYZER_DATA_DIR"):
+            AssetManager("hg19")
+
+
+class TestLfsPointersAreNotAssets:
+    """A clone that skipped `git lfs pull` has every file, as text pointers. An existence
+    check passes them: the targets became a panel of nothing, the blacklist excluded nothing.
+    """
+
+    def _pointer(self, path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "version https://git-lfs.github.com/spec/v1\noid sha256:"
+            + "0" * 64
+            + "\nsize 1024\n"
+        )
+        return path
+
+    def test_targets_that_are_a_pointer_are_not_found(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("KREWLYZER_DATA_DIR", str(tmp_path))
+        self._pointer(tmp_path / "targets" / "GRCh37" / "xs1.targets.bed.gz")
+        with pytest.raises(FileNotFoundError, match="git lfs pull"):
+            AssetManager("hg19").get_target_bed("xs1")
+
+    def test_a_blacklist_that_is_a_pointer_is_an_error(self, tmp_path, monkeypatch):
+        from krewlyzer.core.asset_resolution import resolve_exclude_regions
+
+        monkeypatch.setenv("KREWLYZER_DATA_DIR", str(tmp_path))
+        self._pointer(
+            tmp_path / "exclude-regions" / "GRCh37" / "hg19-blacklist.v2.bed.gz"
+        )
+        with pytest.raises(ValueError, match="git lfs pull"):
+            resolve_exclude_regions(None, AssetManager("hg19"))
+
+    def test_real_files_are_not_pointers(self, tmp_path):
+        from krewlyzer.assets import is_lfs_pointer
+
+        real = tmp_path / "x.bed"
+        real.write_text("chr1\t0\t10\n")
+        assert not is_lfs_pointer(real)
+        assert is_lfs_pointer(self._pointer(tmp_path / "p.bed.gz"))
+        assert not is_lfs_pointer(tmp_path / "absent.bed")
+
+
 class TestAssetResolutionWithExternalDir:
     """Tests for asset resolution with external data directory."""
 

@@ -569,11 +569,19 @@ def test_aggregation_needs_no_extraction_assets(corpus, tmp_path):
     runner has no LFS payload, and `build-pon` refused before reaching the
     branch that would never have read it. An aggregation route that depends on
     a data package it does not touch is not much of an aggregation route.
+
+    The targets are given explicitly. The corpus is a panel cohort (it has
+    on-target tables), and its targets are an input of the PON, not an
+    extraction asset. Left to `--assay xs1`, a runner without the data package
+    got no targets and built a WGS-mode PON from a panel cohort, exit 0; that
+    is now an error, which is the point.
     """
     from typer.testing import CliRunner
 
     from krewlyzer.cli import app
 
+    targets = tmp_path / "xs1.targets.bed"
+    targets.write_text("17\t7000000\t7010000\n")
     output = tmp_path / "no-assets.pon.parquet"
     result = CliRunner().invoke(
         app,
@@ -583,6 +591,8 @@ def test_aggregation_needs_no_extraction_assets(corpus, tmp_path):
             str(corpus),
             "--assay",
             "xs1",
+            "-T",
+            str(targets),
             "-r",
             "/dev/null",
             "-o",

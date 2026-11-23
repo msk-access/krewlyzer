@@ -7,6 +7,7 @@ Tests end-motif and breakpoint-motif extraction via CLI.
 import pytest
 import pysam
 from typer.testing import CliRunner
+from conftest import requires_data
 from krewlyzer.cli import app
 
 runner = CliRunner()
@@ -79,6 +80,8 @@ def test_motif_cli_help():
     assert "-r" in output
 
 
+# Takes the genome's bundled blacklist (no -x): needs the data package.
+@requires_data
 @pytest.mark.integration
 def test_motif_extraction(tmp_path, mock_bam_for_motif, mock_reference):
     """Test basic motif extraction."""
@@ -109,6 +112,8 @@ def test_motif_extraction(tmp_path, mock_bam_for_motif, mock_reference):
     assert (output_dir / "test.MDS.tsv").exists()
 
 
+# Takes the genome's bundled blacklist (no -x): needs the data package.
+@requires_data
 @pytest.mark.integration
 def test_motif_mds_score(tmp_path, mock_bam_for_motif, mock_reference):
     """Test MDS score calculation."""

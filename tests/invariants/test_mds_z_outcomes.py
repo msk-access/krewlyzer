@@ -295,6 +295,10 @@ def test_motif_records_the_pon_only_if_the_mds_z_score_was_written(
             "S",
             "-P",
             str(pon),
+            # The harness's blacklist, as every synthetic run passes: the bundled hg19
+            # one covers the whole synthetic chr1, and without data there is none.
+            "-x",
+            str(sample.assets.blacklist),
             "--output-format",
             "parquet",
         ]

@@ -6,11 +6,14 @@ Uses subset of actual sequencing data for comprehensive testing.
 
 import pytest
 from typer.testing import CliRunner
+from conftest import requires_data
 from krewlyzer.cli import app
 
 runner = CliRunner()
 
 
+# Takes the genome's bundled blacklist (no -x): needs the data package.
+@requires_data
 @pytest.mark.integration
 def test_extract_real_bam(tmp_path, real_bam, real_reference):
     """Test extract with real BAM data."""

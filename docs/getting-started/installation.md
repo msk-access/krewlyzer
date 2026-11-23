@@ -118,7 +118,11 @@ echo 'export KREWLYZER_DATA_DIR=~/.krewlyzer-data/src/krewlyzer/data' >> ~/.bash
 
 !!! warning "Required for pip Install"
     The `KREWLYZER_DATA_DIR` environment variable is **required** when installing via pip.
-    Without it, asset auto-loading will fail. You can still use explicit paths like `--pon-model`.
+    The wheel carries no `data/` folder. Without the variable, an assay's bundled targets
+    and the genome's default blacklist cannot be found, and a run that needs either stops
+    with an error naming the missing folder. Passing them explicitly (`-T`, `-x`) clears
+    those two errors only: the PON, GC reference, gene BED and WPS anchors are bundled too,
+    and a run without them records each stage it could not do.
 
 ---
 

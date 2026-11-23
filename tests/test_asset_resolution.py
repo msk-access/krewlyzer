@@ -27,7 +27,17 @@ def mock_assets():
     assets = Mock()
     assets.get_target_bed = Mock()
     assets.get_pon = Mock()
+    assets.missing_data_reason = Mock(return_value=None)  # the data folder is there
     return assets
+
+
+def _lfs_pointer(path):
+    path.write_text(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:"
+        + "0" * 64
+        + "\nsize 9\n"
+    )
+    return path
 
 
 @pytest.fixture
@@ -60,6 +70,28 @@ class TestResolveTargetRegions:
         assert path == explicit_file
         assert source == "explicit"
         mock_assets.get_target_bed.assert_not_called()
+
+    def test_an_explicit_path_that_does_not_exist_is_an_error(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        """It was warned about and returned, and every caller then ran WGS (`exists()`)."""
+        with pytest.raises(ValueError, match="typo.bed"):
+            resolve_target_regions(
+                tmp_path / "typo.bed", "xs1", False, mock_assets, mock_logger
+            )
+
+    def test_an_explicit_path_that_is_an_lfs_pointer_is_an_error(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        """`-T` pointed into a clone that skipped `git lfs pull`: a panel of nothing."""
+        with pytest.raises(ValueError, match="git lfs pull"):
+            resolve_target_regions(
+                _lfs_pointer(tmp_path / "xs1.targets.bed.gz"),
+                "xs1",
+                False,
+                mock_assets,
+                mock_logger,
+            )
 
     def test_skip_flag_returns_none(self, mock_assets, mock_logger):
         """--skip-target-regions should return (None, 'skipped')."""
@@ -107,6 +139,34 @@ class TestResolveTargetRegions:
 
         assert path is None
         assert source == "none"
+
+    @pytest.mark.parametrize("assay", ["WGS", "Wgs"])
+    def test_wgs_is_wgs_in_any_case(self, mock_assets, mock_logger, assay):
+        mock_assets.get_target_bed.side_effect = FileNotFoundError("No targets")
+        assert resolve_target_regions(None, assay, False, mock_assets, mock_logger) == (
+            None,
+            "none",
+        )
+
+    @pytest.mark.parametrize("assay", ["xs1", "xs2", "XS1", "mypanel"])
+    def test_a_named_assay_without_bundled_targets_is_an_error(
+        self, mock_assets, mock_logger, assay
+    ):
+        """It was taken for WGS, at debug level: a panel sample measured as WGS, exit 0."""
+        mock_assets.get_target_bed.side_effect = FileNotFoundError(
+            "tried /data/targets/GRCh37/xs1.targets.bed.gz"
+        )
+        with pytest.raises(ValueError) as exc:
+            resolve_target_regions(None, assay, False, mock_assets, mock_logger)
+        message = str(exc.value)
+        assert f"'{assay}'" in message
+        assert "xs1.targets.bed.gz" in message  # where it looked
+        for way_out in (
+            "--target-regions",
+            "--skip-target-regions",
+            "KREWLYZER_DATA_DIR",
+        ):
+            assert way_out in message
 
     def test_no_assay_no_skip_returns_none(self, mock_assets, mock_logger):
         """No assay and no skip should return (None, 'none')."""
@@ -379,10 +439,34 @@ class TestResolveExcludeRegions:
             "bundled",
         )
 
-    def test_no_bundled_blacklist_is_said_not_assumed(
+    def test_no_bundled_blacklist_is_an_error(self, mock_assets, mock_logger, tmp_path):
+        """It was a warning, and the run went on keeping blacklisted fragments, exit 0."""
+        mock_assets.exclude_regions = tmp_path / "absent.bed.gz"
+        with pytest.raises(ValueError) as exc:
+            resolve_exclude_regions(None, mock_assets, mock_logger)
+        message = str(exc.value)
+        assert "absent.bed.gz" in message
+        for way_out in ("--exclude-regions", "KREWLYZER_DATA_DIR"):
+            assert way_out in message
+
+    def test_an_explicit_file_that_is_an_lfs_pointer_is_an_error(
         self, mock_assets, mock_logger, tmp_path
     ):
-        """Run-all passed the bundled path whether or not it existed."""
+        """`-x` pointed into a clone that skipped `git lfs pull`: it excluded nothing."""
+        with pytest.raises(ValueError, match="git lfs pull"):
+            resolve_exclude_regions(
+                _lfs_pointer(tmp_path / "hg19-blacklist.v2.bed.gz"),
+                mock_assets,
+                mock_logger,
+            )
+
+    def test_an_explicit_file_needs_no_bundled_blacklist(
+        self, mock_assets, mock_logger, tmp_path
+    ):
+        empty = tmp_path / "nothing.bed"
+        empty.write_text("")
         mock_assets.exclude_regions = tmp_path / "absent.bed.gz"
-        assert resolve_exclude_regions(None, mock_assets, mock_logger) == (None, "none")
-        assert mock_logger.warning.called
+        assert resolve_exclude_regions(empty, mock_assets, mock_logger) == (
+            empty,
+            "explicit",
+        )

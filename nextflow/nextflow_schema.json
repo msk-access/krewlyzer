@@ -45,7 +45,9 @@
     },
     "genome": {
       "type": "string",
-      "default": "hg19"
+      "default": "hg19",
+      "description": "Genome build. main.nf checks it against this list at launch.",
+      "enum": ["hg19", "GRCh37", "hg38", "GRCh38"]
     },
     "gc_correct": {
       "type": "boolean",

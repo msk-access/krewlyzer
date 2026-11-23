@@ -274,7 +274,8 @@ Asset resolution follows this priority:
 1. **Explicit path** (`--target-regions`, `--pon-model`) - highest
 2. **Skip flag** (`--skip-target-regions`, `--skip-pon`)
 3. **Bundled asset** (auto-loaded from `--assay`)
-4. **None** - WGS mode
+4. **None** - WGS mode (`--assay wgs`, or no `--assay`). A named assay whose
+   bundled targets are missing is an error, not WGS
 
 | Assay | WPS Anchors | Target Genes | PON |
 |-------|:-----------:|:------------:|:---:|

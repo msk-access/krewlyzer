@@ -51,11 +51,15 @@ def resolve_target_regions(
     Implements the following priority:
     1. Explicit --target-regions path (if valid) → "explicit"
     2. --skip-target-regions flag → None, "skipped"
-    3. Bundled targets for --assay (if available) → "bundled"
-    4. No targets available → None, "none"
+    3. Bundled targets for --assay → "bundled"
+    4. --assay wgs, or no --assay → None, "none"
 
-    For --assay wgs, no bundled targets exist (by design), so it returns
-    (None, "none") rather than an error.
+    A named assay other than ``wgs`` whose bundled targets are missing is an
+    error, not WGS. It used to be taken for WGS at debug level, so a panel
+    sample was measured as WGS with ``assay`` and ``panel_mode=False`` both in
+    its record and exit 0 -- a data folder that lacks the file, or holds only
+    its Git LFS pointer, was enough. ``wgs`` has no bundled targets by design.
+    An explicit path that does not exist is an error too.
 
     Args:
         explicit_path: Path from --target-regions CLI option, or None
@@ -70,7 +74,9 @@ def resolve_target_regions(
         - source: One of "explicit", "bundled", "skipped", or "none"
 
     Raises:
-        ValueError: If both --target-regions and --skip-target-regions are provided
+        ValueError: If both --target-regions and --skip-target-regions are
+            provided, if an explicit path does not exist, or if a named assay
+            other than ``wgs`` has no bundled targets
 
     Example:
         >>> path, source = resolve_target_regions(None, "xs2", False, assets)
@@ -93,16 +99,14 @@ def resolve_target_regions(
     # PRIORITY 1: Explicit --target-regions path
     # ==========================================================================
     if explicit_path:
-        if explicit_path.exists():
-            log.debug(f"Target resolution: Using explicit path: {explicit_path}")
-            return explicit_path, "explicit"
-        else:
-            # Path specified but doesn't exist - this is an error condition
-            # Return anyway and let caller validate existence
-            log.warning(
-                f"Target resolution: Explicit path does not exist: {explicit_path}"
-            )
-            return explicit_path, "explicit"
+        # One that does not exist is an error. It was warned about and returned for the
+        # caller to check, and every caller took `path.exists()` as panel mode: a typo in
+        # -T ran the sample as WGS, exit 0.
+        if not explicit_path.exists():
+            raise ValueError(f"Target regions file not found: {explicit_path}")
+        _refuse_an_lfs_pointer(explicit_path, "--target-regions")
+        log.debug(f"Target resolution: Using explicit path: {explicit_path}")
+        return explicit_path, "explicit"
 
     # ==========================================================================
     # PRIORITY 2: --skip-target-regions flag
@@ -134,19 +138,34 @@ def resolve_target_regions(
 
             return bundled_path, "bundled"
 
-        except FileNotFoundError:
-            # No bundled targets for this assay (e.g., wgs)
-            # This is expected and not an error
-            log.debug(
-                f"Target resolution: No bundled targets for assay '{assay}' (treating as WGS)"
-            )
-            return None, "none"
+        except FileNotFoundError as e:
+            if assay.lower() == "wgs":
+                log.debug("Target resolution: --assay wgs has no targets, WGS mode")
+                return None, "none"
+            raise ValueError(
+                f"No bundled target regions for assay '{assay}' ({e}). Without them a "
+                f"panel sample would be measured as WGS. Pass the panel's targets with "
+                f"--target-regions, run as WGS with --skip-target-regions or --assay wgs, "
+                f"or point KREWLYZER_DATA_DIR at a data clone that has them."
+            ) from e
 
     # ==========================================================================
     # DEFAULT: No targets configured
     # ==========================================================================
     log.debug("Target resolution: No target regions configured, running in WGS mode")
     return None, "none"
+
+
+def _refuse_an_lfs_pointer(path: Path, option: str) -> None:
+    """An explicit file that is a Git LFS pointer, as one taken from a clone that skipped
+    `git lfs pull` is: it exists, and reads as a region set of nothing."""
+    from krewlyzer.assets import is_lfs_pointer
+
+    if is_lfs_pointer(path):
+        raise ValueError(
+            f"{option} {path} is a Git LFS pointer, not the file: run `git lfs pull` in "
+            f"the clone it came from"
+        )
 
 
 def _count_bed_regions(path: Path) -> int:
@@ -284,25 +303,42 @@ def resolve_exclude_regions(
     Shared by `extract`, `run-all` and `motif`, so one sample's tables all exclude the same
     fragments. `motif` excluded none, so its motif tables counted fragments run-all's dropped.
 
-    Returns ``(path, source)``, source one of ``explicit``, ``bundled`` or ``none``.
+    Returns ``(path, source)``, source ``explicit`` or ``bundled``.
 
     Raises:
-        ValueError: an explicit file that does not exist (it used to be used as given).
+        ValueError: an explicit file that does not exist (it used to be used as given), or no
+            explicit file and no bundled blacklist for the genome, or only its Git LFS pointer
+            (it used to be a warning, and the run kept the blacklisted fragments and exited 0).
     """
     log = log or logger
     if explicit_path is not None:
         if not Path(explicit_path).exists():
             raise ValueError(f"Exclude regions file not found: {explicit_path}")
+        _refuse_an_lfs_pointer(Path(explicit_path), "--exclude-regions")
         log.info(f"Exclude regions: {Path(explicit_path).name} (explicit)")
         return Path(explicit_path), "explicit"
+    from krewlyzer.assets import is_lfs_pointer
+
     bundled = assets.exclude_regions
+    ways_out = (
+        "Pass one with --exclude-regions (an empty file excludes nothing), or point "
+        "KREWLYZER_DATA_DIR at a data clone that has it."
+    )
     if bundled.exists():
+        if is_lfs_pointer(bundled):
+            # A pointer is read as a blacklist of nothing: every fragment kept, exit 0.
+            raise ValueError(
+                f"The bundled blacklist {bundled} is a Git LFS pointer, not the file: run "
+                f"`git lfs pull` in the data clone. {ways_out}"
+            )
         log.info(f"Exclude regions: {bundled.name} (bundled)")
         return bundled, "bundled"
-    log.warning(
-        f"No bundled exclude regions at {bundled}: blacklisted fragments are kept"
+    reason = assets.missing_data_reason()
+    raise ValueError(
+        f"No bundled blacklist at {bundled}"
+        + (f" ({reason})" if reason else "")
+        + f": without it blacklisted fragments would be kept. {ways_out}"
     )
-    return None, "none"
 
 
 # =============================================================================
