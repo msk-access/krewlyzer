@@ -436,6 +436,7 @@ def run_all(
     # leave the first run's extra tables looking current (Greptile on #98).
     from .core.output_provenance import (
         ConfigurationMismatch,
+        filter_settings,
         refuse_a_different_configuration,
     )
 
@@ -447,6 +448,15 @@ def run_all(
                 "genome": genome,
                 "assay": resolved_assay,
                 "target_regions": resolved_target_path,
+                # The filters, so a BED another run extracted is reused only if it holds the
+                # fragments this run's would.
+                **filter_settings(
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                ),
                 # E1 decides a table only gene FSC writes, which needs an assay: as run_features.
                 **(
                     {
@@ -705,9 +715,24 @@ def run_all(
             )
         ]
 
-        # Caching logic: determine what needs to run
-        should_run_extract = not bedgz_file.exists()
-        should_run_engine = not bedgz_file.exists() or not all(
+        # Caching logic: determine what needs to run. A BED is reused only when the record says
+        # which filters made it: the configuration guard has then refused any other than this
+        # run's. A BED with no record, or one from before the filters were recorded truthfully,
+        # was made with filters nobody knows, and is extracted again.
+        from .core.output_provenance import record_vouches_for_filters
+
+        should_run_extract = not bedgz_file.exists() or not record_vouches_for_filters(
+            output,
+            sample,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
+        if bedgz_file.exists() and should_run_extract:
+            logger.info(
+                f"{bedgz_file.name} has no record of the filters it was extracted with; "
+                "extracting it again"
+            )
+        should_run_engine = should_run_extract or not all(
             path.exists() for path in cached_motif_tables
         )
         # Cached motif tables were scored (or not) against the PON of the run that made them.

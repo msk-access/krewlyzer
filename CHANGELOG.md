@@ -303,9 +303,14 @@ All notable changes to this project will be documented in this file.
   among them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
   sample. It now stops before writing anything when any copy of the record (`.tsv`, `.tsv.gz`,
   `.parquet`) holds a provenance column or a stage status, which only run-all and the single tools
-  write (`output_provenance.refuse_to_replace_a_later_record`). Updating only its own fields was
-  not enough: a new BED from other filters would leave every table made from the old one under
-  its recorded `ran`. A rerun of `extract` over a record it wrote alone is still allowed.
+  write, or when any table the output contract declares beside its own exists for the sample, in
+  any format (`output_provenance.refuse_to_replace_a_later_record`,
+  `contract.feature_table_suffixes`). The record alone was not enough: a run-all killed between
+  writing the record and stamping it, or a folder from before provenance, has feature tables
+  beside a record that looks like extraction's, and `extract` with new filters replaced the BED
+  and the marker under them. Updating only its own fields was not enough either: a new BED from
+  other filters would leave every table made from the old one under its recorded `ran`. A rerun of
+  `extract` into a folder it wrote alone is still allowed.
 - **The record's filters and GC flag say what the run did.** `write_extraction_outputs` wrote
   `filters_mapq` 20, `filters_min_length` 65 and `filters_max_length` 1000 whatever the run used;
   they now come from the `ExtractionResult`, which carries the filters `extract_sample` applied,
@@ -317,6 +322,17 @@ All notable changes to this project will be documented in this file.
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (`tests/invariants/test_extract_record.py`).
+- **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
+  then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
+  extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
+  one record. The five read filters are now settings a rerun is checked against
+  (`output_provenance.FILTER_FIELDS`): run-all, `extract`, `motif` and `region-mds` (the three it
+  takes) refuse a run whose filters differ from the record's, before writing anything. The record
+  gains `filters_skip_duplicates` and `filters_require_proper_pair`, which it did not hold. A
+  record without them was written before the filters were recorded truthfully (every one said
+  20/65/1000), so its values are not compared; run-all extracts that folder's BED again rather
+  than reuse it, as it now does a BED with no record beside it
+  (`tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

@@ -650,3 +650,18 @@ NOT_CONSUMED: Tuple[str, ...] = (
     ".correction_factors.parquet",
     ".OCF.parquet",
 )
+
+#: What extraction itself writes beside the BED: the sample's record and its GC factor table.
+EXTRACTION_TABLES: Tuple[str, ...] = (COMPLETION_MARKER, ".correction_factors.parquet")
+
+
+def feature_table_suffixes() -> Tuple[str, ...]:
+    """Every table this contract declares that is made from the sample's fragments, by suffix.
+
+    That is every declared table but extraction's own (`EXTRACTION_TABLES`): one of these beside a
+    BED means something read that BED (`extract` refuses to replace it).
+    """
+    declared = {t.suffix for t in CONTRACT}
+    declared.update(NOT_CONSUMED, OCF_PREFERENCE)
+    declared.update(s for tables in STAGE_TABLES.values() for s in tables)
+    return tuple(sorted(declared - set(EXTRACTION_TABLES)))

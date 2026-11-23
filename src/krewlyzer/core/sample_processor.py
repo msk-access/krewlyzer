@@ -120,6 +120,8 @@ class ExtractionResult:
     mapq: Optional[int] = None
     minlen: Optional[int] = None
     maxlen: Optional[int] = None
+    skip_duplicates: Optional[bool] = None
+    require_proper_pair: Optional[bool] = None
 
 
 @dataclass
@@ -459,6 +461,8 @@ def extract_sample(
         mapq=mapq,
         minlen=minlen,
         maxlen=maxlen,
+        skip_duplicates=skip_duplicates,
+        require_proper_pair=require_proper_pair,
     )
 
 
@@ -795,7 +799,11 @@ def write_extraction_outputs(
     """
     if result.bed_path is None:
         raise ValueError("ExtractionResult has no bed_path - was write_bed=False?")
-    unrecorded = [f for f in ("mapq", "minlen", "maxlen") if getattr(result, f) is None]
+    unrecorded = [
+        f
+        for f in ("mapq", "minlen", "maxlen", "skip_duplicates", "require_proper_pair")
+        if getattr(result, f) is None
+    ]
     if unrecorded:
         # Recording a default for a filter nobody reported is how every record said 20/65/1000.
         raise ValueError(
@@ -835,6 +843,8 @@ def write_extraction_outputs(
         "filters_mapq": result.mapq,
         "filters_min_length": result.minlen,
         "filters_max_length": result.maxlen,
+        "filters_skip_duplicates": bool(result.skip_duplicates),
+        "filters_require_proper_pair": bool(result.require_proper_pair),
         "gc_correction_computed": False,  # True below only if a table was written
         "fragments_on_missing_contig": int(
             result.contig_guard.get("fragments_on_missing_contig", 0)

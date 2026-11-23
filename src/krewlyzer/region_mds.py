@@ -240,13 +240,22 @@ def region_mds_stage(
     if not owns_sample_record:
         # Before any work: other settings than the folder's record would leave the first run's
         # extra tables looking current. run-all owns the record, and checked it already.
-        from krewlyzer.core.output_provenance import refuse_a_different_configuration
+        from krewlyzer.core.output_provenance import (
+            filter_settings,
+            refuse_a_different_configuration,
+        )
 
         try:
+            # The filters it takes: it reads the BAM, so with other ones its tables would come
+            # from fragments the sample's BED does not hold.
             refuse_a_different_configuration(
                 output,
                 sample_name,
-                {"genome": genome, "assay": assay},
+                {
+                    "genome": genome,
+                    "assay": assay,
+                    **filter_settings(mapq=mapq, minlen=minlen, maxlen=maxlen),
+                },
                 output_format=output_format,
                 compress=compress,
             )

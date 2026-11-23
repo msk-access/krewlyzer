@@ -1,0 +1,364 @@
+"""A rerun into a sample's folder never changes the fragment BED under tables made from the old one.
+
+`{sample}.metadata.parquet` is downstream's completion marker (invariant #2): whatever sits beside
+it is read as one sample. Two reruns broke that while every stage still said `ran`:
+
+- **run-all reused a BED extracted with other filters.** `extract --mapq 30` then `run-all` (mapq
+  20) exited 0: the BED existed, so run-all kept it and extract's record, then read the BAM again
+  at mapq 20 for the motif tables. Two filter sets under one record. The filters are now part of
+  the configuration a rerun is checked against, and a BED whose record cannot vouch for its
+  filters (written before they were recorded truthfully, or missing) is extracted again.
+- **`extract` inferred "nothing was made from this BED" from the record's columns.** A run-all
+  killed before its final stamp, or a folder written before provenance existed, holds feature
+  tables beside a record that looks like extraction's alone, and `extract` with new filters
+  replaced the BED and the marker beside them. It now also refuses when any table the output
+  contract declares exists for the sample.
+"""
+
+from __future__ import annotations
+
+import gzip
+import shutil
+
+import pandas as pd
+import pytest
+from typer.testing import CliRunner
+
+from conftest import requires_data
+from krewlyzer.cli import app
+
+from .runall import SAMPLE, record, synth_run_all
+from .synth import BASELINE, make_sample
+
+pytestmark = [pytest.mark.invariant, requires_data]
+
+#: Each filter: what `extract` is given (not the default), run-all's option at its default, the
+#: record column, and a second run-all value.
+FILTERS = {
+    "mapq": (("--mapq", "30"), ("mapq", 20), "filters_mapq", 30),
+    "minlen": (("--minlen", "80"), ("minlen", 65), "filters_min_length", 80),
+    "maxlen": (("--maxlen", "600"), ("maxlen", 1000), "filters_max_length", 600),
+    "skip_duplicates": (
+        ("--no-skip-duplicates",),
+        ("skip_duplicates", True),
+        "filters_skip_duplicates",
+        False,
+    ),
+    "require_proper_pair": (
+        ("--no-require-proper-pair",),
+        ("require_proper_pair", True),
+        "filters_require_proper_pair",
+        False,
+    ),
+}
+
+FILTER_COLUMNS = [column for _, _, column, _ in FILTERS.values()]
+
+
+@pytest.fixture(scope="module")
+def sample(tmp_path_factory):
+    return make_sample(tmp_path_factory.mktemp("rerun_bed_in"), BASELINE)
+
+
+def _files(out):
+    return {p.name: p.stat().st_mtime_ns for p in sorted(out.iterdir()) if p.is_file()}
+
+
+def _cli(*args):
+    return CliRunner().invoke(app, [str(a) for a in args])
+
+
+def _extract(sample, out, *extra):
+    """`extract` with the settings `synth_run_all` uses, so only what a test adds differs."""
+    return _cli(
+        "extract",
+        "-i",
+        sample.bam,
+        "-r",
+        sample.reference,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "-x",
+        sample.assets.blacklist,
+        "--skip-target-regions",
+        "-F",
+        "parquet",
+        *extra,
+    )
+
+
+def _bed_fragments(out):
+    with gzip.open(out / f"{SAMPLE}.bed.gz", "rt") as fh:
+        return sum(1 for _ in fh)
+
+
+def _as_an_old_record(out):
+    """Rewrite the record as one from before the filters were recorded truthfully: no
+    duplicate/proper-pair columns, and 65 whatever the run used."""
+    path = out / f"{SAMPLE}.metadata.parquet"
+    frame = pd.read_parquet(path).drop(
+        columns=["filters_skip_duplicates", "filters_require_proper_pair"]
+    )
+    frame.assign(filters_min_length=65).to_parquet(path, index=False)
+
+
+# ── 1. The filters are part of the configuration ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("name", list(FILTERS))
+def test_run_all_refuses_a_bed_extracted_with_other_filters(sample, tmp_path, name):
+    """The review's case, for each filter: run-all kept extract's BED and its record, and wrote
+    motif tables from the BAM under its own filters."""
+    extract_args, (field, default), column, _ = FILTERS[name]
+    out = tmp_path / "out"
+    result = _extract(sample, out, *extract_args)
+    assert result.exit_code == 0, result.output
+    before = _files(out)
+
+    code = synth_run_all(sample, out, **{field: default})
+
+    assert code == 1, f"run-all accepted a BED made with another {name}"
+    assert _files(out) == before, "a refused run-all wrote into the folder"
+
+
+def test_run_all_with_the_same_filters_reuses_the_bed(sample, tmp_path):
+    """The refusal is for other filters: with the same ones, run-all keeps extract's BED."""
+    out = tmp_path / "out"
+    assert _extract(sample, out, "--minlen", "80").exit_code == 0
+    bed = (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns
+
+    assert synth_run_all(sample, out, minlen=80) is None
+
+    assert (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns == bed, "BED re-extracted"
+    assert int(record(out)["filters_min_length"]) == 80
+
+
+@pytest.mark.parametrize("name", list(FILTERS))
+def test_run_all_records_the_filters_it_used(sample, tmp_path, name):
+    """Two run-alls that differ in one filter record two different values (invariant #1)."""
+    _, (field, default), column, other = FILTERS[name]
+    recorded = []
+    for value in (default, other):
+        out = tmp_path / str(value)
+        assert synth_run_all(sample, out, **{field: value}) is None
+        recorded.append(record(out)[column])
+    assert [type(default)(v) for v in recorded] == [default, other]
+
+
+def test_extract_records_the_duplicate_and_proper_pair_filters(sample, tmp_path):
+    """The two filters the record held no column for (invariant #1)."""
+    recorded = {}
+    for name, extra in (
+        ("default", ()),
+        ("lenient", ("--no-skip-duplicates", "--no-require-proper-pair")),
+    ):
+        out = tmp_path / name
+        assert _extract(sample, out, *extra).exit_code == 0
+        row = record(out)
+        recorded[name] = (
+            bool(row["filters_skip_duplicates"]),
+            bool(row["filters_require_proper_pair"]),
+        )
+    assert recorded == {"default": (True, True), "lenient": (False, False)}
+
+
+def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path):
+    """As for the genome: the folder's filters are the folder's, whichever tool wrote them."""
+    out = tmp_path / "out"
+    assert _extract(sample, out, "--minlen", "80").exit_code == 0
+    before = _files(out)
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 1, result.output
+    assert "filters_min_length" in result.output
+    assert _files(out) == before
+
+
+def test_motif_with_other_filters_is_refused(sample, tmp_path):
+    """`motif` reads the BAM, not the BED: with other filters its tables would come from
+    fragments the sample's BED does not hold."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+
+    result = _cli(
+        "motif",
+        "-i",
+        sample.bam,
+        "-r",
+        sample.reference,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "-x",
+        sample.assets.blacklist,
+        "--skip-target-regions",
+        "--skip-pon",
+        "-F",
+        "parquet",
+        "--minlen",
+        "80",
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "filters_min_length" in result.output
+    assert _files(out) == before
+
+
+def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+
+    result = _cli(
+        "region-mds",
+        sample.bam,
+        sample.reference,
+        out,
+        "-s",
+        SAMPLE,
+        "--skip-pon",
+        "-F",
+        "parquet",
+        "--minlen",
+        "80",
+    )
+
+    assert result.exit_code != 0, result.output
+    assert "filters_min_length" in result.output
+    assert _files(out) == before
+
+
+@pytest.mark.parametrize("state", ["record_before_filters_were_recorded", "no_record"])
+def test_run_all_re_extracts_a_bed_its_record_cannot_vouch_for(sample, tmp_path, state):
+    """A record from before the filters were recorded truthfully said 20/65/1000 whatever the run
+    used, and has no `filters_skip_duplicates`: its values cannot be compared, so the guard lets
+    the run through. The BED it describes is not trusted either: run-all extracts again under its
+    own filters, rather than scoring a BED made with unknown ones. A BED with no record beside it
+    (a run killed before writing one) is the same case."""
+    fresh = tmp_path / "fresh"
+    assert synth_run_all(sample, fresh) is None
+    expected = _bed_fragments(fresh)
+
+    out = tmp_path / "out"
+    assert _extract(sample, out, "--minlen", "150").exit_code == 0
+    assert _bed_fragments(out) < expected, "the two filters keep the same fragments"
+    if state == "no_record":
+        (out / f"{SAMPLE}.metadata.parquet").unlink()
+    else:
+        _as_an_old_record(out)
+
+    assert synth_run_all(sample, out) is None
+
+    assert (
+        _bed_fragments(out) == expected
+    ), "run-all scored a BED made with other filters"
+    row = record(out)
+    assert int(row["total_fragments"]) == expected
+    assert all(c in row for c in FILTER_COLUMNS)
+
+
+def test_an_old_record_is_not_refused_for_its_filters(sample, tmp_path):
+    """Its 65 may not be what the run used, so a run with another value is let through (and
+    re-extracts, above) rather than refused for a value nobody can trust."""
+    out = tmp_path / "out"
+    assert _extract(sample, out, "--minlen", "80").exit_code == 0
+    _as_an_old_record(out)
+
+    assert synth_run_all(sample, out, minlen=80) is None
+
+    assert int(record(out)["filters_min_length"]) == 80
+
+
+# ── 2. extract refuses a folder with tables made from its BED ────────────────────────────────
+
+
+def _feature_suffixes():
+    from krewlyzer.validate.contract import feature_table_suffixes
+
+    return sorted(feature_table_suffixes())
+
+
+@pytest.fixture(scope="module")
+def extracted(sample, tmp_path_factory):
+    out = tmp_path_factory.mktemp("extracted") / "out"
+    result = _extract(sample, out)
+    assert result.exit_code == 0, result.output
+    return out
+
+
+@pytest.mark.parametrize("suffix", _feature_suffixes())
+def test_extract_refuses_a_folder_holding_a_feature_table(
+    sample, extracted, tmp_path, suffix
+):
+    """Extraction's own record and one table something read this BED to make. The record alone
+    looks like a rerun of `extract`."""
+    out = tmp_path / "out"
+    shutil.copytree(extracted, out)
+    (out / f"{SAMPLE}{suffix}").write_bytes(b"")
+    before = _files(out)
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 1, result.output
+    assert f"{SAMPLE}{suffix}" in result.output
+    assert _files(out) == before
+
+
+@pytest.mark.parametrize("extension", [".tsv", ".tsv.gz"])
+def test_extract_refuses_a_feature_table_in_any_format(
+    sample, extracted, tmp_path, extension
+):
+    out = tmp_path / "out"
+    shutil.copytree(extracted, out)
+    (out / f"{SAMPLE}.FSD{extension}").write_bytes(b"")
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 1, result.output
+    assert f"{SAMPLE}.FSD{extension}" in result.output
+
+
+def test_extract_refuses_a_run_all_folder_written_before_provenance(
+    sample, extracted, tmp_path
+):
+    """A real run-all folder whose record holds extraction's columns only: a run-all killed
+    between writing the record and stamping it, or a folder from before provenance existed.
+    """
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    keep = set(pd.read_parquet(extracted / f"{SAMPLE}.metadata.parquet").columns)
+    path = out / f"{SAMPLE}.metadata.parquet"
+    frame = pd.read_parquet(path)
+    frame[[c for c in frame.columns if c in keep]].to_parquet(path, index=False)
+    before = _files(out)
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 1, result.output
+    assert _files(out) == before
+
+
+def test_feature_table_suffixes_cover_the_contract_but_not_extractions_own():
+    from krewlyzer.validate.contract import (
+        CONTRACT,
+        NOT_CONSUMED,
+        OCF_PREFERENCE,
+        STAGE_TABLES,
+        feature_table_suffixes,
+    )
+
+    declared = (
+        {t.suffix for t in CONTRACT}
+        | set(NOT_CONSUMED)
+        | set(OCF_PREFERENCE)
+        | {s for tables in STAGE_TABLES.values() for s in tables}
+    )
+    assert set(feature_table_suffixes()) == declared - {
+        ".metadata.parquet",
+        ".correction_factors.parquet",
+    }

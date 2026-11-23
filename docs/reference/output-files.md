@@ -1165,8 +1165,9 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `target_regions` | str | Path to the target BED, when in panel mode |
 | `extraction_time_seconds` | float | Wall-clock extraction time |
 | `mds_score` | float | Genome-wide motif diversity score |
-| `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`) |
+| `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`). Before this release every record said 20, whatever the run used |
 | `filters_min_length` / `filters_max_length` | int | The fragment length range the extraction applied (`--minlen` / `--maxlen`). Before this release every record said 65 and 1000, whatever the run used |
+| `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose five filters can be trusted |
 | `gc_correction_computed` | bool | Whether an off-target GC factor table was written for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`) |
 | `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
@@ -1192,12 +1193,25 @@ mean.
 
 **One folder, one configuration.** A rerun into a sample's folder must use the settings
 recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
-file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
-feature tool that takes these settings refuse a run with others before writing anything, naming
-the setting; `uxm` compares the genome, which picks its markers. Without that, a rerun that
-writes fewer tables (a panel folder rerun without its assay) left the first run's extra tables
--- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second run's. `extract` rewrites
-this table only over a record it wrote alone (see *Optional stages* below). The output format is one
+file name), the five read filters and, where gene FSC is written, `fsc_e1_aggregation`. run-all,
+`extract` and every feature tool that takes these settings refuse a run with others before
+writing anything, naming the setting; `motif` and `region-mds` compare the filters they take,
+since they read the BAM again rather than the BED, and `uxm` compares the genome, which picks its
+markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
+the second run's, and a run-all after `extract --mapq 30` kept that BED and wrote its motif tables
+at mapq 20, under one record. The filters are compared only when the record holds all five: one
+written before they were recorded truthfully says 20/65/1000 whatever its run used, so a rerun is
+not refused for those values, and run-all extracts that folder's BED again instead of reusing it
+(as it does a BED with no record beside it).
+
+**`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
+anything, a folder holding any table the output contract declares other than its own record and
+factor table (in any format), or a record holding a provenance column or a stage status (see
+*Optional stages* below). Either means something read this BED, and a new BED would leave that
+table under its recorded `ran`. The record alone is not enough to tell: a run-all killed before
+its final stamp, or a folder from before provenance was recorded, has feature tables beside a
+record that looks like extraction's. The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
 writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
 TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names

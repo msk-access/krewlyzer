@@ -223,6 +223,7 @@ def extract(
     from .core.output_provenance import (
         ConfigurationMismatch,
         RecordInUse,
+        filter_settings,
         refuse_a_different_configuration,
         refuse_to_replace_a_later_record,
     )
@@ -235,6 +236,13 @@ def extract(
                 "genome": genome,
                 "assay": assay,
                 "target_regions": resolved_target_path,
+                **filter_settings(
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                ),
             },
             output_format=output_format,
             compress=compress,

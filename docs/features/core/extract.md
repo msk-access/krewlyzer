@@ -79,11 +79,16 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `{sample}.correction_factors.tsv` | GC correction factors (with --gc-correct), when at least one length bin had enough fragments to fit |
 
 `{sample}.metadata.*` is the sample's record, and downstream's completion marker. It repeats the
-filters this run applied (`filters_mapq`, `filters_min_length`, `filters_max_length`) and says in
-`gc_correction_computed` whether the off-target factor table was written. `extract` refuses a folder whose
-record run-all or a single tool has already written into, before writing anything: replacing
-that record would drop its provenance and stage columns, and a new BED would leave the tables
-made from the old one looking current. Rerunning `extract` over its own record is allowed.
+filters this run applied (`filters_mapq`, `filters_min_length`, `filters_max_length`,
+`filters_skip_duplicates`, `filters_require_proper_pair`) and says in `gc_correction_computed`
+whether the off-target factor table was written.
+
+`extract` refuses, before writing anything, a folder that holds any feature table for the sample
+or whose record run-all or a single tool has written into: a new BED would leave the tables made
+from the old one looking current, and replacing that record would drop its provenance and stage
+columns. Rerunning `extract` over a folder it wrote alone is allowed, with the same genome, assay,
+targets, format and filters; other filters are refused like any other setting. run-all reuses a
+BED `extract` wrote only when the filters match; with others it is refused.
 
 `--chromosomes` was removed. It was accepted and ignored, so a run asking for one chromosome
 wrote the whole genome; it is now refused as an unknown option. There is no chromosome subset:

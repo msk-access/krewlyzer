@@ -213,12 +213,28 @@ def motif(
         )
         # Before any work: other settings than the folder's record would leave the first run's
         # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
-        from .core.output_provenance import refuse_a_different_configuration
+        from .core.output_provenance import (
+            filter_settings,
+            refuse_a_different_configuration,
+        )
 
+        # The filters too: motif reads the BAM, so with other ones its tables would come from
+        # fragments the sample's BED does not hold.
         refuse_a_different_configuration(
             output,
             sample_name,
-            {"genome": genome, "assay": assay, "target_regions": resolved_target_path},
+            {
+                "genome": genome,
+                "assay": assay,
+                "target_regions": resolved_target_path,
+                **filter_settings(
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                ),
+            },
             output_format=output_format,
             compress=compress,
         )

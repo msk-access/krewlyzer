@@ -184,12 +184,78 @@ class ConfigurationMismatch(ValueError):
     anything is written."""
 
 
-#: The settings that decide which tables a run writes, as the record names them. A rerun with
-#: other values writes another set of tables, and whatever the first run wrote that the second
-#: does not is left looking current: a panel folder rerun without its assay rewrites `TFBS` but
-#: not `TFBS.ontarget`, under one `tfbs=ran` (Greptile on #98). `genome`, `assay` and
-#: `target_regions` are written at extraction; `fsc_e1_aggregation` by run-all's own stamp.
-CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation")
+#: The read filters extraction applied, as the record names them. They decide which fragments
+#: the BED holds, and every table is made from those fragments or, for the motif tables, from the
+#: BAM read again under the run's own filters. A rerun with other filters therefore mixes two
+#: fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote and made its motif
+#: tables at mapq 20.
+#:
+#: Recorded truthfully only since the duplicate and proper-pair columns were added: before, every
+#: record said 20/65/1000 whatever the run used, and held neither column. So a record holding all
+#: five can be compared, and one that does not holds values nobody can trust (`filters_vouched`).
+FILTER_FIELDS = (
+    "filters_mapq",
+    "filters_min_length",
+    "filters_max_length",
+    "filters_skip_duplicates",
+    "filters_require_proper_pair",
+)
+
+#: The settings that decide which tables a run writes, or what they are made from, as the record
+#: names them. A rerun with other values writes another set of tables, and whatever the first run
+#: wrote that the second does not is left looking current: a panel folder rerun without its assay
+#: rewrites `TFBS` but not `TFBS.ontarget`, under one `tfbs=ran` (Greptile on #98). `genome`,
+#: `assay`, `target_regions` and the filters are written at extraction; `fsc_e1_aggregation` by
+#: run-all's own stamp.
+CONFIGURATION_FIELDS = (
+    "genome",
+    "assay",
+    "target_regions",
+    "fsc_e1_aggregation",
+    *FILTER_FIELDS,
+)
+
+
+def filter_settings(
+    *,
+    mapq: int,
+    minlen: int,
+    maxlen: int,
+    skip_duplicates: Optional[bool] = None,
+    require_proper_pair: Optional[bool] = None,
+) -> Dict[str, Any]:
+    """The `FILTER_FIELDS` a run takes, for `refuse_a_different_configuration`. A filter the entry
+    point does not take (None) is left out, so it is not compared."""
+    values = {
+        "filters_mapq": mapq,
+        "filters_min_length": minlen,
+        "filters_max_length": maxlen,
+        "filters_skip_duplicates": skip_duplicates,
+        "filters_require_proper_pair": require_proper_pair,
+    }
+    return {k: v for k, v in values.items() if v is not None}
+
+
+def filters_vouched(frame: Any) -> bool:
+    """Whether a record's filters are what its run applied: it holds all five `FILTER_FIELDS`,
+    which only a record written since they were recorded truthfully does."""
+    return frame is not None and all(f in frame.columns for f in FILTER_FIELDS)
+
+
+def record_vouches_for_filters(
+    output_dir: Path, sample: str, *, output_format: str, compress: bool
+) -> bool:
+    """Whether the sample's record says which filters its BED was extracted with.
+
+    For a cache: run-all reuses a BED only when this holds and the configuration guard has passed,
+    so the BED's filters are this run's. Without a record, or with one from before the filters
+    were recorded truthfully, a BED beside it was made with filters nobody knows.
+    """
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    return frame is not None and not frame.empty and filters_vouched(frame)
+
 
 #: The record column naming the extensions the folder's tables are written in (`table_formats`).
 #: Not one of `CONFIGURATION_FIELDS`: every run decides its own format, so the guard takes it from
@@ -267,7 +333,14 @@ def _setting(field: str, value: Any) -> str:
         # By file name: Nextflow stages the BED at a new path in every task, and the record holds
         # whatever path extraction was given.
         return Path(text).name if text else ""
-    # fsc_e1_aggregation. Not `bool(text)`: "False" read back from a TSV record is truthy.
+    if field in ("filters_mapq", "filters_min_length", "filters_max_length"):
+        # An integer, which a TSV record may read back as 20.0.
+        try:
+            return str(int(float(text)))
+        except ValueError:
+            return text
+    # fsc_e1_aggregation and the two filter flags. Not `bool(text)`: "False" read back from a TSV
+    # record is truthy.
     return "true" if text.lower() in ("true", "1", "1.0") else "false"
 
 
@@ -303,7 +376,9 @@ def refuse_a_different_configuration(
     run-all's own calls or the PON build, which own the record they write.
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
-    record does not hold (written before the field existed).
+    record does not hold (written before the field existed), nor for the filters of a record that
+    does not hold all five (`filters_vouched`): their values may not be what that run applied.
+    run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`).
 
     The output format is always compared, from ``output_format``/``compress``, and is not a
     ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
@@ -321,8 +396,9 @@ def refuse_a_different_configuration(
     if frame is None or frame.empty:
         return
     differing = []
+    vouched = filters_vouched(frame)
     for field, value in given.items():
-        if field not in frame.columns:
+        if field not in frame.columns or (field in FILTER_FIELDS and not vouched):
             continue
         recorded, ours = _setting(field, frame[field].iloc[0]), _setting(field, value)
         if recorded != ours:
@@ -357,7 +433,7 @@ class RecordInUse(ValueError):
 
 
 def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
-    """Refuse an extraction into a folder whose record holds what a later stage wrote.
+    """Refuse an extraction into a folder where a later stage read the BED or wrote the record.
 
     `extract` writes the record from scratch, with its own fields only. Over run-all's record it
     dropped every provenance column and every `{stage}_status` (about thirty columns), and the
@@ -365,15 +441,40 @@ def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
     fields, as single tools do, would not do either: a new BED (other filters) would leave every
     table the later stages made from the old one under their recorded `ran`.
 
-    The later stages are run-all and the single tools, which both add `PROVENANCE_COLUMNS` and
-    stage statuses. A record extraction wrote alone holds neither, so a rerun of `extract` is
-    allowed. Every copy of the record is read, not only this run's format: a single tool updates
-    only the copies in its own (`record_stage_outcomes`).
+    Two signs of a later stage, either of which refuses:
+
+    - **A feature table** for the sample, any table the output contract declares but extraction's
+      own (`contract.feature_table_suffixes`), in any format. The record cannot be the only sign:
+      a run-all killed between writing the record and stamping it, or a folder written before
+      provenance existed, holds tables beside a record that looks like extraction's alone.
+    - **A record holding `PROVENANCE_COLUMNS` or a stage status**, which run-all and the single
+      tools add. Every copy is read, not only this run's format: a single tool updates only the
+      copies in its own (`record_stage_outcomes`).
+
+    A folder extraction wrote alone has neither, so a rerun of `extract` is allowed (with the
+    folder's settings: `refuse_a_different_configuration` runs first).
     """
-    from krewlyzer.validate.contract import STAGES
+    from krewlyzer.validate.contract import STAGES, feature_table_suffixes
+
+    folder = Path(output_dir)
+    tables = [
+        name
+        for suffix in feature_table_suffixes()
+        for ext in TABLE_EXTENSIONS
+        if (
+            folder / (name := f"{sample}{suffix.removesuffix('.parquet')}{ext}")
+        ).exists()
+    ]
+    if tables:
+        raise RecordInUse(
+            f"{folder.name}/ holds tables made from this sample's BED ({len(tables)}, among them "
+            f"{', '.join(tables[:3])}). Extracting again would replace the BED and the record "
+            "under them, and leave them looking current. Use a fresh output folder, or remove "
+            "this one."
+        )
 
     later = set(PROVENANCE_COLUMNS) | {f"{stage}_status" for stage in STAGES}
-    base = Path(output_dir) / f"{sample}.metadata"
+    base = folder / f"{sample}.metadata"
     for ext in TABLE_EXTENSIONS:
         path = base.parent / (base.name + ext)
         if not path.exists():
