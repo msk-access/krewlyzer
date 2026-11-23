@@ -265,8 +265,9 @@ All notable changes to this project will be documented in this file.
   never writes.
   - **Still different from run-all:** no `TFBS/ATAC.sync` tables (#100); mFSD is not
     GC-corrected (run-all passes extract's factors; the GC redesign decides how a BAM-only tool
-    chooses its table); and `--region_mds_e1_only` is not applied, as `region-mds` has no such
-    option.
+    chooses its table); `--region_mds_e1_only` is not applied, as `region-mds` has no such
+    option; and a sample with no variants gets a 0-row mFSD table, where run-all records
+    `no_variants` and writes none.
   - **No completion marker yet.** Extraction's record is deliberately not published: it has no
     `krewlyzer_version` or `pon_applied` and would appear before any feature table. So a
     tool-level sample is not yet read downstream, and `validate-output` reports

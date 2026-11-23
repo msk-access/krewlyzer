@@ -43,7 +43,7 @@ process KREWLYZER_WPS {
     def anchors_arg = wps_anchors ? "--wps-anchors ${wps_anchors}" : ""
     def background_arg = wps_background ? "--background ${wps_background}" : ""
     def targets_arg = targets ? "--target-regions ${targets}" : ""
-    def bait_arg = params.bait_padding ? "--bait-padding ${params.bait_padding}" : ""
+    def bait_arg = params.bait_padding != 50 ? "--bait-padding ${params.bait_padding}" : ""
     def pon_arg = pon ? "--pon-model ${pon}" : ""
     def assay_arg = meta.assay && meta.assay != 'UNKNOWN' && meta.assay != 'WGS' ? "--assay ${meta.assay.toLowerCase()}" : ""
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""

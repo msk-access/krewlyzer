@@ -267,7 +267,9 @@ def motif(
         from .core.bam_utils import check_bam_compatibility
 
         logger.info("Checking BAM read compatibility with filters...")
-        compat = check_bam_compatibility(bam_input, require_proper_pair, True, 20)
+        compat = check_bam_compatibility(
+            bam_input, require_proper_pair, skip_duplicates, mapq
+        )
 
         if compat["pass_rate"] < 0.01 and compat["total_sampled"] > 100:
             # Critical: Almost no reads would pass!

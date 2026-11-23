@@ -302,3 +302,36 @@ def test_mfsd_reads_the_dedicated_mfsd_bam_as_run_all_does(channel):
 def test_mfsd_writes_no_table_run_all_does_not():
     """Run-all calls mFSD with `output_distributions=False`."""
     assert "--output-distributions" not in nf.script("mfsd")
+
+
+def _conditions(module: str) -> dict:
+    """``{flag: the condition under which the module passes it}``, for `def x_arg = c ? "--f"`."""
+    found = re.findall(
+        r'^\s*def \w+_arg = (.+?) \? "(--[a-z][a-z0-9-]*)', nf.script(module), re.M
+    )
+    return {flag: condition.strip() for condition, flag in found}
+
+
+#: A tool module that passes a flag under another condition than run-all's, with the reason.
+_OWN_CONDITION = {
+    # Run-all switches duplex on inside the CLI when given `--mfsd-bam`; `krewlyzer mfsd` is
+    # given that BAM as its only input, so the module says so.
+    ("mfsd", "--duplex"): "run-all decides it in the CLI from --mfsd-bam",
+}
+
+
+@pytest.mark.parametrize("module", [m for m, _ in nf.TOOL_MODULES])
+def test_a_flag_is_passed_under_run_alls_condition(module):
+    """Passing the flag is not enough: `wps` passed `--bait-padding` only when it was truthy, so
+    `--bait_padding 0` reached run-all and not the tool, which then used 50."""
+    run_all = _conditions("runall")
+    differ = {
+        flag: (condition, run_all[flag])
+        for flag, condition in _conditions(module).items()
+        if flag in run_all
+        and condition != run_all[flag]
+        and (module, flag) not in _OWN_CONDITION
+    }
+    assert (
+        not differ
+    ), f"{module} passes {differ} (tool, run-all) under other conditions"

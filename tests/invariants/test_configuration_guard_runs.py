@@ -276,6 +276,72 @@ def test_a_both_folder_allows_a_both_tool(sample, tmp_path):
     assert result.exit_code == 0, result.output
 
 
+@pytest.mark.parametrize(
+    "fmt",
+    [["both"], ["both", "--compress"], ["parquet"]],
+    ids=["both", "both-compress", "parquet"],
+)
+def test_single_tools_after_run_all_in_its_format_are_allowed_and_not_mixed(
+    sample, tmp_path, fmt
+):
+    """A single tool records its stage in each copy of the record, with the run's formats.
+
+    Recording each copy's own format instead (the `.parquet` copy of a `both` record says
+    `parquet`) passed every other test. Yet after one `mfsd -F both`, every later `both` run was
+    refused as mixed, and `validate-output` reported a clean folder `FORMAT.MIXED`.
+    """
+    from krewlyzer.validate.gate import check_sample
+
+    out = tmp_path / "out"
+    vcf = write_vcf(tmp_path / "v.vcf")
+    output_format, compress = fmt[0], "--compress" in fmt
+    flags = ["--output-format", *fmt]
+    runs = dict(variants=vcf, bisulfite_bam=sample.bam)
+    assert (
+        synth_run_all(
+            sample, out, output_format=output_format, compress=compress, **runs
+        )
+        is None
+    )
+    bed = out / "S.bed.gz"
+    for args in (
+        [
+            "mfsd",
+            "-i",
+            sample.bam,
+            "-V",
+            vcf,
+            "-g",
+            sample.reference,
+            "--sample-name",
+            "S",
+        ],
+        ["uxm", "-i", sample.bam, "--sample-name", "S"],
+        ["fsd", "-i", bed, "-s", "S", "--skip-target-regions", "--skip-pon"],
+        [
+            "mfsd",
+            "-i",
+            sample.bam,
+            "-V",
+            vcf,
+            "-g",
+            sample.reference,
+            "--sample-name",
+            "S",
+        ],
+    ):
+        result = _cli(*args, "-o", out, *flags)
+        assert result.exit_code == 0, f"{args[0]} refused:\n{result.output[-1500:]}"
+    assert (
+        synth_run_all(
+            sample, out, output_format=output_format, compress=compress, **runs
+        )
+        is None
+    )
+    findings, _ = check_sample("S", out)
+    assert not [f.id for f in findings if f.id.startswith("FORMAT")]
+
+
 def test_a_tsv_run_all_then_a_parquet_run_all_is_refused(sample, tmp_path):
     out = tmp_path / "out"
     assert synth_run_all(sample, out, output_format="tsv") is None

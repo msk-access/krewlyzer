@@ -135,6 +135,9 @@ Still different from run-all:
 - mFSD is not GC-corrected. Run-all passes extract's factor table (on-target first on a panel);
   tool-level passes none until the GC redesign decides how a BAM-only tool chooses its table.
 - `--region_mds_e1_only` is not applied: `krewlyzer region-mds` has no such option.
+- A sample with no variants in the MAF gets a 0-row `mFSD` table. Run-all writes none and records
+  `mfsd_status = no_variants`. Tool-level mode drops only filtered MAFs of 100 bytes or less, and a
+  real MAF's header alone is longer.
 
 ---
 
