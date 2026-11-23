@@ -3449,6 +3449,27 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li><strong>The Nextflow samplesheet's <code>vcf</code> column reaches <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>.</strong> It was parsed and documented, and
+  ignored in both modes. The only code that routed it, <code>INPUT_CHECK</code>'s <code>runall</code> emit, was never
+  read by the workflow. Run-all mode built its tuple from the MAF alone, so a VCF-only sample got
+  FILTER_MAF's header-only placeholder and <code>mfsd_status=no_variants</code>. Tool-level mode selected
+  <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> samples by their MAF and dropped VCF-only samples entirely. A VCF now goes straight to
+  run-all's <code>--variants</code> and to tool-level <code>krewlyzer mfsd -V</code>, skipping SPLIT_MAF and FILTER_MAF,
+  which read only MAF. When a row sets both <code>maf</code> and <code>vcf</code>, the MAF is used and a warning names
+  the sample. The <code>runall</code> emit is gone. A new test fails for any <code>INPUT_CHECK</code> emit the workflow
+  does not read, and requires the VCF channel to choose its <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> as the MAF channels do. Samples
+  without a VCF hash as before, so <code>-resume</code> still hits for them. The VCF example rows in
+  <code>docs/nextflow/samplesheet.md</code> and <code>nextflow/samplesheet.csv</code> had one field too many and one too
+  few, which put the assay in the wrong column. Both are corrected.</li>
+<li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> reads gzipped variant files.</strong> A <code>.vcf.gz</code> (or a gzipped MAF) failed in two places. The
+  Rust reader read the file as plain text, so <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> failed. Before that, run-all's variant-line
+  count raised <code>UnicodeDecodeError</code> and stopped the whole run, with no stage recorded. Both now
+  recognise gzip from the file's first two bytes, not its name, and read every bgzip block. A
+  single-member decoder would stop after the first block and drop the remaining variants without
+  an error. The pipeline's SPLIT_MAF (run-all) and FILTER_MAF (tool-level) steps read the MAF
+  before <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> does, also as plain text, so a <code>.maf.gz</code> in the samplesheet failed there; they now
+  recognise gzip the same way. <code>tests/unit/test_split_maf_logic.py</code> and
+  <code>tests/unit/test_filter_maf_logic.py</code> run each script on a plain and a gzipped copy.</li>
 <li><strong><code>--skip_pon</code> and <code>--skip_target_regions</code> no longer fail the task in the Nextflow pipeline.</strong>
   The input_check resolvers (<code>resolvePon</code>, <code>resolveTargets</code>) still returned the samplesheet's
   file, the assay's bundled file or <code>--pon_model</code> / <code>--targets</code> when the matching skip flag was

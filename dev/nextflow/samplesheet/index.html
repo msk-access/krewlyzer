@@ -742,6 +742,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Input Logic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variants-for-mfsd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variants for mFSD
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2455,6 +2472,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Input Logic">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variants-for-mfsd" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Variants for mFSD
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2590,7 +2624,7 @@
 <td><code>vcf</code></td>
 <td>PATH</td>
 <td></td>
-<td>VCF for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr></td>
+<td>VCF for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>, used when <code>maf</code> is empty</td>
 </tr>
 <tr>
 <td><code>bed</code></td>
@@ -2602,7 +2636,7 @@
 <td><code>maf</code></td>
 <td>PATH</td>
 <td></td>
-<td>MAF for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr></td>
+<td>MAF for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> (takes precedence over <code>vcf</code>)</td>
 </tr>
 <tr>
 <td><code>single_sample_maf</code></td>
@@ -2661,6 +2695,23 @@
 </tr>
 </tbody>
 </table>
+<h3 id="variants-for-mfsd">Variants for <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr></h3>
+<p><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> reads one variant file per sample, in both <code>--use_runall true</code> and
+tool-level mode:</p>
+<ul>
+<li><strong><code>maf</code></strong>: filtered to the sample's <code>Tumor_Sample_Barcode</code> rows, unless
+  <code>single_sample_maf</code> is <code>true</code>.</li>
+<li><strong><code>vcf</code></strong>: used as given, every record. The pipeline does not filter a VCF
+  by sample, so give each row a VCF of that sample's calls.</li>
+<li><strong>Both set</strong>: the MAF is used and the VCF is ignored, with a warning in the
+  log naming the sample.</li>
+<li><strong>Neither set</strong>: run-all receives a header-only placeholder MAF and records
+  <code>mfsd_status=no_variants</code> in <code>{sample}.metadata</code>; tool-level mode skips the
+  <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> process.</li>
+</ul>
+<p>The file type is detected from the extension: <code>.vcf</code> or <code>.vcf.gz</code> is read as
+VCF, anything else as MAF. Either may be gzipped (bgzip included); compression
+is recognised from the file's contents.</p>
 <h2 id="assay-resolution">Assay Resolution</h2>
 <p>When <code>assay</code> is set and <code>--asset_dir</code> is provided:</p>
 <table>
@@ -2703,7 +2754,7 @@
 <a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>ACCESS_V2,/data/sample.all_unique.bam,/data/sample.duplex.bam,,,,,maf.tsv,true,XS2,,
 <a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>
 <a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a># WGS (no targets)
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>WGS_001,/data/wgs.bam,,,/data/wgs.vcf,,,,,WGS,,
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>WGS_001,/data/wgs.bam,,,/data/wgs.vcf,,,,WGS,,
 <a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>
 <a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a># Custom PON/targets
 <a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>CUSTOM,/data/custom.bam,,,,,,,,,/data/custom.pon.parquet,/data/custom.bed
@@ -2732,7 +2783,7 @@
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="February 5, 2026 21:28:40 UTC"><span class="timeago" datetime="2026-02-05T21:28:40+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="February 5, 2026 21:28:40 UTC">2026-02-05</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 03:00:20 UTC"><span class="timeago" datetime="2026-11-23T03:00:20+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 03:00:20 UTC">2026-11-23</span>
   </span>
 
     
