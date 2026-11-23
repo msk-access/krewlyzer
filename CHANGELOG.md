@@ -330,9 +330,11 @@ All notable changes to this project will be documented in this file.
   takes) refuse a run whose filters differ from the record's, before writing anything. The record
   gains `filters_skip_duplicates` and `filters_require_proper_pair`, which it did not hold. A
   record without them was written before the filters were recorded truthfully (every one said
-  20/65/1000), so its values are not compared; run-all extracts that folder's BED again rather
-  than reuse it, as it now does a BED with no record beside it
-  (`tests/invariants/test_rerun_bed.py`).
+  20/65/1000), so its values are not compared. run-all extracts that folder's BED again rather
+  than reuse it, as it now does a BED with no record beside it, unless feature tables were made
+  from it: then it refuses, like `extract`, so a pre-release run-all folder is rerun into a fresh
+  output folder. `motif` and `region-mds`, which cannot extract again, warn that the filters could
+  not be compared (`tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

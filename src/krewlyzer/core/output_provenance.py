@@ -185,10 +185,11 @@ class ConfigurationMismatch(ValueError):
 
 
 #: The read filters extraction applied, as the record names them. They decide which fragments
-#: the BED holds, and every table is made from those fragments or, for the motif tables, from the
-#: BAM read again under the run's own filters. A rerun with other filters therefore mixes two
-#: fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote and made its motif
-#: tables at mapq 20.
+#: the BED holds, and every table is made from those fragments or, for the motif and Region-MDS
+#: tables, from the BAM read again under the filters that tool takes. A rerun with other filters
+#: therefore mixes two fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote
+#: and made its motif tables at mapq 20. (Region-MDS takes no duplicate or proper-pair filter: it
+#: always drops duplicates, whatever the record says.)
 #:
 #: Recorded truthfully only since the duplicate and proper-pair columns were added: before, every
 #: record said 20/65/1000 whatever the run used, and held neither column. So a record holding all
@@ -397,6 +398,13 @@ def refuse_a_different_configuration(
         return
     differing = []
     vouched = filters_vouched(frame)
+    if not vouched and any(f in FILTER_FIELDS for f in given):
+        # run-all extracts the BED again in this case; a tool reading the BAM cannot.
+        logger.warning(
+            f"{sample}'s record in {Path(output_dir).name}/ does not say which read filters its "
+            "BED was extracted with (written before the filters were recorded), so this run's "
+            "filters cannot be compared with them"
+        )
     for field, value in given.items():
         if field not in frame.columns or (field in FILTER_FIELDS and not vouched):
             continue
@@ -432,6 +440,23 @@ class RecordInUse(ValueError):
     anything is written."""
 
 
+def feature_tables(output_dir: Path, sample: str) -> list:
+    """The names of the sample's tables made from its fragments: every table the output contract
+    declares but extraction's own (`contract.feature_table_suffixes`), in any format. One of them
+    beside a BED means the BED cannot be replaced without leaving it stale."""
+    from krewlyzer.validate.contract import feature_table_suffixes
+
+    folder = Path(output_dir)
+    return [
+        name
+        for suffix in feature_table_suffixes()
+        for ext in TABLE_EXTENSIONS
+        if (
+            folder / (name := f"{sample}{suffix.removesuffix('.parquet')}{ext}")
+        ).exists()
+    ]
+
+
 def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
     """Refuse an extraction into a folder where a later stage read the BED or wrote the record.
 
@@ -454,17 +479,10 @@ def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
     A folder extraction wrote alone has neither, so a rerun of `extract` is allowed (with the
     folder's settings: `refuse_a_different_configuration` runs first).
     """
-    from krewlyzer.validate.contract import STAGES, feature_table_suffixes
+    from krewlyzer.validate.contract import STAGES
 
     folder = Path(output_dir)
-    tables = [
-        name
-        for suffix in feature_table_suffixes()
-        for ext in TABLE_EXTENSIONS
-        if (
-            folder / (name := f"{sample}{suffix.removesuffix('.parquet')}{ext}")
-        ).exists()
-    ]
+    tables = feature_tables(folder, sample)
     if tables:
         raise RecordInUse(
             f"{folder.name}/ holds tables made from this sample's BED ({len(tables)}, among them "

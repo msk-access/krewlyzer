@@ -719,7 +719,7 @@ def run_all(
         # which filters made it: the configuration guard has then refused any other than this
         # run's. A BED with no record, or one from before the filters were recorded truthfully,
         # was made with filters nobody knows, and is extracted again.
-        from .core.output_provenance import record_vouches_for_filters
+        from .core.output_provenance import feature_tables, record_vouches_for_filters
 
         should_run_extract = not bedgz_file.exists() or not record_vouches_for_filters(
             output,
@@ -727,6 +727,21 @@ def run_all(
             output_format=resolved_output_format,
             compress=resolved_compress,
         )
+        made_from_it = (
+            feature_tables(output, sample)
+            if bedgz_file.exists() and should_run_extract
+            else []
+        )
+        if made_from_it:
+            # Not replaced either: every table beside it was made from it, and a run that stopped
+            # after extracting would leave a new BED and a fresh record over them. As `extract`.
+            console.print(
+                f"[bold red]❌ ERROR:[/bold red] {output.name}/ holds a BED whose filters its "
+                f"record does not name, and tables made from it ({len(made_from_it)}, among "
+                f"them {', '.join(made_from_it[:3])}). It cannot be reused, and replacing it "
+                "would leave them looking current. Use a fresh output folder, or remove this one."
+            )
+            raise typer.Exit(1)
         if bedgz_file.exists() and should_run_extract:
             logger.info(
                 f"{bedgz_file.name} has no record of the filters it was extracted with; "

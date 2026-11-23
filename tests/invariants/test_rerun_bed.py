@@ -274,6 +274,57 @@ def test_an_old_record_is_not_refused_for_its_filters(sample, tmp_path):
     assert int(record(out)["filters_min_length"]) == 80
 
 
+def test_run_all_does_not_re_extract_a_bed_tables_were_made_from(sample, tmp_path):
+    """A run-all folder from before the filters were recorded truthfully: its BED cannot be
+    trusted, and cannot be replaced either, since every table beside it was made from it. A run
+    killed after extracting would leave a new BED and a fresh record over the old tables. Refused,
+    as `extract` is, before anything is written."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    _as_an_old_record(out)
+    before = _files(out)
+
+    code = synth_run_all(sample, out)
+
+    assert code == 1, "run-all replaced a BED its tables were made from"
+    assert _files(out) == before
+
+
+def test_a_tool_reading_the_bam_warns_when_the_filters_cannot_be_compared(
+    sample, tmp_path, caplog
+):
+    """`motif` cannot extract the BED again, as run-all does: over a record whose filters cannot
+    be trusted it is let through, and says so."""
+    import logging
+
+    out = tmp_path / "out"
+    assert _extract(sample, out).exit_code == 0
+    _as_an_old_record(out)
+    with caplog.at_level(logging.WARNING):
+        result = _cli(
+            "motif",
+            "-i",
+            sample.bam,
+            "-r",
+            sample.reference,
+            "-o",
+            out,
+            "-s",
+            SAMPLE,
+            "-x",
+            sample.assets.blacklist,
+            "--skip-target-regions",
+            "--skip-pon",
+            "-F",
+            "parquet",
+        )
+    assert result.exit_code == 0, result.output
+    assert any(
+        "filters" in r.getMessage() and r.levelno >= logging.WARNING
+        for r in caplog.records
+    ), "a filter check that could not be made went unsaid"
+
+
 # ── 2. extract refuses a folder with tables made from its BED ────────────────────────────────
 
 
