@@ -3255,19 +3255,19 @@
   outcome was in the log only, and "not requested" (no <code>--variants</code>, no <code>--assay</code>) left the same
   absent table as "requested and failed". Each of <code>uxm</code>, <code>mfsd</code>, <code>region_mds</code>, <code>gene_fsc</code>,
   <code>panel_wps</code>, <code>tfbs</code>, <code>atac</code>, <code>mds_z</code>, <code>mds_z_ontarget</code> and <code>region_mds_z</code> (Region-<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr>'s <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
-  z-scoring) now records <code>{stage}_status</code> -- <code>ran</code>, <code>not_requested</code>, <code>no_variants</code>,
-  <code>unavailable</code> or <code>failed</code> -- and <code>{stage}_error</code>, the exception's class name only, never its
-  message (messages carry input paths; sample directories are named for the patient). One writer,
+  z-scoring) now records <code>{stage}_status</code> -- <code>ran</code>, <code>not_requested</code>, <code>no_variants</code>, <code>unavailable</code>
+  or <code>failed</code> -- and <code>{stage}_error</code>, the exception's class name only, never its message (messages
+  carry input paths; sample directories are named for the patient). One writer,
   <code>output_provenance.record_stage_outcomes</code>: run-all reads the record its own format writes and
   writes its formats; a single tool updates only the copies in the format(s) it wrote its tables
-  in (so a <code>-F tsv</code> rerun beside a Parquet run-all leaves <code>.metadata.parquet</code>, and the stale
-  <code>.parquet</code> table beside it, as they were) and creates none. run-all writes every status on
-  every run, except that a rerun reusing cached motif tables (same <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>) leaves <code>mds_z*</code> as
-  recorded. A single tool records only the stages whose outputs it rewrote, each as it ended --
-  <code>not_requested</code> included, as <code>motif --skip-pon</code> does for <code>mds_z</code> in the <code>MDS</code> it rewrote
-  without one; <code>uxm</code>, <code>mfsd</code>, <code>region-mds</code> and <code>region-entropy</code> record <code>ran</code> when rerun by
-  hand at run-all's <code>--output-format</code>, which is how a stage that failed under run-all gets
-  fixed, and <code>motif</code> its <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> z-scores. <code>extract</code> rewrites the table from scratch and so clears them. The
+  in (so a <code>--output-format tsv</code> rerun beside a Parquet run-all leaves <code>.metadata.parquet</code>, and
+  the stale <code>.parquet</code> table beside it, as they were) and creates none. run-all writes every
+  status on every run, except that a rerun reusing cached motif tables (same <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>) leaves <code>mds_z*</code>
+  as recorded. A single tool records only the stages whose outputs it rewrote, each as it ended --
+  <code>not_requested</code> included, as <code>motif --skip-pon</code> does for <code>mds_z</code> in the <code>MDS</code> it rewrote without
+  one; <code>uxm</code>, <code>mfsd</code>, <code>region-mds</code> and <code>region-entropy</code> record <code>ran</code> when rerun by hand at
+  run-all's <code>--output-format</code>, which is how a stage that failed under run-all gets fixed, and
+  <code>motif</code> its <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> z-scores. <code>extract</code> rewrites the table from scratch and so clears them. The
   columns are in the output contract as optional strings.</li>
 </ul>
 <h3 id="removed">Removed</h3>
@@ -3297,6 +3297,24 @@
   sufficient.</p>
 <h3 id="changed">Changed</h3>
 <ul>
+<li><strong><code>krewlyzer fsc</code> and <code>fsr</code> choose the window by mode, as run-all does.</strong> Without
+  <code>--continue-n</code>, a run with target regions now writes one 100 kb bin per row, and one without
+  writes 50 (5 Mb). Both tools defaulted to 50 whatever the mode, so a panel sample's single-tool
+  <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> held 1/50th of run-all's rows (on the synthetic sample, none). An explicit
+  <code>--continue-n</code> is kept. The rule is one helper, <code>fsc_processor.default_continue_n</code>, that run-all
+  calls too; its two numbers are in the claims registry.</li>
+<li>
+<p><strong><code>krewlyzer motif</code> excludes the genome's blacklist and takes run-all's read filters.</strong> It
+  passed no blacklist and fixed mapq 20, 65-1000 bp and duplicates skipped, so its tables counted
+  fragments run-all's excluded (on the synthetic sample, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> 0.960 against run-all's 0.927).
+  It now takes <code>-x/--exclude-regions</code> (default: the bundled blacklist), <code>--mapq</code>, <code>--minlen</code>,
+  <code>--maxlen</code> and <code>--skip-duplicates/--no-skip-duplicates</code>, with run-all's defaults. Motif tables
+  from the single tool change accordingly; no <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> is built from single-tool output. <code>extract</code>,
+  run-all and <code>motif</code> resolve the blacklist through one function,
+  <code>asset_resolution.resolve_exclude_regions</code>. Run-all passed the bundled path even where the
+  file did not exist; that is now a warning, and the run keeps the fragments. <code>extract</code>'s
+  fallback to a path that does not exist is removed.</p>
+</li>
 <li>
 <p><strong>A rerun into a sample's folder must use the settings recorded there.</strong> A rerun with other
   settings writes another set of tables, and whatever the first run wrote that the second does not
@@ -3312,6 +3330,27 @@
   the record from scratch, keeps the recorded E1 setting it does not decide, so a later run-all
   with the other one is still refused. Nextflow cannot be checked this way (each
   task starts in an empty folder); its docs now say to use a fresh <code>--outdir</code> per configuration.</p>
+</li>
+<li>
+<p><strong>A rerun into a sample's folder must also use the output format recorded there.</strong> A rerun in
+  another format rewrote its tables in that format and left the first run's beside them, and each
+  reader then picked by its own rule: downstream, which reads only Parquet, the earlier run's
+  Parquet; <code>resolve_table_path</code> (the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build from outputs) the earlier run's <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>. Every CLI
+  defaults to <code>--output-format tsv</code> and Nextflow writes Parquet, so a tool run by hand without
+  <code>--output-format</code> into a Nextflow folder did this. The record gains <code>table_formats</code> (<code>.parquet</code>,
+  <code>.tsv.gz</code>, <code>.parquet,.tsv</code>, ...), written by every writer of the record from its own
+  <code>--output-format</code> and <code>--compress</code>; the configuration check compares it on every call, so every
+  entry point refuses another format once the folder holds a record, and names the option to pass.
+  <code>uxm</code>, <code>mfsd</code> and <code>motif</code> write no record, so one of them run alone in a fresh folder is not
+  checked. <code>mfsd</code> now runs the check too, for the format alone. A record from before this release
+  is judged by its record files (one <code>.parquet</code> record is Parquet; a <code>.parquet</code> and a <code>.tsv</code> are
+  <code>both</code>, though no refusal then advises <code>--output-format both</code>, since two runs look the same). A
+  copy of the record in an extension the field does not name (a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run published over a Parquet
+  one) makes the folder mixed, refused whatever the format. A hand rerun without <code>--output-format</code>
+  into a Parquet folder that worked before is now refused: each one left stale Parquet. For
+  Nextflow, where no task can see the published folder, <code>validate-output</code> reports a table in an
+  extension outside <code>table_formats</code> as <code>FORMAT.MIXED</code> (error), and a pre-release record with
+  tables in two extensions as <code>FORMAT.UNJUDGED</code> (skip).</p>
 </li>
 <li>
 <p><strong>Writers and readers of a sample's outputs take the format from the caller, with no default.</strong>
@@ -3449,7 +3488,69 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
-<li><strong>The Nextflow samplesheet's <code>vcf</code> column reaches <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>.</strong> It was parsed and documented, and
+<li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
+  Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
+  required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
+  <code>region_mds</code> twice). <code>motif</code> was handed the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, in a tuple one item short, where it reads the
+  <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>. And no module had a <code>publishDir</code>, so even a green run would have left <code>--outdir</code> empty.
+  Had any table been written, a panel sample's would not have been run-all's:</li>
+<li><code>fsr</code>, <code>fsd</code>, <code>wps</code>, <code>ocf</code>, <code>motif</code> and <code>region-entropy</code> were given no assay, and <code>extract</code>
+    the pipeline-wide <code>params.assay</code> rather than the sample's;</li>
+<li><code>fsd</code>, <code>wps</code> and <code>ocf</code> were given the pipeline-wide targets, five tools the pipeline-wide <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
+    and <code>motif</code> none, and <code>wps</code> the pipeline-wide anchors, instead of the ones <code>INPUT_CHECK</code>
+    resolves per sample for run-all;</li>
+<li>none of the scorers was given <code>--skip-pon</code> or <code>--pon-variant</code>;</li>
+<li><code>extract</code> and <code>motif</code> ignored run-all's read filters, and <code>motif</code> the blacklist (see
+    Changed);</li>
+<li>panel <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> were written at 5 Mb windows, where run-all writes 100 kb bins (see Changed);</li>
+<li><code>mfsd</code> read the main <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> where run-all reads the samplesheet's duplex <code>mfsd_bam</code> with duplex
+    weighting on, and wrote a <code>mFSD.distributions</code> table run-all does not.</li>
+</ul>
+<p>Every module now takes the sample's assay (run-all's rule), <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, targets and <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors, and
+  each option run-all passes that its tool takes. Each declares the tables run-all's module
+  declares for its stage, as <code>*.X.{parquet,tsv,tsv.gz}</code>: required where every run writes it,
+  optional for the panel, on-target and data-dependent tables (<code>OCF.ontarget</code> was written and
+  dropped). Each publishes into <code>{outdir}/{sample}/</code> as run-all does. <code>fsc_counts</code> is published
+  by <code>fsc</code> only, and <code>region-entropy</code>'s Rust intermediates (<code>*.raw.tsv</code>) by none. The unused
+  <code>params.assay</code> is removed. Region-<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> now runs only for a sample with an assay, as under
+  run-all: without one it fell back to the WGS gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> and wrote <code>MDS.exon/gene</code> tables run-all
+  never writes.
+  - <strong>Still different from run-all:</strong> no <code>TFBS/ATAC.sync</code> tables (#100); <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> is not
+    <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected (run-all passes extract's factors; the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> redesign decides how a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>-only tool
+    chooses its table); <code>--region_mds_e1_only</code> is not applied, as <code>region-mds</code> has no such
+    option; a sample with no variants gets a 0-row <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> table, where run-all records
+    <code>no_variants</code> and writes none; <code>--gc_correct false</code> turns correction off in <code>fsc</code>, <code>fsr</code>,
+    <code>ocf</code> and <code>wps</code> only, while run-all ignores it; and on a genome with no bundled <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> regions
+    (hg38) the <code>ocf</code> task fails for want of its tables, where run-all skips <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr>.
+  - <strong>No completion marker yet.</strong> Extraction's record is deliberately not published: it has no
+    <code>krewlyzer_version</code> or <code>pon_applied</code> and would appear before any feature table. So a
+    tool-level sample is not yet read downstream, and <code>validate-output</code> reports
+    <code>COMPLETION.MARKER_ABSENT</code>; run-all remains the mode for cohorts. A record an earlier run-all
+    left in the same <code>--outdir</code> is not removed, and would mark the sample complete.
+  - Held by <code>tests/invariants/test_tool_level_matches_runall.py</code> (run-all and each tool on the
+    synthetic sample, panel and WGS: the same files, with the same contents; the tables with
+    no data on that sample, so equal by being empty, are named with the reason, and any other
+    that comes out empty fails),
+    <code>tests/invariants/test_tool_level_outputs.py</code> (every file each tool writes, in three formats
+    and both modes, is declared, and every required pattern is written) and
+    <code>tests/unit/test_tool_level_modules.py</code> (option parity with run-all's module, per-sample
+    settings, each process given a tuple of its input's size, every table run-all's module
+    declares declared by a tool module, emits, publishing, stubs).</p>
+<ul>
+<li>
+<p><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> and <abbr title="Fragment-level Methylation - Methylation state of individual fragments">UXM</abbr> leave only the run's formats.</strong> Rust writes each as <code>.tsv</code>; both stages converted
+  it and never removed it, so every Parquet run left a <code>.mFSD.tsv</code> / <code>.UXM.tsv</code> beside the
+  <code>.parquet</code> (and <code>both --compress</code> a plain <code>.tsv</code> beside the <code>.tsv.gz</code>), and <code>--output-format tsv
+  --compress</code> never gzipped <code>mFSD.distributions</code>. A stray format is what <code>resolve_table_path</code>
+  readers pick first and what <code>validate-output</code> now reports (<code>FORMAT.MIXED</code>). One helper,
+  <code>output_utils.convert_rust_tsv</code>, converts and removes the raw <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> unless it is an output, and
+  raises when Rust wrote nothing: the stage used to log a warning and be recorded as <code>ran</code> with no
+  table. The tool-level Nextflow <code>mfsd</code> and <code>uxm</code> modules declared a required <code>.tsv</code> output, met
+  only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
+  <code>table</code>). The other tool-level modules are fixed in the entry above.</p>
+</li>
+<li>
+<p><strong>The Nextflow samplesheet's <code>vcf</code> column reaches <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>.</strong> It was parsed and documented, and
   ignored in both modes. The only code that routed it, <code>INPUT_CHECK</code>'s <code>runall</code> emit, was never
   read by the workflow. Run-all mode built its tuple from the MAF alone, so a VCF-only sample got
   FILTER_MAF's header-only placeholder and <code>mfsd_status=no_variants</code>. Tool-level mode selected
@@ -3460,7 +3561,8 @@
   does not read, and requires the VCF channel to choose its <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> as the MAF channels do. Samples
   without a VCF hash as before, so <code>-resume</code> still hits for them. The VCF example rows in
   <code>docs/nextflow/samplesheet.md</code> and <code>nextflow/samplesheet.csv</code> had one field too many and one too
-  few, which put the assay in the wrong column. Both are corrected.</li>
+  few, which put the assay in the wrong column. Both are corrected.</p>
+</li>
 <li><strong><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> reads gzipped variant files.</strong> A <code>.vcf.gz</code> (or a gzipped MAF) failed in two places. The
   Rust reader read the file as plain text, so <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> failed. Before that, run-all's variant-line
   count raised <code>UnicodeDecodeError</code> and stopped the whole run, with no stage recorded. Both now
@@ -3479,11 +3581,9 @@
   resolver now returns nothing when its skip flag is set, ahead of every other source, the
   samplesheet included, and the once-per-run <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> validation no longer runs under <code>--skip_pon</code>, so
   a missing or invalid <code>--pon_model</code> cannot stop a run that will not use it. This covers run-all
-  and the tool-level <code>extract</code>, <code>fsc</code>, <code>fsr</code>, <code>region-entropy</code> and <code>region-mds</code>, which take their
-  <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and targets from the resolvers. Not yet the tool-level <code>fsd</code>, <code>ocf</code> and <code>wps</code>, which read
-  <code>--targets</code> directly, nor <code>fsd</code>, <code>fsc</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code>, which read <code>--pon_model</code>
-  directly and never pass <code>--skip-pon</code>. <code>tests/unit/test_nextflow_skip_flags.py</code> pins both guards
-  and the resolvers' order.</li>
+  and every tool-level module, which take their <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and targets from the resolvers and pass
+  <code>--skip-pon</code> (see the tool-level entry above). <code>tests/unit/test_nextflow_skip_flags.py</code> pins
+  both guards and the resolvers' order.</li>
 <li><strong>Optional stages that were asked for and produced nothing now say so.</strong> A <code>--variants</code> file
   that does not exist was skipped with no log line at all; a <code>--bisulfite-bam</code> that does not
   exist, a gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> missing for the assay, and missing <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> or <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> regions were skipped quietly

@@ -2767,7 +2767,7 @@
 <tr>
 <td><code>--use_runall</code></td>
 <td><code>true</code></td>
-<td><code>true</code> = unified <code>run-all</code> (default), <code>false</code> = tool-level subworkflow</td>
+<td><code>true</code> = unified <code>run-all</code> (default), <code>false</code> = tool-level subworkflow: one task per tool, no completion marker yet (<a href="../outputs/#tool-level-mode-use_runall-false">Outputs</a>)</td>
 </tr>
 </tbody>
 </table>
@@ -2794,7 +2794,7 @@
 <tr>
 <td><code>--skip_pon</code></td>
 <td><code>false</code></td>
-<td>Skip <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-score normalization. Overrides every <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> source: the samplesheet's <code>pon</code> column, the assay's bundled <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and <code>--pon_model</code> are all ignored, and <code>--pon_model</code> is not validated. Exception: with <code>--use_runall false</code>, <code>fsd</code>, <code>fsc</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code> still read <code>--pon_model</code> directly.</td>
+<td>Skip <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> z-score normalization. Overrides every <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> source: the samplesheet's <code>pon</code> column, the assay's bundled <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and <code>--pon_model</code> are all ignored, and <code>--pon_model</code> is not validated.</td>
 </tr>
 </tbody>
 </table>
@@ -2900,7 +2900,7 @@
 <tr>
 <td><code>--skip_target_regions</code></td>
 <td><code>false</code></td>
-<td>Force WGS mode. Overrides every targets source: the samplesheet's <code>targets</code> column, the assay's bundled targets and <code>--targets</code> are all ignored. Exception: with <code>--use_runall false</code>, <code>fsd</code>, <code>ocf</code> and <code>wps</code> still read <code>--targets</code> directly, and fail if it is set alongside this flag.</td>
+<td>Force WGS mode. Overrides every targets source: the samplesheet's <code>targets</code> column, the assay's bundled targets and <code>--targets</code> are all ignored.</td>
 </tr>
 <tr>
 <td><code>--disable_e1_aggregation</code></td>
@@ -2952,7 +2952,7 @@
 <tr>
 <td><code>--gc_correct</code></td>
 <td><code>true</code></td>
-<td>Apply <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction during extraction.</td>
+<td>Apply <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> bias correction. Read only in tool-level mode (<code>--use_runall false</code>), and there only by <code>fsc</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code>: <code>false</code> leaves their tables uncorrected, while <code>fsd</code>, <code>region-entropy</code> and run-all mode still correct (<code>extract</code> writes its factor tables regardless).</td>
 </tr>
 <tr>
 <td><code>--queue_size</code></td>

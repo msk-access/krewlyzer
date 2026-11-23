@@ -6790,6 +6790,7 @@ genome-wide set.</p>
 <h2 id="variant-level">Variant-Level</h2>
 <h3 id="mfsd-mutant-fragment-size-distribution"><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> (Mutant Fragment Size Distribution)</h3>
 <p><strong>File:</strong> <code>{sample}.mFSD.tsv</code><br>
+<strong>Format:</strong> the run's <code>--output-format</code>: <code>.tsv</code>, <code>.tsv.gz</code> (<code>--compress</code>), <code>.parquet</code>, or both. Rust writes a <code>.tsv</code> first; it is removed once converted unless it is one of the run's formats.<br>
 <strong>Requires:</strong> <code>--maf</code> / <code>run-all</code> with MAF input</p>
 <p>Per-variant fragment size analysis. Compares ALT-bearing fragments vs REF, NonREF, and N (uncertain) allele classes.</p>
 <h4 id="column-groups-46-total">Column Groups (46 total)</h4>
@@ -6876,6 +6877,7 @@ genome-wide set.</p>
 <h2 id="methylation">Methylation</h2>
 <h3 id="uxm-methylation"><abbr title="Fragment-level Methylation - Methylation state of individual fragments">UXM</abbr> (Methylation)</h3>
 <p><strong>File:</strong> <code>{sample}.UXM.tsv</code><br>
+<strong>Format:</strong> the run's <code>--output-format</code>: <code>.tsv</code>, <code>.tsv.gz</code> (<code>--compress</code>), <code>.parquet</code>, or both. Rust writes a <code>.tsv</code> first; it is removed once converted unless it is one of the run's formats.<br>
 <strong>Requires:</strong> Methylation-enabled <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> input</p>
 <p>CpG methylation classification per genomic region. Each fragment is classified as Unmethylated (U), Partially-methylated (X), or fully Methylated (M).</p>
 <h4 id="columns_13">Columns</h4>
@@ -7129,6 +7131,11 @@ mean.</p>
 <td>bool</td>
 <td>run-all's E1 setting (<code>False</code> with <code>--disable-e1-aggregation</code>). Recorded so a rerun with the other setting is refused; absent from directories written before this release</td>
 </tr>
+<tr>
+<td><code>table_formats</code></td>
+<td>str</td>
+<td>The extensions the folder's tables are written in: <code>.parquet</code>, <code>.tsv</code>, <code>.tsv.gz</code>, <code>.parquet,.tsv</code> or <code>.parquet,.tsv.gz</code> (from <code>--output-format</code> and <code>--compress</code>; compression changes no Parquet file). Recorded so a rerun in another format is refused; absent from directories written before this release</td>
+</tr>
 </tbody>
 </table>
 <p><strong>One folder, one configuration.</strong> A rerun into a sample's folder must use the settings
@@ -7138,7 +7145,13 @@ feature tool that takes these settings refuse a run with others before writing a
 the setting; <code>uxm</code> compares the genome, which picks its markers. <code>extract</code> rewrites this table
 but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- <code>TFBS.ontarget</code>, <code>FSC.regions.e1only</code> -- reading as
-the second run's. To change settings, use a fresh output folder. Nextflow cannot be checked
+the second run's. The output format is one
+of these settings for every tool, <code>mfsd</code> included: every CLI defaults to <code>-F tsv</code> and Nextflow
+writes Parquet, so a tool run by hand without <code>-F</code> into a Nextflow folder rewrote its tables as
+<abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> and left the Parquet ones, which downstream reads, from the earlier run. The refusal names
+the option to pass (<code>--output-format parquet</code>). A folder written before <code>table_formats</code> was
+recorded is judged by its record files: <code>S.metadata.parquet</code> alone is Parquet, and a
+<code>.parquet</code> with a <code>.tsv</code> is <code>both</code>. To change settings, use a fresh output folder. Nextflow cannot be checked
 this way, since each task starts in an empty work folder; there, publish a different
 configuration to a different <code>--outdir</code>.</p>
 <p><strong>Optional stages.</strong> run-all carries on when an optional stage fails, so that one
@@ -7280,7 +7293,7 @@ produced by one build against one baseline.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 21, 2026 06:04:46 UTC"><span class="timeago" datetime="2026-11-21T06:04:46+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 21, 2026 06:04:46 UTC">2026-11-21</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 22, 2026 21:27:35 UTC"><span class="timeago" datetime="2026-11-22T21:27:35+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 22, 2026 21:27:35 UTC">2026-11-22</span>
   </span>
 
     

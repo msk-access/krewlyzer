@@ -834,6 +834,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tool-level-mode-use_runall-false" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-level mode (--use_runall false)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-changes-in-090" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2524,6 +2535,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#tool-level-mode-use_runall-false" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool-level mode (--use_runall false)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#output-changes-in-090" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2728,6 +2750,38 @@ re-reading tables.</p>
 skipped rather than run on a partial set, which would report degeneracy
 findings that are artefacts of the missing samples.</p>
 </div>
+<h2 id="tool-level-mode-use_runall-false">Tool-level mode (<code>--use_runall false</code>)</h2>
+<p>Each tool runs as its own task. It is given the sample's assay, targets, <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors,
+as run-all is, and publishes its tables into <code>{outdir}/{sample}/</code>, the folder run-all publishes
+into.</p>
+<div class="admonition warning">
+<p class="admonition-title">No completion marker yet</p>
+<p><code>{sample}.metadata.*</code> is not published in this mode. Downstream takes that file to mean the
+sample is complete, and extraction's record would appear before any feature table, without
+<code>krewlyzer_version</code> or <code>pon_applied</code>. So a sample from a fresh <code>--outdir</code> is not read
+downstream, and <code>krewlyzer validate-output</code> reports <code>COMPLETION.MARKER_ABSENT</code>. Use run-all
+for a cohort. In an <code>--outdir</code> an earlier run-all used, that run's record stays and marks the
+sample complete, describing the earlier run: use a fresh <code>--outdir</code>.</p>
+</div>
+<p>Not published: <code>fsr</code>'s copy of <code>fsc_counts</code> (<code>fsc</code> publishes the same table), and the Rust
+intermediates <code>region-entropy</code> leaves (<code>*.raw.tsv</code>).</p>
+<p>Still different from run-all:</p>
+<ul>
+<li><code>region-entropy</code> run on its own writes no <code>TFBS/ATAC.sync</code> tables
+  (<a href="https://github.com/msk-access/krewlyzer/issues/100">#100</a>).</li>
+<li><abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> is not <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-corrected. Run-all passes extract's factor table (on-target first on a panel);
+  tool-level passes none until the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> redesign decides how a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>-only tool chooses its table.</li>
+<li><code>--region_mds_e1_only</code> is not applied: <code>krewlyzer region-mds</code> has no such option.</li>
+<li>A sample with no variants in the MAF gets a 0-row <code>mFSD</code> table. Run-all writes none and records
+  <code>mfsd_status = no_variants</code>. Tool-level mode drops only filtered MAFs of 100 bytes or less, and a
+  real MAF's header alone is longer.</li>
+<li><code>--gc_correct false</code> turns <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction off in <code>fsc</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code> only. <code>extract</code>
+  still writes its factor tables, so <code>fsd</code> and <code>region-entropy</code> stay corrected, and run-all
+  ignores the parameter. A sample's tables then mix corrected and uncorrected.</li>
+<li>On a genome with no bundled <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> regions (hg38), <code>krewlyzer ocf</code> writes nothing and exits 0, so
+  the <code>ocf</code> task fails for want of its tables and, under a retry-then-ignore error strategy, is
+  dropped. Run-all skips <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> on that genome.</li>
+</ul>
 <hr>
 <h2 id="output-changes-in-090">Output Changes in 0.9.0</h2>
 <p>Six output families changed value semantics. Values are <strong>not comparable</strong>
@@ -2855,7 +2909,7 @@ rebuilt.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="July 31, 2026 18:52:33 UTC"><span class="timeago" datetime="2026-07-31T18:52:33+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="July 31, 2026 18:52:33 UTC">2026-07-31</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 03:00:20 UTC"><span class="timeago" datetime="2026-11-23T03:00:20+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 03:00:20 UTC">2026-11-23</span>
   </span>
 
     
