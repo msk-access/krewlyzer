@@ -38,12 +38,19 @@ def get_index(bam) {
 // Each lookup table moves into the function that uses it. Each was used by
 // exactly one, so nothing is duplicated -- and leaving them at the top level
 // as `def x = [...]` would just be the statement-vs-declaration error again.
+//
+// A skip flag is checked first and wins over every source, the samplesheet
+// included. The modules pass `--skip-pon` / `--skip-target-regions` from params
+// on their own; a resolved file alongside that flag is a pair
+// asset_resolution rejects with ValueError, so the task fails (and under a
+// retry-then-ignore profile the run reports complete without those tables).
 def resolvePon(row) {
     def assayToPon = [
         'XS1': 'GRCh37/xs1.pon.parquet',
         'XS2': 'GRCh37/xs2.pon.parquet',
         'WGS': 'GRCh37/wgs.pon.parquet'
     ]
+    if (params.skip_pon) return []
     if (row.pon) return file(row.pon)
     if (row.assay && params.asset_dir && assayToPon[row.assay]) {
         def assay_pon = file("${params.asset_dir}/pon/${assayToPon[row.assay]}")
@@ -59,6 +66,7 @@ def resolveTargets(row) {
         'XS1': 'GRCh37/xs1.targets.bed',
         'XS2': 'GRCh37/xs2.targets.bed'
     ]
+    if (params.skip_target_regions) return []
     if (row.targets) return file(row.targets)
     if (row.assay && params.asset_dir && assayToTargets[row.assay]) {
         def assay_targets = file("${params.asset_dir}/targets/${assayToTargets[row.assay]}")

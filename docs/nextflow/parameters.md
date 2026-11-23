@@ -32,7 +32,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 |-----------|---------|-------------|
 | `--pon_model` | | Global PON model path (fallback) |
 | `--pon_variant` | `all_unique` | PON variant: `all_unique` or `duplex` |
-| `--skip_pon` | `false` | Skip PON z-score normalization |
+| `--skip_pon` | `false` | Skip PON z-score normalization. Overrides every PON source: the samplesheet's `pon` column, the assay's bundled PON and `--pon_model` are all ignored, and `--pon_model` is not validated. |
 
 ## Panel & WPS Parameters
 
@@ -61,7 +61,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 |-----------|---------|-------------|
 | `--no_tfbs` | `false` | Disable TFBS region entropy |
 | `--no_atac` | `false` | Disable ATAC region entropy |
-| `--skip_target_regions` | `false` | Force WGS mode (ignore bundled targets) |
+| `--skip_target_regions` | `false` | Force WGS mode. Overrides every targets source: the samplesheet's `targets` column, the assay's bundled targets and `--targets` are all ignored. |
 | `--disable_e1_aggregation` | `false` | Skip E1-only FSC aggregation |
 | `--region_mds_e1_only` | `false` | Run region-MDS on E1 (first exon) only |
 
@@ -74,7 +74,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 | `--compress_tsv` | `false` | Gzip-compress all TSV outputs (`.tsv.gz`). Applies only when `output_format` is `tsv` or `both`. Maps to the `--compress` flag in the Python CLI. |
 | `--strict_validation` | `false` | Fail a sample when its output violates the contract. The report and fingerprint are written either way; this only controls whether a violation stops the run. |
 | `--validate_min_samples` | `3` | Minimum samples before cross-sample degeneracy checks are meaningful. Below this the cohort step reports SKIP, never PASS. |
-| `--gc_correct` | `true` | Apply GC bias correction during extraction. |
+| `--gc_correct` | `true` | Apply GC bias correction. Read only in tool-level mode (`--use_runall false`), and there only by `fsc`, `fsr`, `ocf` and `wps`: `false` leaves their tables uncorrected, while `fsd`, `region-entropy` and run-all mode still correct (`extract` writes its factor tables regardless). |
 | `--queue_size` | `100` | Maximum concurrent executor jobs; also derives `FILTER_MAF` maxForks. |
 | `--long_partition` | `null` | Partition for **retried** `run-all` tasks whose grown time request no longer fits the shortest partition in `--partition`. See below. |
 

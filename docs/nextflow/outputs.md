@@ -138,6 +138,12 @@ Still different from run-all:
 - A sample with no variants in the MAF gets a 0-row `mFSD` table. Run-all writes none and records
   `mfsd_status = no_variants`. Tool-level mode drops only filtered MAFs of 100 bytes or less, and a
   real MAF's header alone is longer.
+- `--gc_correct false` turns GC correction off in `fsc`, `fsr`, `ocf` and `wps` only. `extract`
+  still writes its factor tables, so `fsd` and `region-entropy` stay corrected, and run-all
+  ignores the parameter. A sample's tables then mix corrected and uncorrected.
+- On a genome with no bundled OCF regions (hg38), `krewlyzer ocf` writes nothing and exits 0, so
+  the `ocf` task fails for want of its tables and, under a retry-then-ignore error strategy, is
+  dropped. Run-all skips OCF on that genome.
 
 ---
 

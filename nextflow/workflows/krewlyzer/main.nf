@@ -200,8 +200,11 @@ workflow KREWLYZER {
     // Wired here rather than added as a module and left to be called later:
     // an unwired module is exactly the defect #34 fixed, and it looks like
     // coverage while providing none.
+    //
+    // Not under --skip_pon: the run will not use the PON, so a missing or
+    // invalid one must not stop it (`checkIfExists` would).
     ch_pon_report = Channel.empty()
-    if (params.pon_model) {
+    if (params.pon_model && !params.skip_pon) {
         KREWLYZER_VALIDATE_PON(Channel.fromPath(params.pon_model, checkIfExists: true))
         ch_versions   = ch_versions.mix(KREWLYZER_VALIDATE_PON.out.versions)
         ch_pon_report = KREWLYZER_VALIDATE_PON.out.report

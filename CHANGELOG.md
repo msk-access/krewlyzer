@@ -11,19 +11,19 @@ All notable changes to this project will be documented in this file.
   outcome was in the log only, and "not requested" (no `--variants`, no `--assay`) left the same
   absent table as "requested and failed". Each of `uxm`, `mfsd`, `region_mds`, `gene_fsc`,
   `panel_wps`, `tfbs`, `atac`, `mds_z`, `mds_z_ontarget` and `region_mds_z` (Region-MDS's PON
-  z-scoring) now records `{stage}_status` -- `ran`, `not_requested`, `no_variants`,
-  `unavailable` or `failed` -- and `{stage}_error`, the exception's class name only, never its
-  message (messages carry input paths; sample directories are named for the patient). One writer,
+  z-scoring) now records `{stage}_status` -- `ran`, `not_requested`, `no_variants`, `unavailable`
+  or `failed` -- and `{stage}_error`, the exception's class name only, never its message (messages
+  carry input paths; sample directories are named for the patient). One writer,
   `output_provenance.record_stage_outcomes`: run-all reads the record its own format writes and
   writes its formats; a single tool updates only the copies in the format(s) it wrote its tables
-  in (so a `-F tsv` rerun beside a Parquet run-all leaves `.metadata.parquet`, and the stale
-  `.parquet` table beside it, as they were) and creates none. run-all writes every status on
-  every run, except that a rerun reusing cached motif tables (same PON) leaves `mds_z*` as
-  recorded. A single tool records only the stages whose outputs it rewrote, each as it ended --
-  `not_requested` included, as `motif --skip-pon` does for `mds_z` in the `MDS` it rewrote
-  without one; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by
-  hand at run-all's `--output-format`, which is how a stage that failed under run-all gets
-  fixed, and `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
+  in (so a `--output-format tsv` rerun beside a Parquet run-all leaves `.metadata.parquet`, and
+  the stale `.parquet` table beside it, as they were) and creates none. run-all writes every
+  status on every run, except that a rerun reusing cached motif tables (same PON) leaves `mds_z*`
+  as recorded. A single tool records only the stages whose outputs it rewrote, each as it ended --
+  `not_requested` included, as `motif --skip-pon` does for `mds_z` in the `MDS` it rewrote without
+  one; `uxm`, `mfsd`, `region-mds` and `region-entropy` record `ran` when rerun by hand at
+  run-all's `--output-format`, which is how a stage that failed under run-all gets fixed, and
+  `motif` its MDS z-scores. `extract` rewrites the table from scratch and so clears them. The
   columns are in the output contract as optional strings.
 
 ### Removed
@@ -90,20 +90,21 @@ All notable changes to this project will be documented in this file.
   another format rewrote its tables in that format and left the first run's beside them, and each
   reader then picked by its own rule: downstream, which reads only Parquet, the earlier run's
   Parquet; `resolve_table_path` (the PON build from outputs) the earlier run's TSV. Every CLI
-  defaults to `-F tsv` and Nextflow writes Parquet, so a tool run by hand without `-F` into a
-  Nextflow folder did this. The record gains `table_formats` (`.parquet`, `.tsv.gz`,
-  `.parquet,.tsv`, ...), written by every writer of the record from its own `--output-format` and
-  `--compress`; the configuration check compares it on every call, so every entry point refuses
-  another format and names the option to pass. `mfsd` now runs the check too, for the format
-  alone. A record from before this release is judged by its record files (one `.parquet` record
-  is Parquet; a `.parquet` and a `.tsv` are `both`, though no refusal then advises `-F both`, since
-  two runs look the same). A copy of the record in an extension the field does not name (a TSV
-  run published over a Parquet one) makes the folder mixed, refused whatever the format. A hand
-  rerun without `-F` into a Parquet
-  folder that worked before is now refused: each one left stale Parquet. For Nextflow, where no
-  task can see the published folder, `validate-output` reports a table in an extension outside
-  `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with tables in two
-  extensions as `FORMAT.UNJUDGED` (skip).
+  defaults to `--output-format tsv` and Nextflow writes Parquet, so a tool run by hand without
+  `--output-format` into a Nextflow folder did this. The record gains `table_formats` (`.parquet`,
+  `.tsv.gz`, `.parquet,.tsv`, ...), written by every writer of the record from its own
+  `--output-format` and `--compress`; the configuration check compares it on every call, so every
+  entry point refuses another format once the folder holds a record, and names the option to pass.
+  `uxm`, `mfsd` and `motif` write no record, so one of them run alone in a fresh folder is not
+  checked. `mfsd` now runs the check too, for the format alone. A record from before this release
+  is judged by its record files (one `.parquet` record is Parquet; a `.parquet` and a `.tsv` are
+  `both`, though no refusal then advises `--output-format both`, since two runs look the same). A
+  copy of the record in an extension the field does not name (a TSV run published over a Parquet
+  one) makes the folder mixed, refused whatever the format. A hand rerun without `--output-format`
+  into a Parquet folder that worked before is now refused: each one left stale Parquet. For
+  Nextflow, where no task can see the published folder, `validate-output` reports a table in an
+  extension outside `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with
+  tables in two extensions as `FORMAT.UNJUDGED` (skip).
 
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
   `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
@@ -236,7 +237,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes what run-all would.**
+- **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
   `region_mds` twice). `motif` was handed the BED, in a tuple one item short, where it reads the
@@ -266,8 +267,10 @@ All notable changes to this project will be documented in this file.
   - **Still different from run-all:** no `TFBS/ATAC.sync` tables (#100); mFSD is not
     GC-corrected (run-all passes extract's factors; the GC redesign decides how a BAM-only tool
     chooses its table); `--region_mds_e1_only` is not applied, as `region-mds` has no such
-    option; and a sample with no variants gets a 0-row mFSD table, where run-all records
-    `no_variants` and writes none.
+    option; a sample with no variants gets a 0-row mFSD table, where run-all records
+    `no_variants` and writes none; `--gc_correct false` turns correction off in `fsc`, `fsr`,
+    `ocf` and `wps` only, while run-all ignores it; and on a genome with no bundled OCF regions
+    (hg38) the `ocf` task fails for want of its tables, where run-all skips OCF.
   - **No completion marker yet.** Extraction's record is deliberately not published: it has no
     `krewlyzer_version` or `pon_applied` and would appear before any feature table. So a
     tool-level sample is not yet read downstream, and `validate-output` reports
@@ -285,15 +288,27 @@ All notable changes to this project will be documented in this file.
 
 - **mFSD and UXM leave only the run's formats.** Rust writes each as `.tsv`; both stages converted
   it and never removed it, so every Parquet run left a `.mFSD.tsv` / `.UXM.tsv` beside the
-  `.parquet` (and `both --compress` a plain `.tsv` beside the `.tsv.gz`), and `-F tsv --compress`
-  never gzipped `mFSD.distributions`. A stray format is what `resolve_table_path` readers pick
-  first and what `validate-output` now reports (`FORMAT.MIXED`). One helper,
+  `.parquet` (and `both --compress` a plain `.tsv` beside the `.tsv.gz`), and `--output-format tsv
+  --compress` never gzipped `mFSD.distributions`. A stray format is what `resolve_table_path`
+  readers pick first and what `validate-output` now reports (`FORMAT.MIXED`). One helper,
   `output_utils.convert_rust_tsv`, converts and removes the raw TSV unless it is an output, and
-  raises when Rust wrote nothing: the stage used to log a warning and be recorded as `ran` with
-  no table. The tool-level Nextflow `mfsd` and `uxm` modules declared a required `.tsv` output,
-  met only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
+  raises when Rust wrote nothing: the stage used to log a warning and be recorded as `ran` with no
+  table. The tool-level Nextflow `mfsd` and `uxm` modules declared a required `.tsv` output, met
+  only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
   `table`). The other tool-level modules are fixed in the entry above.
 
+- **`--skip_pon` and `--skip_target_regions` no longer fail the task in the Nextflow pipeline.**
+  The input_check resolvers (`resolvePon`, `resolveTargets`) still returned the samplesheet's
+  file, the assay's bundled file or `--pon_model` / `--targets` when the matching skip flag was
+  set, so a module was handed `--pon-model X` and `--skip-pon` together (or `--target-regions X`
+  and `--skip-target-regions`), a pair `asset_resolution` rejects with `ValueError`. Under a
+  retry-then-ignore error strategy the run reported complete with those tables missing. Each
+  resolver now returns nothing when its skip flag is set, ahead of every other source, the
+  samplesheet included, and the once-per-run PON validation no longer runs under `--skip_pon`, so
+  a missing or invalid `--pon_model` cannot stop a run that will not use it. This covers run-all
+  and every tool-level module, which take their PON and targets from the resolvers and pass
+  `--skip-pon` (see the tool-level entry above). `tests/unit/test_nextflow_skip_flags.py` pins
+  both guards and the resolvers' order.
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
   exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly
