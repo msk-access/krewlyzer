@@ -175,9 +175,11 @@ def test_the_in_process_pon_build_is_never_refused(sample, tmp_path):
 
 
 def test_extract_keeps_the_settings_it_does_not_decide(sample, tmp_path):
-    """`extract` rewrites the record from scratch, and does not take E1. Dropping run-all's
+    """`extract` does not take E1. When it rewrote run-all's record from scratch, dropping
     `fsc_e1_aggregation` let a later run-all with the other setting pass the check, and the first
-    run's E1 table read as current (review of the branch)."""
+    run's E1 table read as current (review of the branch). It now refuses run-all's record
+    outright (`test_extract_record.py`), which keeps the setting; this pins that the later run-all
+    is still refused."""
     import pandas as pd
 
     out = tmp_path / "out"
@@ -198,7 +200,7 @@ def test_extract_keeps_the_settings_it_does_not_decide(sample, tmp_path):
         "--output-format",
         "parquet",
     )
-    assert result.exit_code == 0, result.output
+    assert result.exit_code == 1, result.output
     assert bool(
         pd.read_parquet(out / "S.metadata.parquet")["fsc_e1_aggregation"].iloc[0]
     )

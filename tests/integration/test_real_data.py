@@ -58,8 +58,6 @@ def test_fsc_real_data(tmp_path, real_bam, real_reference, real_bins):
             str(output_dir),
             "-s",
             "test_sample",
-            "--chromosomes",
-            "1",
         ],
     )
 
@@ -106,8 +104,6 @@ def test_fsd_real_data(tmp_path, real_bam, real_reference, real_arms):
             str(output_dir),
             "-s",
             "test_sample",
-            "--chromosomes",
-            "1",
         ],
     )
 
@@ -164,8 +160,6 @@ def test_fsr_real_data(tmp_path, real_bam, real_reference, real_bins):
             str(output_dir),
             "-s",
             "test_sample",
-            "--chromosomes",
-            "1",
         ],
     )
 

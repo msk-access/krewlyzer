@@ -96,8 +96,6 @@ def test_extract_exclude_regions(tmp_path):
             str(output_dir),
             "--exclude-regions",
             str(exclude_file),
-            "--chromosomes",
-            "chr1",
         ],
     )
 

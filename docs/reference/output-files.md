@@ -1165,9 +1165,9 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `target_regions` | str | Path to the target BED, when in panel mode |
 | `extraction_time_seconds` | float | Wall-clock extraction time |
 | `mds_score` | float | Genome-wide motif diversity score |
-| `filters_mapq` | int | Minimum MAPQ applied |
-| `filters_min_length` / `filters_max_length` | int | Fragment length filter, 65–1000 bp |
-| `gc_correction_computed` | bool | Whether GC factors were derived for this sample |
+| `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`) |
+| `filters_min_length` / `filters_max_length` | int | The fragment length range the extraction applied (`--minlen` / `--maxlen`). Before this release every record said 65 and 1000, whatever the run used |
+| `gc_correction_computed` | bool | Whether an off-target GC factor table was written for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`) |
 | `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
 | `fragments_on_missing_contig` | int | Fragments on contigs the reference FASTA lacks under either `chr` spelling, such as decoys and alts; their GC is unresolved and they enter no GC model. A non-primary contig at another length counts here too. Warned about above 1% of fragments. A primary contig the reference lacks, or has at another length, is refused before extraction |
@@ -1195,7 +1195,8 @@ recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the targe
 file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
 feature tool that takes these settings refuse a run with others before writing anything, naming
 the setting; `uxm` compares the genome, which picks its markers. `extract` rewrites this table
-but keeps the recorded E1 setting, which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
+only when it wrote it alone (see *Optional stages* below), and keeps any recorded E1 setting,
+which it does not decide. Without that, a rerun that writes fewer tables (a panel folder rerun without its
 assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
 the second run's. The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
@@ -1224,8 +1225,10 @@ status on every run, except that a rerun reusing cached motif tables leaves
 only the stages whose outputs it rewrote, each as it ended -- `not_requested`
 included, as `motif --skip-pon` records `mds_z` for the `MDS` it rewrote without
 one -- and only into the copies of this table in the format(s) it wrote its own
-tables in; it creates none. `extract` writes this table
-from scratch, so it clears the statuses: a new fragment BED is a new sample. All
+tables in; it creates none. `extract` never clears them:
+into a folder whose record holds a status or a provenance column, written by run-all or by a
+single tool, it stops before writing anything, because a new fragment BED would leave every
+table made from the old one under its recorded `ran`. To re-extract, use a fresh folder. All
 are absent from directories written before this release, and Nextflow tool-level
 mode writes no metadata table at all, so it records none. `validate-output`
 reads them: see [`validate-output`](../cli/index.md#validate-output).

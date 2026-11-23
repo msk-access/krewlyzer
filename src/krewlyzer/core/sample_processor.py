@@ -115,6 +115,11 @@ class ExtractionResult:
     extraction_time_seconds: float = 0.0
     kmer: int = 4
     target_regions_path: Optional[str] = None  # For metadata output
+    # The read filters this extraction applied, which the record repeats. No default: the record
+    # once wrote 20/65/1000 whatever the run used (`write_extraction_outputs` refuses a None).
+    mapq: Optional[int] = None
+    minlen: Optional[int] = None
+    maxlen: Optional[int] = None
 
 
 @dataclass
@@ -451,6 +456,9 @@ def extract_sample(
         extraction_time_seconds=elapsed,
         kmer=kmer,
         target_regions_path=str(target_regions) if target_regions else None,
+        mapq=mapq,
+        minlen=minlen,
+        maxlen=maxlen,
     )
 
 
@@ -761,13 +769,15 @@ def write_extraction_outputs(
 
     After extract_sample() writes the BED.gz file, this function:
     - Creates tabix index for the BED.gz
-    - Writes sample metadata JSON
+    - Writes the sample's record, `{sample}.metadata.*`
     - Computes and writes GC correction factors
 
     Files written:
     - {sample}.bed.gz.tbi: Tabix index (for random access)
-    - {sample}.metadata.json: Sample metadata and statistics
-    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors
+    - {sample}.metadata.{tsv,tsv.gz,parquet}: The record: the filters the extraction applied,
+      and whether a GC factor table was written
+    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors, when any length
+      bin could be fitted
 
     Args:
         result: ExtractionResult from extract_sample()
@@ -785,6 +795,12 @@ def write_extraction_outputs(
     """
     if result.bed_path is None:
         raise ValueError("ExtractionResult has no bed_path - was write_bed=False?")
+    unrecorded = [f for f in ("mapq", "minlen", "maxlen") if getattr(result, f) is None]
+    if unrecorded:
+        # Recording a default for a filter nobody reported is how every record said 20/65/1000.
+        raise ValueError(
+            f"ExtractionResult does not say which filters it used: {unrecorded}"
+        )
 
     output_dir = Path(output_dir)
     sample = result.sample_id
@@ -807,7 +823,6 @@ def write_extraction_outputs(
     # Write metadata as flat TSV/Parquet row (replaces legacy .metadata.json)
     # Using a flat dict so write_table can produce TSV or Parquet at source
     meta_base = output_dir / f"{sample}.metadata"
-    gc_correct_status = False  # Updated below if GC factors computed
     meta_flat = {
         "sample_id": sample,
         "total_fragments": result.fragment_count,
@@ -817,10 +832,10 @@ def write_extraction_outputs(
         "target_regions": str(result.target_regions_path or ""),
         "extraction_time_seconds": round(result.extraction_time_seconds, 2),
         "mds_score": round(result.mds_score, 6),
-        "filters_mapq": 20,
-        "filters_min_length": 65,
-        "filters_max_length": 1000,
-        "gc_correction_computed": gc_correct_status,
+        "filters_mapq": result.mapq,
+        "filters_min_length": result.minlen,
+        "filters_max_length": result.maxlen,
+        "gc_correction_computed": False,  # True below only if a table was written
         "fragments_on_missing_contig": int(
             result.contig_guard.get("fragments_on_missing_contig", 0)
         ),
@@ -847,12 +862,19 @@ def write_extraction_outputs(
                 compress=compress,
             )
 
-            outputs["gc_factors"] = factors_path
-            gc_correct_status = True
-            meta_flat["gc_correction_computed"] = True
-            logger.debug(
-                f"  Wrote GC factors: {factors_path.name} ({n_factors} regions)"
-            )
+            # 0 is Rust's "no length bin could be fitted", and then it writes no table: the
+            # record and `outputs` say a table exists only when one was written.
+            if n_factors > 0:
+                outputs["gc_factors"] = factors_path
+                meta_flat["gc_correction_computed"] = True
+                logger.debug(
+                    f"  Wrote GC factors: {factors_path.name} ({n_factors} regions)"
+                )
+            else:
+                logger.warning(
+                    f"  No GC factor could be fitted for {sample}; no factor table written, "
+                    "so the tools reading this folder find none"
+                )
         except Exception as e:
             logger.debug(f"  GC factor computation failed: {e}")
 
