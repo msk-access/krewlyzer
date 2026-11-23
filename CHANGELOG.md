@@ -209,10 +209,15 @@ All notable changes to this project will be documented in this file.
   which read only MAF. When a row sets both `maf` and `vcf`, the MAF is used and a warning names
   the sample. The `runall` emit is gone. A new test fails for any `INPUT_CHECK` emit the workflow
   does not read, and requires the VCF channel to choose its BAM as the MAF channels do. Samples
-  without a VCF hash as before, so `-resume` still hits for them. Use an uncompressed `.vcf` in
-  run-all mode: its variant-line count reads the file as plain text and fails on `.vcf.gz`. The
-  VCF example rows in `docs/nextflow/samplesheet.md` and `nextflow/samplesheet.csv` had one
-  field too many and one too few, which put the assay in the wrong column. Both are corrected.
+  without a VCF hash as before, so `-resume` still hits for them. The VCF example rows in
+  `docs/nextflow/samplesheet.md` and `nextflow/samplesheet.csv` had one field too many and one too
+  few, which put the assay in the wrong column. Both are corrected.
+- **mFSD reads gzipped variant files.** A `.vcf.gz` (or a gzipped MAF) failed in two places. The
+  Rust reader read the file as plain text, so mFSD failed. Before that, run-all's variant-line
+  count raised `UnicodeDecodeError` and stopped the whole run, with no stage recorded. Both now
+  recognise gzip from the file's first two bytes, not its name, and read every bgzip block. A
+  single-member decoder would stop after the first block and drop the remaining variants without
+  an error.
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
   exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly

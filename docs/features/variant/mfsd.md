@@ -118,7 +118,7 @@ ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--input` | `-i` | PATH | *required* | Input BAM file |
-| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants |
+| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants, plain or gzipped (`.vcf.gz` / bgzip) |
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--reference` | `-r` | PATH | | Reference FASTA for GC correction |

@@ -5864,7 +5864,7 @@ ACCESS_001,/path/to/sample.all_unique.bam,/path/to/sample.duplex.bam,,,/path/to/
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--input` | `-i` | PATH | *required* | Input BAM file |
-| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants |
+| `--variants` | `-V` | PATH | *required* | VCF or MAF file with variants, plain or gzipped (`.vcf.gz` / bgzip) |
 | `--output` | `-o` | PATH | *required* | Output directory |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--reference` | `-r` | PATH | | Reference FASTA for GC correction |
@@ -8536,10 +8536,9 @@ tool-level mode:
   `mfsd_status=no_variants` in `{sample}.metadata`; tool-level mode skips the
   mFSD process.
 
-The file type is detected from the extension: `.vcf` is read as VCF, anything
-else as MAF. Use an uncompressed `.vcf` in run-all mode for now: run-all counts
-the variant lines with a plain-text read before mFSD starts, and a `.vcf.gz`
-fails that count.
+The file type is detected from the extension: `.vcf` or `.vcf.gz` is read as
+VCF, anything else as MAF. Either may be gzipped (bgzip included); compression
+is recognised from the file's contents.
 
 ## Assay Resolution
 

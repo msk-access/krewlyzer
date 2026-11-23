@@ -47,10 +47,9 @@ tool-level mode:
   `mfsd_status=no_variants` in `{sample}.metadata`; tool-level mode skips the
   mFSD process.
 
-The file type is detected from the extension: `.vcf` is read as VCF, anything
-else as MAF. Use an uncompressed `.vcf` in run-all mode for now: run-all counts
-the variant lines with a plain-text read before mFSD starts, and a `.vcf.gz`
-fails that count.
+The file type is detected from the extension: `.vcf` or `.vcf.gz` is read as
+VCF, anything else as MAF. Either may be gzipped (bgzip included); compression
+is recognised from the file's contents.
 
 ## Assay Resolution
 
