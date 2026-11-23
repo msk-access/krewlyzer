@@ -219,6 +219,37 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes what run-all would.**
+  Measured on the synthetic sample, it could not produce a sample. Eight modules required a
+  `*.X.tsv` output under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif`,
+  `region_mds`). `motif` was handed the BED, in a tuple one item short, where it reads the BAM.
+  And no module had a `publishDir`, so even a green run would have left `--outdir` empty. Had any
+  table been written, a panel sample's would not have been run-all's:
+  - `fsr`, `fsd`, `wps`, `ocf`, `motif` and `region-entropy` were given no assay, and `extract`
+    the pipeline-wide `params.assay` rather than the sample's;
+  - `fsd`, `wps` and `ocf` were given the pipeline-wide targets, five tools the pipeline-wide PON
+    and `motif` none, and `wps` the pipeline-wide anchors, instead of the ones `INPUT_CHECK`
+    resolves per sample for run-all;
+  - none of the scorers was given `--skip-pon` or `--pon-variant`;
+  - `extract` ignored run-all's read filters.
+
+  Every module now takes the sample's assay (run-all's rule), PON, targets and WPS anchors, and
+  each option run-all passes that its tool takes. Each declares every table its tool writes, as
+  `*.X.{parquet,tsv,tsv.gz}`: required where every run writes it, optional for the panel and
+  on-target tables. Each publishes into `{outdir}/{sample}/` as run-all does. `fsc_counts` is
+  published by `fsc` only, and `region-entropy`'s Rust intermediates (`*.raw.tsv`) by none.
+  The unused `params.assay` is removed. Region-MDS now runs only for a sample with an assay, as
+  under run-all: without one it fell back to the WGS gene BED and wrote `MDS.exon/gene` tables
+  run-all never writes.
+  - **No completion marker yet.** Extraction's record is deliberately not published: it has no
+    `krewlyzer_version` or `pon_applied` and would appear before any feature table. So a
+    tool-level sample is not yet read downstream, and `validate-output` reports
+    `COMPLETION.MARKER_ABSENT`; run-all remains the mode for cohorts.
+  - Held by `tests/unit/test_tool_level_modules.py` (option parity with run-all's module,
+    per-sample settings, `motif`'s BAM, emits, publishing, stubs) and
+    `tests/invariants/test_tool_level_outputs.py` (every file each tool writes, in three formats
+    and both modes, is declared, and every required pattern is written).
+
 - **mFSD and UXM leave only the run's formats.** Rust writes each as `.tsv`; both stages converted
   it and never removed it, so every Parquet run left a `.mFSD.tsv` / `.UXM.tsv` beside the
   `.parquet` (and `both --compress` a plain `.tsv` beside the `.tsv.gz`), and `-F tsv --compress`

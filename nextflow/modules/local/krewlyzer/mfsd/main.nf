@@ -15,6 +15,10 @@ process KREWLYZER_MFSD {
     label 'process_medium'
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
+    // Into the sample's folder, as run-all publishes. `{sample}.metadata.*` is never among a
+    // tool's outputs: it is downstream's completion marker.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
     tuple val(meta), path(bam), path(bai), path(variants)
     path fasta                    // Optional: reference FASTA for GC correction

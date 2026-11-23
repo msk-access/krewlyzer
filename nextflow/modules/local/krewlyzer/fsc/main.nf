@@ -13,14 +13,25 @@ process KREWLYZER_FSC {
     label 'process_medium'
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
+    // Into the sample's folder, as run-all publishes. `{sample}.metadata.*` is never among a
+    // tool's outputs: it is downstream's completion marker.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
-    tuple val(meta), path(bed), path(gc_factors)  // gc_factors: extract's tables, staged beside the BED ([] if none)
-    path targets   // Optional for custom bins
+    // The sample's PON and targets, resolved once by INPUT_CHECK as run-all's are ([] if none).
+    // gc_factors: extract's tables, staged beside the BED ([] if none).
+    tuple val(meta), path(bed), path(gc_factors), path(pon), path(targets)
 
     output:
-    tuple val(meta), path("*.FSC.tsv"), emit: tsv
-    tuple val(meta), path("*.FSC.gene.tsv"), emit: gene_fsc, optional: true
-    path "versions.yml"               , emit: versions
+    // In params.output_format; on-target and panel tables only in panel mode.
+    tuple val(meta), path("*.FSC.{parquet,tsv,tsv.gz}")                , emit: table
+    tuple val(meta), path("*.FSC.ontarget.{parquet,tsv,tsv.gz}")       , emit: ontarget, optional: true
+    tuple val(meta), path("*.FSC.gene.{parquet,tsv,tsv.gz}")           , emit: gene_fsc, optional: true
+    tuple val(meta), path("*.FSC.regions.{parquet,tsv,tsv.gz}")        , emit: regions, optional: true
+    tuple val(meta), path("*.FSC.regions.e1only.{parquet,tsv,tsv.gz}") , emit: regions_e1only, optional: true
+    tuple val(meta), path("*.fsc_counts.{parquet,tsv,tsv.gz}")         , emit: counts
+    tuple val(meta), path("*.fsc_counts.ontarget.{parquet,tsv,tsv.gz}"), emit: counts_ontarget, optional: true
+    path "versions.yml"                                                , emit: versions
 
     when:
     task.ext.when == null || task.ext.when
@@ -32,7 +43,10 @@ process KREWLYZER_FSC {
     def assay_arg = meta.assay && meta.assay != 'UNKNOWN' && meta.assay != 'WGS' ? "--assay ${meta.assay.toLowerCase()}" : ""
     def genome_arg = params.genome ? "--genome ${params.genome}" : ""
     def gc_arg = params.gc_correct == false ? "--no-gc-correct" : ""
-    def pon_arg = params.pon_model ? "--pon-model ${params.pon_model}" : ""
+    def pon_arg = pon ? "--pon-model ${pon}" : ""
+    def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
+    def pon_variant_arg = params.pon_variant != 'all_unique' ? "--pon-variant ${params.pon_variant}" : ""
+    def e1_disable_arg = params.disable_e1_aggregation ? "--disable-e1-aggregation" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
     def compress_arg = params.compress_tsv ? "--compress" : ""
@@ -49,6 +63,9 @@ process KREWLYZER_FSC {
         $genome_arg \\
         $gc_arg \\
         $pon_arg \\
+        $skip_pon_arg \\
+        $pon_variant_arg \\
+        $e1_disable_arg \\
         $verbose_arg \\
         $output_format_arg \\
         $compress_arg \\
@@ -65,6 +82,7 @@ process KREWLYZER_FSC {
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
     echo -e "chrom\\tstart\\tend\\tultra_short\\tcore_short\\tmono_nucl\\tdi_nucl\\tlong\\ttotal" > ${prefix}.FSC.tsv
+    touch ${prefix}.fsc_counts.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

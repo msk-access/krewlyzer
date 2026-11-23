@@ -8321,6 +8321,22 @@ Skipped entirely for tsv-only runs — see `--output_format` in
     skipped rather than run on a partial set, which would report degeneracy
     findings that are artefacts of the missing samples.
 
+## Tool-level mode (`--use_runall false`)
+
+Each tool runs as its own task. It is given the sample's assay, targets, PON and WPS anchors,
+as run-all is, and publishes its tables into `{outdir}/{sample}/`, the folder run-all publishes
+into.
+
+!!! warning "No completion marker yet"
+    `{sample}.metadata.*` is not published in this mode. Downstream takes that file to mean the
+    sample is complete, and extraction's record would appear before any feature table, without
+    `krewlyzer_version` or `pon_applied`. So a tool-level sample is not read downstream, and
+    `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all for a cohort.
+
+Not published: `fsr`'s copy of `fsc_counts` (`fsc` publishes the same table), and the Rust
+intermediates `region-entropy` leaves (`*.raw.tsv`). `region-entropy` run on its own also writes
+no `TFBS/ATAC.sync` tables, which run-all does.
+
 ---
 
 ## Output Changes in 0.9.0
@@ -8388,7 +8404,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow |
+| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow: one task per tool, no completion marker yet ([Outputs](outputs.md#tool-level-mode-use_runall-false)) |
 
 ## PON Parameters
 

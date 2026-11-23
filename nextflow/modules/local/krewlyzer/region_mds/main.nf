@@ -13,15 +13,20 @@ process KREWLYZER_REGION_MDS {
     label 'process_high'
     container "ghcr.io/msk-access/krewlyzer:0.9.2"
 
+    // Into the sample's folder, as run-all publishes. `{sample}.metadata.*` is never among a
+    // tool's outputs: it is downstream's completion marker.
+    publishDir path: { "${params.outdir}/${meta.id}" }, mode: 'copy', saveAs: { filename -> filename == 'versions.yml' ? null : filename }
+
     input:
-    tuple val(meta), path(bam), path(bai)
+    // The sample's PON, resolved once by INPUT_CHECK as run-all's is ([] if none). The assay,
+    // which picks the bundled gene BED, comes from meta as it does for run-all.
+    tuple val(meta), path(bam), path(bai), path(pon)
     path fasta
-    path pon_model   // Optional PON model for z-score normalization
-    val assay        // Assay code (xs1, xs2, wgs) for bundled gene BED
 
     output:
-    tuple val(meta), path("*.MDS.exon.tsv"), emit: mds_exon
-    tuple val(meta), path("*.MDS.gene.tsv"), emit: mds_gene
+    // In params.output_format.
+    tuple val(meta), path("*.MDS.exon.{parquet,tsv,tsv.gz}"), emit: mds_exon
+    tuple val(meta), path("*.MDS.gene.{parquet,tsv,tsv.gz}"), emit: mds_gene
     path "versions.yml"                    , emit: versions
 
     when:
@@ -31,8 +36,13 @@ process KREWLYZER_REGION_MDS {
     def args = task.ext.args ?: ''
     def prefix = task.ext.prefix ?: "${meta.id}"
     def genome_arg = params.genome ? "--genome ${params.genome}" : "--genome hg19"
-    def assay_arg = assay ? "--assay ${assay}" : ""
-    def pon_arg = pon_model ? "--pon-model ${pon_model}" : ""
+    def assay_arg = meta.assay && meta.assay != 'UNKNOWN' && meta.assay != 'WGS' ? "--assay ${meta.assay.toLowerCase()}" : ""
+    def pon_arg = pon ? "--pon-model ${pon}" : ""
+    def pon_variant_arg = params.pon_variant != 'all_unique' ? "--pon-variant ${params.pon_variant}" : ""
+    // run-all's read filters, which it applies to Region-MDS.
+    def mapq_arg = params.mapq != 20 ? "--mapq ${params.mapq}" : ""
+    def minlen_arg = params.minlen != 65 ? "--minlen ${params.minlen}" : ""
+    def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
@@ -45,10 +55,15 @@ process KREWLYZER_REGION_MDS {
         $fasta \\
         ./ \\
         --sample-name $prefix \\
+        --threads $task.cpus \\
         $genome_arg \\
         $assay_arg \\
         $pon_arg \\
         $skip_pon_arg \\
+        $pon_variant_arg \\
+        $mapq_arg \\
+        $minlen_arg \\
+        $maxlen_arg \\
         $verbose_arg \\
         $output_format_arg \\
         $compress_arg \\

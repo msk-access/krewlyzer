@@ -156,9 +156,9 @@ workflow INPUT_CHECK {
                 def variants = maf ?: (vcf ?: [])
                 [meta, bam, bai, mfsd_bam ?: [], mfsd_bai ?: [], mbam ?: [], variants, pon ?: [], targets ?: [], wps_anchors ?: [], wps_bg ?: []]
 
-            // tool-level: extract path
+            // tool-level: extract path, with the sample's settings for every tool
             extract:
-                [meta, bam, bai, pon ?: [], targets ?: []]
+                [meta, bam, bai, pon ?: [], targets ?: [], wps_anchors ?: []]
 
             // run-all FILTER_MAF: meta carries ALL paths so join is unnecessary
             maf_for_filter:
@@ -177,7 +177,7 @@ workflow INPUT_CHECK {
     // Pre-extracted BEDs (tool_level only — uses bed_samples, not bam_samples)
     ch_beds = ch_branched.bed_samples.map {
         meta, bam, bai, mfsd_bam, mfsd_bai, mbam, mbai, bed, vcf, maf, single, pon, targets, wps_anchors, wps_bg ->
-        [meta, bed, pon ?: [], targets ?: []]
+        [meta, bed, pon ?: [], targets ?: [], wps_anchors ?: []]
     }
 
     // Methylation samples (from ch_parsed, not affected by multiMap)

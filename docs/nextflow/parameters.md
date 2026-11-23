@@ -24,7 +24,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow |
+| `--use_runall` | `true` | `true` = unified `run-all` (default), `false` = tool-level subworkflow: one task per tool, no completion marker yet ([Outputs](outputs.md#tool-level-mode-use_runall-false)) |
 
 ## PON Parameters
 
