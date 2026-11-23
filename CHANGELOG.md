@@ -200,6 +200,19 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **The Nextflow samplesheet's `vcf` column reaches mFSD.** It was parsed and documented, and
+  ignored in both modes. The only code that routed it, `INPUT_CHECK`'s `runall` emit, was never
+  read by the workflow. Run-all mode built its tuple from the MAF alone, so a VCF-only sample got
+  FILTER_MAF's header-only placeholder and `mfsd_status=no_variants`. Tool-level mode selected
+  mFSD samples by their MAF and dropped VCF-only samples entirely. A VCF now goes straight to
+  run-all's `--variants` and to tool-level `krewlyzer mfsd -V`, skipping SPLIT_MAF and FILTER_MAF,
+  which read only MAF. When a row sets both `maf` and `vcf`, the MAF is used and a warning names
+  the sample. The `runall` emit is gone. A new test fails for any `INPUT_CHECK` emit the workflow
+  does not read, and requires the VCF channel to choose its BAM as the MAF channels do. Samples
+  without a VCF hash as before, so `-resume` still hits for them. Use an uncompressed `.vcf` in
+  run-all mode: its variant-line count reads the file as plain text and fails on `.vcf.gz`. The
+  VCF example rows in `docs/nextflow/samplesheet.md` and `nextflow/samplesheet.csv` had one
+  field too many and one too few, which put the assay in the wrong column. Both are corrected.
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not
   exist, a gene BED missing for the assay, and missing TFBS or ATAC regions were skipped quietly
