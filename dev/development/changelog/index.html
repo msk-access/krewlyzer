@@ -3488,6 +3488,21 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li><strong><code>krewlyzer extract --no-gc-correct</code> applies the assay's targets and the bundled blacklist.</strong>
+<code>extract</code> built its AssetManager only under <code>--gc-correct</code>, and both the assay's bundled
+  targets and the genome's blacklist are resolved through it. So <code>extract --no-gc-correct -A xs1</code>
+  ran in WGS mode with no blacklist and exited 0, while run-all, which always builds the
+  AssetManager, ran the same sample in panel mode with the blacklist applied. <code>extract</code> now
+  builds it whatever the flag says; <code>--no-gc-correct</code> turns off the factor tables and nothing
+  else. So <code>--no-gc-correct</code> now applies the genome's bundled blacklist by default; an empty <code>-x</code>
+  file excludes nothing. An unknown genome (<code>-G hg99</code>) or a <code>KREWLYZER_DATA_DIR</code> that does not
+  exist is an error, as in run-all: with <code>--gc-correct</code>, <code>extract</code> used to warn, disable <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>
+  correction and carry on without the targets and the blacklist, and with <code>--no-gc-correct</code> it
+  ran without them. A known genome whose bundled files are missing is not yet caught, in either
+  mode: a named assay's targets then resolve to none (WGS mode) and a missing blacklist is only
+  warned about. Held by
+  <code>tests/invariants/test_extract_assets_without_gc.py</code>, which also runs run-all on the same
+  sample and compares the regions each hands to extraction.</li>
 <li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
