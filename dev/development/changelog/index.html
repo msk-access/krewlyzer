@@ -3449,6 +3449,20 @@
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
+<li><strong><code>--skip_pon</code> and <code>--skip_target_regions</code> no longer fail the task in the Nextflow pipeline.</strong>
+  The input_check resolvers (<code>resolvePon</code>, <code>resolveTargets</code>) still returned the samplesheet's
+  file, the assay's bundled file or <code>--pon_model</code> / <code>--targets</code> when the matching skip flag was
+  set, so a module was handed <code>--pon-model X</code> and <code>--skip-pon</code> together (or <code>--target-regions X</code>
+  and <code>--skip-target-regions</code>), a pair <code>asset_resolution</code> rejects with <code>ValueError</code>. Under a
+  retry-then-ignore error strategy the run reported complete with those tables missing. Each
+  resolver now returns nothing when its skip flag is set, ahead of every other source, the
+  samplesheet included, and the once-per-run <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> validation no longer runs under <code>--skip_pon</code>, so
+  a missing or invalid <code>--pon_model</code> cannot stop a run that will not use it. This covers run-all
+  and the tool-level <code>extract</code>, <code>fsc</code>, <code>fsr</code>, <code>region-entropy</code> and <code>region-mds</code>, which take their
+  <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> and targets from the resolvers. Not yet the tool-level <code>fsd</code>, <code>ocf</code> and <code>wps</code>, which read
+  <code>--targets</code> directly, nor <code>fsd</code>, <code>fsc</code>, <code>fsr</code>, <code>ocf</code> and <code>wps</code>, which read <code>--pon_model</code>
+  directly and never pass <code>--skip-pon</code>. <code>tests/unit/test_nextflow_skip_flags.py</code> pins both guards
+  and the resolvers' order.</li>
 <li><strong>Optional stages that were asked for and produced nothing now say so.</strong> A <code>--variants</code> file
   that does not exist was skipped with no log line at all; a <code>--bisulfite-bam</code> that does not
   exist, a gene <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> missing for the assay, and missing <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> or <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> regions were skipped quietly
