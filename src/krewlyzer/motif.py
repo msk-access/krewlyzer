@@ -36,7 +36,11 @@ logger = logging.getLogger("motif")
 from krewlyzer import _core
 
 # Import asset resolution and startup banner
-from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.asset_resolution import (
+    resolve_exclude_regions,
+    resolve_pon_model,
+    resolve_target_regions,
+)
 from .core.logging import log_startup_banner, ResolvedAsset
 from . import __version__
 
@@ -79,6 +83,19 @@ def motif(
         False, "--skip-pon", help="Skip PON z-score normalization"
     ),
     kmer: int = typer.Option(4, "-k", "--kmer", help="K-mer size for motif extraction"),
+    # Read filters and blacklist: run-all's, so motif counts the fragments run-all's tables do
+    exclude_regions: Optional[Path] = typer.Option(
+        None,
+        "-x",
+        "--exclude-regions",
+        help="Exclude regions BED file (default: the genome's bundled blacklist)",
+    ),
+    mapq: int = typer.Option(20, "--mapq", "-q", help="Minimum mapping quality"),
+    minlen: int = typer.Option(65, "--minlen", help="Minimum fragment length"),
+    maxlen: int = typer.Option(1000, "--maxlen", help="Maximum fragment length"),
+    skip_duplicates: bool = typer.Option(
+        True, "--skip-duplicates/--no-skip-duplicates", help="Skip duplicate reads"
+    ),
     chromosomes: Optional[str] = typer.Option(
         None, "--chromosomes", help="Comma-separated chromosomes to process"
     ),
@@ -210,6 +227,14 @@ def motif(
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 
+    try:
+        resolved_exclude_path, exclude_source = resolve_exclude_regions(
+            exclude_regions, assets, logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
 
     # ═══════════════════════════════════════════════════════════════════
@@ -232,6 +257,7 @@ def motif(
         assets=[
             ResolvedAsset("PON", resolved_pon_path, pon_source),
             ResolvedAsset("Targets", resolved_target_path, target_source),
+            ResolvedAsset("Exclude regions", resolved_exclude_path, exclude_source),
         ],
         logger=logger,
     )
@@ -272,15 +298,15 @@ def motif(
         result = extract_sample(
             input_path=bam_input,
             reference=genome_reference,
-            mapq=20,  # Default mapQ for motif
-            minlen=65,
-            maxlen=1000,
+            mapq=mapq,
+            minlen=minlen,
+            maxlen=maxlen,
             kmer=kmer,
             threads=threads,
-            skip_duplicates=True,
+            skip_duplicates=skip_duplicates,
             require_proper_pair=require_proper_pair,
             target_regions=resolved_target_path,
-            exclude_regions=None,
+            exclude_regions=resolved_exclude_path,
             write_bed=False,  # Motif command doesn't write BED
             output_dir=None,
             sample_name=sample_name,

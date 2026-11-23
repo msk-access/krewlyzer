@@ -5,10 +5,14 @@ and the module does not declare is dropped from `--outdir` without a word. A req
 the tool does not write fails the task: eight modules required `*.X.tsv` under the Parquet
 default, so tool-level mode could not run at all.
 
-Each tool runs on the synthetic sample, staged the way `tool_level/main.nf` stages it (the BED
-and extract's GC factor tables beside it), in three configurations that between them write every
-extension and both modes. The patterns are read from the modules (`tests/nextflow_modules.py`),
-so a new table or a renamed pattern fails here rather than on the cluster.
+Each tool runs on the synthetic sample, staged the way `tool_level/main.nf` stages it
+(`tool_level.py`), in three configurations that between them write every extension and both
+modes. The patterns are read from the modules (`tests/nextflow_modules.py`), so a new table or a
+renamed pattern fails here rather than on the cluster.
+
+Blind to a table only some data produces: the synthetic sample has no on-target fragment in an
+OCR, so `OCF.ontarget` is never written here. `test_tool_level_modules.py` holds the modules'
+declarations to run-all's, which does not depend on the data.
 """
 
 from __future__ import annotations
@@ -18,14 +22,12 @@ from pathlib import Path
 from typing import Dict, List
 
 import pytest
-from typer.testing import CliRunner
-
 import nextflow_modules as nf
 from conftest import requires_data
-from krewlyzer.cli import app
 
-from .runall import write_arms, write_vcf
+from .runall import write_vcf
 from .synth import BASELINE, make_sample
+from .tool_level import run_tools
 
 pytestmark = [pytest.mark.invariant, pytest.mark.slow, requires_data]
 
@@ -49,20 +51,6 @@ CONFIGS = {
 }
 
 
-def _run(*args) -> None:
-    result = CliRunner().invoke(app, [str(a) for a in args])
-    assert (
-        result.exit_code == 0
-    ), f"krewlyzer {args[0]} failed:\n{result.output[-2000:]}"
-
-
-def _stage(extracted: Path, folder: Path) -> None:
-    folder.mkdir(parents=True)
-    for f in extracted.iterdir():
-        if f.name.startswith("S.bed.gz") or "correction_factors" in f.name:
-            (folder / f.name).symlink_to(f)
-
-
 def _left(folder: Path, staged=_STAGED) -> List[str]:
     return sorted(
         p.name
@@ -77,84 +65,12 @@ def written(request, tmp_path_factory) -> Dict[str, List[str]]:
     fmt, panel = CONFIGS[request.param]
     root = tmp_path_factory.mktemp(request.param)
     s = make_sample(root / "in", BASELINE)
-    arms = write_arms(s.directory / "arms.validated.bed", s)
-    mode = ["-T", s.assets.targets, "-A", "xs1"] if panel else ["--skip-target-regions"]
-
-    extracted = root / "extract"
-    _run(
-        "extract",
-        "-i",
-        s.bam,
-        "-r",
-        s.reference,
-        "-o",
-        extracted,
-        "-s",
-        "S",
-        *mode,
-        *fmt,
-    )
-    # Extraction's own outputs are everything it wrote but its logs.
-    found = {"extract": _left(extracted, ("*.log", "*.json"))}
-
-    bed_tools = {
-        "fsc": ["fsc", "-b", s.assets.bins],
-        "fsr": ["fsr", "-b", s.assets.bins],
-        "fsd": ["fsd", "-a", arms],
-        "ocf": ["ocf", "-r", s.assets.regions],
-        "wps": ["wps", "--wps-anchors", s.assets.anchors, "-B", s.assets.alu],
-        "region_entropy": [
-            "region-entropy",
-            "--tfbs-regions",
-            s.assets.regions,
-            "--atac-regions",
-            s.assets.regions,
-        ],
+    folders = run_tools(s, root, fmt, panel, write_vcf(root / "v.vcf"))
+    return {
+        # Extraction's own outputs are everything it wrote but its logs.
+        module: _left(folder, ("*.log", "*.json") if module == "extract" else _STAGED)
+        for module, folder in folders.items()
     }
-    for module, (command, *args) in bed_tools.items():
-        folder = root / module
-        _stage(extracted, folder)
-        _run(
-            command,
-            "-i",
-            folder / "S.bed.gz",
-            "-o",
-            folder,
-            "-s",
-            "S",
-            *args,
-            "--skip-pon",
-            *mode,
-            *fmt,
-        )
-        found[module] = _left(folder)
-
-    vcf = write_vcf(root / "v.vcf")
-    bam_tools = {
-        "motif": ["motif", "-i", s.bam, "-r", s.reference, "--skip-pon", *mode],
-        "mfsd": ["mfsd", "-i", s.bam, "-V", vcf, "-g", s.reference],
-        "uxm": ["uxm", "-i", s.bam],
-    }
-    for module, args in bam_tools.items():
-        folder = root / module
-        _run(*args, "-o", folder, "--sample-name", "S", *fmt)
-        found[module] = _left(folder)
-    if panel:  # region-MDS reads an assay's gene BED
-        folder = root / "region_mds"
-        _run(
-            "region-mds",
-            s.bam,
-            s.reference,
-            folder,
-            "--sample-name",
-            "S",
-            "-a",
-            "xs1",
-            "--skip-pon",
-            *fmt,
-        )
-        found["region_mds"] = _left(folder)
-    return found
 
 
 @pytest.mark.parametrize("module", [m for m, _ in nf.TOOL_MODULES])

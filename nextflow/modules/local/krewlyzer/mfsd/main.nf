@@ -27,6 +27,7 @@ process KREWLYZER_MFSD {
     output:
     // In params.output_format: krewlyzer leaves only the run's formats, not Rust's raw TSV.
     tuple val(meta), path("*.mFSD.{parquet,tsv,tsv.gz}")              , emit: mfsd
+    // Only when asked for through task.ext.args (`--output-distributions`); run-all writes none.
     tuple val(meta), path("*.mFSD.distributions.{parquet,tsv,tsv.gz}"), emit: distributions, optional: true
     tuple val(meta), path("*.filtered.maf")          , emit: filtered_maf, optional: true
     path "versions.yml"                              , emit: versions
@@ -50,7 +51,8 @@ process KREWLYZER_MFSD {
     def min_baseq_arg = params.min_baseq != 20 ? "--min-baseq ${params.min_baseq}" : ""
     def skip_dup_arg = params.skip_duplicates == false ? "--no-skip-duplicates" : ""
     def proper_pair_arg = params.require_proper_pair == false ? "--no-require-proper-pair" : ""
-    def duplex_arg = params.duplex ? "--duplex" : ""
+    // Duplex weighting for the samplesheet's duplex `mfsd_bam`, as run-all switches it on.
+    def duplex_arg = params.duplex || meta.mfsd_duplex ? "--duplex" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
     def compress_arg = params.compress_tsv ? "--compress" : ""
@@ -62,7 +64,6 @@ process KREWLYZER_MFSD {
         --output ./ \\
         --sample-name $prefix \\
         --threads $task.cpus \\
-        --output-distributions \\
         $gc_factors_arg \\
         $ref_arg \\
         $mapq_arg \\
@@ -87,7 +88,6 @@ process KREWLYZER_MFSD {
     def prefix = task.ext.prefix ?: "${meta.id}"
     """
     echo -e "variant_id\\tmean_size\\tmedian_size" > ${prefix}.mFSD.tsv
-    echo -e "variant_id\\tsize\\tcount" > ${prefix}.mFSD.distributions.tsv
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

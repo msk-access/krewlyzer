@@ -120,12 +120,21 @@ into.
 !!! warning "No completion marker yet"
     `{sample}.metadata.*` is not published in this mode. Downstream takes that file to mean the
     sample is complete, and extraction's record would appear before any feature table, without
-    `krewlyzer_version` or `pon_applied`. So a tool-level sample is not read downstream, and
-    `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all for a cohort.
+    `krewlyzer_version` or `pon_applied`. So a sample from a fresh `--outdir` is not read
+    downstream, and `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all
+    for a cohort. In an `--outdir` an earlier run-all used, that run's record stays and marks the
+    sample complete, describing the earlier run: use a fresh `--outdir`.
 
 Not published: `fsr`'s copy of `fsc_counts` (`fsc` publishes the same table), and the Rust
-intermediates `region-entropy` leaves (`*.raw.tsv`). `region-entropy` run on its own also writes
-no `TFBS/ATAC.sync` tables, which run-all does.
+intermediates `region-entropy` leaves (`*.raw.tsv`).
+
+Still different from run-all:
+
+- `region-entropy` run on its own writes no `TFBS/ATAC.sync` tables
+  ([#100](https://github.com/msk-access/krewlyzer/issues/100)).
+- mFSD is not GC-corrected. Run-all passes extract's factor table (on-target first on a panel);
+  tool-level passes none until the GC redesign decides how a BAM-only tool chooses its table.
+- `--region_mds_e1_only` is not applied: `krewlyzer region-mds` has no such option.
 
 ---
 

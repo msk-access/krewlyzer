@@ -23,9 +23,12 @@ process KREWLYZER_OCF {
     path fasta
 
     output:
-    // In params.output_format; on-target and panel tables only in panel mode.
+    // In params.output_format. On- and off-target tables in panel mode only, and each only when
+    // a fragment of that kind falls in an OCR (the synthetic test sample has no on-target one).
     tuple val(meta), path("*.OCF.{parquet,tsv,tsv.gz}")               , emit: table
     tuple val(meta), path("*.OCF.sync.{parquet,tsv,tsv.gz}")          , emit: sync
+    tuple val(meta), path("*.OCF.ontarget.{parquet,tsv,tsv.gz}")      , emit: ontarget, optional: true
+    tuple val(meta), path("*.OCF.ontarget.sync.{parquet,tsv,tsv.gz}") , emit: ontarget_sync, optional: true
     tuple val(meta), path("*.OCF.offtarget.{parquet,tsv,tsv.gz}")     , emit: offtarget, optional: true
     tuple val(meta), path("*.OCF.offtarget.sync.{parquet,tsv,tsv.gz}"), emit: offtarget_sync, optional: true
     path "versions.yml"                                               , emit: versions

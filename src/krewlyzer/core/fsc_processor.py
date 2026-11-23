@@ -31,6 +31,16 @@ CHANNELS = ["ultra_short", "core_short", "mono_nucl", "di_nucl", "long", "ultra_
 # Regularization constant for reliability calculation
 RELIABILITY_K = 0.01
 
+#: 100 kb bins per FSC/FSR row. Genome-wide, 50 bins make 5 Mb, arm-scale windows. A panel keeps
+#: one bin per row: its targets are sparse, so a 5 Mb window would merge unrelated genes.
+WGS_CONTINUE_N = 50
+PANEL_CONTINUE_N = 1
+
+
+def default_continue_n(panel_mode: bool) -> int:
+    """Bins per FSC/FSR row when none is asked for: run-all's rule, and the single tools'."""
+    return PANEL_CONTINUE_N if panel_mode else WGS_CONTINUE_N
+
 
 def add_pon_channel_columns(
     frame: "pd.DataFrame", pon, ontarget: bool = False

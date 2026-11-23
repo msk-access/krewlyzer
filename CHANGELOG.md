@@ -54,6 +54,23 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **`krewlyzer fsc` and `fsr` choose the window by mode, as run-all does.** Without
+  `--continue-n`, a run with target regions now writes one 100 kb bin per row, and one without
+  writes 50 (5 Mb). Both tools defaulted to 50 whatever the mode, so a panel sample's single-tool
+  FSC/FSR held 1/50th of run-all's rows (on the synthetic sample, none). An explicit
+  `--continue-n` is kept. The rule is one helper, `fsc_processor.default_continue_n`, that run-all
+  calls too; its two numbers are in the claims registry.
+- **`krewlyzer motif` excludes the genome's blacklist and takes run-all's read filters.** It
+  passed no blacklist and fixed mapq 20, 65-1000 bp and duplicates skipped, so its tables counted
+  fragments run-all's excluded (on the synthetic sample, MDS 0.960 against run-all's 0.927).
+  It now takes `-x/--exclude-regions` (default: the bundled blacklist), `--mapq`, `--minlen`,
+  `--maxlen` and `--skip-duplicates/--no-skip-duplicates`, with run-all's defaults. Motif tables
+  from the single tool change accordingly; no PON is built from single-tool output. `extract`,
+  run-all and `motif` resolve the blacklist through one function,
+  `asset_resolution.resolve_exclude_regions`. Run-all passed the bundled path even where the
+  file did not exist; that is now a warning, and the run keeps the fragments. `extract`'s
+  fallback to a path that does not exist is removed.
+
 - **A rerun into a sample's folder must use the settings recorded there.** A rerun with other
   settings writes another set of tables, and whatever the first run wrote that the second does not
   was left looking current: a panel folder rerun without its assay rewrote `TFBS` but not
@@ -220,35 +237,48 @@ All notable changes to this project will be documented in this file.
 ### Fixed
 
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes what run-all would.**
-  Measured on the synthetic sample, it could not produce a sample. Eight modules required a
-  `*.X.tsv` output under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif`,
-  `region_mds`). `motif` was handed the BED, in a tuple one item short, where it reads the BAM.
-  And no module had a `publishDir`, so even a green run would have left `--outdir` empty. Had any
-  table been written, a panel sample's would not have been run-all's:
+  Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
+  required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
+  `region_mds` twice). `motif` was handed the BED, in a tuple one item short, where it reads the
+  BAM. And no module had a `publishDir`, so even a green run would have left `--outdir` empty.
+  Had any table been written, a panel sample's would not have been run-all's:
   - `fsr`, `fsd`, `wps`, `ocf`, `motif` and `region-entropy` were given no assay, and `extract`
     the pipeline-wide `params.assay` rather than the sample's;
   - `fsd`, `wps` and `ocf` were given the pipeline-wide targets, five tools the pipeline-wide PON
     and `motif` none, and `wps` the pipeline-wide anchors, instead of the ones `INPUT_CHECK`
     resolves per sample for run-all;
   - none of the scorers was given `--skip-pon` or `--pon-variant`;
-  - `extract` ignored run-all's read filters.
+  - `extract` and `motif` ignored run-all's read filters, and `motif` the blacklist (see
+    Changed);
+  - panel FSC/FSR were written at 5 Mb windows, where run-all writes 100 kb bins (see Changed);
+  - `mfsd` read the main BAM where run-all reads the samplesheet's duplex `mfsd_bam` with duplex
+    weighting on, and wrote a `mFSD.distributions` table run-all does not.
 
   Every module now takes the sample's assay (run-all's rule), PON, targets and WPS anchors, and
-  each option run-all passes that its tool takes. Each declares every table its tool writes, as
-  `*.X.{parquet,tsv,tsv.gz}`: required where every run writes it, optional for the panel and
-  on-target tables. Each publishes into `{outdir}/{sample}/` as run-all does. `fsc_counts` is
-  published by `fsc` only, and `region-entropy`'s Rust intermediates (`*.raw.tsv`) by none.
-  The unused `params.assay` is removed. Region-MDS now runs only for a sample with an assay, as
-  under run-all: without one it fell back to the WGS gene BED and wrote `MDS.exon/gene` tables
-  run-all never writes.
+  each option run-all passes that its tool takes. Each declares the tables run-all's module
+  declares for its stage, as `*.X.{parquet,tsv,tsv.gz}`: required where every run writes it,
+  optional for the panel, on-target and data-dependent tables (`OCF.ontarget` was written and
+  dropped). Each publishes into `{outdir}/{sample}/` as run-all does. `fsc_counts` is published
+  by `fsc` only, and `region-entropy`'s Rust intermediates (`*.raw.tsv`) by none. The unused
+  `params.assay` is removed. Region-MDS now runs only for a sample with an assay, as under
+  run-all: without one it fell back to the WGS gene BED and wrote `MDS.exon/gene` tables run-all
+  never writes.
+  - **Still different from run-all:** no `TFBS/ATAC.sync` tables (#100); mFSD is not
+    GC-corrected (run-all passes extract's factors; the GC redesign decides how a BAM-only tool
+    chooses its table); and `--region_mds_e1_only` is not applied, as `region-mds` has no such
+    option.
   - **No completion marker yet.** Extraction's record is deliberately not published: it has no
     `krewlyzer_version` or `pon_applied` and would appear before any feature table. So a
     tool-level sample is not yet read downstream, and `validate-output` reports
-    `COMPLETION.MARKER_ABSENT`; run-all remains the mode for cohorts.
-  - Held by `tests/unit/test_tool_level_modules.py` (option parity with run-all's module,
-    per-sample settings, `motif`'s BAM, emits, publishing, stubs) and
+    `COMPLETION.MARKER_ABSENT`; run-all remains the mode for cohorts. A record an earlier run-all
+    left in the same `--outdir` is not removed, and would mark the sample complete.
+  - Held by `tests/invariants/test_tool_level_matches_runall.py` (run-all and each tool on the
+    synthetic sample, panel and WGS: the same files, with the same contents),
     `tests/invariants/test_tool_level_outputs.py` (every file each tool writes, in three formats
-    and both modes, is declared, and every required pattern is written).
+    and both modes, is declared, and every required pattern is written) and
+    `tests/unit/test_tool_level_modules.py` (option parity with run-all's module, per-sample
+    settings, each process given a tuple of its input's size, every table run-all's module
+    declares declared by a tool module, emits, publishing, stubs).
 
 - **mFSD and UXM leave only the run's formats.** Rust writes each as `.tsv`; both stages converted
   it and never removed it, so every Parquet run left a `.mFSD.tsv` / `.UXM.tsv` beside the
@@ -259,7 +289,7 @@ All notable changes to this project will be documented in this file.
   raises when Rust wrote nothing: the stage used to log a warning and be recorded as `ran` with
   no table. The tool-level Nextflow `mfsd` and `uxm` modules declared a required `.tsv` output,
   met only by that leftover under Parquet; they now take the run's format (uxm's emit is renamed
-  `table`). The other tool-level modules still declare `.tsv` outputs under a Parquet default.
+  `table`). The other tool-level modules are fixed in the entry above.
 
 - **Optional stages that were asked for and produced nothing now say so.** A `--variants` file
   that does not exist was skipped with no log line at all; a `--bisulfite-bam` that does not

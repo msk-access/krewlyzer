@@ -40,7 +40,7 @@ from krewlyzer import _core
 from .core.bam_utils import check_bam_compatibility
 
 # Asset resolution for --assay auto-loading
-from .core.asset_resolution import resolve_target_regions
+from .core.asset_resolution import resolve_exclude_regions, resolve_target_regions
 from .core.gc_assets import factor_table_base, factor_table_path
 
 
@@ -205,20 +205,16 @@ def extract(
             console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
             raise typer.Exit(1)
 
-    # Default exclude regions from assets
-    if exclude_regions is None and assets:
+    # The blacklist, by the rule run-all and motif use. (Without assets, i.e. --no-gc-correct,
+    # only an explicit one applies.)
+    if assets:
         try:
-            exclude_regions = assets.resolve("exclude_regions")
-            logger.info(f"Using default exclude regions: {exclude_regions}")
-        except FileNotFoundError:
-            # Fallback to hardcoded path
-            pkg_dir = Path(__file__).parent
-            default_exclude = (
-                pkg_dir / "data" / "exclude-regions" / "hg19-blacklist.v2.bed.gz"
+            exclude_regions, _ = resolve_exclude_regions(
+                exclude_regions, assets, logger
             )
-            if default_exclude.exists():
-                exclude_regions = default_exclude
-                logger.info(f"Using default exclude regions: {exclude_regions}")
+        except ValueError as e:
+            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+            raise typer.Exit(1)
     elif exclude_regions and not exclude_regions.exists():
         logger.error(f"Exclude regions file not found: {exclude_regions}")
         raise typer.Exit(1)

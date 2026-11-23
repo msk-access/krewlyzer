@@ -53,7 +53,12 @@ from .core.utils import resolve_str as _resolve_str
 from .core.utils import resolve_bool as _resolve_bool
 
 # Import asset resolution functions (PON/target auto-loading)
-from .core.asset_resolution import resolve_target_regions, resolve_pon_model
+from .core.asset_resolution import (
+    resolve_exclude_regions,
+    resolve_pon_model,
+    resolve_target_regions,
+)
+from .core.fsc_processor import default_continue_n
 from .core.gc_assets import factor_table_path, resolve_gc_factors
 
 # Import startup banner logging
@@ -394,6 +399,15 @@ def run_all(
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 
+    # The blacklist, by the rule extract and motif use
+    try:
+        resolved_exclude_regions, _ = resolve_exclude_regions(
+            resolved_exclude_regions, assets, logger
+        )
+    except ValueError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+
     # Panel mode detection (based on resolved targets, not raw CLI arg)
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
 
@@ -524,15 +538,11 @@ def run_all(
 
     # Window settings for FSC/FSR
     # fsc_windows: bin size in bp — must match the bundled bin BED (100kb)
-    # fsc_continue_n: bins per aggregated output row
-    #   WGS: 50 bins × 100kb = 5Mb windows (arm-level CNV resolution)
-    #   Panel: 1 bin = 100kb per row (preserves per-bin/gene resolution)
+    # fsc_continue_n: bins per aggregated output row, by mode (core.fsc_processor, the rule
+    #   `krewlyzer fsc`/`fsr` also use)
     fsc_windows = 100000  # Always matches bundled 100kb bin file
-    if is_panel_mode:
-        fsc_continue_n = 1
-        logger.info("Panel mode: FSC/FSR using continue_n=1 (per-bin resolution)")
-    else:
-        fsc_continue_n = 50
+    fsc_continue_n = default_continue_n(is_panel_mode)
+    logger.info(f"FSC/FSR: {fsc_continue_n} bin(s) per row")
     if bin_input:
         logger.info(f"Using custom bin file: {bin_input}")
 
@@ -752,7 +762,7 @@ def run_all(
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=require_proper_pair,
                     target_regions=resolved_target_path,
-                    exclude_regions=resolved_exclude_regions or assets.exclude_regions,
+                    exclude_regions=resolved_exclude_regions,
                     write_bed=should_run_extract,
                     output_dir=output if should_run_extract else None,
                     sample_name=sample,

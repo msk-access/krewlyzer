@@ -12,6 +12,7 @@ against these declarations is `tests/invariants/test_tool_level_outputs.py`.
 
 from __future__ import annotations
 
+import fnmatch
 import re
 
 import pytest
@@ -91,8 +92,9 @@ def test_motif_is_given_the_bam():
     call = re.search(r"KREWLYZER_MOTIF\(\s*(\w+)", subworkflow)
     assert call, "tool_level no longer calls KREWLYZER_MOTIF"
     source = re.search(rf"^\s*{call.group(1)}\s*=\s*(.*)$", subworkflow, re.M)
-    assert source and "ch_extract" in source.group(
-        1
+    # A word match: `ch_extracted`, the BED channel, contains `ch_extract`.
+    assert source and re.search(
+        r"\bch_extract\b", source.group(1)
     ), f"KREWLYZER_MOTIF is given {call.group(1)}, which is not built from the BAM channel"
 
 
@@ -174,3 +176,129 @@ def test_region_mds_runs_only_for_a_sample_with_an_assay():
     call = subworkflow[subworkflow.index("KREWLYZER_REGION_MDS(") :]
     call = call[: call.index("\n    )")]
     assert ".filter" in call and "'UNKNOWN'" in call and "'WGS'" in call, call
+
+
+#: What run-all's module declares that no tool-level module does, deliberately, with the reason.
+_RUN_ALL_ONLY = {
+    # Written by run-all's own stamp and validation; tool-level has neither (the record and
+    # the marker are the finalize step's).
+    "*.features.json": "run-all's summary",
+    "*.validation.json": "run-all's own validation",
+    "*.fingerprint.json": "run-all's cohort fingerprint",
+    # The single tool writes no `.sync` tables in the run's format (msk-access/krewlyzer#100).
+    "*.TFBS.sync.*": "#100",
+    "*.TFBS.ontarget.sync.*": "#100",
+    "*.ATAC.sync.*": "#100",
+    "*.ATAC.ontarget.sync.*": "#100",
+}
+
+
+def test_every_table_run_all_declares_a_tool_module_declares():
+    """Read from the declarations, not from a run: a table that only some data produces
+    (`OCF.ontarget`, which needs on-target fragments in an OCR) is never written by the
+    synthetic sample, so the drift test cannot see it undeclared.
+    """
+    tools = [o for m, _ in nf.TOOL_MODULES for o in nf.outputs(m)]
+    uncovered = [
+        name
+        for name in (o.glob.replace("*", "S") for o in nf.outputs("runall"))
+        if not any(t.matches(name) for t in tools)
+        and not any(fnmatch.fnmatchcase(name, g) for g in _RUN_ALL_ONLY)
+    ]
+    assert not uncovered, (
+        f"run-all's module declares {uncovered}, which no tool-level module does: "
+        "tool-level mode would write them and drop them from --outdir"
+    )
+
+
+def _items(listing: str) -> int:
+    """How many items a Groovy list literal's body has, counting only top-level commas."""
+    depth, count = 0, 1
+    for ch in listing:
+        depth += ch in "[({"
+        depth -= ch in "])}"
+        count += ch == "," and depth == 0
+    return count
+
+
+def _last_list(expression: str) -> str:
+    """The body of the last `-> [ ... ]` a closure in `expression` returns."""
+    start = expression.rindex("-> [") + len("-> [")
+    depth = 1
+    for i, ch in enumerate(expression[start:], start):
+        depth += ch == "["
+        depth -= ch == "]"
+        if depth == 0:
+            return expression[start:i]
+    raise ValueError(f"unclosed list in {expression!r}")
+
+
+def _channel_size(subworkflow: str, argument: str) -> int:
+    """The tuple size of the channel `argument` names, or builds inline."""
+    if "-> [" in argument:
+        return _items(_last_list(argument))
+    defined = re.search(
+        rf"^\s*{argument}\s*=(.*?)(?=^\s*$|^\s*//|^\s*KREWLYZER_)",
+        subworkflow,
+        re.M | re.S,
+    )
+    if defined:
+        return _items(_last_list(defined.group(1)))
+    take = re.search(rf"^\s*{argument}\s*//\s*\[([^\]]*)\]", subworkflow, re.M)
+    assert take, f"cannot tell what {argument} carries"
+    return _items(take.group(1))
+
+
+def _call_argument(subworkflow: str, process: str) -> str:
+    """The first argument of `KREWLYZER_<process>(...)`, up to its top-level comma."""
+    start = subworkflow.index(f"KREWLYZER_{process}(") + len(f"KREWLYZER_{process}(")
+    depth = 0
+    for i, ch in enumerate(subworkflow[start:], start):
+        if ch in "[({":
+            depth += 1
+        elif ch in "])}":
+            if depth == 0:
+                return subworkflow[start:i].strip()
+            depth -= 1
+        elif ch == "," and depth == 0:
+            return subworkflow[start:i].strip()
+    raise ValueError(process)
+
+
+@pytest.mark.parametrize("module", [m for m, _ in nf.TOOL_MODULES])
+def test_each_process_is_given_a_tuple_of_its_input_size(module):
+    """motif was given a 2-tuple where it takes three. Groovy finds that only when it runs."""
+    expected = len(
+        re.findall(
+            r"\b(?:val|path)\(",
+            re.search(r"^\s*tuple (.*)$", nf.text(module), re.M).group(1),
+        )
+    )
+    subworkflow = nf.TOOL_LEVEL.read_text()
+    given = _channel_size(subworkflow, _call_argument(subworkflow, module.upper()))
+    assert given == expected, f"{module} takes a {expected}-tuple and is given {given}"
+
+
+_INPUT_CHECK = nf.TOOL_LEVEL.parents[1] / "input_check" / "main.nf"
+
+
+def _maf_channel(name: str) -> str:
+    source = _INPUT_CHECK.read_text()
+    start = source.index(f"{name} = ch_parsed")
+    return source[start : source.index("\n\n", start)]
+
+
+@pytest.mark.parametrize("channel", ["ch_maf_multi", "ch_maf_single"])
+def test_mfsd_reads_the_dedicated_mfsd_bam_as_run_all_does(channel):
+    """Run-all reads mFSD from the samplesheet's `mfsd_bam` (the duplex BAM) when given, with
+    duplex weighting on. Tool-level read the main BAM, with it off."""
+    body = _maf_channel(channel)
+    # Not `mfsd_bai ?: bai`: an unindexed duplex BAM would be given the main BAM's index.
+    assert "mfsd_bam ?: bam" in body and "mfsd_bam ? mfsd_bai : bai" in body, body
+    assert "mfsd_duplex" in body, body
+    assert "meta.mfsd_duplex" in nf.script("mfsd")
+
+
+def test_mfsd_writes_no_table_run_all_does_not():
+    """Run-all calls mFSD with `output_distributions=False`."""
+    assert "--output-distributions" not in nf.script("mfsd")

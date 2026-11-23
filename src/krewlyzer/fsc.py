@@ -35,6 +35,7 @@ logging.basicConfig(
 logger = logging.getLogger("fsc")
 
 # Import asset resolution functions
+from .core.fsc_processor import default_continue_n
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
 from .core.output_provenance import ConfigurationMismatch
 
@@ -85,8 +86,12 @@ def fsc(
     windows: int = typer.Option(
         100000, "--windows", "-w", help="Window size (default: 100000)"
     ),
-    continue_n: int = typer.Option(
-        50, "--continue-n", "-c", help="Consecutive window number"
+    continue_n: Optional[int] = typer.Option(
+        None,
+        "--continue-n",
+        "-c",
+        help="100 kb bins per output row (default: 1 with target regions, 50 without, "
+        "as run-all)",
     ),
     genome: str = typer.Option(
         "hg19", "--genome", "-G", help="Genome build (hg19/GRCh37/hg38/GRCh38)"
@@ -184,6 +189,11 @@ def fsc(
         raise typer.Exit(1)
 
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
+    if continue_n is None:
+        continue_n = default_continue_n(is_panel_mode)
+    logger.info(
+        f"Window: {continue_n} bin(s) per row ({'panel' if is_panel_mode else 'WGS'})"
+    )
 
     # ═══════════════════════════════════════════════════════════════════
     # STARTUP BANNER

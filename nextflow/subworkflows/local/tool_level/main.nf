@@ -26,7 +26,7 @@ workflow TOOL_LEVEL {
     ch_extract    // [meta, bam, bai, pon, targets, wps_anchors]
     ch_beds       // [meta, bed, pon, targets, wps_anchors] - pre-extracted
     ch_methyl     // [meta, mbam, mbai]
-    ch_mfsd       // [meta, bam, bai, maf] - already filtered
+    ch_mfsd       // [meta, bam, bai, maf] - already filtered; the mFSD BAM (meta.mfsd_duplex)
     fasta
 
     main:
@@ -120,8 +120,10 @@ workflow TOOL_LEVEL {
     // =====================================================
     // 4. mFSD (Mutant Fragment Size Distribution)
     // =====================================================
-    // mFSD: no factor tables in tool-level mode yet. mFSD's GC weighting is decided in the
-    // fragment-model Step 4 (mutant and wild-type fragments are GC-matched by locus).
+    // mFSD: no factor tables in tool-level mode yet, where run-all passes extract's (on-target
+    // first on a panel). How a BAM-only tool chooses its table is decided in the fragment-model
+    // Step 4 (mutant and wild-type fragments GC-matched by locus); docs/nextflow/outputs.md
+    // lists the difference.
     KREWLYZER_MFSD(ch_mfsd, fasta, [])
     ch_versions = ch_versions.mix(KREWLYZER_MFSD.out.versions)
 

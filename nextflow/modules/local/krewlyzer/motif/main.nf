@@ -46,6 +46,11 @@ process KREWLYZER_MOTIF {
     def pon_arg = pon ? "--pon-model ${pon}" : ""
     def skip_pon_arg = params.skip_pon ? "--skip-pon" : ""
     def pon_variant_arg = params.pon_variant != 'all_unique' ? "--pon-variant ${params.pon_variant}" : ""
+    // run-all's read filters; the tool applies the genome's bundled blacklist, as run-all does.
+    def mapq_arg = params.mapq != 20 ? "--mapq ${params.mapq}" : ""
+    def minlen_arg = params.minlen != 65 ? "--minlen ${params.minlen}" : ""
+    def maxlen_arg = params.maxlen != 1000 ? "--maxlen ${params.maxlen}" : ""
+    def skip_dup_arg = params.skip_duplicates == false ? "--no-skip-duplicates" : ""
     def proper_pair_arg = params.require_proper_pair == false ? "--no-require-proper-pair" : ""
     def verbose_arg = params.verbose ? "--verbose" : ""
     def output_format_arg = params.output_format && params.output_format != 'tsv' ? "--output-format ${params.output_format}" : ""
@@ -65,6 +70,10 @@ process KREWLYZER_MOTIF {
         $pon_arg \\
         $skip_pon_arg \\
         $pon_variant_arg \\
+        $mapq_arg \\
+        $minlen_arg \\
+        $maxlen_arg \\
+        $skip_dup_arg \\
         $proper_pair_arg \\
         $verbose_arg \\
         $output_format_arg \\

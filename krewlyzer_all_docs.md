@@ -2173,7 +2173,7 @@ krewlyzer fsc -i sample.bed.gz -o output/ --bin-input custom_bins.bed
 | `--skip-target-regions` | | FLAG | | Force WGS mode (ignore bundled targets) |
 | `--assay` | `-A` | TEXT | | Assay type (xs1/xs2) for gene-centric FSC |
 | `--windows` | `-w` | INT | 100000 | Window size for aggregation |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window number |
+| `--continue-n` | `-c` | INT | 1 with target regions, else 50 | 100 kb bins per output row; run-all's rule |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all cores) |
@@ -2910,7 +2910,7 @@ krewlyzer fsr -i sample.bed.gz -o output/ \
 | `--assay` | `-A` | TEXT | | Assay code (xs1/xs2) for bundled assets |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/hg38) |
 | `--windows` | `-w` | INT | 100000 | Window size |
-| `--continue-n` | `-c` | INT | 50 | Consecutive window number |
+| `--continue-n` | `-c` | INT | 1 with target regions, else 50 | 100 kb bins per output row; run-all's rule |
 | `--gc-correct` | | FLAG | True | Apply GC bias correction |
 | `--threads` | `-t` | INT | 0 | Number of threads (0=all cores) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |
@@ -4549,6 +4549,11 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization |
 | `--kmer` | `-k` | INT | 4 | K-mer size for motif extraction |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | Exclude regions BED (the genome's blacklist, as run-all) |
+| `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
+| `--minlen` | | INT | 65 | Minimum fragment length |
+| `--maxlen` | | INT | 1000 | Maximum fragment length |
+| `--skip-duplicates` | | FLAG | True | Skip duplicate reads (`--no-skip-duplicates` to keep them) |
 | `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--require-proper-pair` | | FLAG | True | Require proper pairs (disable for duplex) |
@@ -8138,10 +8143,10 @@ nextflow run msk-access/krewlyzer \
 !!! warning "One `--outdir` per configuration"
     Results are copied into `{outdir}/{sample}/`, and a later run copies its files over the
     earlier one's without removing any the later run did not make. Rerunning a sample with
-    different settings (another `--assay`, no targets, another `output_format`) into the same
-    `--outdir` would leave the first run's extra tables beside the second run's record, read as
-    current. The CLI refuses such a rerun; the pipeline cannot see the published folder, so use a
-    fresh `--outdir`. `krewlyzer validate-output` on the published folder reports tables in two
+    different settings (another `--assay`, no targets, another `output_format`, another
+    `--use_runall`) into the same `--outdir` would leave the first run's extra tables beside the
+    second run's record, read as current. The CLI refuses such a rerun; the pipeline cannot see
+    the published folder, so use a fresh `--outdir`. `krewlyzer validate-output` on the published folder reports tables in two
     formats as `FORMAT.MIXED`; another assay or targets it cannot see.
 
 ## Workflow Architecture
@@ -8330,12 +8335,21 @@ into.
 !!! warning "No completion marker yet"
     `{sample}.metadata.*` is not published in this mode. Downstream takes that file to mean the
     sample is complete, and extraction's record would appear before any feature table, without
-    `krewlyzer_version` or `pon_applied`. So a tool-level sample is not read downstream, and
-    `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all for a cohort.
+    `krewlyzer_version` or `pon_applied`. So a sample from a fresh `--outdir` is not read
+    downstream, and `krewlyzer validate-output` reports `COMPLETION.MARKER_ABSENT`. Use run-all
+    for a cohort. In an `--outdir` an earlier run-all used, that run's record stays and marks the
+    sample complete, describing the earlier run: use a fresh `--outdir`.
 
 Not published: `fsr`'s copy of `fsc_counts` (`fsc` publishes the same table), and the Rust
-intermediates `region-entropy` leaves (`*.raw.tsv`). `region-entropy` run on its own also writes
-no `TFBS/ATAC.sync` tables, which run-all does.
+intermediates `region-entropy` leaves (`*.raw.tsv`).
+
+Still different from run-all:
+
+- `region-entropy` run on its own writes no `TFBS/ATAC.sync` tables
+  ([#100](https://github.com/msk-access/krewlyzer/issues/100)).
+- mFSD is not GC-corrected. Run-all passes extract's factor table (on-target first on a panel);
+  tool-level passes none until the GC redesign decides how a BAM-only tool chooses its table.
+- `--region_mds_e1_only` is not applied: `krewlyzer region-mds` has no such option.
 
 ---
 
