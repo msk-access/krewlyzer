@@ -62,8 +62,10 @@ def write_gc_factor_table(
 ) -> bool:
     """Fit one population's GC factors and write its table. True only if a table was written.
 
-    The one place a factor table is written for a sample, so what the log says is what the folder
-    holds: the tools reading it find a table by existence, and a line naming a table that was not
+    The one place a factor table is written from extraction's observations (extract, run-all and
+    the PON build, both populations), so what the log says is what the folder holds. A single
+    tool that refits from the BED writes through the unified pipeline instead, and Rust's
+    `write_factor_tables` holds both writers to every format or none. Why it matters: the tools reading it find a table by existence, and a line naming a table that was not
     written ("Wrote 0 on-target GC factors") sends a reader after one that does not exist. Rust
     returns 0 and writes nothing when no length bin can be fitted, and writes every format or
     none. ``assets`` is an `AssetManager` or a genome name; a failure to resolve it is a failed

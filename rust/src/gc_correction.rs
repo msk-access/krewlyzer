@@ -613,8 +613,7 @@ pub fn compute_and_write_gc_factors(
     output_format: &str,
     compress: bool,
 ) -> PyResult<u64> {
-    use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
-    use std::path::PathBuf;
+    use crate::output_utils::validated_output_format;
     let fmt = validated_output_format(output_format);
     info!(
         "gc_correction: computing factors from {} observations (format={}, compress={})",
@@ -655,37 +654,48 @@ pub fn compute_and_write_gc_factors(
     } else {
         output_path
     };
-    //
-    // All formats or none: with "both", a TSV written before the Parquet write failed was left
-    // behind, and every tool reading the folder used it while the caller recorded no table.
+    write_factor_tables(&factors, stem, fmt, compress).map_err(PyRuntimeError::new_err)?;
+
+    Ok(n_factors)
+}
+
+/// Write a factor table at `stem` in every format `fmt` asks for, or in none.
+///
+/// The one Rust writer of a sample's factor table: extraction's (`compute_and_write_gc_factors`)
+/// and the unified pipeline's refit both call it. With "both", a TSV written before the Parquet
+/// write failed was left behind, and every tool reading the folder used it while the caller
+/// recorded no table: on any failure the tables this call had started are removed first.
+pub(crate) fn write_factor_tables(
+    factors: &CorrectionFactors,
+    stem: &str,
+    fmt: &str,
+    compress: bool,
+) -> std::result::Result<Vec<std::path::PathBuf>, String> {
+    use crate::output_utils::{should_write_parquet, should_write_tsv};
+    use std::path::PathBuf;
     let mut started: Vec<PathBuf> = Vec::new();
-    let written = (|| -> PyResult<()> {
+    let mut write = || -> std::result::Result<(), String> {
         if should_write_tsv(fmt) {
-            let tsv_out = if compress {
-                PathBuf::from(format!("{}.tsv.gz", stem))
-            } else {
-                PathBuf::from(format!("{}.tsv", stem))
-            };
+            let tsv_out = PathBuf::from(format!("{}{}", stem, if compress { ".tsv.gz" } else { ".tsv" }));
             started.push(tsv_out.clone());
-            factors.write_tsv(&tsv_out, compress)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
+            factors.write_tsv(&tsv_out, compress).map_err(|e| format!("Failed to write TSV: {}", e))?;
             info!("gc_correction: wrote {:?}", tsv_out);
         }
         if should_write_parquet(fmt) {
             let parquet_out = PathBuf::from(format!("{}.parquet", stem));
             started.push(parquet_out.clone());
-            factors.write_parquet(&parquet_out)
-                .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
+            factors.write_parquet(&parquet_out).map_err(|e| format!("Failed to write Parquet: {}", e))?;
             info!("gc_correction: wrote {:?}", parquet_out);
         }
         Ok(())
-    })();
-    if let Err(e) = written {
-        remove_started(&started);
-        return Err(e);
+    };
+    match write() {
+        Ok(()) => Ok(started),
+        Err(e) => {
+            remove_started(&started);
+            Err(e)
+        }
     }
-
-    Ok(n_factors)
 }
 
 /// Remove the factor tables a failed write had started, so none is left for a reader to find.
@@ -816,6 +826,32 @@ impl FragmentConsumer for GcObservationConsumer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn one_bin() -> CorrectionFactors {
+        let mut data = HashMap::new();
+        data.insert(
+            (LengthBin(10), 40u8),
+            CorrectionBinStats { observed: 100, expected: 90, factor: 0.9 },
+        );
+        CorrectionFactors { data }
+    }
+
+    #[test]
+    fn write_factor_tables_writes_every_format_or_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let stem = dir.path().join("s.correction_factors");
+        let stem = stem.to_str().unwrap();
+
+        // The Parquet table cannot be created (a directory is there) after the TSV one was.
+        std::fs::create_dir(format!("{}.parquet", stem)).unwrap();
+        assert!(write_factor_tables(&one_bin(), stem, "both", false).is_err());
+        assert!(!std::path::Path::new(&format!("{}.tsv", stem)).exists(), "half a table left");
+
+        std::fs::remove_dir(format!("{}.parquet", stem)).unwrap();
+        let written = write_factor_tables(&one_bin(), stem, "both", false).unwrap();
+        assert_eq!(written.len(), 2);
+        assert!(written.iter().all(|p| p.is_file()));
+    }
 
     #[test]
     fn remove_started_removes_files_and_leaves_what_is_not_a_file() {

@@ -246,7 +246,7 @@ pub fn run_unified_pipeline(
         }
         // Use string-based stem extraction to avoid Path::with_extension()
         // mangling compound names like "correction_factors.ontarget".
-        use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
+        use crate::output_utils::validated_output_format;
         let fmt = validated_output_format(output_format);
         let factors_str = out_factors.to_string_lossy();
         let factors_stem = if let Some(stripped) = factors_str.strip_suffix(".tsv") {
@@ -255,19 +255,10 @@ pub fn run_unified_pipeline(
             &factors_str
         };
         debug!("pipeline: writing off-target GC factors → {} (format={})", factors_stem, fmt);
-        if should_write_tsv(fmt) && !computed.data.is_empty() {
-            let tsv_out = if compress {
-                PathBuf::from(format!("{}.tsv.gz", factors_stem))
-            } else {
-                PathBuf::from(format!("{}.tsv", factors_stem))
-            };
-            computed.write_tsv(&tsv_out, compress)
-                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (TSV): {}", e)))?;
-        }
-        if should_write_parquet(fmt) && !computed.data.is_empty() {
-            let pq = PathBuf::from(format!("{}.parquet", factors_stem));
-            computed.write_parquet(&pq)
-                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors (Parquet): {}", e)))?;
+        // Every format or none (`write_factor_tables`), as extraction's writer.
+        if !computed.data.is_empty() {
+            crate::gc_correction::write_factor_tables(&computed, factors_stem, fmt, compress)
+                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors: {}", e)))?;
         }
         
         Some(computed)
