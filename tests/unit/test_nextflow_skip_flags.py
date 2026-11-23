@@ -29,6 +29,7 @@ import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
 _INPUT_CHECK = _ROOT / "nextflow" / "subworkflows" / "local" / "input_check" / "main.nf"
+_WORKFLOW = _ROOT / "nextflow" / "workflows" / "krewlyzer" / "main.nf"
 
 pytestmark = [
     pytest.mark.unit,
@@ -79,4 +80,25 @@ def test_skip_flag_returns_empty_before_any_other_source(resolver: str, flag: st
     assert first_return and first_return.start() >= guard.start(), (
         f"{resolver}() can return a file before it checks params.{flag}: "
         f"{body[first_return.start():].splitlines()[0].strip()!r} comes first."
+    )
+
+
+def test_skip_pon_also_skips_the_pon_validation():
+    """`--skip_pon` must stop the workflow-level PON check too.
+
+    The workflow validates `params.pon_model` once per run, through
+    `Channel.fromPath(..., checkIfExists: true)`. Gated on `params.pon_model`
+    alone, a run that asked to skip the PON still stopped when that path was
+    missing or the PON failed validation -- for a file it was told not to use.
+    """
+    text = _WORKFLOW.read_text()
+    m = re.search(r"if\s*\(([^{]*)\)\s*\{\s*KREWLYZER_VALIDATE_PON\(", text)
+    assert m, (
+        f"no `if (...) {{ KREWLYZER_VALIDATE_PON(...)` block in {_WORKFLOW.name}; "
+        "if the call moved, move this check with it."
+    )
+    assert re.search(r"!\s*params\.skip_pon\b", m.group(1)), (
+        f"KREWLYZER_VALIDATE_PON runs under `if ({m.group(1).strip()})`, which "
+        "does not exclude --skip_pon: a run told to skip the PON still fails "
+        "on a missing or invalid one."
     )

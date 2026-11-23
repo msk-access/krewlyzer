@@ -8392,7 +8392,7 @@ All parameters for the Krewlyzer Nextflow pipeline. See `nextflow.config` for de
 |-----------|---------|-------------|
 | `--pon_model` | | Global PON model path (fallback) |
 | `--pon_variant` | `all_unique` | PON variant: `all_unique` or `duplex` |
-| `--skip_pon` | `false` | Skip PON z-score normalization. Overrides every PON source: the samplesheet's `pon` column, the assay's bundled PON and `--pon_model` are all ignored. Exception: with `--use_runall false`, `fsd`, `fsc`, `fsr`, `ocf` and `wps` still read `--pon_model` directly. |
+| `--skip_pon` | `false` | Skip PON z-score normalization. Overrides every PON source: the samplesheet's `pon` column, the assay's bundled PON and `--pon_model` are all ignored, and `--pon_model` is not validated. Exception: with `--use_runall false`, `fsd`, `fsc`, `fsr`, `ocf` and `wps` still read `--pon_model` directly. |
 
 ## Panel & WPS Parameters
 
