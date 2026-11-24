@@ -306,14 +306,20 @@ def resolve_exclude_regions(
     Returns ``(path, source)``, source ``explicit`` or ``bundled``.
 
     Raises:
-        ValueError: an explicit file that does not exist (it used to be used as given), or no
-            explicit file and no bundled blacklist for the genome, or only its Git LFS pointer
-            (it used to be a warning, and the run kept the blacklisted fragments and exited 0).
+        ValueError: an explicit file that does not exist (it used to be used as given) or is a
+            directory, or no explicit file and no bundled blacklist for the genome, or only its
+            Git LFS pointer (it used to be a warning, and the run kept the blacklisted fragments
+            and exited 0).
     """
     log = log or logger
     if explicit_path is not None:
         if not Path(explicit_path).exists():
             raise ValueError(f"Exclude regions file not found: {explicit_path}")
+        if not Path(explicit_path).is_file():
+            # Its bytes are the blacklist's digest in the record (`blacklist_digest`).
+            raise ValueError(
+                f"Exclude regions {explicit_path} is a directory, not a BED file"
+            )
         _refuse_an_lfs_pointer(Path(explicit_path), "--exclude-regions")
         log.info(f"Exclude regions: {Path(explicit_path).name} (explicit)")
         return Path(explicit_path), "explicit"

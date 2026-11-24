@@ -245,7 +245,7 @@ def run_features(
     # first run's extra tables looking current. run-all and the PON build own the record.
     if not owns_sample_record:
         from .output_provenance import (
-            refuse_a_bed_from_another_folder,
+            refuse_a_bed_the_record_does_not_describe,
             refuse_a_different_configuration,
         )
 
@@ -264,7 +264,7 @@ def run_features(
             compress=resolved_compress,
         )
         # A BED from another folder: its tables would be made from fragments other filters chose.
-        refuse_a_bed_from_another_folder(
+        refuse_a_bed_the_record_does_not_describe(
             bed_path,
             output_dir,
             sample_name,

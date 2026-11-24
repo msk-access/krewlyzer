@@ -301,6 +301,23 @@ def test_motif_with_another_blacklist_is_refused(sample, tmp_path):
     assert _files(out) == before
 
 
+@pytest.mark.parametrize("tool", ["extract", "motif", "run-all"])
+def test_a_directory_as_the_blacklist_is_refused_in_one_line(sample, tmp_path, tool):
+    """Read as a file to take its digest, a directory raised `IsADirectoryError` (fourth review).
+    Refused where the blacklist is resolved, as a missing file is."""
+    out, directory = tmp_path / "out", tmp_path / "regions"
+    directory.mkdir()
+    if tool == "run-all":
+        assert synth_run_all(sample, out, exclude_regions=directory) == 1
+        return
+    args = _extract_args if tool == "extract" else _motif_args
+    result = _cli(*args(sample, out, directory))
+
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code != 0, _message(result)
+    assert "is a directory" in _message(result), _message(result)
+
+
 @pytest.mark.parametrize("name", list(FILTERS))
 def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path, name):
     """As for the genome: the folder's filters are the folder's, whichever tool wrote them."""
@@ -766,6 +783,72 @@ def test_a_bed_tool_reads_a_bed_from_elsewhere_into_a_folder_without_a_record(
     assert _extract(sample, a, "--minlen", "150").exit_code == 0
 
     result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code == 0, result.output
+
+
+def _extract_as(sample, out, name, *extra):
+    """`extract` as `_extract`, for the sample ``name``: another sample's BED and record."""
+    args = list(_extract_args(sample, out, sample.assets.blacklist, *extra))
+    args[args.index("-s") + 1] = name
+    return _cli(*args)
+
+
+@pytest.mark.parametrize("extra", [(), ("--minlen", "150")], ids=["same", "other"])
+def test_a_bed_tool_refuses_another_samples_bed_in_the_folder(sample, tmp_path, extra):
+    """The fourth review's case: in a folder two samples share, `fsd -i b/T.bed.gz -s S` read T's
+    BED as the folder's own and rewrote S's FSD from T's fragments, under S's record. Another
+    sample's fragments, whatever filters made them."""
+    b = tmp_path / "b"
+    assert synth_run_all(sample, b) is None
+    assert _extract_as(sample, b, "T", *extra).exit_code == 0
+    before = _files(b)
+
+    result = _fsd(sample, b / "T.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert f"T.bed.gz is not {SAMPLE}'s BED" in _message(result), _message(result)
+    assert _files(b) == before
+
+
+def test_a_bed_tool_refuses_a_bed_extracted_for_another_genome(sample, tmp_path):
+    """Another build is another fragment set as surely as another mapq is."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a).exit_code == 0
+    assert synth_run_all(sample, b) is None
+    record_file = a / f"{SAMPLE}.metadata.parquet"
+    pd.read_parquet(record_file).assign(genome="hg38").to_parquet(
+        record_file, index=False
+    )
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "genome=GRCh37 in b/, GRCh38 in a/" in _message(result), _message(result)
+
+
+def test_a_bed_tool_refuses_a_bed_beside_a_record_it_cannot_read(sample, tmp_path):
+    """One line, not a traceback: a record nobody can read names no filters."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a).exit_code == 0
+    assert synth_run_all(sample, b) is None
+    (a / f"{SAMPLE}.metadata.parquet").write_bytes(b"not a table")
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert isinstance(result.exception, SystemExit), result.exception
+    assert result.exit_code == 1, _message(result)
+    assert "cannot be read" in _message(result), _message(result)
+
+
+def test_a_bed_tool_reads_its_own_bed_beside_an_old_record(sample, tmp_path):
+    """The folder's own BED is the one its record describes, whatever the record holds: an old
+    run-all folder's FSD is still rerun from its BED."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    _as_an_old_record(out)
+
+    result = _fsd(sample, out / f"{SAMPLE}.bed.gz", out)
 
     assert result.exit_code == 0, result.output
 

@@ -197,10 +197,10 @@ class ConfigurationMismatch(ValueError):
 #: the mapq. Recorded by content (`blacklist_digest`), not by name: two files can share a name, and
 #: the bundled one sits at another path in every install.
 #:
-#: Recorded truthfully only since the duplicate and proper-pair columns were added: before, every
-#: record said 20/65/1000 whatever the run used, and held neither column, nor any blacklist. So a
-#: record holding all six can be compared, and one that does not holds values nobody can trust
-#: (`filters_vouched`).
+#: Recorded truthfully only since the duplicate and proper-pair columns were added: every record a
+#: release wrote said 20/65/1000 whatever the run used, and none held either column or any
+#: blacklist. So a record holding all six can be compared, and one that does not may hold values
+#: its run did not use (`filters_vouched`).
 FILTER_FIELDS = (
     "filters_mapq",
     "filters_min_length",
@@ -404,7 +404,7 @@ def refuse_a_different_configuration(
     run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`), and it
     and the tools reading the BAM refuse to write beside tables another step made
     (`refuse_tables_of_unrecorded_filters`), which they call next; the tools reading the BED
-    compare a BED from another folder (`refuse_a_bed_from_another_folder`).
+    compare a BED from another folder (`refuse_a_bed_the_record_does_not_describe`).
 
     The output format is always compared, from ``output_format``/``compress``, and is not a
     ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
@@ -522,7 +522,7 @@ def refuse_tables_of_unrecorded_filters(
 
     Called by run-all, `motif`, `region-mds` and `mfsd`. `extract` refuses any table at all
     (`refuse_to_replace_a_later_record`). The tools reading the BED make their tables from the
-    fragments their record names, or compare another folder's BED (`refuse_a_bed_from_another_folder`).
+    fragments their record names, or compare another folder's BED (`refuse_a_bed_the_record_does_not_describe`).
     """
     frame = _read_record(
         record_path(output_dir, sample, output_format=output_format, compress=compress)
@@ -546,7 +546,7 @@ def refuse_tables_of_unrecorded_filters(
         )
 
 
-def refuse_a_bed_from_another_folder(
+def refuse_a_bed_the_record_does_not_describe(
     bed_path: Path,
     output_dir: Path,
     sample: str,
@@ -554,40 +554,47 @@ def refuse_a_bed_from_another_folder(
     output_format: str,
     compress: bool,
 ) -> None:
-    """Refuse tables made from another folder's BED into a folder whose record names other read
-    filters, or cannot be compared with it.
+    """Refuse tables made from a BED other than the one the folder's record describes, unless its
+    own record shows it holds the same fragments.
 
     The tools reading the BED are given it by path, and make their tables from whatever fragments
     it holds: `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150 fragments under b's
-    record, which says 65. A BED's filters are those its own folder's record names, so the two
-    records are compared over `FILTER_FIELDS`. A record that does not hold all six
-    (`filters_vouched`), or no record beside the BED, cannot be compared, and is refused too.
+    record, which says 65; in a folder two samples share, `fsd -i b/T.bed.gz -s S` rewrote S's
+    from T's. So:
 
-    Not compared: the folder's own BED, which is the one its record describes; and anything into
-    a folder without a record, where nothing claims the tables are one sample's (tools run by hand,
-    and Nextflow's tasks, each writing its own folder with the BED staged in).
+    - **Another sample's BED** (named for another sample) is refused, whatever filters made it:
+      its fragments are another sample's.
+    - **A BED from another folder** is compared with the folder's record by the record beside it,
+      over `genome` and `FILTER_FIELDS`. A record that does not hold all six filters
+      (`filters_vouched`), none beside the BED, or one that cannot be read, cannot be compared,
+      and is refused too.
+
+    Not compared: the sample's own BED in the folder, which is the one its record describes; and
+    anything into a folder without a record, where nothing claims the tables are one sample's
+    (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
 
     Called by the `run_features` tools and `region-entropy`, after
     `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing
-    filter with both values, or `UnrecordedFilters`.
+    setting with both values, or `UnrecordedFilters`.
     """
     bed = Path(bed_path).absolute()
     folder = Path(output_dir)
-    if bed.parent.resolve() == folder.resolve():
+    # As the tools name the sample from the BED.
+    bed_sample = bed.name.replace(".bed.gz", "").replace(".bed", "")
+    if bed_sample == sample and bed.parent.resolve() == folder.resolve():
         return
     ours = _read_record(
         record_path(folder, sample, output_format=output_format, compress=compress)
     )
     if ours is None or ours.empty:
         return
-    # As the tools name the sample from the BED.
-    bed_sample = bed.name.replace(".bed.gz", "").replace(".bed", "")
-    theirs = _read_record(
-        record_path(
-            bed.parent, bed_sample, output_format=output_format, compress=compress
-        )
-    )
     where, here = f"{bed.parent.name}/", f"{folder.name}/"
+    if bed_sample != sample:
+        raise ConfigurationMismatch(
+            f"{bed.name} is not {sample}'s BED, and {here} holds {sample}'s record: this run's "
+            f"tables would be made from another sample's fragments under it. Use {sample}'s BED, "
+            "or a fresh output folder."
+        )
     advice = (
         " This run's tables would sit beside the folder's, and nothing could say whether both "
         f"were made from the same fragments. Use the BED in {here}, or a fresh output folder."
@@ -598,6 +605,19 @@ def refuse_a_bed_from_another_folder(
             f"so {bed.name} from {where} cannot be compared with the record in {here}."
             + advice
         )
+    beside = record_path(
+        bed.parent, bed_sample, output_format=output_format, compress=compress
+    )
+    try:
+        theirs = _read_record(beside)
+    except (
+        Exception
+    ) as e:  # any reader's error: a record nobody can read names no filters
+        raise UnrecordedFilters(
+            f"{beside.name if beside else 'The record'} in {where} cannot be read "
+            f"({type(e).__name__}), so nothing names the read filters {bed.name} was extracted "
+            f"with, and it cannot be compared with the record in {here}." + advice
+        ) from e
     if theirs is None or theirs.empty:
         raise UnrecordedFilters(
             f"{where} holds no record of {bed_sample}, so nothing names the read filters "
@@ -610,7 +630,9 @@ def refuse_a_bed_from_another_folder(
             f"with, so it cannot be compared with the record in {here}." + advice
         )
     differing = []
-    for field in FILTER_FIELDS:
+    for field in ("genome", *FILTER_FIELDS):
+        if field not in ours.columns or field not in theirs.columns:
+            continue  # the genome, in a record written before it was recorded
         recorded = _setting(field, ours[field].iloc[0])
         given = _setting(field, theirs[field].iloc[0])
         if recorded != given:
@@ -619,7 +641,7 @@ def refuse_a_bed_from_another_folder(
             )
     if differing:
         raise ConfigurationMismatch(
-            f"{bed.name} in {where} was extracted with other read filters than the record in "
+            f"{bed.name} in {where} was extracted with other settings than the record in "
             f"{here} names: " + "; ".join(differing) + "." + advice
         )
 

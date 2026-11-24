@@ -1203,20 +1203,21 @@ and it drops duplicates whatever its flag says), and `uxm` compares the genome, 
 markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its assay)
 left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second
 run's, and a run-all after `extract --mapq 30` kept that BED and wrote its motif tables at mapq 20,
-under one record. The filters are compared only when the record holds all six: one written before
-they were recorded truthfully says 20/65/1000 whatever its run used, so a rerun is not refused for
-those values. run-all extracts that folder's BED again instead of reusing it (as it does a BED with
-no record beside it), unless tables were made from it, whether or not it is still there: then it
-refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh
-record over them. A run-all folder whose record lacks the filter columns, from any earlier build,
-is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd` cannot extract
-again, so over such a record they refuse when the folder holds the BED or tables another step made,
-and otherwise warn that the filters could not be compared, and run. run-all also refuses tables
-with no record beside them, since the record it writes would vouch for them; a single tool writes
-no record into such a folder, and runs. A tool reading the BED from another folder
-(`fsd -i a/S.bed.gz -o b`) compares the read filters recorded beside that BED with the output
-folder's record, and refuses other ones, or a record on either side that cannot name them; into a
-folder without a record it runs.
+under one record. The filters are compared only when the record holds all six: one without them may
+hold values its run did not use (every record a release wrote said 20/65/1000), so a rerun is not
+refused for those values. run-all extracts that folder's BED again instead of reusing it (as it
+does a BED with no record beside it), unless tables were made from it, whether or not it is still
+there: then it refuses, like `extract`, since a run stopped after extracting would leave a new BED
+and a fresh record over them. A run-all folder whose record lacks the filter columns, from any
+earlier build, is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`
+cannot extract again, so over such a record they refuse when the folder holds the BED or tables
+another step made, and otherwise warn that the filters could not be compared, and run. run-all also
+refuses tables with no record beside them, since the record it writes would vouch for them; a
+single tool writes no record into such a folder, and runs. A tool reading the BED from another
+folder (`fsd -i a/S.bed.gz -o b`) compares the genome and read filters recorded beside that BED
+with the output folder's record, and refuses other ones, or a record on either side that cannot
+name them or cannot be read. It refuses another sample's BED (`fsd -i b/T.bed.gz -s S`) whatever
+made it. Into a folder without a record it runs.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

@@ -335,23 +335,25 @@ All notable changes to this project will be documented in this file.
   `filters_require_proper_pair`, which it did not hold, and `filters_blacklist_sha256`: the SHA-256
   of the blacklist file's bytes, so the same file at another path (the bundled one sits at another
   path in every install) is the same blacklist, and an edited one under the same name is not. A
-  record without them was written before the filters were recorded truthfully (every one said
-  20/65/1000), so its values are not compared. run-all extracts that folder's BED again rather than
-  reuse it, as it now does a BED with no record beside it, unless feature tables were made from it,
-  whether or not it is still there: then it refuses, like `extract`, so a run-all folder whose
-  record lacks these columns, from any earlier build, is rerun into a fresh output folder. `motif`,
-  `region-mds` and `mfsd`, which cannot extract again, refuse such a folder when it holds the BED
-  or tables another step made (their own they replace), and otherwise warn that the filters could
-  not be compared: one check for all four
-  (`output_provenance.refuse_tables_of_unrecorded_filters`). The BED counts, so the order the tools
-  run in no longer decides: `motif --minlen 150` over an old `extract` folder warned and ran, and
-  `fsd` then read the BED unchecked. run-all also refuses a folder of tables with no record beside
-  it, since its record would vouch for them; a single tool writes no record there, and runs. The
-  tools reading the BED compare a BED from another folder with the output folder's record:
-  `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150 fragments under b's record, which
-  says 65. Other filters are refused, and so is a BED or a folder whose record cannot name them;
-  from the folder's own BED, or into a folder without a record (Nextflow's tasks), they run as
-  before (`output_provenance.refuse_a_bed_from_another_folder`,
+  record without them was written before the filters were recorded truthfully (every record a
+  release wrote said 20/65/1000), so its values are not compared. `-x` given a directory is
+  refused, as a missing file is. run-all extracts that folder's BED again rather than reuse it, as
+  it now does a BED with no record beside it, unless feature tables were made from it, whether or
+  not it is still there: then it refuses, like `extract`, so a run-all folder whose record lacks
+  these columns, from any earlier build, is rerun into a fresh output folder. `motif`, `region-mds`
+  and `mfsd`, which cannot extract again, refuse such a folder when it holds the BED or tables
+  another step made (their own they replace), and otherwise warn that the filters could not be
+  compared: one check for all four (`output_provenance.refuse_tables_of_unrecorded_filters`). The
+  BED counts, so the order the tools run in no longer decides: `motif --minlen 150` over an old
+  `extract` folder warned and ran, and `fsd` then read the BED unchecked. run-all also refuses a
+  folder of tables with no record beside it, since its record would vouch for them; a single tool
+  writes no record there, and runs. The tools reading the BED compare a BED from another folder
+  with the output folder's record: `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150
+  fragments under b's record, which says 65. Another genome or other filters are refused, and so is
+  a BED or a folder whose record cannot name them or cannot be read; so is another sample's BED
+  (`fsd -i b/T.bed.gz -s S` in a folder two samples share), whatever made it. From the sample's own
+  BED in the folder, or into a folder without a record (Nextflow's tasks), they run as before
+  (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
   `tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules

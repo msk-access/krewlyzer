@@ -204,7 +204,7 @@ def region_entropy(
         # extra tables looking current, and a BED from another folder may hold other fragments.
         # A `ConfigurationMismatch` is a ValueError.
         from .core.output_provenance import (
-            refuse_a_bed_from_another_folder,
+            refuse_a_bed_the_record_does_not_describe,
             refuse_a_different_configuration,
         )
 
@@ -215,7 +215,7 @@ def region_entropy(
             output_format=output_format,
             compress=compress,
         )
-        refuse_a_bed_from_another_folder(
+        refuse_a_bed_the_record_does_not_describe(
             bedgz_input,
             output,
             sample_name,
