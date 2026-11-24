@@ -299,18 +299,19 @@ All notable changes to this project will be documented in this file.
 - **`extract` no longer replaces a record run-all or a single tool wrote into.** Run into a folder
   `run-all` had finished (`run-all -A xs1`, then `extract -A xs1`), it rewrote
   `{sample}.metadata.parquet`, downstream's completion marker, with extraction's fields alone:
-  about thirty columns dropped, `krewlyzer_version`, `pon_applied` and every `{stage}_status`
-  among them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
+  about thirty columns dropped, `krewlyzer_version`, `pon_applied` and every `{stage}_status` among
+  them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
   sample. It now stops before writing anything when any copy of the record (`.tsv`, `.tsv.gz`,
   `.parquet`) holds a provenance column or a stage status, which only run-all and the single tools
   write, or when any table the output contract declares beside its own exists for the sample, in
-  any format (`output_provenance.refuse_to_replace_a_later_record`,
-  `contract.feature_table_suffixes`). The record alone was not enough: a run-all killed between
-  writing the record and stamping it, or a folder from before provenance, has feature tables
-  beside a record that looks like extraction's, and `extract` with new filters replaced the BED
-  and the marker under them. Updating only its own fields was not enough either: a new BED from
-  other filters would leave every table made from the old one under its recorded `ran`. A rerun of
-  `extract` into a folder it wrote alone is still allowed.
+  any format, but UXM's, which reads the BAM at a fixed mapq and never the BED
+  (`output_provenance.refuse_to_replace_a_later_record`, `contract.feature_table_suffixes`). The
+  record alone was not enough: a run-all killed between writing the record and stamping it, or a
+  folder from before provenance, has feature tables beside a record that looks like extraction's,
+  and `extract` with new filters replaced the BED and the marker under them. Updating only its own
+  fields was not enough either: a new BED from other filters would leave every table made from the
+  old one under its recorded `ran`. A rerun of `extract` into a folder it wrote alone is still
+  allowed.
 - **The record's filters and GC flag say what the run did.** `write_extraction_outputs` wrote
   `filters_mapq` 20, `filters_min_length` 65 and `filters_max_length` 1000 whatever the run used;
   they now come from the `ExtractionResult`, which carries the filters `extract_sample` applied,

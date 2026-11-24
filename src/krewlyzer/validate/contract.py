@@ -672,10 +672,12 @@ EXTRACTION_TABLES: Tuple[str, ...] = (COMPLETION_MARKER, ".correction_factors.pa
 def feature_table_suffixes() -> Tuple[str, ...]:
     """Every table this contract declares that is made from the sample's fragments, by suffix.
 
-    That is every declared table but extraction's own (`EXTRACTION_TABLES`): one of these beside a
-    BED means something read that BED (`extract` refuses to replace it).
+    That is every declared table but extraction's own (`EXTRACTION_TABLES`) and UXM's: one of
+    these beside a BED means something read that BED, or the BAM under the folder's filters
+    (`extract` refuses to replace it). UXM reads the BAM at a fixed mapq of 20 whatever the record
+    names, and never the BED, so a new BED leaves it no staler than it was.
     """
     declared = {t.suffix for t in CONTRACT}
     declared.update(NOT_CONSUMED, OCF_PREFERENCE)
     declared.update(s for tables in STAGE_TABLES.values() for s in tables)
-    return tuple(sorted(declared - set(EXTRACTION_TABLES)))
+    return tuple(sorted(declared - set(EXTRACTION_TABLES) - set(STAGE_TABLES["uxm"])))

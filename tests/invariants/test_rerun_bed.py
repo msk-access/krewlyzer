@@ -177,6 +177,30 @@ def test_run_all_with_the_same_filters_reuses_the_bed(sample, tmp_path):
     assert int(record(out)["filters_min_length"]) == 80
 
 
+@pytest.mark.parametrize(
+    "fmt", [("tsv",), ("tsv", "--compress"), ("both",)], ids=["tsv", "tsv.gz", "both"]
+)
+def test_a_record_in_any_format_compares_its_filters(sample, tmp_path, fmt):
+    """Every other test here writes Parquet. A TSV record reads its filters back as text ("False"
+    is truthy), and a rerun is judged from what it reads."""
+    output_format, compress = fmt[0], "--compress" in fmt
+    out = tmp_path / "out"
+    args = [
+        output_format if a == "parquet" else a
+        for a in _extract_args(sample, out, sample.assets.blacklist, *fmt[1:])
+    ]
+    assert _cli(*args).exit_code == 0
+    bed = (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns
+
+    runs = dict(output_format=output_format, compress=compress)
+    assert synth_run_all(sample, out, **runs) is None
+    assert (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns == bed, "BED re-extracted"
+    before = _files(out)
+
+    assert synth_run_all(sample, out, skip_duplicates=False, **runs) == 1
+    assert _files(out) == before, "a refused run-all wrote into the folder"
+
+
 @pytest.mark.parametrize("name", list(FILTERS))
 def test_run_all_records_the_filters_it_used(sample, tmp_path, name):
     """Two run-alls that differ in one filter record two different values (invariant #1)."""
@@ -626,6 +650,18 @@ def test_extract_refuses_a_folder_holding_a_feature_table(
     assert _files(out) == before
 
 
+def test_extract_reruns_beside_a_uxm_table(sample, extracted, tmp_path):
+    """UXM reads the BAM at a fixed mapq of 20 and never the BED (`uxm.py`), so a new BED cannot
+    leave it stale: `uxm` then `extract` into one folder was refused for nothing."""
+    out = tmp_path / "out"
+    shutil.copytree(extracted, out)
+    (out / f"{SAMPLE}.UXM.parquet").write_bytes(b"")
+
+    result = _extract(sample, out)
+
+    assert result.exit_code == 0, result.output
+
+
 @pytest.mark.parametrize("extension", [".tsv", ".tsv.gz"])
 def test_extract_refuses_a_feature_table_in_any_format(
     sample, extracted, tmp_path, extension
@@ -678,5 +714,7 @@ def test_feature_table_suffixes_are_the_tables_made_from_fragments():
     ):
         assert made in suffixes, made
     assert not suffixes & {".metadata.parquet", ".correction_factors.parquet"}
+    # UXM reads the BAM at its own fixed mapq, never the BED: a new BED leaves it no staler.
+    assert ".UXM.parquet" not in suffixes
     # The tables `motif` replaces are declared, so it is told apart from every other step.
     assert set(MOTIF_TABLES) <= suffixes

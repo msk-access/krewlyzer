@@ -1217,11 +1217,11 @@ into such a folder, and runs.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and
-factor table (in any format), or a record holding a provenance column or a stage status (see
-*Optional stages* below). Either means something read this BED, and a new BED would leave that
-table under its recorded `ran`. The record alone is not enough to tell: a run-all killed before
-its final stamp, or a folder from before provenance was recorded, has feature tables beside a
-record that looks like extraction's. The output format is one
+factor table and UXM's, which never reads the BED (in any format), or a record holding a provenance
+column or a stage status (see *Optional stages* below). Either means something read this BED, and a
+new BED would leave that table under its recorded `ran`. The record alone is not enough to tell: a
+run-all killed before its final stamp, or a folder from before provenance was recorded, has feature
+tables beside a record that looks like extraction's. The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
 writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
 TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names

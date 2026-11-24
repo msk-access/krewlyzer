@@ -85,11 +85,12 @@ blacklist's SHA-256) and says in `gc_correction_computed` whether the off-target
 written.
 
 `extract` refuses, before writing anything, a folder that holds any feature table for the sample
-or whose record run-all or a single tool has written into: a new BED would leave the tables made
-from the old one looking current, and replacing that record would drop its provenance and stage
-columns. Rerunning `extract` over a folder it wrote alone is allowed, with the same genome, assay,
-targets, format and filters; other filters are refused like any other setting. run-all reuses a
-BED `extract` wrote only when the filters match; with others it is refused.
+(UXM's aside: it reads the BAM at a fixed mapq, never the BED) or whose record run-all or a single
+tool has written into: a new BED would leave the tables made from the old one looking current, and
+replacing that record would drop its provenance and stage columns. Rerunning `extract` over a
+folder it wrote alone is allowed, with the same genome, assay, targets, format and filters; other
+filters are refused like any other setting. run-all reuses a BED `extract` wrote only when the
+filters match; with others it is refused.
 
 `--chromosomes` was removed. It was accepted and ignored, so a run asking for one chromosome
 wrote the whole genome; it is now refused as an unknown option. There is no chromosome subset:

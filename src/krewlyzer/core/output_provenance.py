@@ -185,8 +185,10 @@ class ConfigurationMismatch(ValueError):
 
 
 #: The read filters extraction applied, as the record names them. They decide which fragments
-#: the BED holds, and every table is made from those fragments or, for the motif and Region-MDS
-#: tables, from the BAM read again under the filters that tool takes. A rerun with other filters
+#: the BED holds, and every table is made from those fragments or, for the motif, Region-MDS and
+#: mFSD tables, from the BAM read again under the filters that tool takes. (UXM reads the BAM at a
+#: fixed mapq of 20 whatever the record names, so it is no table of the folder's fragments:
+#: `contract.feature_table_suffixes`.) A rerun with other filters
 #: therefore mixes two fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote
 #: and made its motif tables at mapq 20. (Region-MDS takes no duplicate or proper-pair filter: it
 #: always drops duplicates, whatever the record says. Neither it nor mFSD applies the blacklist.)
@@ -775,6 +777,7 @@ def stamp_metadata(
 #: Columns read back from a TSV record as text: a digit-only cohort digest such as '0123…' read
 #: back as an integer, and a status column must never become a number either.
 _RECORD_TEXT = (
+    "filters_blacklist_sha256",
     "pon_model",
     "pon_cohort_digest",
     "pon_digest",
