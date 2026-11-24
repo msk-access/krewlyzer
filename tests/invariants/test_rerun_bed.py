@@ -807,7 +807,9 @@ def test_a_bed_tool_refuses_another_samples_bed_in_the_folder(sample, tmp_path, 
     result = _fsd(sample, b / "T.bed.gz", b)
 
     assert result.exit_code != 0, _message(result)
-    assert f"T.bed.gz is not {SAMPLE}'s BED" in _message(result), _message(result)
+    assert f"T.bed.gz is not named {SAMPLE}.bed.gz" in _message(result), _message(
+        result
+    )
     assert _files(b) == before
 
 
@@ -825,6 +827,32 @@ def test_a_bed_tool_refuses_a_bed_extracted_for_another_genome(sample, tmp_path)
 
     assert result.exit_code != 0, _message(result)
     assert "genome=GRCh37 in b/, GRCh38 in a/" in _message(result), _message(result)
+
+
+@pytest.mark.parametrize(
+    "field, value, shown",
+    [
+        ("assay", "xs1", "assay=(none) in b/, xs1 in a/"),
+        ("target_regions", "panel.bed", "target_regions=(none) in b/, panel.bed in a/"),
+    ],
+)
+def test_a_bed_tool_refuses_a_bed_extracted_for_other_targets(
+    sample, tmp_path, field, value, shown
+):
+    """The fifth review's case: a BED from another folder brings that folder's GC factor table,
+    fitted on the off-target fragments its targets left, or on all of them."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a).exit_code == 0
+    assert synth_run_all(sample, b) is None
+    record_file = a / f"{SAMPLE}.metadata.parquet"
+    pd.read_parquet(record_file).assign(**{field: value}).to_parquet(
+        record_file, index=False
+    )
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert shown in _message(result), _message(result)
 
 
 def test_a_bed_tool_refuses_a_bed_beside_a_record_it_cannot_read(sample, tmp_path):
@@ -851,6 +879,41 @@ def test_a_bed_tool_reads_its_own_bed_beside_an_old_record(sample, tmp_path):
     result = _fsd(sample, out / f"{SAMPLE}.bed.gz", out)
 
     assert result.exit_code == 0, result.output
+
+
+# ── 1d. Links where extraction writes ────────────────────────────────────────────────────────
+#
+# Nextflow stages a task's inputs as links, and so can a person (`ln -s`). Written through, a link
+# rewrites the file it points to: `extract -o b --minlen 150` over `b/S.bed.gz -> a/S.bed.gz`
+# rewrote a's BED (395 fragments to 301) under a's record, which says 65, and nothing in b could
+# see it (fifth review). Extraction refuses instead.
+
+
+@pytest.mark.parametrize(
+    "linked",
+    [".bed.gz", ".bed.gz.tbi", ".metadata.parquet", ".correction_factors.parquet"],
+)
+@pytest.mark.parametrize("tool", ["extract", "run-all"])
+def test_extraction_refuses_to_write_through_a_link(sample, tmp_path, tool, linked):
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert synth_run_all(sample, a) is None
+    target = a / f"{SAMPLE}{linked}"
+    if not target.exists():  # the synthetic sample fits no factor table
+        target.write_bytes(b"a's table")
+    b.mkdir()
+    (b / f"{SAMPLE}{linked}").symlink_to(target)
+    before = _files(a), target.read_bytes()
+
+    if tool == "extract":
+        result = _extract(sample, b, "--minlen", "150")
+        assert result.exit_code != 0, _message(result)
+        assert f"{SAMPLE}{linked}" in _message(result), _message(result)
+        assert "link" in _message(result), _message(result)
+    else:  # with a's own settings, so no other check refuses it first
+        assert synth_run_all(sample, b) == 1
+
+    assert (_files(a), target.read_bytes()) == before, "wrote through the link into a/"
+    assert (b / f"{SAMPLE}{linked}").is_symlink(), "the link itself was removed"
 
 
 # ── 2. extract refuses a folder with tables made from its BED ────────────────────────────────

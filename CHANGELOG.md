@@ -349,10 +349,15 @@ All notable changes to this project will be documented in this file.
   folder of tables with no record beside it, since its record would vouch for them; a single tool
   writes no record there, and runs. The tools reading the BED compare a BED from another folder
   with the output folder's record: `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150
-  fragments under b's record, which says 65. Another genome or other filters are refused, and so is
-  a BED or a folder whose record cannot name them or cannot be read; so is another sample's BED
-  (`fsd -i b/T.bed.gz -s S` in a folder two samples share), whatever made it. From the sample's own
-  BED in the folder, or into a folder without a record (Nextflow's tasks), they run as before
+  fragments under b's record, which says 65. Another genome, assay, targets (the GC factor table
+  beside the BED comes with it) or other filters are refused, and so is a BED or a folder whose
+  record cannot name the filters, or a BED whose record beside it cannot be read; so is a BED not
+  named for the sample (`fsd -i b/T.bed.gz -s S` in a folder two samples share), whatever made it.
+  `extract` and run-all refuse a folder where a file extraction writes (the BED, its index, the
+  record, a GC factor table) is a link: written through, `b/S.bed.gz -> a/S.bed.gz` rewrote a's BED
+  under a's record, and nothing in b could see it
+  (`output_provenance.refuse_links_where_extraction_writes`). From the sample's own BED in the
+  folder, or into a folder without a record (Nextflow's tasks), they run as before
   (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
   `tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**

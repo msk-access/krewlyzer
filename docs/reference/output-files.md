@@ -1214,10 +1214,14 @@ cannot extract again, so over such a record they refuse when the folder holds th
 another step made, and otherwise warn that the filters could not be compared, and run. run-all also
 refuses tables with no record beside them, since the record it writes would vouch for them; a
 single tool writes no record into such a folder, and runs. A tool reading the BED from another
-folder (`fsd -i a/S.bed.gz -o b`) compares the genome and read filters recorded beside that BED
-with the output folder's record, and refuses other ones, or a record on either side that cannot
-name them or cannot be read. It refuses another sample's BED (`fsd -i b/T.bed.gz -s S`) whatever
-made it. Into a folder without a record it runs.
+folder (`fsd -i a/S.bed.gz -o b`) compares the genome, assay, targets and read filters recorded
+beside that BED with the output folder's record (the GC factor table beside the BED comes with it),
+and refuses other ones, a record on either side that cannot name the filters, or one beside the BED
+that cannot be read. It refuses a BED not named for the sample (`fsd -i b/T.bed.gz -s S`) whatever
+made it. Into a folder without a record the BED tool runs. `extract` and run-all refuse a folder
+where a file extraction writes -- the BED, its index, the record, a GC factor table -- is a link
+(as Nextflow stages inputs, or `ln -s`): written through, it would rewrite the file it points to in
+another folder.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

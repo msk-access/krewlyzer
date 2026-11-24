@@ -438,9 +438,12 @@ def run_all(
         ConfigurationMismatch,
         filter_settings,
         refuse_a_different_configuration,
+        refuse_links_where_extraction_writes,
     )
 
     try:
+        # First: every check below reads the folder, and would read a linked record as its own.
+        refuse_links_where_extraction_writes(output, sample)
         refuse_a_different_configuration(
             output,
             sample,

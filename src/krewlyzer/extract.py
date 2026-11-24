@@ -225,10 +225,13 @@ def extract(
         RecordInUse,
         filter_settings,
         refuse_a_different_configuration,
+        refuse_links_where_extraction_writes,
         refuse_to_replace_a_later_record,
     )
 
     try:
+        # First: every check below reads the folder, and would read a linked record as its own.
+        refuse_links_where_extraction_writes(output, sample_name)
         refuse_a_different_configuration(
             output,
             sample_name,

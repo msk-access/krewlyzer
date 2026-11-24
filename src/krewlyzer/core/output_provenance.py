@@ -466,6 +466,42 @@ class RecordInUse(ValueError):
     anything is written."""
 
 
+class LinkedOutput(ConfigurationMismatch):
+    """A file an extraction would write that is a link to one elsewhere. Raised before anything
+    is read or written."""
+
+
+def refuse_links_where_extraction_writes(output_dir: Path, sample: str) -> None:
+    """Refuse an extraction into a folder where a file it writes is a link.
+
+    Written through, a link rewrites the file it points to. Nextflow stages a task's inputs as
+    links, and so can a person (`ln -s`): over `b/S.bed.gz -> a/S.bed.gz`, `extract -o b
+    --minlen 150` rewrote a's BED under a's record, which says 65, and nothing in b could see it.
+    A linked record is read as b's by every check, and stamped. Checked: the BED and its index,
+    every copy of the record, and every GC factor table (removed before a run writes its own).
+
+    Called first by `extract` and run-all, before any check reads the folder. Raises
+    `LinkedOutput` naming each link; the files they point to are left as they are.
+    """
+    from .gc_assets import FACTOR_KINDS, POPULATIONS, factor_table_base
+
+    folder = Path(output_dir)
+    paths = [folder / f"{sample}.bed.gz", folder / f"{sample}.bed.gz.tbi"]
+    paths += [folder / f"{sample}.metadata{ext}" for ext in TABLE_EXTENSIONS]
+    paths += [
+        Path(f"{factor_table_base(folder, sample, population)}{ext}")
+        for population in POPULATIONS
+        for _, ext in FACTOR_KINDS
+    ]
+    linked = [p.name for p in paths if p.is_symlink()]
+    if linked:
+        raise LinkedOutput(
+            f"{folder.name}/ holds a link where {sample}'s extraction writes "
+            f"({', '.join(linked)}): writing it would rewrite the file it points to, in another "
+            "folder. Remove the link, or use a fresh output folder."
+        )
+
+
 def feature_tables(
     output_dir: Path, sample: str, *, excluding: Sequence[str] = ()
 ) -> list:
@@ -562,10 +598,11 @@ def refuse_a_bed_the_record_does_not_describe(
     record, which says 65; in a folder two samples share, `fsd -i b/T.bed.gz -s S` rewrote S's
     from T's. So:
 
-    - **Another sample's BED** (named for another sample) is refused, whatever filters made it:
-      its fragments are another sample's.
+    - **Another sample's BED** (not named for this sample) is refused, whatever filters made it:
+      nothing shows its fragments are this sample's.
     - **A BED from another folder** is compared with the folder's record by the record beside it,
-      over `genome` and `FILTER_FIELDS`. A record that does not hold all six filters
+      over `genome`, `assay`, `target_regions` and `FILTER_FIELDS`: the GC factor table beside it
+      comes with it. A record that does not hold all six filters
       (`filters_vouched`), none beside the BED, or one that cannot be read, cannot be compared,
       and is refused too.
 
@@ -591,9 +628,9 @@ def refuse_a_bed_the_record_does_not_describe(
     where, here = f"{bed.parent.name}/", f"{folder.name}/"
     if bed_sample != sample:
         raise ConfigurationMismatch(
-            f"{bed.name} is not {sample}'s BED, and {here} holds {sample}'s record: this run's "
-            f"tables would be made from another sample's fragments under it. Use {sample}'s BED, "
-            "or a fresh output folder."
+            f"{bed.name} is not named {sample}.bed.gz, so it cannot be shown to be {sample}'s "
+            f"BED, and {here} holds {sample}'s record: this run's tables could be made from "
+            f"another sample's fragments under it. Use {sample}.bed.gz, or a fresh output folder."
         )
     advice = (
         " This run's tables would sit beside the folder's, and nothing could say whether both "
@@ -630,9 +667,11 @@ def refuse_a_bed_the_record_does_not_describe(
             f"with, so it cannot be compared with the record in {here}." + advice
         )
     differing = []
-    for field in ("genome", *FILTER_FIELDS):
+    # What extraction recorded: the BED's fragments, and the GC factor table beside it, fitted on
+    # the off-target fragments the targets left (`resolve_gc_factors` looks beside the BED first).
+    for field in ("genome", "assay", "target_regions", *FILTER_FIELDS):
         if field not in ours.columns or field not in theirs.columns:
-            continue  # the genome, in a record written before it was recorded
+            continue  # in a record written before the field was recorded
         recorded = _setting(field, ours[field].iloc[0])
         given = _setting(field, theirs[field].iloc[0])
         if recorded != given:
