@@ -277,30 +277,35 @@ def test_motif_with_another_blacklist_is_refused(sample, tmp_path):
     assert _files(out) == before
 
 
-def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path):
+@pytest.mark.parametrize("name", list(FILTERS))
+def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path, name):
     """As for the genome: the folder's filters are the folder's, whichever tool wrote them."""
+    extract_args, _, column, _ = FILTERS[name]
     out = tmp_path / "out"
-    assert _extract(sample, out, "--minlen", "80").exit_code == 0
+    assert _extract(sample, out, *extract_args).exit_code == 0
     before = _files(out)
 
     result = _extract(sample, out)
 
     assert result.exit_code == 1, result.output
-    assert "filters_min_length" in result.output
+    assert column in result.output
     assert _files(out) == before
 
 
-def test_motif_with_other_filters_is_refused(sample, tmp_path):
+@pytest.mark.parametrize("name", list(FILTERS))
+def test_motif_with_other_filters_is_refused(sample, tmp_path, name):
     """`motif` reads the BAM, not the BED: with other filters its tables would come from
-    fragments the sample's BED does not hold."""
+    fragments the sample's BED does not hold. Each of the five it takes, as `extract` does.
+    """
+    extract_args, _, column, _ = FILTERS[name]
     out = tmp_path / "out"
     assert synth_run_all(sample, out) is None
     before = _files(out)
 
-    result = _cli(*_motif_args(sample, out, sample.assets.blacklist, "--minlen", "80"))
+    result = _cli(*_motif_args(sample, out, sample.assets.blacklist, *extract_args))
 
     assert result.exit_code != 0, result.output
-    assert "filters_min_length" in result.output
+    assert column in result.output
     assert _files(out) == before
 
 
@@ -319,15 +324,18 @@ def _region_mds_args(sample, out, *extra):
     )
 
 
-def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
+@pytest.mark.parametrize("name", ["mapq", "minlen", "maxlen"])
+def test_region_mds_with_other_filters_is_refused(sample, tmp_path, name):
+    """The three filters `region-mds` takes; it always drops duplicates and takes no pairing."""
+    extract_args, _, column, _ = FILTERS[name]
     out = tmp_path / "out"
     assert synth_run_all(sample, out) is None
     before = _files(out)
 
-    result = _cli(*_region_mds_args(sample, out, "--minlen", "80"))
+    result = _cli(*_region_mds_args(sample, out, *extract_args))
 
     assert result.exit_code != 0, result.output
-    assert "filters_min_length" in result.output
+    assert column in result.output
     assert _files(out) == before
 
 
@@ -652,22 +660,23 @@ def test_extract_refuses_a_run_all_folder_written_before_provenance(
     assert _files(out) == before
 
 
-def test_feature_table_suffixes_cover_the_contract_but_not_extractions_own():
-    from krewlyzer.validate.contract import (
-        CONTRACT,
-        NOT_CONSUMED,
-        OCF_PREFERENCE,
-        STAGE_TABLES,
-        feature_table_suffixes,
-    )
+def test_feature_table_suffixes_are_the_tables_made_from_fragments():
+    """Named, not re-derived: a copy of `feature_table_suffixes` would pass whatever it returned.
+    Tables from the BED, the BAM and the optional stages are in; extraction's own are not.
+    """
+    from krewlyzer.validate.contract import feature_table_suffixes
 
-    declared = (
-        {t.suffix for t in CONTRACT}
-        | set(NOT_CONSUMED)
-        | set(OCF_PREFERENCE)
-        | {s for tables in STAGE_TABLES.values() for s in tables}
-    )
-    assert set(feature_table_suffixes()) == declared - {
-        ".metadata.parquet",
-        ".correction_factors.parquet",
-    }
+    suffixes = set(feature_table_suffixes())
+    for made in (
+        ".FSD.parquet",
+        ".WPS.parquet",
+        ".OCF.parquet",
+        ".EndMotif.parquet",
+        ".mFSD.parquet",
+        ".MDS.exon.parquet",
+        ".TFBS.ontarget.parquet",
+    ):
+        assert made in suffixes, made
+    assert not suffixes & {".metadata.parquet", ".correction_factors.parquet"}
+    # The tables `motif` replaces are declared, so it is told apart from every other step.
+    assert set(MOTIF_TABLES) <= suffixes
