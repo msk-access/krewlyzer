@@ -448,14 +448,15 @@ def run_all(
                 "genome": genome,
                 "assay": resolved_assay,
                 "target_regions": resolved_target_path,
-                # The filters, so a BED another run extracted is reused only if it holds the
-                # fragments this run's would.
+                # The filters and the blacklist, so a BED another run extracted is reused only
+                # if it holds the fragments this run's would.
                 **filter_settings(
                     mapq=mapq,
                     minlen=minlen,
                     maxlen=maxlen,
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=require_proper_pair,
+                    blacklist=resolved_exclude_regions,
                 ),
                 # E1 decides a table only gene FSC writes, which needs an assay: as run_features.
                 **(

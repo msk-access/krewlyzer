@@ -242,6 +242,7 @@ def extract(
                     maxlen=maxlen,
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=require_proper_pair,
+                    blacklist=exclude_regions,
                 ),
             },
             output_format=output_format,

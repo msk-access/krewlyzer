@@ -1889,8 +1889,9 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 
 `{sample}.metadata.*` is the sample's record, and downstream's completion marker. It repeats the
 filters this run applied (`filters_mapq`, `filters_min_length`, `filters_max_length`,
-`filters_skip_duplicates`, `filters_require_proper_pair`) and says in `gc_correction_computed`
-whether the off-target factor table was written.
+`filters_skip_duplicates`, `filters_require_proper_pair`, and `filters_blacklist_sha256`, the
+blacklist's SHA-256) and says in `gc_correction_computed` whether the off-target factor table was
+written.
 
 `extract` refuses, before writing anything, a folder that holds any feature table for the sample
 or whose record run-all or a single tool has written into: a new BED would leave the tables made
@@ -10875,7 +10876,8 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `mds_score` | float | Genome-wide motif diversity score |
 | `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`). Before this release every record said 20, whatever the run used |
 | `filters_min_length` / `filters_max_length` | int | The fragment length range the extraction applied (`--minlen` / `--maxlen`). Before this release every record said 65 and 1000, whatever the run used |
-| `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose five filters can be trusted |
+| `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose filters can be trusted |
+| `filters_blacklist_sha256` | str | The SHA-256 of the blacklist file the extraction applied (`--exclude-regions`, else the genome's bundled one), by its bytes: the same file at another path gives the same value, an edited one another. Empty when none was applied. New in this release |
 | `gc_correction_computed` | bool | Whether an off-target GC factor table was written for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`) |
 | `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
@@ -10901,22 +10903,23 @@ mean.
 
 **One folder, one configuration.** A rerun into a sample's folder must use the settings recorded
 there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by file name),
-the five read filters and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and
-every feature tool that takes these settings refuse a run with others before writing anything,
-naming the setting; `motif` and `region-mds` compare the filters they take, since they read the
-BAM again rather than the BED, `mfsd` its mapq and length range (run-all gives it those, runs it
-without the proper-pair filter, and it drops duplicates whatever its flag says), and `uxm`
-compares the genome, which picks its markers. Without that, a rerun that writes fewer tables (a
-panel folder rerun without its assay) left the first run's extra tables -- `TFBS.ontarget`,
-`FSC.regions.e1only` -- reading as the second run's, and a run-all after `extract --mapq 30` kept
-that BED and wrote its motif tables at mapq 20, under one record. The filters are compared only
-when the record holds all five: one written before they were recorded truthfully says 20/65/1000
-whatever its run used, so a rerun is not refused for those values. run-all extracts that folder's
-BED again instead of reusing it (as it does a BED with no record beside it), unless tables were
-made from it, whether or not it is still there: then it refuses, like `extract`, since a run
-stopped after extracting would leave a new BED and a fresh record over them. A pre-release run-all
-folder is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd` cannot
-extract again, so over such a record they warn that the filters could not be compared, and run.
+the five read filters, the blacklist (by content) and, where gene FSC is written,
+`fsc_e1_aggregation`. run-all, `extract` and every feature tool that takes these settings refuse a
+run with others before writing anything, naming the setting; `motif` and `region-mds` compare the
+filters they take (`motif` the blacklist too), since they read the BAM again rather than the BED,
+`mfsd` its mapq and length range (run-all gives it those, runs it without the proper-pair filter,
+and it drops duplicates whatever its flag says), and `uxm` compares the genome, which picks its
+markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its assay)
+left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second
+run's, and a run-all after `extract --mapq 30` kept that BED and wrote its motif tables at mapq 20,
+under one record. The filters are compared only when the record holds all six: one written before
+they were recorded truthfully says 20/65/1000 whatever its run used, so a rerun is not refused for
+those values. run-all extracts that folder's BED again instead of reusing it (as it does a BED with
+no record beside it), unless tables were made from it, whether or not it is still there: then it
+refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh
+record over them. A pre-release run-all folder is therefore rerun into a fresh output folder.
+`motif`, `region-mds` and `mfsd` cannot extract again, so over such a record they warn that the
+filters could not be compared, and run.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

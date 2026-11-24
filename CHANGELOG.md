@@ -325,18 +325,21 @@ All notable changes to this project will be documented in this file.
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
-  one record. The five read filters are now settings a rerun is checked against
-  (`output_provenance.FILTER_FIELDS`): run-all, `extract`, `motif`, `region-mds` (the three it
-  takes) and `mfsd` (mapq and the length range, which run-all gives it; it runs without the
-  proper-pair filter in run-all and drops duplicates whatever its flag says) refuse a run whose
-  filters differ from the record's, before writing anything. The record
-  gains `filters_skip_duplicates` and `filters_require_proper_pair`, which it did not hold. A
+  one record. `extract -x` with another blacklist was the same case. The five read filters and the
+  blacklist are now settings a rerun is checked against (`output_provenance.FILTER_FIELDS`):
+  run-all, `extract`, `motif`, `region-mds` (the three filters it takes; it applies no blacklist)
+  and `mfsd` (mapq and the length range, which run-all gives it; it runs without the proper-pair
+  filter in run-all and drops duplicates whatever its flag says) refuse a run whose filters differ
+  from the record's, before writing anything. The record gains `filters_skip_duplicates` and
+  `filters_require_proper_pair`, which it did not hold, and `filters_blacklist_sha256`: the SHA-256
+  of the blacklist file's bytes, so the same file at another path (the bundled one sits at another
+  path in every install) is the same blacklist, and an edited one under the same name is not. A
   record without them was written before the filters were recorded truthfully (every one said
-  20/65/1000), so its values are not compared. run-all extracts that folder's BED again rather
-  than reuse it, as it now does a BED with no record beside it, unless feature tables were made
-  from it, whether or not it is still there: then it refuses, like `extract`, so a pre-release
-  run-all folder is rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`, which
-  cannot extract again, warn that the filters could not be compared
+  20/65/1000), so its values are not compared. run-all extracts that folder's BED again rather than
+  reuse it, as it now does a BED with no record beside it, unless feature tables were made from it,
+  whether or not it is still there: then it refuses, like `extract`, so a pre-release run-all
+  folder is rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`, which cannot
+  extract again, warn that the filters could not be compared
   (`tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules

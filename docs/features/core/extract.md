@@ -80,8 +80,9 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 
 `{sample}.metadata.*` is the sample's record, and downstream's completion marker. It repeats the
 filters this run applied (`filters_mapq`, `filters_min_length`, `filters_max_length`,
-`filters_skip_duplicates`, `filters_require_proper_pair`) and says in `gc_correction_computed`
-whether the off-target factor table was written.
+`filters_skip_duplicates`, `filters_require_proper_pair`, and `filters_blacklist_sha256`, the
+blacklist's SHA-256) and says in `gc_correction_computed` whether the off-target factor table was
+written.
 
 `extract` refuses, before writing anything, a folder that holds any feature table for the sample
 or whose record run-all or a single tool has written into: a new BED would leave the tables made

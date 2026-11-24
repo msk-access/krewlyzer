@@ -36,7 +36,7 @@ from .output_utils import (
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
-from .output_provenance import TABLE_FORMATS, Outcome
+from .output_provenance import TABLE_FORMATS, Outcome, blacklist_digest
 from .motif_processor import compute_mds
 from ..assets import AssetManager
 from .gc_assets import (
@@ -122,6 +122,8 @@ class ExtractionResult:
     maxlen: Optional[int] = None
     skip_duplicates: Optional[bool] = None
     require_proper_pair: Optional[bool] = None
+    # The blacklist it applied, by `blacklist_digest` ("" for none).
+    blacklist_sha256: Optional[str] = None
 
 
 @dataclass
@@ -359,6 +361,12 @@ def extract_sample(
         # run writes a new BED, so a run that fits none (or another format) cannot reuse it.
         remove_factor_tables(output_dir, sample_name)
 
+    # The blacklist the engine applies, so the record names that one. A path that does not exist
+    # is none applied (the CLI resolvers refuse one before this).
+    applied_blacklist = (
+        exclude_regions if exclude_regions and exclude_regions.exists() else None
+    )
+
     # Call Rust extraction engine
     try:
         result = _core.extract_motif.process_bam_parallel(
@@ -371,11 +379,7 @@ def extract_sample(
             threads,
             bed_output_arg,
             "enable",  # Enable motif counting
-            (
-                str(exclude_regions)
-                if exclude_regions and exclude_regions.exists()
-                else None
-            ),
+            str(applied_blacklist) if applied_blacklist else None,
             str(target_regions) if is_panel_mode else None,
             skip_duplicates,
             require_proper_pair,
@@ -463,6 +467,7 @@ def extract_sample(
         maxlen=maxlen,
         skip_duplicates=skip_duplicates,
         require_proper_pair=require_proper_pair,
+        blacklist_sha256=blacklist_digest(applied_blacklist),
     )
 
 
@@ -801,7 +806,14 @@ def write_extraction_outputs(
         raise ValueError("ExtractionResult has no bed_path - was write_bed=False?")
     unrecorded = [
         f
-        for f in ("mapq", "minlen", "maxlen", "skip_duplicates", "require_proper_pair")
+        for f in (
+            "mapq",
+            "minlen",
+            "maxlen",
+            "skip_duplicates",
+            "require_proper_pair",
+            "blacklist_sha256",
+        )
         if getattr(result, f) is None
     ]
     if unrecorded:
@@ -845,6 +857,7 @@ def write_extraction_outputs(
         "filters_max_length": result.maxlen,
         "filters_skip_duplicates": bool(result.skip_duplicates),
         "filters_require_proper_pair": bool(result.require_proper_pair),
+        "filters_blacklist_sha256": result.blacklist_sha256,
         "gc_correction_computed": False,  # True below only if a table was written
         "fragments_on_missing_contig": int(
             result.contig_guard.get("fragments_on_missing_contig", 0)

@@ -665,6 +665,10 @@ def test_motif_without_a_pon_after_a_scored_run_records_its_mds_z_as_not_request
             "S",
             "--skip-pon",
             "--skip-target-regions",
+            # run-all's blacklist: with the bundled one, motif would count other fragments than
+            # the folder's BED holds, and is refused.
+            "-x",
+            str(sample.assets.blacklist),
             "--output-format",
             "parquet",
         ],

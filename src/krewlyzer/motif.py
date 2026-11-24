@@ -211,6 +211,10 @@ def motif(
             assets=assets,
             log=logger,
         )
+        # The blacklist before the check, which compares it with the one the BED was made with.
+        resolved_exclude_path, exclude_source = resolve_exclude_regions(
+            exclude_regions, assets, logger
+        )
         # Before any work: other settings than the folder's record would leave the first run's
         # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
         from .core.output_provenance import (
@@ -218,8 +222,8 @@ def motif(
             refuse_a_different_configuration,
         )
 
-        # The filters too: motif reads the BAM, so with other ones its tables would come from
-        # fragments the sample's BED does not hold.
+        # The filters and the blacklist too: motif reads the BAM, so with other ones its tables
+        # would come from fragments the sample's BED does not hold.
         refuse_a_different_configuration(
             output,
             sample_name,
@@ -233,18 +237,11 @@ def motif(
                     maxlen=maxlen,
                     skip_duplicates=skip_duplicates,
                     require_proper_pair=require_proper_pair,
+                    blacklist=resolved_exclude_path,
                 ),
             },
             output_format=output_format,
             compress=compress,
-        )
-    except ValueError as e:
-        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
-        raise typer.Exit(1)
-
-    try:
-        resolved_exclude_path, exclude_source = resolve_exclude_regions(
-            exclude_regions, assets, logger
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")

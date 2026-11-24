@@ -189,17 +189,23 @@ class ConfigurationMismatch(ValueError):
 #: tables, from the BAM read again under the filters that tool takes. A rerun with other filters
 #: therefore mixes two fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote
 #: and made its motif tables at mapq 20. (Region-MDS takes no duplicate or proper-pair filter: it
-#: always drops duplicates, whatever the record says.)
+#: always drops duplicates, whatever the record says. Neither it nor mFSD applies the blacklist.)
+#:
+#: The blacklist is one of them: extraction drops the fragments it covers, as it drops those under
+#: the mapq. Recorded by content (`blacklist_digest`), not by name: two files can share a name, and
+#: the bundled one sits at another path in every install.
 #:
 #: Recorded truthfully only since the duplicate and proper-pair columns were added: before, every
-#: record said 20/65/1000 whatever the run used, and held neither column. So a record holding all
-#: five can be compared, and one that does not holds values nobody can trust (`filters_vouched`).
+#: record said 20/65/1000 whatever the run used, and held neither column, nor any blacklist. So a
+#: record holding all six can be compared, and one that does not holds values nobody can trust
+#: (`filters_vouched`).
 FILTER_FIELDS = (
     "filters_mapq",
     "filters_min_length",
     "filters_max_length",
     "filters_skip_duplicates",
     "filters_require_proper_pair",
+    "filters_blacklist_sha256",
 )
 
 #: The settings that decide which tables a run writes, or what they are made from, as the record
@@ -217,6 +223,17 @@ CONFIGURATION_FIELDS = (
 )
 
 
+def blacklist_digest(path: Optional[Path]) -> str:
+    """The `filters_blacklist_sha256` of a blacklist: the SHA-256 of its bytes, or "" for none
+    applied. The same file at any path gives the same value, and an edited one another.
+    """
+    if path is None:
+        return ""
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
 def filter_settings(
     *,
     mapq: int,
@@ -224,21 +241,26 @@ def filter_settings(
     maxlen: int,
     skip_duplicates: Optional[bool] = None,
     require_proper_pair: Optional[bool] = None,
+    blacklist: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """The `FILTER_FIELDS` a run takes, for `refuse_a_different_configuration`. A filter the entry
-    point does not take (None) is left out, so it is not compared."""
+    point does not take (None) is left out, so it is not compared. ``blacklist`` is the file the
+    run applies (`resolve_exclude_regions`), compared by `blacklist_digest`."""
     values = {
         "filters_mapq": mapq,
         "filters_min_length": minlen,
         "filters_max_length": maxlen,
         "filters_skip_duplicates": skip_duplicates,
         "filters_require_proper_pair": require_proper_pair,
+        "filters_blacklist_sha256": (
+            blacklist_digest(blacklist) if blacklist is not None else None
+        ),
     }
     return {k: v for k, v in values.items() if v is not None}
 
 
 def filters_vouched(frame: Any) -> bool:
-    """Whether a record's filters are what its run applied: it holds all five `FILTER_FIELDS`,
+    """Whether a record's filters are what its run applied: it holds all six `FILTER_FIELDS`,
     which only a record written since they were recorded truthfully does."""
     return frame is not None and all(f in frame.columns for f in FILTER_FIELDS)
 
@@ -336,6 +358,8 @@ def _setting(field: str, value: Any) -> str:
         return Path(text).name if text else ""
     if field in ("filters_mapq", "filters_min_length", "filters_max_length"):
         return text
+    if field == "filters_blacklist_sha256":
+        return text.lower()
     # fsc_e1_aggregation and the two filter flags. Not `bool(text)`: "False" read back from a TSV
     # record is truthy.
     return "true" if text.lower() in ("true", "1", "1.0") else "false"
@@ -374,7 +398,7 @@ def refuse_a_different_configuration(
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
     record does not hold (written before the field existed), nor for the filters of a record that
-    does not hold all five (`filters_vouched`): their values may not be what that run applied.
+    does not hold all six (`filters_vouched`): their values may not be what that run applied.
     run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`).
 
     The output format is always compared, from ``output_format``/``compress``, and is not a

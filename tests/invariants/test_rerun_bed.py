@@ -68,9 +68,8 @@ def _cli(*args):
     return CliRunner().invoke(app, [str(a) for a in args])
 
 
-def _extract(sample, out, *extra):
-    """`extract` with the settings `synth_run_all` uses, so only what a test adds differs."""
-    return _cli(
+def _extract_args(sample, out, blacklist, *extra):
+    return (
         "extract",
         "-i",
         sample.bam,
@@ -81,12 +80,54 @@ def _extract(sample, out, *extra):
         "-s",
         SAMPLE,
         "-x",
-        sample.assets.blacklist,
+        blacklist,
         "--skip-target-regions",
         "-F",
         "parquet",
         *extra,
     )
+
+
+def _extract(sample, out, *extra):
+    """`extract` with the settings `synth_run_all` uses, so only what a test adds differs."""
+    return _cli(*_extract_args(sample, out, sample.assets.blacklist, *extra))
+
+
+def _motif_args(sample, out, blacklist, *extra):
+    """`motif` with the settings `synth_run_all` uses, so only what a test adds differs."""
+    return (
+        "motif",
+        "-i",
+        sample.bam,
+        "-r",
+        sample.reference,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "-x",
+        blacklist,
+        "--skip-target-regions",
+        "--skip-pon",
+        "-F",
+        "parquet",
+        *extra,
+    )
+
+
+def _no_blacklist(directory):
+    """A blacklist of nothing: another blacklist than the synthetic one, as `-x` may give."""
+    path = directory / "nothing.bed"
+    path.write_text("")
+    return path
+
+
+def _copied_blacklist(sample, directory):
+    """The synthetic blacklist at another path: the same blacklist."""
+    copied = directory / "elsewhere" / sample.assets.blacklist.name
+    copied.parent.mkdir()
+    shutil.copy(sample.assets.blacklist, copied)
+    return copied
 
 
 def _bed_fragments(out):
@@ -164,6 +205,77 @@ def test_extract_records_the_duplicate_and_proper_pair_filters(sample, tmp_path)
     assert recorded == {"default": (True, True), "lenient": (False, False)}
 
 
+def test_extract_records_which_blacklist_it_applied(sample, tmp_path):
+    """The blacklist decides which fragments the BED holds, as the read filters do: two extracts
+    with different blacklists record two different values, and the same file at another path the
+    same one (invariant #1). By content, not name: two files can share a name, and the bundled one
+    sits at another path in every install."""
+    recorded = {}
+    for name, blacklist in (
+        ("synthetic", sample.assets.blacklist),
+        ("copy", _copied_blacklist(sample, tmp_path)),
+        ("nothing", _no_blacklist(tmp_path)),
+    ):
+        out = tmp_path / name
+        assert _cli(*_extract_args(sample, out, blacklist)).exit_code == 0
+        recorded[name] = record(out)["filters_blacklist_sha256"]
+    assert recorded["synthetic"] == recorded["copy"]
+    assert recorded["synthetic"] != recorded["nothing"]
+    assert all(isinstance(v, str) and len(v) == 64 for v in recorded.values())
+
+
+def test_run_all_refuses_a_bed_extracted_with_another_blacklist(sample, tmp_path):
+    """The second review's case: `extract -x nothing.bed`, then run-all with the synthetic
+    blacklist, kept a BED holding the fragments run-all would have dropped."""
+    out = tmp_path / "out"
+    assert _cli(*_extract_args(sample, out, _no_blacklist(tmp_path))).exit_code == 0
+    before = _files(out)
+
+    code = synth_run_all(sample, out)
+
+    assert code == 1, "run-all accepted a BED made with another blacklist"
+    assert _files(out) == before, "a refused run-all wrote into the folder"
+
+
+def test_run_all_reuses_a_bed_extracted_with_the_same_blacklist_elsewhere(
+    sample, tmp_path
+):
+    out = tmp_path / "out"
+    blacklist = _copied_blacklist(sample, tmp_path)
+    assert _cli(*_extract_args(sample, out, blacklist)).exit_code == 0
+    bed = (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns
+
+    assert synth_run_all(sample, out) is None
+
+    assert (out / f"{SAMPLE}.bed.gz").stat().st_mtime_ns == bed, "BED re-extracted"
+
+
+def test_extract_with_another_blacklist_than_its_record_is_refused(sample, tmp_path):
+    out = tmp_path / "out"
+    assert _extract(sample, out).exit_code == 0
+    before = _files(out)
+
+    result = _cli(*_extract_args(sample, out, _no_blacklist(tmp_path)))
+
+    assert result.exit_code == 1, result.output
+    assert "filters_blacklist_sha256" in result.output
+    assert _files(out) == before
+
+
+def test_motif_with_another_blacklist_is_refused(sample, tmp_path):
+    """`motif` applies the blacklist itself, reading the BAM: with another one its tables would
+    count fragments the sample's BED does not hold."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+
+    result = _cli(*_motif_args(sample, out, _no_blacklist(tmp_path)))
+
+    assert result.exit_code != 0, result.output
+    assert "filters_blacklist_sha256" in result.output
+    assert _files(out) == before
+
+
 def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path):
     """As for the genome: the folder's filters are the folder's, whichever tool wrote them."""
     out = tmp_path / "out"
@@ -184,25 +296,7 @@ def test_motif_with_other_filters_is_refused(sample, tmp_path):
     assert synth_run_all(sample, out) is None
     before = _files(out)
 
-    result = _cli(
-        "motif",
-        "-i",
-        sample.bam,
-        "-r",
-        sample.reference,
-        "-o",
-        out,
-        "-s",
-        SAMPLE,
-        "-x",
-        sample.assets.blacklist,
-        "--skip-target-regions",
-        "--skip-pon",
-        "-F",
-        "parquet",
-        "--minlen",
-        "80",
-    )
+    result = _cli(*_motif_args(sample, out, sample.assets.blacklist, "--minlen", "80"))
 
     assert result.exit_code != 0, result.output
     assert "filters_min_length" in result.output
@@ -374,23 +468,7 @@ def test_a_tool_reading_the_bam_warns_when_the_filters_cannot_be_compared(
     assert _extract(sample, out).exit_code == 0
     _as_an_old_record(out)
     with caplog.at_level(logging.WARNING):
-        result = _cli(
-            "motif",
-            "-i",
-            sample.bam,
-            "-r",
-            sample.reference,
-            "-o",
-            out,
-            "-s",
-            SAMPLE,
-            "-x",
-            sample.assets.blacklist,
-            "--skip-target-regions",
-            "--skip-pon",
-            "-F",
-            "parquet",
-        )
+        result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
     assert result.exit_code == 0, result.output
     assert any(
         "filters" in r.getMessage() and r.levelno >= logging.WARNING
