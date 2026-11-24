@@ -10911,8 +10911,8 @@ the second run's, and a run-all after `extract --mapq 30` kept that BED and wrot
 at mapq 20, under one record. The filters are compared only when the record holds all five: one
 written before they were recorded truthfully says 20/65/1000 whatever its run used, so a rerun is
 not refused for those values. run-all extracts that folder's BED again instead of reusing it (as
-it does a BED with no record beside it), unless tables were made from it: then it refuses, like
-`extract`, since a run stopped after extracting would leave a new BED and a fresh record over
+it does a BED with no record beside it), unless tables were made from it, whether or not it is
+still there: then it refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh record over
 them. A pre-release run-all folder is therefore rerun into a fresh output folder. `motif` and
 `region-mds` cannot extract again, so over such a record they warn that the filters could not be
 compared, and run.

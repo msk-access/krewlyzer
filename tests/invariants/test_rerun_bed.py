@@ -274,20 +274,39 @@ def test_an_old_record_is_not_refused_for_its_filters(sample, tmp_path):
     assert int(record(out)["filters_min_length"]) == 80
 
 
-def test_run_all_does_not_re_extract_a_bed_tables_were_made_from(sample, tmp_path):
+@pytest.mark.parametrize("bed", ["kept", "deleted"])
+def test_run_all_does_not_re_extract_a_bed_tables_were_made_from(sample, tmp_path, bed):
     """A run-all folder from before the filters were recorded truthfully: its BED cannot be
     trusted, and cannot be replaced either, since every table beside it was made from it. A run
     killed after extracting would leave a new BED and a fresh record over the old tables. Refused,
-    as `extract` is, before anything is written."""
+    as `extract` is, before anything is written. The same when the BED was deleted to save space:
+    the tables were still made from it, with filters nobody knows."""
     out = tmp_path / "out"
     assert synth_run_all(sample, out) is None
     _as_an_old_record(out)
+    if bed == "deleted":
+        (out / f"{SAMPLE}.bed.gz").unlink()
     before = _files(out)
 
     code = synth_run_all(sample, out)
 
     assert code == 1, "run-all replaced a BED its tables were made from"
     assert _files(out) == before
+
+
+def test_run_all_re_extracts_a_deleted_bed_its_record_vouches_for(sample, tmp_path):
+    """The refusal above is for a record that cannot say which filters made the tables. A current
+    record can: the configuration guard has refused any other filters, so a deleted BED is
+    extracted again with the same ones, beside the tables made from the first."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out, minlen=80) is None
+    expected = _bed_fragments(out)
+    (out / f"{SAMPLE}.bed.gz").unlink()
+
+    assert synth_run_all(sample, out, minlen=80) is None
+
+    assert _bed_fragments(out) == expected
+    assert int(record(out)["filters_min_length"]) == 80
 
 
 def test_a_tool_reading_the_bam_warns_when_the_filters_cannot_be_compared(

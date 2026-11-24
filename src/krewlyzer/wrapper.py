@@ -721,25 +721,24 @@ def run_all(
         # was made with filters nobody knows, and is extracted again.
         from .core.output_provenance import feature_tables, record_vouches_for_filters
 
-        should_run_extract = not bedgz_file.exists() or not record_vouches_for_filters(
+        vouched = record_vouches_for_filters(
             output,
             sample,
             output_format=resolved_output_format,
             compress=resolved_compress,
         )
-        made_from_it = (
-            feature_tables(output, sample)
-            if bedgz_file.exists() and should_run_extract
-            else []
-        )
+        should_run_extract = not bedgz_file.exists() or not vouched
+        made_from_it = [] if vouched else feature_tables(output, sample)
         if made_from_it:
-            # Not replaced either: every table beside it was made from it, and a run that stopped
+            # Not extracted again either: every table beside it was made from a BED with filters
+            # nobody knows, whether that BED is still here or was deleted, and a run that stopped
             # after extracting would leave a new BED and a fresh record over them. As `extract`.
             console.print(
-                f"[bold red]❌ ERROR:[/bold red] {output.name}/ holds a BED whose filters its "
-                f"record does not name, and tables made from it ({len(made_from_it)}, among "
-                f"them {', '.join(made_from_it[:3])}). It cannot be reused, and replacing it "
-                "would leave them looking current. Use a fresh output folder, or remove this one."
+                f"[bold red]❌ ERROR:[/bold red] {output.name}/ holds tables made from a BED "
+                f"whose filters its record does not name ({len(made_from_it)}, among them "
+                f"{', '.join(made_from_it[:3])}). That BED cannot be reused, and extracting a "
+                "new one would leave them looking current. Use a fresh output folder, or remove "
+                "this one."
             )
             raise typer.Exit(1)
         if bedgz_file.exists() and should_run_extract:
