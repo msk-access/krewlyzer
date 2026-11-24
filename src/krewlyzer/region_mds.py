@@ -243,7 +243,9 @@ def region_mds_stage(
         from krewlyzer.core.output_provenance import (
             filter_settings,
             refuse_a_different_configuration,
+            refuse_tables_of_unrecorded_filters,
         )
+        from krewlyzer.validate.contract import STAGE_TABLES
 
         try:
             # The filters it takes: it reads the BAM, so with other ones its tables would come
@@ -259,7 +261,16 @@ def region_mds_stage(
                 output_format=output_format,
                 compress=compress,
             )
-        except ValueError as e:  # ConfigurationMismatch
+            # Nor beside tables another step made with filters the record does not name.
+            refuse_tables_of_unrecorded_filters(
+                output,
+                sample_name,
+                own=STAGE_TABLES["region_mds"],
+                creates_the_record=False,
+                output_format=output_format,
+                compress=compress,
+            )
+        except ValueError as e:  # ConfigurationMismatch, UnrecordedFilters
             raise _usage(e)
 
     try:

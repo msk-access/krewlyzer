@@ -339,8 +339,11 @@ All notable changes to this project will be documented in this file.
   reuse it, as it now does a BED with no record beside it, unless feature tables were made from it,
   whether or not it is still there: then it refuses, like `extract`, so a pre-release run-all
   folder is rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`, which cannot
-  extract again, warn that the filters could not be compared
-  (`tests/invariants/test_rerun_bed.py`).
+  extract again, refuse such a folder when it holds tables another step made (their own they
+  replace), and otherwise warn that the filters could not be compared: one check for all four
+  (`output_provenance.refuse_tables_of_unrecorded_filters`). run-all also refuses a folder of
+  tables with no record beside it, since its record would vouch for them; a single tool writes no
+  record there, and runs (`tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

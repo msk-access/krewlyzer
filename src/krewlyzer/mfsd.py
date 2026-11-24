@@ -269,9 +269,12 @@ def mfsd(
     # folder; it calls `mfsd_stage`, not this command.
     from .core.output_provenance import (
         ConfigurationMismatch,
+        UnrecordedFilters,
         filter_settings,
         refuse_a_different_configuration,
+        refuse_tables_of_unrecorded_filters,
     )
+    from .validate.contract import STAGE_TABLES
 
     try:
         refuse_a_different_configuration(
@@ -281,7 +284,16 @@ def mfsd(
             output_format=output_format,
             compress=compress,
         )
-    except ConfigurationMismatch as e:
+        # Nor beside tables another step made with filters the record does not name.
+        refuse_tables_of_unrecorded_filters(
+            output,
+            _sample_name(bam_input, sample_name),
+            own=STAGE_TABLES["mfsd"],
+            creates_the_record=False,
+            output_format=output_format,
+            compress=compress,
+        )
+    except (ConfigurationMismatch, UnrecordedFilters) as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 

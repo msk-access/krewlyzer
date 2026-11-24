@@ -261,6 +261,20 @@ _WPS_PON_COLS: Tuple[ColumnRule, ...] = (
 )
 
 
+#: The tables run-all's motif step and `motif` write, on- and off-target. A rerun of `motif`
+#: replaces them, so they are its own (`output_provenance.refuse_tables_of_unrecorded_filters`),
+#: and run-all reuses them only when all of this run's exist.
+MOTIF_TABLES: Tuple[str, ...] = (
+    ".EndMotif.parquet",
+    ".EndMotif1mer.parquet",
+    ".BreakPointMotif.parquet",
+    ".MDS.parquet",
+    ".EndMotif.ontarget.parquet",
+    ".BreakPointMotif.ontarget.parquet",
+    ".MDS.ontarget.parquet",
+)
+
+
 #: The optional stages run-all carries on past, and the tables each one writes.
 #:
 #: run-all keeps going when one of these fails, by design, so that one stage cannot cost a

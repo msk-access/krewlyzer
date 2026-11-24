@@ -10918,8 +10918,10 @@ those values. run-all extracts that folder's BED again instead of reusing it (as
 no record beside it), unless tables were made from it, whether or not it is still there: then it
 refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh
 record over them. A pre-release run-all folder is therefore rerun into a fresh output folder.
-`motif`, `region-mds` and `mfsd` cannot extract again, so over such a record they warn that the
-filters could not be compared, and run.
+`motif`, `region-mds` and `mfsd` cannot extract again, so over such a record they refuse when the
+folder holds tables another step made, and otherwise warn that the filters could not be compared,
+and run. run-all also refuses tables with no record beside them, since the record it writes would
+vouch for them; a single tool writes no record into such a folder, and runs.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

@@ -26,6 +26,7 @@ from typer.testing import CliRunner
 
 from conftest import requires_data
 from krewlyzer.cli import app
+from krewlyzer.validate.contract import MOTIF_TABLES, STAGE_TABLES
 
 from .runall import SAMPLE, record, synth_run_all, write_vcf
 from .synth import BASELINE, make_sample
@@ -303,12 +304,8 @@ def test_motif_with_other_filters_is_refused(sample, tmp_path):
     assert _files(out) == before
 
 
-def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
-    out = tmp_path / "out"
-    assert synth_run_all(sample, out) is None
-    before = _files(out)
-
-    result = _cli(
+def _region_mds_args(sample, out, *extra):
+    return (
         "region-mds",
         sample.bam,
         sample.reference,
@@ -318,9 +315,16 @@ def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
         "--skip-pon",
         "-F",
         "parquet",
-        "--minlen",
-        "80",
+        *extra,
     )
+
+
+def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    before = _files(out)
+
+    result = _cli(*_region_mds_args(sample, out, "--minlen", "80"))
 
     assert result.exit_code != 0, result.output
     assert "filters_min_length" in result.output
@@ -474,6 +478,109 @@ def test_a_tool_reading_the_bam_warns_when_the_filters_cannot_be_compared(
         "filters" in r.getMessage() and r.levelno >= logging.WARNING
         for r in caplog.records
     ), "a filter check that could not be made went unsaid"
+
+
+# ── 1b. Tables made with filters nobody recorded ─────────────────────────────────────────────
+#
+# Over a record that cannot say which filters made the sample's fragments, run-all refuses a
+# folder holding tables (above); a tool reading the BAM refused nothing, and wrote its own beside
+# them. One check now serves all four: `output_provenance.refuse_tables_of_unrecorded_filters`.
+
+
+def _an_old_run_all_folder(sample, out):
+    assert synth_run_all(sample, out) is None
+    _as_an_old_record(out)
+    return _files(out)
+
+
+def _refused_for_unrecorded_filters(result, own):
+    """Refused by the shared check, naming tables another step made and none of the tool's own."""
+    from rich.text import Text
+
+    # As text, and on one line: Rich styles the message under GITHUB_ACTIONS, and wraps it (in a
+    # box, for a usage error).
+    message = " ".join(Text.from_ansi(result.output).plain.replace("│", " ").split())
+    assert result.exit_code != 0, message
+    assert "made with read filters its record does not name" in message, message
+    assert f"among them {SAMPLE}." in message, message
+    assert not any(f"{SAMPLE}{suffix}" in message for suffix in own), message
+
+
+def test_motif_refuses_a_folder_of_tables_made_with_unrecorded_filters(
+    sample, tmp_path
+):
+    """The second review's case: over an old record, `motif` warned and wrote motif tables from
+    the BAM beside tables made from a BED nobody knows the filters of."""
+    out = tmp_path / "out"
+    before = _an_old_run_all_folder(sample, out)
+
+    result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
+
+    _refused_for_unrecorded_filters(result, MOTIF_TABLES)
+    assert _files(out) == before
+
+
+def test_region_mds_refuses_a_folder_of_tables_made_with_unrecorded_filters(
+    sample, tmp_path
+):
+    out = tmp_path / "out"
+    before = _an_old_run_all_folder(sample, out)
+
+    result = _cli(*_region_mds_args(sample, out))
+
+    _refused_for_unrecorded_filters(result, STAGE_TABLES["region_mds"])
+    assert _files(out) == before
+
+
+def test_mfsd_refuses_a_folder_of_tables_made_with_unrecorded_filters(sample, tmp_path):
+    out = tmp_path / "out"
+    before = _an_old_run_all_folder(sample, out)
+    vcf = write_vcf(tmp_path / "variants.vcf")
+
+    result = _mfsd(sample, out, vcf)
+
+    _refused_for_unrecorded_filters(result, STAGE_TABLES["mfsd"])
+    assert _files(out) == before
+
+
+def test_a_tools_own_earlier_tables_do_not_refuse_it(sample, tmp_path):
+    """`motif` replaces its own tables, so those alone are no reason to refuse: an extract-and-
+    motif folder whose record cannot vouch for its filters is still rerun by `motif`."""
+    out = tmp_path / "out"
+    assert _extract(sample, out).exit_code == 0
+    assert _cli(*_motif_args(sample, out, sample.assets.blacklist)).exit_code == 0
+    _as_an_old_record(out)
+
+    result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
+
+    assert result.exit_code == 0, result.output
+
+
+def test_a_tool_into_a_folder_without_a_record_is_not_refused(sample, tmp_path):
+    """Without a record there is nothing to compare, and a single tool writes none
+    (`record_stage_outcomes`), so it leaves no completion marker over the tables beside it: tools
+    run by hand into one folder still run. run-all writes one, and refuses (above)."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    for record_file in out.glob(f"{SAMPLE}.metadata.*"):
+        record_file.unlink()
+
+    result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
+
+    assert result.exit_code == 0, result.output
+
+
+def test_run_all_into_a_folder_of_tables_without_a_record_is_refused(sample, tmp_path):
+    """run-all writes the completion marker: over tables nobody recorded the filters of, it would
+    vouch for them as one sample's."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    for record_file in out.glob(f"{SAMPLE}.metadata.*"):
+        record_file.unlink()
+    before = _files(out)
+
+    assert synth_run_all(sample, out) == 1
+    assert _files(out) == before
 
 
 # ── 2. extract refuses a folder with tables made from its BED ────────────────────────────────

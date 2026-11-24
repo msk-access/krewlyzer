@@ -399,7 +399,9 @@ def refuse_a_different_configuration(
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
     record does not hold (written before the field existed), nor for the filters of a record that
     does not hold all six (`filters_vouched`): their values may not be what that run applied.
-    run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`).
+    run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`), and it
+    and the tools reading the BAM refuse to write beside tables another step made
+    (`refuse_tables_of_unrecorded_filters`), which they call next.
 
     The output format is always compared, from ``output_format``/``compress``, and is not a
     ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
@@ -419,7 +421,8 @@ def refuse_a_different_configuration(
     differing = []
     vouched = filters_vouched(frame)
     if not vouched and any(f in FILTER_FIELDS for f in given):
-        # run-all extracts the BED again in this case; a tool reading the BAM cannot.
+        # run-all extracts the BED again in this case; a tool reading the BAM cannot, and runs
+        # only when no other step's tables are there (`refuse_tables_of_unrecorded_filters`).
         logger.warning(
             f"{sample}'s record in {Path(output_dir).name}/ does not say which read filters its "
             "BED was extracted with (written before the filters were recorded), so this run's "
@@ -460,23 +463,77 @@ class RecordInUse(ValueError):
     anything is written."""
 
 
-def feature_tables(output_dir: Path, sample: str) -> list:
+def feature_tables(
+    output_dir: Path, sample: str, *, excluding: Sequence[str] = ()
+) -> list:
     """The names of the sample's declared tables made from its fragments: every table the output
-    contract declares but extraction's own (`contract.feature_table_suffixes`), in any format.
-    Undeclared ones (`.TFBS.raw`, `features.json`) are not looked for: a folder holding them holds
-    declared tables too. One of them beside a BED means the BED cannot be replaced without leaving
-    it stale."""
+    contract declares but extraction's own (`contract.feature_table_suffixes`) and ``excluding``
+    (suffixes, as the contract names them), in any format. Undeclared ones (`.TFBS.raw`,
+    `features.json`) are not looked for: a folder holding them holds declared tables too. One of
+    them beside a BED means the BED cannot be replaced without leaving it stale."""
     from krewlyzer.validate.contract import feature_table_suffixes
 
     folder = Path(output_dir)
     return [
         name
         for suffix in feature_table_suffixes()
+        if suffix not in excluding
         for ext in TABLE_EXTENSIONS
         if (
             folder / (name := f"{sample}{suffix.removesuffix('.parquet')}{ext}")
         ).exists()
     ]
+
+
+class UnrecordedFilters(ValueError):
+    """Tables beside a record that cannot say which read filters made them. Raised before
+    anything is written."""
+
+
+def refuse_tables_of_unrecorded_filters(
+    output_dir: Path,
+    sample: str,
+    *,
+    own: Sequence[str] = (),
+    creates_the_record: bool,
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Refuse a run beside tables made with read filters the folder's record does not name.
+
+    A record written before the filters were recorded truthfully cannot say which fragments the
+    folder's tables counted (`filters_vouched`), so no run can be checked against them: its tables
+    would sit beside theirs with nothing to say whether both came from the same fragments. run-all
+    cannot reuse that BED nor extract another under them; `motif`, `region-mds` and `mfsd` read the
+    BAM under their own filters, and only warned (the configuration check skips those filters).
+
+    ``own`` are the tables this run replaces (suffixes, as the contract names them), which are no
+    reason to refuse it. ``creates_the_record`` is for run-all, which writes the completion marker:
+    with no record at all it would vouch for whatever tables are there. A single tool writes no
+    record into a folder without one (`record_stage_outcomes`), so there it has nothing to compare
+    and leaves nothing claiming the tables are one sample's.
+
+    Called by run-all, `motif`, `region-mds` and `mfsd`. `extract` refuses any table at all
+    (`refuse_to_replace_a_later_record`), and the tools reading the BED read the fragments their
+    tables are made from.
+    """
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    has_record = frame is not None and not frame.empty
+    if has_record and filters_vouched(frame):
+        return
+    if not has_record and not creates_the_record:
+        return
+    others = feature_tables(output_dir, sample, excluding=own)
+    if others:
+        named = "its record does not name" if has_record else "no record names"
+        raise UnrecordedFilters(
+            f"{Path(output_dir).name}/ holds tables made with read filters {named} "
+            f"({len(others)}, among them {', '.join(others[:3])}). This run's tables would sit "
+            "beside them, and nothing could say whether both were made from the same "
+            "fragments. Use a fresh output folder, or remove this one."
+        )
 
 
 def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
@@ -507,9 +564,9 @@ def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
     tables = feature_tables(folder, sample)
     if tables:
         raise RecordInUse(
-            f"{folder.name}/ holds tables made from this sample's BED ({len(tables)}, among them "
+            f"{folder.name}/ holds this sample's feature tables ({len(tables)}, among them "
             f"{', '.join(tables[:3])}). Extracting again would replace the BED and the record "
-            "under them, and leave them looking current. Use a fresh output folder, or remove "
+            "beside them, and leave them looking current. Use a fresh output folder, or remove "
             "this one."
         )
 

@@ -216,7 +216,8 @@ def motif(
             exclude_regions, assets, logger
         )
         # Before any work: other settings than the folder's record would leave the first run's
-        # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
+        # extra tables looking current. `ConfigurationMismatch` and `UnrecordedFilters` are
+        # ValueErrors.
         from .core.output_provenance import (
             filter_settings,
             refuse_a_different_configuration,
@@ -240,6 +241,19 @@ def motif(
                     blacklist=resolved_exclude_path,
                 ),
             },
+            output_format=output_format,
+            compress=compress,
+        )
+        # Its filters cannot be compared with a record that does not name them: then it is
+        # refused beside tables another step made, which its own would sit beside unchecked.
+        from .core.output_provenance import refuse_tables_of_unrecorded_filters
+        from .validate.contract import MOTIF_TABLES
+
+        refuse_tables_of_unrecorded_filters(
+            output,
+            sample_name,
+            own=MOTIF_TABLES,
+            creates_the_record=False,
             output_format=output_format,
             compress=compress,
         )

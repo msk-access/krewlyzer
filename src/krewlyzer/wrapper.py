@@ -699,18 +699,14 @@ def run_all(
         # a Parquet run never reused anything.
         from .core.output_utils import table_paths
 
-        motif_tables = ["EndMotif", "EndMotif1mer", "BreakPointMotif", "MDS"]
-        if is_panel_mode:
-            motif_tables += [
-                "EndMotif.ontarget",
-                "BreakPointMotif.ontarget",
-                "MDS.ontarget",
-            ]
+        from .validate.contract import MOTIF_TABLES
+
         cached_motif_tables = [
             path
-            for table in motif_tables
+            for suffix in MOTIF_TABLES
+            if is_panel_mode or ".ontarget." not in suffix
             for path in table_paths(
-                output / f"{sample}.{table}",
+                output / f"{sample}{suffix.removesuffix('.parquet')}",
                 output_format=resolved_output_format,
                 compress=resolved_compress,
             )
@@ -719,9 +715,26 @@ def run_all(
         # Caching logic: determine what needs to run. A BED is reused only when the record says
         # which filters made it: the configuration guard has then refused any other than this
         # run's. A BED with no record, or one from before the filters were recorded truthfully,
-        # was made with filters nobody knows, and is extracted again.
-        from .core.output_provenance import feature_tables, record_vouches_for_filters
+        # was made with filters nobody knows, and is extracted again -- unless tables were made
+        # from it (whether or not it is still here), which a new BED and a fresh record would
+        # leave looking current: then the run is refused, as `extract` is.
+        from .core.output_provenance import (
+            UnrecordedFilters,
+            record_vouches_for_filters,
+            refuse_tables_of_unrecorded_filters,
+        )
 
+        try:
+            refuse_tables_of_unrecorded_filters(
+                output,
+                sample,
+                creates_the_record=True,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+        except UnrecordedFilters as e:
+            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+            raise typer.Exit(1)
         vouched = record_vouches_for_filters(
             output,
             sample,
@@ -729,19 +742,6 @@ def run_all(
             compress=resolved_compress,
         )
         should_run_extract = not bedgz_file.exists() or not vouched
-        made_from_it = [] if vouched else feature_tables(output, sample)
-        if made_from_it:
-            # Not extracted again either: every table beside it was made from a BED with filters
-            # nobody knows, whether that BED is still here or was deleted, and a run that stopped
-            # after extracting would leave a new BED and a fresh record over them. As `extract`.
-            console.print(
-                f"[bold red]❌ ERROR:[/bold red] {output.name}/ holds tables made from a BED "
-                f"whose filters its record does not name ({len(made_from_it)}, among them "
-                f"{', '.join(made_from_it[:3])}). That BED cannot be reused, and extracting a "
-                "new one would leave them looking current. Use a fresh output folder, or remove "
-                "this one."
-            )
-            raise typer.Exit(1)
         if bedgz_file.exists() and should_run_extract:
             logger.info(
                 f"{bedgz_file.name} has no record of the filters it was extracted with; "
