@@ -335,11 +335,7 @@ def _setting(field: str, value: Any) -> str:
         # whatever path extraction was given.
         return Path(text).name if text else ""
     if field in ("filters_mapq", "filters_min_length", "filters_max_length"):
-        # An integer, which a TSV record may read back as 20.0.
-        try:
-            return str(int(float(text)))
-        except ValueError:
-            return text
+        return text
     # fsc_e1_aggregation and the two filter flags. Not `bool(text)`: "False" read back from a TSV
     # record is truthy.
     return "true" if text.lower() in ("true", "1", "1.0") else "false"
@@ -441,9 +437,11 @@ class RecordInUse(ValueError):
 
 
 def feature_tables(output_dir: Path, sample: str) -> list:
-    """The names of the sample's tables made from its fragments: every table the output contract
-    declares but extraction's own (`contract.feature_table_suffixes`), in any format. One of them
-    beside a BED means the BED cannot be replaced without leaving it stale."""
+    """The names of the sample's declared tables made from its fragments: every table the output
+    contract declares but extraction's own (`contract.feature_table_suffixes`), in any format.
+    Undeclared ones (`.TFBS.raw`, `features.json`) are not looked for: a folder holding them holds
+    declared tables too. One of them beside a BED means the BED cannot be replaced without leaving
+    it stale."""
     from krewlyzer.validate.contract import feature_table_suffixes
 
     folder = Path(output_dir)
