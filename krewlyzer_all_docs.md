@@ -4564,7 +4564,6 @@ krewlyzer motif -i /path/to/input.bam -r /path/to/reference.fa -o /path/to/outpu
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length |
 | `--skip-duplicates` | | FLAG | True | Skip duplicate reads (`--no-skip-duplicates` to keep them) |
-| `--chromosomes` | | TEXT | | Comma-separated chromosomes to process |
 | `--sample-name` | `-s` | TEXT | | Override sample name |
 | `--require-proper-pair` | | FLAG | True | Require proper pairs (disable for duplex) |
 | `--verbose` | `-v` | FLAG | | Enable verbose logging |

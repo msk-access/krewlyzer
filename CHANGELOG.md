@@ -33,7 +33,15 @@ All notable changes to this project will be documented in this file.
   now refused as an unknown option (exit 2) rather than ignored. Passing it through was not an
   option: nothing recorded the subset, and a one-chromosome sample under a completion marker is
   indistinguishable from a whole one downstream. The docs advised it for memory errors; they now
-  advise `--threads`. (`motif` and `run-all` still declare the same unused option.)
+  advise `--threads`.
+- **`krewlyzer run-all --chromosomes` and `krewlyzer motif --chromosomes`.** Both were parsed
+  and never read, so `--chromosomes chr1` processed the whole genome, and `run-all` wrote that
+  whole-genome sample under a `{sample}.metadata.parquet` that looked complete. They are now
+  refused as unknown options (exit 2), before anything is written, rather than ignored. Passing
+  the value through was not an option: nothing records a chromosome subset, and a
+  one-chromosome sample under a completion marker is indistinguishable from a whole one
+  downstream. The `motif` docs listed the option; they no longer do
+  (`tests/invariants/test_no_ignored_options.py`).
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
   Cargo warned about both on every build of `rust/`, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04

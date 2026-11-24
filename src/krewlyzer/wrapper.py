@@ -163,9 +163,8 @@ def run_all(
         "-s",
         help="Sample name for output files (default: derived from BAM filename)",
     ),
-    chromosomes: Optional[str] = typer.Option(
-        None, "--chromosomes", help="Comma-separated chromosomes to process"
-    ),
+    # (`--chromosomes` was removed: it was parsed and ignored, so a "chr1 only" run wrote a
+    # whole-genome sample under a complete-looking record.)
     threads: int = typer.Option(
         0, "--threads", "-t", help="Number of threads (0=all cores)"
     ),
