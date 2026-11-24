@@ -9,6 +9,7 @@ downstream as a whole one. The option is gone; using it is a usage error that wr
 
 from __future__ import annotations
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -88,9 +89,12 @@ def test_chromosomes_is_refused_rather_than_ignored(build, sample, tmp_path):
     out = tmp_path / "out"
     args = build(sample, out) + ["--chromosomes", "chr1"]
     result = CliRunner().invoke(app, [str(a) for a in args])
-    assert result.exit_code == 2, f"not refused as a usage error: {result.output}"
-    assert "No such option" in result.output
-    assert "--chromosomes" in result.output
+    # Typer styles its error box when GITHUB_ACTIONS is set, which splits the option name
+    # with escape codes; the message is compared as text.
+    message = click.unstyle(result.output)
+    assert result.exit_code == 2, f"not refused as a usage error: {message}"
+    assert "No such option" in message
+    assert "--chromosomes" in message
     assert (
         not out.exists()
     ), f"a refused run wrote {sorted(p.name for p in out.iterdir())}"
