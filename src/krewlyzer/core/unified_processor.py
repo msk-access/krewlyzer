@@ -244,7 +244,10 @@ def run_features(
     # Before any work: a single tool with other settings than the folder's record would leave the
     # first run's extra tables looking current. run-all and the PON build own the record.
     if not owns_sample_record:
-        from .output_provenance import refuse_a_different_configuration
+        from .output_provenance import (
+            refuse_a_bed_from_another_folder,
+            refuse_a_different_configuration,
+        )
 
         settings: Dict[str, Any] = {
             "genome": genome,
@@ -257,6 +260,14 @@ def run_features(
             output_dir,
             sample_name,
             settings,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
+        # A BED from another folder: its tables would be made from fragments other filters chose.
+        refuse_a_bed_from_another_folder(
+            bed_path,
+            output_dir,
+            sample_name,
             output_format=resolved_output_format,
             compress=resolved_compress,
         )

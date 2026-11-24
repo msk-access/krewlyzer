@@ -28,7 +28,7 @@ from conftest import requires_data
 from krewlyzer.cli import app
 from krewlyzer.validate.contract import MOTIF_TABLES, STAGE_TABLES
 
-from .runall import SAMPLE, record, synth_run_all, write_vcf
+from .runall import SAMPLE, record, synth_run_all, write_arms, write_vcf
 from .synth import BASELINE, make_sample
 
 pytestmark = [pytest.mark.invariant, requires_data]
@@ -497,12 +497,14 @@ def test_a_tool_reading_the_bam_warns_when_the_filters_cannot_be_compared(
     sample, tmp_path, caplog
 ):
     """`motif` cannot extract the BED again, as run-all does: over a record whose filters cannot
-    be trusted it is let through, and says so."""
+    be trusted, and nothing made from fragments beside it (the BED deleted), it is let through,
+    and says so."""
     import logging
 
     out = tmp_path / "out"
     assert _extract(sample, out).exit_code == 0
     _as_an_old_record(out)
+    (out / f"{SAMPLE}.bed.gz").unlink()
     with caplog.at_level(logging.WARNING):
         result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
     assert result.exit_code == 0, result.output
@@ -525,13 +527,17 @@ def _an_old_run_all_folder(sample, out):
     return _files(out)
 
 
-def _refused_for_unrecorded_filters(result, own):
-    """Refused by the shared check, naming tables another step made and none of the tool's own."""
+def _message(result):
+    """The output as text, and on one line: Rich styles it under GITHUB_ACTIONS, and wraps it (in
+    a box, for a usage error)."""
     from rich.text import Text
 
-    # As text, and on one line: Rich styles the message under GITHUB_ACTIONS, and wraps it (in a
-    # box, for a usage error).
-    message = " ".join(Text.from_ansi(result.output).plain.replace("│", " ").split())
+    return " ".join(Text.from_ansi(result.output).plain.replace("│", " ").split())
+
+
+def _refused_for_unrecorded_filters(result, own):
+    """Refused by the shared check, naming tables another step made and none of the tool's own."""
+    message = _message(result)
     assert result.exit_code != 0, message
     assert "made with read filters its record does not name" in message, message
     assert f"among them {SAMPLE}." in message, message
@@ -575,13 +581,45 @@ def test_mfsd_refuses_a_folder_of_tables_made_with_unrecorded_filters(sample, tm
     assert _files(out) == before
 
 
+def _bam_tool(tool, sample, out, tmp_path):
+    """Run ``tool``, one of the three tools reading the BAM, into ``out``; and its own tables."""
+    if tool == "motif":
+        return _cli(*_motif_args(sample, out, sample.assets.blacklist)), MOTIF_TABLES
+    if tool == "region-mds":
+        return _cli(*_region_mds_args(sample, out)), STAGE_TABLES["region_mds"]
+    vcf = write_vcf(tmp_path / "variants.vcf")
+    return _mfsd(sample, out, vcf), STAGE_TABLES["mfsd"]
+
+
+@pytest.mark.parametrize("tool", ["motif", "region-mds", "mfsd"])
+def test_a_tool_reading_the_bam_refuses_an_old_folder_holding_its_bed(
+    sample, tmp_path, tool
+):
+    """The third review's case: over an old `extract` record, `motif --minlen 150` only warned and
+    ran, as none of its own tables were there yet; `fsd` then read the BED with nothing to check.
+    Motif tables at minlen 150 beside an FSD from fragments nobody knows the filters of. The BED
+    is made from fragments too, and these tools do not replace it."""
+    out = tmp_path / "out"
+    assert _extract(sample, out).exit_code == 0
+    _as_an_old_record(out)
+    before = _files(out)
+
+    result, own = _bam_tool(tool, sample, out, tmp_path)
+
+    _refused_for_unrecorded_filters(result, own)
+    assert f"{SAMPLE}.bed.gz" in _message(result)
+    assert _files(out) == before
+
+
 def test_a_tools_own_earlier_tables_do_not_refuse_it(sample, tmp_path):
     """`motif` replaces its own tables, so those alone are no reason to refuse: an extract-and-
-    motif folder whose record cannot vouch for its filters is still rerun by `motif`."""
+    motif folder whose record cannot vouch for its filters, and whose BED is gone, is still rerun
+    by `motif`."""
     out = tmp_path / "out"
     assert _extract(sample, out).exit_code == 0
     assert _cli(*_motif_args(sample, out, sample.assets.blacklist)).exit_code == 0
     _as_an_old_record(out)
+    (out / f"{SAMPLE}.bed.gz").unlink()
 
     result = _cli(*_motif_args(sample, out, sample.assets.blacklist))
 
@@ -613,6 +651,123 @@ def test_run_all_into_a_folder_of_tables_without_a_record_is_refused(sample, tmp
 
     assert synth_run_all(sample, out) == 1
     assert _files(out) == before
+
+
+# ── 1c. A BED read from another folder ───────────────────────────────────────────────────────
+#
+# The tools that read the BED are given it by path. `fsd -i A/S.bed.gz -o B` wrote B's FSD from
+# A's fragments under B's record, whatever filters each record names (third review). The
+# five `run_features` tools share one check; `region-entropy` makes its own call.
+
+
+def _fsd(sample, bed, out):
+    arms = write_arms(sample.directory / "arms.validated.bed", sample)
+    return _cli(
+        "fsd",
+        "-i",
+        bed,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "-a",
+        arms,
+        "--skip-target-regions",
+        "--skip-pon",
+        "-F",
+        "parquet",
+    )
+
+
+def _region_entropy(sample, bed, out):
+    # --output-format by its long name: region-entropy gives -F to --gc-factors too.
+    return _cli(
+        "region-entropy",
+        "-i",
+        bed,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "--skip-target-regions",
+        "--skip-pon",
+        "--output-format",
+        "parquet",
+    )
+
+
+@pytest.mark.parametrize("tool", [_fsd, _region_entropy], ids=["fsd", "region-entropy"])
+def test_a_bed_tool_refuses_a_bed_extracted_with_other_filters(sample, tmp_path, tool):
+    """The review's case: `extract --minlen 150 -o a`, run-all into b, then a BED tool given a's
+    BED into b, which would hold tables from two fragment sets under one record."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+    assert synth_run_all(sample, b) is None
+    before = _files(b)
+
+    result = tool(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "filters_min_length=65 in b/, 150 in a/" in _message(result), _message(
+        result
+    )
+    assert _files(b) == before
+
+
+def test_a_bed_tool_reads_a_bed_extracted_elsewhere_with_the_folders_filters(
+    sample, tmp_path
+):
+    """The refusal is for other filters: a BED from another folder with the same ones is read."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a).exit_code == 0
+    assert synth_run_all(sample, b) is None
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code == 0, result.output
+
+
+@pytest.mark.parametrize(
+    "unvouched",
+    ["no_record_beside_the_bed", "old_record_beside_the_bed", "old_record_here"],
+)
+def test_a_bed_tool_refuses_a_bed_whose_filters_cannot_be_compared(
+    sample, tmp_path, unvouched
+):
+    """A BED nobody recorded the filters of, or a folder whose record cannot say which filters
+    its tables were made with: nothing could say whether both came from the same fragments.
+    """
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a).exit_code == 0
+    assert synth_run_all(sample, b) is None
+    if unvouched == "no_record_beside_the_bed":
+        for record_file in a.glob(f"{SAMPLE}.metadata.*"):
+            record_file.unlink()
+    else:
+        _as_an_old_record(a if unvouched == "old_record_beside_the_bed" else b)
+    before = _files(b)
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "cannot be compared with the record in b/" in _message(result), _message(
+        result
+    )
+    assert _files(b) == before
+
+
+def test_a_bed_tool_reads_a_bed_from_elsewhere_into_a_folder_without_a_record(
+    sample, tmp_path
+):
+    """As for every tool: without a record there is nothing to compare, and nothing there claims
+    the folder's tables are one sample's. Tools run by hand, and Nextflow's, write so.
+    """
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+
+    result = _fsd(sample, a / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code == 0, result.output
 
 
 # ── 2. extract refuses a folder with tables made from its BED ────────────────────────────────

@@ -201,13 +201,24 @@ def region_entropy(
             log=logger,
         )
         # Before any work: other settings than the folder's record would leave the first run's
-        # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
-        from .core.output_provenance import refuse_a_different_configuration
+        # extra tables looking current, and a BED from another folder may hold other fragments.
+        # A `ConfigurationMismatch` is a ValueError.
+        from .core.output_provenance import (
+            refuse_a_bed_from_another_folder,
+            refuse_a_different_configuration,
+        )
 
         refuse_a_different_configuration(
             output,
             sample_name,
             {"genome": genome, "assay": assay, "target_regions": resolved_target_path},
+            output_format=output_format,
+            compress=compress,
+        )
+        refuse_a_bed_from_another_folder(
+            bedgz_input,
+            output,
+            sample_name,
             output_format=output_format,
             compress=compress,
         )

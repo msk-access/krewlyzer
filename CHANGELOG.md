@@ -340,11 +340,19 @@ All notable changes to this project will be documented in this file.
   reuse it, as it now does a BED with no record beside it, unless feature tables were made from it,
   whether or not it is still there: then it refuses, like `extract`, so a run-all folder whose
   record lacks these columns, from any earlier build, is rerun into a fresh output folder. `motif`,
-  `region-mds` and `mfsd`, which cannot extract again, refuse such a folder when it holds tables
-  another step made (their own they replace), and otherwise warn that the filters could not be
-  compared: one check for all four (`output_provenance.refuse_tables_of_unrecorded_filters`).
-  run-all also refuses a folder of tables with no record beside it, since its record would vouch
-  for them; a single tool writes no record there, and runs (`tests/invariants/test_rerun_bed.py`).
+  `region-mds` and `mfsd`, which cannot extract again, refuse such a folder when it holds the BED
+  or tables another step made (their own they replace), and otherwise warn that the filters could
+  not be compared: one check for all four
+  (`output_provenance.refuse_tables_of_unrecorded_filters`). The BED counts, so the order the tools
+  run in no longer decides: `motif --minlen 150` over an old `extract` folder warned and ran, and
+  `fsd` then read the BED unchecked. run-all also refuses a folder of tables with no record beside
+  it, since its record would vouch for them; a single tool writes no record there, and runs. The
+  tools reading the BED compare a BED from another folder with the output folder's record:
+  `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150 fragments under b's record, which
+  says 65. Other filters are refused, and so is a BED or a folder whose record cannot name them;
+  from the folder's own BED, or into a folder without a record (Nextflow's tasks), they run as
+  before (`output_provenance.refuse_a_bed_from_another_folder`,
+  `tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

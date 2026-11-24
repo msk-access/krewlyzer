@@ -269,7 +269,6 @@ def mfsd(
     # folder; it calls `mfsd_stage`, not this command.
     from .core.output_provenance import (
         ConfigurationMismatch,
-        UnrecordedFilters,
         filter_settings,
         refuse_a_different_configuration,
         refuse_tables_of_unrecorded_filters,
@@ -293,7 +292,7 @@ def mfsd(
             output_format=output_format,
             compress=compress,
         )
-    except (ConfigurationMismatch, UnrecordedFilters) as e:
+    except ConfigurationMismatch as e:  # `UnrecordedFilters` is one
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 

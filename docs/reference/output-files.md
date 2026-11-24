@@ -1210,10 +1210,13 @@ no record beside it), unless tables were made from it, whether or not it is stil
 refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh
 record over them. A run-all folder whose record lacks the filter columns, from any earlier build,
 is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd` cannot extract
-again, so over such a record they refuse when the folder holds tables another step made, and
-otherwise warn that the filters could not be compared, and run. run-all also refuses tables with no
-record beside them, since the record it writes would vouch for them; a single tool writes no record
-into such a folder, and runs.
+again, so over such a record they refuse when the folder holds the BED or tables another step made,
+and otherwise warn that the filters could not be compared, and run. run-all also refuses tables
+with no record beside them, since the record it writes would vouch for them; a single tool writes
+no record into such a folder, and runs. A tool reading the BED from another folder
+(`fsd -i a/S.bed.gz -o b`) compares the read filters recorded beside that BED with the output
+folder's record, and refuses other ones, or a record on either side that cannot name them; into a
+folder without a record it runs.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and
