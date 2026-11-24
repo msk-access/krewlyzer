@@ -9,8 +9,8 @@ downstream as a whole one. The option is gone; using it is a usage error that wr
 
 from __future__ import annotations
 
-import click
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from conftest import requires_data
@@ -90,8 +90,9 @@ def test_chromosomes_is_refused_rather_than_ignored(build, sample, tmp_path):
     args = build(sample, out) + ["--chromosomes", "chr1"]
     result = CliRunner().invoke(app, [str(a) for a in args])
     # Typer styles its error box when GITHUB_ACTIONS is set, which splits the option name
-    # with escape codes; the message is compared as text.
-    message = click.unstyle(result.output)
+    # with escape codes; the message is compared as text. Rich, not Click: Click is not a
+    # krewlyzer dependency, and Typer 0.29 no longer installs it.
+    message = Text.from_ansi(result.output).plain
     assert result.exit_code == 2, f"not refused as a usage error: {message}"
     assert "No such option" in message
     assert "--chromosomes" in message
