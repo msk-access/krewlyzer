@@ -110,15 +110,15 @@ All notable changes to this project will be documented in this file.
   `--output-format` and `--compress`; the configuration check compares it on every call, so every
   entry point refuses another format once the folder holds a record, and names the option to pass.
   `uxm`, `mfsd` and `motif` write no record, so one of them run alone in a fresh folder is not
-  checked. `mfsd` now runs the check too, for the format alone. A record from before this release
-  is judged by its record files (one `.parquet` record is Parquet; a `.parquet` and a `.tsv` are
-  `both`, though no refusal then advises `--output-format both`, since two runs look the same). A
-  copy of the record in an extension the field does not name (a TSV run published over a Parquet
-  one) makes the folder mixed, refused whatever the format. A hand rerun without `--output-format`
-  into a Parquet folder that worked before is now refused: each one left stale Parquet. For
-  Nextflow, where no task can see the published folder, `validate-output` reports a table in an
-  extension outside `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with
-  tables in two extensions as `FORMAT.UNJUDGED` (skip).
+  checked. `mfsd` now runs the check too (for the format, and its read filters below). A record from
+  before this release is judged by its record files (one `.parquet` record is Parquet; a `.parquet`
+  and a `.tsv` are `both`, though no refusal then advises `--output-format both`, since two runs
+  look the same). A copy of the record in an extension the field does not name (a TSV run published
+  over a Parquet one) makes the folder mixed, refused whatever the format. A hand rerun without
+  `--output-format` into a Parquet folder that worked before is now refused: each one left stale
+  Parquet. For Nextflow, where no task can see the published folder, `validate-output` reports a
+  table in an extension outside `table_formats` as `FORMAT.MIXED` (error), and a pre-release record
+  with tables in two extensions as `FORMAT.UNJUDGED` (skip).
 
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
   `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
@@ -326,15 +326,18 @@ All notable changes to this project will be documented in this file.
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
   one record. The five read filters are now settings a rerun is checked against
-  (`output_provenance.FILTER_FIELDS`): run-all, `extract`, `motif` and `region-mds` (the three it
-  takes) refuse a run whose filters differ from the record's, before writing anything. The record
+  (`output_provenance.FILTER_FIELDS`): run-all, `extract`, `motif`, `region-mds` (the three it
+  takes) and `mfsd` (mapq and the length range, which run-all gives it; it runs without the
+  proper-pair filter in run-all and drops duplicates whatever its flag says) refuse a run whose
+  filters differ from the record's, before writing anything. The record
   gains `filters_skip_duplicates` and `filters_require_proper_pair`, which it did not hold. A
   record without them was written before the filters were recorded truthfully (every one said
   20/65/1000), so its values are not compared. run-all extracts that folder's BED again rather
   than reuse it, as it now does a BED with no record beside it, unless feature tables were made
-  from it, whether or not it is still there: then it refuses, like `extract`, so a pre-release run-all folder is rerun into a fresh
-  output folder. `motif` and `region-mds`, which cannot extract again, warn that the filters could
-  not be compared (`tests/invariants/test_rerun_bed.py`).
+  from it, whether or not it is still there: then it refuses, like `extract`, so a pre-release
+  run-all folder is rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`, which
+  cannot extract again, warn that the filters could not be compared
+  (`tests/invariants/test_rerun_bed.py`).
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

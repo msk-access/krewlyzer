@@ -373,7 +373,7 @@ def refuse_a_different_configuration(
 
     Called by every entry point that writes a settings-dependent set of tables, before it writes
     anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy`,
-    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (the format alone); not
+    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (its mapq and lengths); not
     run-all's own calls or the PON build, which own the record they write.
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the

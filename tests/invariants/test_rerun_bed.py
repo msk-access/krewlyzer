@@ -27,7 +27,7 @@ from typer.testing import CliRunner
 from conftest import requires_data
 from krewlyzer.cli import app
 
-from .runall import SAMPLE, record, synth_run_all
+from .runall import SAMPLE, record, synth_run_all, write_vcf
 from .synth import BASELINE, make_sample
 
 pytestmark = [pytest.mark.invariant, requires_data]
@@ -231,6 +231,60 @@ def test_region_mds_with_other_filters_is_refused(sample, tmp_path):
     assert result.exit_code != 0, result.output
     assert "filters_min_length" in result.output
     assert _files(out) == before
+
+
+def _mfsd(sample, out, vcf, *extra):
+    return _cli(
+        "mfsd",
+        "-i",
+        sample.bam,
+        "-V",
+        vcf,
+        "-g",
+        sample.reference,
+        "-o",
+        out,
+        "-s",
+        SAMPLE,
+        "--output-format",
+        "parquet",
+        *extra,
+    )
+
+
+@pytest.mark.parametrize(
+    "option,column",
+    [
+        (("--mapq", "30"), "filters_mapq"),
+        (("--minlen", "80"), "filters_min_length"),
+        (("--maxlen", "600"), "filters_max_length"),
+    ],
+)
+def test_mfsd_with_other_filters_is_refused(sample, tmp_path, option, column):
+    """`mfsd` reads the BAM, as `motif` does, and run-all gives it the sample's mapq and length
+    range (`--mfsd-bam` included). It is not compared on the other two: run-all always runs it
+    without the proper-pair filter, and it drops duplicates whatever its flag says."""
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    vcf = write_vcf(tmp_path / "variants.vcf")
+    before = _files(out)
+
+    result = _mfsd(sample, out, vcf, *option)
+
+    assert result.exit_code == 1, result.output
+    assert column in result.output
+    assert _files(out) == before
+
+
+def test_mfsd_with_the_folders_filters_runs(sample, tmp_path):
+    out = tmp_path / "out"
+    assert synth_run_all(sample, out) is None
+    vcf = write_vcf(tmp_path / "variants.vcf")
+
+    result = _mfsd(sample, out, vcf)
+
+    assert result.exit_code == 0, result.output
+    assert (out / f"{SAMPLE}.mFSD.parquet").exists()
 
 
 @pytest.mark.parametrize("state", ["record_before_filters_were_recorded", "no_record"])

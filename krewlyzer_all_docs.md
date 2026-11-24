@@ -10899,23 +10899,24 @@ mean.
 | `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
 | `table_formats` | str | The extensions the folder's tables are written in: `.parquet`, `.tsv`, `.tsv.gz`, `.parquet,.tsv` or `.parquet,.tsv.gz` (from `--output-format` and `--compress`; compression changes no Parquet file). Recorded so a rerun in another format is refused; absent from directories written before this release |
 
-**One folder, one configuration.** A rerun into a sample's folder must use the settings
-recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
-file name), the five read filters and, where gene FSC is written, `fsc_e1_aggregation`. run-all,
-`extract` and every feature tool that takes these settings refuse a run with others before
-writing anything, naming the setting; `motif` and `region-mds` compare the filters they take,
-since they read the BAM again rather than the BED, and `uxm` compares the genome, which picks its
-markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its
-assay) left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as
-the second run's, and a run-all after `extract --mapq 30` kept that BED and wrote its motif tables
-at mapq 20, under one record. The filters are compared only when the record holds all five: one
-written before they were recorded truthfully says 20/65/1000 whatever its run used, so a rerun is
-not refused for those values. run-all extracts that folder's BED again instead of reusing it (as
-it does a BED with no record beside it), unless tables were made from it, whether or not it is
-still there: then it refuses, like `extract`, since a run stopped after extracting would leave a new BED and a fresh record over
-them. A pre-release run-all folder is therefore rerun into a fresh output folder. `motif` and
-`region-mds` cannot extract again, so over such a record they warn that the filters could not be
-compared, and run.
+**One folder, one configuration.** A rerun into a sample's folder must use the settings recorded
+there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by file name),
+the five read filters and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and
+every feature tool that takes these settings refuse a run with others before writing anything,
+naming the setting; `motif` and `region-mds` compare the filters they take, since they read the
+BAM again rather than the BED, `mfsd` its mapq and length range (run-all gives it those, runs it
+without the proper-pair filter, and it drops duplicates whatever its flag says), and `uxm`
+compares the genome, which picks its markers. Without that, a rerun that writes fewer tables (a
+panel folder rerun without its assay) left the first run's extra tables -- `TFBS.ontarget`,
+`FSC.regions.e1only` -- reading as the second run's, and a run-all after `extract --mapq 30` kept
+that BED and wrote its motif tables at mapq 20, under one record. The filters are compared only
+when the record holds all five: one written before they were recorded truthfully says 20/65/1000
+whatever its run used, so a rerun is not refused for those values. run-all extracts that folder's
+BED again instead of reusing it (as it does a BED with no record beside it), unless tables were
+made from it, whether or not it is still there: then it refuses, like `extract`, since a run
+stopped after extracting would leave a new BED and a fresh record over them. A pre-release run-all
+folder is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd` cannot
+extract again, so over such a record they warn that the filters could not be compared, and run.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

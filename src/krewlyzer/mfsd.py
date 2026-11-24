@@ -262,9 +262,14 @@ def mfsd(
     """
     # Before any work: mFSD's tables depend on no assay or targets, but a run in another format
     # than the folder's leaves its earlier tables beside the new ones, and downstream reads the
-    # Parquet. run-all checks its own folder; it calls `mfsd_stage`, not this command.
+    # Parquet. The filters too: mFSD reads the BAM, and run-all gives it the sample's mapq and
+    # length range (`--mfsd-bam` included), so other ones would put a second fragment set under
+    # the record. Not the other two: run-all always runs mFSD without the proper-pair filter, and
+    # the Rust reader drops duplicates whatever `--skip-duplicates` says. run-all checks its own
+    # folder; it calls `mfsd_stage`, not this command.
     from .core.output_provenance import (
         ConfigurationMismatch,
+        filter_settings,
         refuse_a_different_configuration,
     )
 
@@ -272,7 +277,7 @@ def mfsd(
         refuse_a_different_configuration(
             output,
             _sample_name(bam_input, sample_name),
-            {},
+            filter_settings(mapq=mapq, minlen=minlen, maxlen=maxlen),
             output_format=output_format,
             compress=compress,
         )
