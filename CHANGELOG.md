@@ -323,18 +323,25 @@ All notable changes to this project will be documented in this file.
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (`tests/invariants/test_extract_record.py`).
-- **A GC factor table exists exactly when the run says it wrote one.** With `-F both`, Rust wrote
-  the TSV factor table and then failed on the Parquet one: the record said
+- **A GC factor table is written in every format or none, and named only when written.** With
+  `-F both`, Rust wrote the TSV factor table and then failed on the Parquet one: the record said
   `gc_correction_computed=False` while a `.tsv` table sat in the folder, and every tool reading it
   found and used that table. Both Rust writers of a factor table -- extraction's
-  `compute_and_write_gc_factors` and the unified pipeline's refit for a single tool with no table
-  beside its BED -- now write every format or none, removing what they wrote before raising
+  `compute_and_write_gc_factors` and the unified pipeline's refit for a feature step that finds no
+  table beside its BED -- now write every format or none, removing what they wrote before raising
   (`gc_correction::write_factor_tables`). The on-target writes in run-all and `process_sample`
   (`build-pon`) logged "Wrote 0 ... GC factors" (the off-target one in `process_sample`, "Computed
-  0") when nothing was fitted or written; every write from extraction's observations now goes
-  through one helper, `sample_processor.write_gc_factor_table`, which names a table only when it
-  wrote one and warns, per population, when none could be fitted or the computation failed
-  (`tests/invariants/test_factor_table_writes.py`).
+  0") when nothing was fitted or written, and a population with no observations at all (a panel
+  whose targets no fragment reaches) was skipped without a word. Every write from extraction's
+  observations now goes through one helper, `sample_processor.write_gc_factor_table`, which names
+  a table only when it wrote one and warns, per population, when there was nothing to fit, none
+  could be fitted, or the computation failed; for the off-target table the warning adds that a
+  feature step reading the BED refits one (`tests/invariants/test_factor_table_writes.py`). Two
+  defects of that refit remain, pinned by strict xfails in the same file until fragment-model
+  Step 2 deletes it (#92): after run-all's or the PON build's own extraction fitted no off-target
+  table, the refit fits one from the whole BED (on-target fragments included, in panel mode) while
+  the record says none was computed; and it checks fragments against another chromosome's valid
+  regions when the BED's contig order differs from theirs.
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under

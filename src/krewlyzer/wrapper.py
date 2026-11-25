@@ -843,10 +843,7 @@ def run_all(
 
                     # Compute on-target GC factors for panel mode
                     # These are used by mFSD and gene-level FSC for accurate panel analysis
-                    if (
-                        is_panel_mode
-                        and len(extraction_result.gc_observations_ontarget) > 0
-                    ):
+                    if is_panel_mode:
                         write_gc_factor_table(
                             extraction_result.gc_observations_ontarget,
                             assets,

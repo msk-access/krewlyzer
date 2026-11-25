@@ -63,16 +63,34 @@ def write_gc_factor_table(
     """Fit one population's GC factors and write its table. True only if a table was written.
 
     The one place a factor table is written from extraction's observations (extract, run-all and
-    the PON build, both populations), so what the log says is what the folder holds: the tools
-    reading the folder find a table by existence, and a line naming one that was not written
-    ("Wrote 0 on-target GC factors") sends a reader after a table that does not exist. Rust
-    returns 0 and writes nothing when no length bin can be fitted. A single tool that refits from
-    the BED writes through the unified pipeline instead; Rust's `write_factor_tables` holds both
-    writers to every format or none. ``assets`` is an `AssetManager` or a genome name; a failure
-    to resolve it is a failed computation like any other, warned about, never raised: the record
+    the PON build, both populations), so the log names a table only when one was written: the
+    tools reading the folder find a table by existence, and a line naming one that was not
+    ("Wrote 0 on-target GC factors") sends a reader after a table that does not exist. A
+    population with no observations, or none Rust can fit (it returns 0 and writes nothing), is
+    warned about with that reason. ``assets`` is an `AssetManager` or a genome name; a failure to
+    resolve it is a failed computation like any other, warned about, never raised: the record
     says no table.
+
+    The other writer is the unified pipeline's refit: a feature step that finds no off-target
+    table beside its BED fits one from the whole BED. After a single tool's run that is its job;
+    after run-all's or the PON build's own extraction fitted none it is a known defect (in panel
+    mode it fits from on-target fragments too), pinned by strict xfails in
+    ``tests/invariants/test_factor_table_writes.py`` until fragment-model Step 2 deletes the refit
+    (#92). Rust's `write_factor_tables` holds both writers to every format or none.
     """
     label = population.replace("_", "-")  # off_target -> off-target
+    # Only an off-target table is refitted when missing (`resolve_gc_assets`); say so, or the
+    # line reads as if the folder will stay without one.
+    none_written = "no factor table written" + (
+        " (a feature step reading this BED refits one from it)"
+        if population == "off_target"
+        else ""
+    )
+    if not observations:
+        logger.warning(
+            f"No {label} fragments to fit GC factors for {sample}; {none_written}"
+        )
+        return False
     try:
         if isinstance(assets, str):
             assets = AssetManager(assets)
@@ -86,7 +104,7 @@ def write_gc_factor_table(
         )
     except Exception as e:
         logger.warning(
-            f"{label} GC factor computation failed for {sample}, no factor table written: {e}"
+            f"{label} GC factor computation failed for {sample}: {e}; {none_written}"
         )
         return False
     if n_factors > 0:
@@ -95,10 +113,7 @@ def write_gc_factor_table(
             f"{factor_table_base(output_dir, sample, population).name}.*"
         )
         return True
-    logger.warning(
-        f"No {label} GC factor could be fitted for {sample}; no factor table written, so the "
-        "tools reading this folder find none"
-    )
+    logger.warning(f"No {label} GC factor could be fitted for {sample}; {none_written}")
     return False
 
 
@@ -923,18 +938,14 @@ def write_extraction_outputs(
 
     # Compute GC correction factors. The record and `outputs` say a table exists only when one
     # was written (`write_gc_factor_table`).
-    if (
-        compute_gc_factors
-        and result.gc_observations
-        and write_gc_factor_table(
-            result.gc_observations,
-            genome,
-            output_dir,
-            sample,
-            "off_target",
-            output_format=output_format,
-            compress=compress,
-        )
+    if compute_gc_factors and write_gc_factor_table(
+        result.gc_observations,
+        genome,
+        output_dir,
+        sample,
+        "off_target",
+        output_format=output_format,
+        compress=compress,
     ):
         outputs["gc_factors"] = factor_table_path(output_dir, sample, "off_target")
         meta_flat["gc_correction_computed"] = True
@@ -1149,17 +1160,16 @@ def process_sample(
 
         # === Compute GC correction factors for downstream tools ===
         # Off-target factors (WGS-like, primary); on-target in panel mode (FSC, RegionEntropy).
-        if result.gc_observations:
-            write_gc_factor_table(
-                result.gc_observations,
-                assets,
-                output_dir,
-                sample_name,
-                "off_target",
-                output_format=output_format,
-                compress=compress,
-            )
-        if result.gc_observations_ontarget and result.is_panel_mode:
+        write_gc_factor_table(
+            result.gc_observations,
+            assets,
+            output_dir,
+            sample_name,
+            "off_target",
+            output_format=output_format,
+            compress=compress,
+        )
+        if result.is_panel_mode:
             write_gc_factor_table(
                 result.gc_observations_ontarget,
                 assets,

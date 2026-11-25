@@ -340,11 +340,7 @@ def extract(
         )
 
         # On-target GC correction (panel mode only) - additional to standard outputs
-        if (
-            resolved_target_path
-            and gc_correct
-            and len(result.gc_observations_ontarget) > 0
-        ):
+        if resolved_target_path and gc_correct:
             write_gc_factor_table(
                 result.gc_observations_ontarget,
                 assets,
