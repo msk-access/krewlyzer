@@ -261,6 +261,20 @@ _WPS_PON_COLS: Tuple[ColumnRule, ...] = (
 )
 
 
+#: The tables run-all's motif step and `motif` write, on- and off-target. A rerun of `motif`
+#: replaces them, so they are its own (`output_provenance.refuse_tables_of_unrecorded_filters`),
+#: and run-all reuses them only when all of this run's exist.
+MOTIF_TABLES: Tuple[str, ...] = (
+    ".EndMotif.parquet",
+    ".EndMotif1mer.parquet",
+    ".BreakPointMotif.parquet",
+    ".MDS.parquet",
+    ".EndMotif.ontarget.parquet",
+    ".BreakPointMotif.ontarget.parquet",
+    ".MDS.ontarget.parquet",
+)
+
+
 #: The optional stages run-all carries on past, and the tables each one writes.
 #:
 #: run-all keeps going when one of these fails, by design, so that one stage cannot cost a
@@ -650,3 +664,20 @@ NOT_CONSUMED: Tuple[str, ...] = (
     ".correction_factors.parquet",
     ".OCF.parquet",
 )
+
+#: What extraction itself writes beside the BED: the sample's record and its GC factor table.
+EXTRACTION_TABLES: Tuple[str, ...] = (COMPLETION_MARKER, ".correction_factors.parquet")
+
+
+def feature_table_suffixes() -> Tuple[str, ...]:
+    """Every table this contract declares that is made from the sample's fragments, by suffix.
+
+    That is every declared table but extraction's own (`EXTRACTION_TABLES`) and UXM's: one of
+    these beside a BED means something read that BED, or the BAM under the folder's filters
+    (`extract` refuses to replace it). UXM reads the BAM at a fixed mapq of 20 whatever the record
+    names, and never the BED, so a new BED leaves it no staler than it was.
+    """
+    declared = {t.suffix for t in CONTRACT}
+    declared.update(NOT_CONSUMED, OCF_PREFERENCE)
+    declared.update(s for tables in STAGE_TABLES.values() for s in tables)
+    return tuple(sorted(declared - set(EXTRACTION_TABLES) - set(STAGE_TABLES["uxm"])))

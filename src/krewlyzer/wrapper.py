@@ -436,10 +436,14 @@ def run_all(
     # leave the first run's extra tables looking current (Greptile on #98).
     from .core.output_provenance import (
         ConfigurationMismatch,
+        filter_settings,
         refuse_a_different_configuration,
+        refuse_links_where_extraction_writes,
     )
 
     try:
+        # First: every check below reads the folder, and would read a linked record as its own.
+        refuse_links_where_extraction_writes(output, sample)
         refuse_a_different_configuration(
             output,
             sample,
@@ -447,6 +451,16 @@ def run_all(
                 "genome": genome,
                 "assay": resolved_assay,
                 "target_regions": resolved_target_path,
+                # The filters and the blacklist, so a BED another run extracted is reused only
+                # if it holds the fragments this run's would.
+                **filter_settings(
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                    blacklist=resolved_exclude_regions,
+                ),
                 # E1 decides a table only gene FSC writes, which needs an assay: as run_features.
                 **(
                     {
@@ -688,26 +702,55 @@ def run_all(
         # a Parquet run never reused anything.
         from .core.output_utils import table_paths
 
-        motif_tables = ["EndMotif", "EndMotif1mer", "BreakPointMotif", "MDS"]
-        if is_panel_mode:
-            motif_tables += [
-                "EndMotif.ontarget",
-                "BreakPointMotif.ontarget",
-                "MDS.ontarget",
-            ]
+        from .validate.contract import MOTIF_TABLES
+
         cached_motif_tables = [
             path
-            for table in motif_tables
+            for suffix in MOTIF_TABLES
+            if is_panel_mode or ".ontarget." not in suffix
             for path in table_paths(
-                output / f"{sample}.{table}",
+                output / f"{sample}{suffix.removesuffix('.parquet')}",
                 output_format=resolved_output_format,
                 compress=resolved_compress,
             )
         ]
 
-        # Caching logic: determine what needs to run
-        should_run_extract = not bedgz_file.exists()
-        should_run_engine = not bedgz_file.exists() or not all(
+        # Caching logic: determine what needs to run. A BED is reused only when the record says
+        # which filters made it: the configuration guard has then refused any other than this
+        # run's. A BED with no record, or one from before the filters were recorded truthfully,
+        # was made with filters nobody knows, and is extracted again -- unless tables were made
+        # from it (whether or not it is still here), which a new BED and a fresh record would
+        # leave looking current: then the run is refused, as `extract` is.
+        from .core.output_provenance import (
+            UnrecordedFilters,
+            record_vouches_for_filters,
+            refuse_tables_of_unrecorded_filters,
+        )
+
+        try:
+            refuse_tables_of_unrecorded_filters(
+                output,
+                sample,
+                creates_the_record=True,
+                output_format=resolved_output_format,
+                compress=resolved_compress,
+            )
+        except UnrecordedFilters as e:
+            console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+            raise typer.Exit(1)
+        vouched = record_vouches_for_filters(
+            output,
+            sample,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
+        should_run_extract = not bedgz_file.exists() or not vouched
+        if bedgz_file.exists() and should_run_extract:
+            logger.info(
+                f"{bedgz_file.name} has no record of the filters it was extracted with; "
+                "extracting it again"
+            )
+        should_run_engine = should_run_extract or not all(
             path.exists() for path in cached_motif_tables
         )
         # Cached motif tables were scored (or not) against the PON of the run that made them.

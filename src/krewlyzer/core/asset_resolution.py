@@ -23,6 +23,7 @@ Usage:
 
 import logging
 import gzip
+import os
 from pathlib import Path
 from typing import Optional, Tuple, TYPE_CHECKING
 
@@ -306,14 +307,33 @@ def resolve_exclude_regions(
     Returns ``(path, source)``, source ``explicit`` or ``bundled``.
 
     Raises:
-        ValueError: an explicit file that does not exist (it used to be used as given), or no
-            explicit file and no bundled blacklist for the genome, or only its Git LFS pointer
-            (it used to be a warning, and the run kept the blacklisted fragments and exited 0).
+        ValueError: an explicit file that does not exist (it used to be used as given), is a
+            directory, or is not a regular file other than `/dev/null`; or no explicit file and
+            no bundled blacklist for the genome, or only its Git LFS pointer (it used to be a
+            warning, and the run kept the blacklisted fragments and exited 0).
     """
     log = log or logger
     if explicit_path is not None:
         if not Path(explicit_path).exists():
             raise ValueError(f"Exclude regions file not found: {explicit_path}")
+        # Its bytes are the blacklist's digest in the record (`blacklist_digest`), read before
+        # the filter reads them, so it must read the same twice, and end: a regular file.
+        # `/dev/null` reads as an empty file, so it is one. Not caught, on macOS only:
+        # `/dev/stdin` or `/dev/fd/N` open on a regular file pass as that file, but share its
+        # read position, so the filter reads nothing after the digest (Linux opens it anew).
+        if Path(explicit_path).is_dir():
+            raise ValueError(
+                f"Exclude regions {explicit_path} is a directory, not a BED file"
+            )
+        if not (
+            Path(explicit_path).is_file() or os.path.samefile(explicit_path, os.devnull)
+        ):
+            raise ValueError(
+                f"Exclude regions {explicit_path} is not a regular file (a pipe, as process "
+                "substitution gives, a socket or a device): it is read once for the record's "
+                "digest and again by the filter, which a pipe cannot serve and a device may "
+                "never end. Pass a file, or /dev/null to exclude nothing."
+            )
         _refuse_an_lfs_pointer(Path(explicit_path), "--exclude-regions")
         log.info(f"Exclude regions: {Path(explicit_path).name} (explicit)")
         return Path(explicit_path), "explicit"

@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 import logging
 
+from .output_provenance import bed_as_extracted
+
 if TYPE_CHECKING:
     from ..assets import AssetManager
 
@@ -135,8 +137,16 @@ def resolve_gc_factors(
     Every reader goes through this. Before it existed, three call sites looked only for a plain
     `.tsv`, which production (`--output-format both --compress`) never writes, and silently ran
     uncorrected.
+
+    Beside the BED means where extraction wrote it, as the BED check places it
+    (`output_provenance.bed_as_extracted`): a link is followed to its end, and the table is the
+    one beside the last file along it that an extraction claims, so a file of another name no
+    extraction claims (an annex or DVC object, or a versioned file beside the link) is read with
+    the table beside the link. In a
+    Nextflow task, a BED the pipeline extracted is linked in from that extraction's folder, with
+    its tables; a samplesheet BED staged as a link is read with the table beside its source.
     """
-    bed_path = Path(bed_path)
+    bed_path = bed_as_extracted(bed_path)
     places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]
     if output_dir is not None:
         places.append((Path(output_dir), sample))

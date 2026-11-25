@@ -333,3 +333,30 @@ def test_single_tools_give_the_same_record_in_any_order(tmp_path):
         compress=False,
     )
     assert bool(pd.read_parquet(path)["pon_applied"].iloc[0])
+
+
+def test_a_blacklist_digest_of_digits_reads_back_from_tsv_as_the_same_digest(tmp_path):
+    """A SHA-256 of digits only, or digits and one `e`, reads back from a TSV as a number unless
+    it is read as text (`_RECORD_TEXT`), and then equals no run's digest."""
+    from krewlyzer.core.output_provenance import (
+        FILTER_FIELDS,
+        TABLE_FORMATS,
+        refuse_a_different_configuration,
+        table_formats,
+    )
+
+    digest = "0" * 63 + "1"
+    row = {f: 1 for f in FILTER_FIELDS}
+    row.update(
+        filters_blacklist_sha256=digest,
+        **{TABLE_FORMATS: table_formats(output_format="tsv", compress=False)},
+    )
+    pd.DataFrame([row]).to_csv(tmp_path / "S1.metadata.tsv", sep="\t", index=False)
+
+    refuse_a_different_configuration(
+        tmp_path,
+        "S1",
+        {"filters_blacklist_sha256": digest},
+        output_format="tsv",
+        compress=False,
+    )

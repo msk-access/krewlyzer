@@ -184,12 +184,103 @@ class ConfigurationMismatch(ValueError):
     anything is written."""
 
 
-#: The settings that decide which tables a run writes, as the record names them. A rerun with
-#: other values writes another set of tables, and whatever the first run wrote that the second
-#: does not is left looking current: a panel folder rerun without its assay rewrites `TFBS` but
-#: not `TFBS.ontarget`, under one `tfbs=ran` (Greptile on #98). `genome`, `assay` and
-#: `target_regions` are written at extraction; `fsc_e1_aggregation` by run-all's own stamp.
-CONFIGURATION_FIELDS = ("genome", "assay", "target_regions", "fsc_e1_aggregation")
+#: The read filters extraction applied, as the record names them. They decide which fragments
+#: the BED holds, and every table is made from those fragments or, for the motif, Region-MDS and
+#: mFSD tables, from the BAM read again under the filters that tool takes. (UXM reads the BAM at a
+#: fixed mapq of 20 whatever the record names, so it is no table of the folder's fragments:
+#: `contract.feature_table_suffixes`.) A rerun with other filters
+#: therefore mixes two fragment sets under one record: run-all kept a BED `extract --mapq 30` wrote
+#: and made its motif tables at mapq 20. (Region-MDS takes no duplicate or proper-pair filter: it
+#: always drops duplicates, whatever the record says. Neither it nor mFSD applies the blacklist.)
+#:
+#: The blacklist is one of them: extraction drops the fragments it covers, as it drops those under
+#: the mapq. Recorded by content (`blacklist_digest`), not by name: two files can share a name, and
+#: the bundled one sits at another path in every install.
+#:
+#: Recorded truthfully only since the duplicate and proper-pair columns were added: every record a
+#: release wrote said 20/65/1000 whatever the run used, and none held either column or any
+#: blacklist. So a record holding all six can be compared, and one that does not may hold values
+#: its run did not use (`filters_vouched`).
+FILTER_FIELDS = (
+    "filters_mapq",
+    "filters_min_length",
+    "filters_max_length",
+    "filters_skip_duplicates",
+    "filters_require_proper_pair",
+    "filters_blacklist_sha256",
+)
+
+#: The settings that decide which tables a run writes, or what they are made from, as the record
+#: names them. A rerun with other values writes another set of tables, and whatever the first run
+#: wrote that the second does not is left looking current: a panel folder rerun without its assay
+#: rewrites `TFBS` but not `TFBS.ontarget`, under one `tfbs=ran` (Greptile on #98). `genome`,
+#: `assay`, `target_regions` and the filters are written at extraction; `fsc_e1_aggregation` by
+#: run-all's own stamp.
+CONFIGURATION_FIELDS = (
+    "genome",
+    "assay",
+    "target_regions",
+    "fsc_e1_aggregation",
+    *FILTER_FIELDS,
+)
+
+
+def blacklist_digest(path: Optional[Path]) -> str:
+    """The `filters_blacklist_sha256` of a blacklist: the SHA-256 of its bytes, or "" for none
+    applied. The same file at any path gives the same value, and an edited one another.
+    """
+    if path is None:
+        return ""
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def filter_settings(
+    *,
+    mapq: int,
+    minlen: int,
+    maxlen: int,
+    skip_duplicates: Optional[bool] = None,
+    require_proper_pair: Optional[bool] = None,
+    blacklist: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """The `FILTER_FIELDS` a run takes, for `refuse_a_different_configuration`. A filter the entry
+    point does not take (None) is left out, so it is not compared. ``blacklist`` is the file the
+    run applies (`resolve_exclude_regions`), compared by `blacklist_digest`."""
+    values = {
+        "filters_mapq": mapq,
+        "filters_min_length": minlen,
+        "filters_max_length": maxlen,
+        "filters_skip_duplicates": skip_duplicates,
+        "filters_require_proper_pair": require_proper_pair,
+        "filters_blacklist_sha256": (
+            blacklist_digest(blacklist) if blacklist is not None else None
+        ),
+    }
+    return {k: v for k, v in values.items() if v is not None}
+
+
+def filters_vouched(frame: Any) -> bool:
+    """Whether a record's filters are what its run applied: it holds all six `FILTER_FIELDS`,
+    which only a record written since they were recorded truthfully does."""
+    return frame is not None and all(f in frame.columns for f in FILTER_FIELDS)
+
+
+def record_vouches_for_filters(
+    output_dir: Path, sample: str, *, output_format: str, compress: bool
+) -> bool:
+    """Whether the sample's record says which filters its BED was extracted with.
+
+    For a cache: run-all reuses a BED only when this holds and the configuration guard has passed,
+    so the BED's filters are this run's. Without a record, or with one from before the filters
+    were recorded truthfully, a BED beside it was made with filters nobody knows.
+    """
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    return frame is not None and not frame.empty and filters_vouched(frame)
+
 
 #: The record column naming the extensions the folder's tables are written in (`table_formats`).
 #: Not one of `CONFIGURATION_FIELDS`: every run decides its own format, so the guard takes it from
@@ -267,7 +358,12 @@ def _setting(field: str, value: Any) -> str:
         # By file name: Nextflow stages the BED at a new path in every task, and the record holds
         # whatever path extraction was given.
         return Path(text).name if text else ""
-    # fsc_e1_aggregation. Not `bool(text)`: "False" read back from a TSV record is truthy.
+    if field in ("filters_mapq", "filters_min_length", "filters_max_length"):
+        return text
+    if field == "filters_blacklist_sha256":
+        return text.lower()
+    # fsc_e1_aggregation and the two filter flags. Not `bool(text)`: "False" read back from a TSV
+    # record is truthy.
     return "true" if text.lower() in ("true", "1", "1.0") else "false"
 
 
@@ -299,11 +395,16 @@ def refuse_a_different_configuration(
 
     Called by every entry point that writes a settings-dependent set of tables, before it writes
     anything: run-all, `extract`, the `run_features` tools, `motif`, `region-entropy`,
-    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (the format alone); not
+    `region-mds`, `uxm` (the genome picks its markers) and `mfsd` (its mapq and lengths); not
     run-all's own calls or the PON build, which own the record they write.
     ``given`` holds the settings this entry point takes, by `CONFIGURATION_FIELDS` name; a setting
     it does not take is not compared. Nothing to compare in a fresh folder, nor for a field the
-    record does not hold (written before the field existed).
+    record does not hold (written before the field existed), nor for the filters of a record that
+    does not hold all six (`filters_vouched`): their values may not be what that run applied.
+    run-all then extracts its BED again rather than reuse it (`record_vouches_for_filters`), and it
+    and the tools reading the BAM refuse to write beside tables another step made
+    (`refuse_tables_of_unrecorded_filters`), which they call next; the tools reading the BED
+    compare a BED from another folder (`refuse_a_bed_the_record_does_not_describe`).
 
     The output format is always compared, from ``output_format``/``compress``, and is not a
     ``given`` setting (`TABLE_FORMATS`): a record without the field is judged by the extensions of
@@ -321,8 +422,17 @@ def refuse_a_different_configuration(
     if frame is None or frame.empty:
         return
     differing = []
+    vouched = filters_vouched(frame)
+    if not vouched and any(f in FILTER_FIELDS for f in given):
+        # run-all extracts the BED again in this case; a tool reading the BAM cannot, and runs
+        # only when no other step's tables are there (`refuse_tables_of_unrecorded_filters`).
+        logger.warning(
+            f"{sample}'s record in {Path(output_dir).name}/ does not say which read filters its "
+            "BED was extracted with (written before the filters were recorded), so this run's "
+            "filters cannot be compared with them"
+        )
     for field, value in given.items():
-        if field not in frame.columns:
+        if field not in frame.columns or (field in FILTER_FIELDS and not vouched):
             continue
         recorded, ours = _setting(field, frame[field].iloc[0]), _setting(field, value)
         if recorded != ours:
@@ -356,8 +466,282 @@ class RecordInUse(ValueError):
     anything is written."""
 
 
+class LinkedOutput(ConfigurationMismatch):
+    """A file an extraction would write that is a link to one elsewhere. Raised before anything
+    is read or written."""
+
+
+def refuse_links_where_extraction_writes(output_dir: Path, sample: str) -> None:
+    """Refuse an extraction into a folder where a file it writes is a link.
+
+    Written through, a link rewrites the file it points to. Nextflow stages a task's inputs as
+    links, and so can a person (`ln -s`): over `b/S.bed.gz -> a/S.bed.gz`, `extract -o b
+    --minlen 150` rewrote a's BED under a's record, which says 65, and nothing in b could see it.
+    A linked record is read as b's by every check, and stamped. Checked: the BED and its index,
+    every copy of the record, and every GC factor table (removed before a run writes its own).
+
+    Called first by `extract` and run-all, before any check reads the folder. Raises
+    `LinkedOutput` naming each link; the files they point to are left as they are.
+    """
+    from .gc_assets import FACTOR_KINDS, POPULATIONS, factor_table_base
+
+    folder = Path(output_dir)
+    paths = [folder / f"{sample}.bed.gz", folder / f"{sample}.bed.gz.tbi"]
+    paths += [folder / f"{sample}.metadata{ext}" for ext in TABLE_EXTENSIONS]
+    paths += [
+        Path(f"{factor_table_base(folder, sample, population)}{ext}")
+        for population in POPULATIONS
+        for _, ext in FACTOR_KINDS
+    ]
+    linked = [p.name for p in paths if p.is_symlink()]
+    if linked:
+        raise LinkedOutput(
+            f"{folder.name}/ holds a link where {sample}'s extraction writes "
+            f"({', '.join(linked)}): writing it would rewrite the file it points to, in another "
+            "folder. Remove the link, or use a fresh output folder."
+        )
+
+
+def feature_tables(
+    output_dir: Path, sample: str, *, excluding: Sequence[str] = ()
+) -> list:
+    """The names of the sample's declared tables made from its fragments: every table the output
+    contract declares but extraction's own (`contract.feature_table_suffixes`) and ``excluding``
+    (suffixes, as the contract names them), in any format. Undeclared ones (`.TFBS.raw`,
+    `features.json`) are not looked for: a folder holding them holds declared tables too. One of
+    them beside a BED means the BED cannot be replaced without leaving it stale."""
+    from krewlyzer.validate.contract import feature_table_suffixes
+
+    folder = Path(output_dir)
+    return [
+        name
+        for suffix in feature_table_suffixes()
+        if suffix not in excluding
+        for ext in TABLE_EXTENSIONS
+        if (
+            folder / (name := f"{sample}{suffix.removesuffix('.parquet')}{ext}")
+        ).exists()
+    ]
+
+
+class UnrecordedFilters(ConfigurationMismatch):
+    """Output made with read filters no record names, which a run would mix its own tables with:
+    a configuration that cannot be compared. Raised before anything is written."""
+
+
+def refuse_tables_of_unrecorded_filters(
+    output_dir: Path,
+    sample: str,
+    *,
+    own: Sequence[str] = (),
+    creates_the_record: bool,
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Refuse a run beside tables made with read filters the folder's record does not name.
+
+    A record written before the filters were recorded truthfully cannot say which fragments the
+    folder's tables counted (`filters_vouched`), so no run can be checked against them: its tables
+    would sit beside theirs with nothing to say whether both came from the same fragments. run-all
+    cannot reuse that BED nor extract another under them; `motif`, `region-mds` and `mfsd` read the
+    BAM under their own filters, and only warned (the configuration check skips those filters).
+
+    ``own`` are the tables this run replaces (suffixes, as the contract names them), which are no
+    reason to refuse it. ``creates_the_record`` is for run-all, which writes the completion marker:
+    with no record at all it would vouch for whatever tables are there. A single tool writes no
+    record into a folder without one (`record_stage_outcomes`), so there it has nothing to compare
+    and leaves nothing claiming the tables are one sample's.
+
+    The BED counts as output too, for every run but run-all, which extracts it again: a tool reading
+    the BAM beside it left the BED for a BED tool to make tables from afterwards, unchecked. So the
+    order the tools run in no longer decides whether they are refused.
+
+    Called by run-all, `motif`, `region-mds` and `mfsd`. `extract` refuses any table at all
+    (`refuse_to_replace_a_later_record`). The tools reading the BED make their tables from the
+    fragments their record names, or compare another folder's BED (`refuse_a_bed_the_record_does_not_describe`).
+    """
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    has_record = frame is not None and not frame.empty
+    if has_record and filters_vouched(frame):
+        return
+    if not has_record and not creates_the_record:
+        return
+    others = feature_tables(output_dir, sample, excluding=own)
+    bed = Path(output_dir) / f"{sample}.bed.gz"
+    if not creates_the_record and bed.exists():
+        others.insert(0, bed.name)
+    if others:
+        named = "its record does not name" if has_record else "no record names"
+        raise UnrecordedFilters(
+            f"{Path(output_dir).name}/ holds output made with read filters {named} "
+            f"({len(others)}, among them {', '.join(others[:3])}). This run's tables would sit "
+            "beside them, and nothing could say whether both were made from the same "
+            "fragments. Use a fresh output folder, or remove this one."
+        )
+
+
+def bed_as_extracted(bed_path: Path) -> Path:
+    """The path that stands for a BED where extraction wrote it: its folder holds the BED's record
+    and GC factor tables, and its name is the one extraction gave it.
+
+    One rule for the BED check (`refuse_a_bed_the_record_does_not_describe`) and the factor-table
+    lookup (`gc_assets.resolve_gc_factors`), so a tool reads a BED's fragments with that BED's
+    table. A link is followed to its end, as the reader follows it, and the BED stands at the last
+    file along it that an extraction claims: the path given; a file of the same name
+    (`c/S.bed.gz -> b/S.bed.gz` is b's BED); or a renamed file with a record of its name beside the
+    link, or with any record in its own folder if that is another (`b/S.bed.gz -> a/S.v1.bed.gz` is
+    a's file, refused as not named for the sample; `b/S.bed.gz -> b/S.v1.bed.gz -> a/S.bed.gz` is
+    a's BED). A file no extraction claims holds the bytes of the BED before it: `S.bed.gz ->
+    S.v1.bed.gz` beside the link, or a git-annex, DataLad or DVC object in a store that holds no
+    record, is the BED of the folder the link is in. Judged by such a file, the folder's own BED
+    was refused as another sample's, and the tools refitted GC factors and removed extract's table;
+    judged short of a's file, a's fragments were read under b's record and table.
+
+    A record here is any file named `*.metadata{.tsv,.tsv.gz,.parquet}`, read by name only. Not
+    told apart, and taken as the link's BED: a renamed file in a folder holding no record, and
+    another sample's BED beside the link with no record of it.
+    """
+    path = Path(bed_path).absolute()
+    path = path.parent.resolve() / path.name
+    stand, seen = path, {path}
+    while path.is_symlink():
+        hop = path.parent / path.readlink()
+        hop = hop.parent.resolve() / hop.name
+        if hop in seen:  # a loop of links: reading the BED fails on its own
+            break
+        claimed = hop.name == path.name
+        if not claimed:
+            if hop.parent == path.parent:
+                stem = hop.name.removesuffix(".gz").removesuffix(".bed")
+                records = [
+                    hop.parent / f"{stem}.metadata{ext}" for ext in TABLE_EXTENSIONS
+                ]
+            else:  # a store holds no record; a folder extraction wrote holds one
+                records = [
+                    p
+                    for ext in TABLE_EXTENSIONS
+                    for p in hop.parent.glob(f"*.metadata{ext}")
+                ]
+            claimed = any(p.exists() for p in records)
+        seen.add(hop)
+        path = hop
+        if claimed:
+            stand = path
+    return stand
+
+
+def refuse_a_bed_the_record_does_not_describe(
+    bed_path: Path,
+    output_dir: Path,
+    sample: str,
+    *,
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Refuse tables made from a BED other than the one the folder's record describes, unless its
+    own record shows it holds the same fragments.
+
+    The tools reading the BED are given it by path, and make their tables from whatever fragments
+    it holds: `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150 fragments under b's
+    record, which says 65; in a folder two samples share, `fsd -i b/T.bed.gz -s S` rewrote S's
+    from T's. So:
+
+    - **Another sample's BED** (not named for this sample) is refused, whatever filters made it:
+      nothing shows its fragments are this sample's.
+    - **A BED from another folder** is compared with the folder's record by the record beside it,
+      over `genome`, `assay`, `target_regions` and `FILTER_FIELDS`: the GC factor table beside it
+      comes with it. A record that does not hold all six filters
+      (`filters_vouched`), none beside the BED, or one that cannot be read, cannot be compared,
+      and is refused too.
+
+    Not compared: the sample's own BED in the folder, which is the one its record describes; and
+    anything into a folder without a record, where nothing claims the tables are one sample's
+    (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
+
+    A link is judged where `bed_as_extracted` places it: a link elsewhere to the folder's own BED,
+    under its own name, is that BED; a link in the folder that reaches a file in another
+    extraction's folder is not, whatever the names along the way; a link in the folder to a
+    versioned file beside it, or to an annex or DVC object, is the folder's own.
+
+    Called by the `run_features` tools and `region-entropy`, after
+    `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing
+    setting with both values, or `UnrecordedFilters`.
+    """
+    bed = bed_as_extracted(bed_path)
+    folder = Path(output_dir)
+    # As the tools name the sample from the BED.
+    bed_sample = bed.name.replace(".bed.gz", "").replace(".bed", "")
+    if bed_sample == sample and bed.parent == folder.resolve():
+        return
+    ours = _read_record(
+        record_path(folder, sample, output_format=output_format, compress=compress)
+    )
+    if ours is None or ours.empty:
+        return
+    where, here = f"{bed.parent.name}/", f"{folder.name}/"
+    if bed_sample != sample:
+        raise ConfigurationMismatch(
+            f"{bed.name} is not named {sample}.bed.gz, so it cannot be shown to be {sample}'s "
+            f"BED, and {here} holds {sample}'s record: this run's tables could be made from "
+            f"another sample's fragments under it. Use {sample}.bed.gz, or a fresh output folder."
+        )
+    advice = (
+        " This run's tables would sit beside the folder's, and nothing could say whether both "
+        f"were made from the same fragments. Use the BED in {here}, or a fresh output folder."
+    )
+    if not filters_vouched(ours):
+        raise UnrecordedFilters(
+            f"The record in {here} does not name the read filters its tables were made with, "
+            f"so {bed.name} from {where} cannot be compared with the record in {here}."
+            + advice
+        )
+    beside = record_path(
+        bed.parent, bed_sample, output_format=output_format, compress=compress
+    )
+    try:
+        theirs = _read_record(beside)
+    except (
+        Exception
+    ) as e:  # any reader's error: a record nobody can read names no filters
+        raise UnrecordedFilters(
+            f"{beside.name if beside else 'The record'} in {where} cannot be read "
+            f"({type(e).__name__}), so nothing names the read filters {bed.name} was extracted "
+            f"with, and it cannot be compared with the record in {here}." + advice
+        ) from e
+    if theirs is None or theirs.empty:
+        raise UnrecordedFilters(
+            f"{where} holds no record of {bed_sample}, so nothing names the read filters "
+            f"{bed.name} was extracted with, and it cannot be compared with the record in "
+            f"{here}." + advice
+        )
+    if not filters_vouched(theirs):
+        raise UnrecordedFilters(
+            f"The record in {where} does not name the read filters {bed.name} was extracted "
+            f"with, so it cannot be compared with the record in {here}." + advice
+        )
+    differing = []
+    # What extraction recorded: the BED's fragments, and the GC factor table beside it, fitted on
+    # the off-target fragments the targets left (`resolve_gc_factors` looks beside the BED first).
+    for field in ("genome", "assay", "target_regions", *FILTER_FIELDS):
+        if field not in ours.columns or field not in theirs.columns:
+            continue  # in a record written before the field was recorded
+        recorded = _setting(field, ours[field].iloc[0])
+        given = _setting(field, theirs[field].iloc[0])
+        if recorded != given:
+            differing.append(
+                f"{field}={recorded or '(none)'} in {here}, {given or '(none)'} in {where}"
+            )
+    if differing:
+        raise ConfigurationMismatch(
+            f"{bed.name} in {where} was extracted with other settings than the record in "
+            f"{here} names: " + "; ".join(differing) + "." + advice
+        )
+
+
 def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
-    """Refuse an extraction into a folder whose record holds what a later stage wrote.
+    """Refuse an extraction into a folder where a later stage read the BED or wrote the record.
 
     `extract` writes the record from scratch, with its own fields only. Over run-all's record it
     dropped every provenance column and every `{stage}_status` (about thirty columns), and the
@@ -365,15 +749,33 @@ def refuse_to_replace_a_later_record(output_dir: Path, sample: str) -> None:
     fields, as single tools do, would not do either: a new BED (other filters) would leave every
     table the later stages made from the old one under their recorded `ran`.
 
-    The later stages are run-all and the single tools, which both add `PROVENANCE_COLUMNS` and
-    stage statuses. A record extraction wrote alone holds neither, so a rerun of `extract` is
-    allowed. Every copy of the record is read, not only this run's format: a single tool updates
-    only the copies in its own (`record_stage_outcomes`).
+    Two signs of a later stage, either of which refuses:
+
+    - **A feature table** for the sample, any table the output contract declares but extraction's
+      own (`contract.feature_table_suffixes`), in any format. The record cannot be the only sign:
+      a run-all killed between writing the record and stamping it, or a folder written before
+      provenance existed, holds tables beside a record that looks like extraction's alone.
+    - **A record holding `PROVENANCE_COLUMNS` or a stage status**, which run-all and the single
+      tools add. Every copy is read, not only this run's format: a single tool updates only the
+      copies in its own (`record_stage_outcomes`).
+
+    A folder extraction wrote alone has neither, so a rerun of `extract` is allowed (with the
+    folder's settings: `refuse_a_different_configuration` runs first).
     """
     from krewlyzer.validate.contract import STAGES
 
+    folder = Path(output_dir)
+    tables = feature_tables(folder, sample)
+    if tables:
+        raise RecordInUse(
+            f"{folder.name}/ holds this sample's feature tables ({len(tables)}, among them "
+            f"{', '.join(tables[:3])}). Extracting again would replace the BED and the record "
+            "beside them, and leave them looking current. Use a fresh output folder, or remove "
+            "this one."
+        )
+
     later = set(PROVENANCE_COLUMNS) | {f"{stage}_status" for stage in STAGES}
-    base = Path(output_dir) / f"{sample}.metadata"
+    base = folder / f"{sample}.metadata"
     for ext in TABLE_EXTENSIONS:
         path = base.parent / (base.name + ext)
         if not path.exists():
@@ -577,6 +979,7 @@ def stamp_metadata(
 #: Columns read back from a TSV record as text: a digit-only cohort digest such as '0123…' read
 #: back as an integer, and a status column must never become a number either.
 _RECORD_TEXT = (
+    "filters_blacklist_sha256",
     "pon_model",
     "pon_cohort_digest",
     "pon_digest",

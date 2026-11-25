@@ -211,24 +211,51 @@ def motif(
             assets=assets,
             log=logger,
         )
+        # The blacklist before the check, which compares it with the one the BED was made with.
+        resolved_exclude_path, exclude_source = resolve_exclude_regions(
+            exclude_regions, assets, logger
+        )
         # Before any work: other settings than the folder's record would leave the first run's
-        # extra tables looking current. A `ConfigurationMismatch` is a ValueError.
-        from .core.output_provenance import refuse_a_different_configuration
+        # extra tables looking current. `ConfigurationMismatch` and `UnrecordedFilters` are
+        # ValueErrors.
+        from .core.output_provenance import (
+            filter_settings,
+            refuse_a_different_configuration,
+        )
 
+        # The filters and the blacklist too: motif reads the BAM, so with other ones its tables
+        # would come from fragments the sample's BED does not hold.
         refuse_a_different_configuration(
             output,
             sample_name,
-            {"genome": genome, "assay": assay, "target_regions": resolved_target_path},
+            {
+                "genome": genome,
+                "assay": assay,
+                "target_regions": resolved_target_path,
+                **filter_settings(
+                    mapq=mapq,
+                    minlen=minlen,
+                    maxlen=maxlen,
+                    skip_duplicates=skip_duplicates,
+                    require_proper_pair=require_proper_pair,
+                    blacklist=resolved_exclude_path,
+                ),
+            },
             output_format=output_format,
             compress=compress,
         )
-    except ValueError as e:
-        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
-        raise typer.Exit(1)
+        # Its filters cannot be compared with a record that does not name them: then it is
+        # refused beside tables another step made, which its own would sit beside unchecked.
+        from .core.output_provenance import refuse_tables_of_unrecorded_filters
+        from .validate.contract import MOTIF_TABLES
 
-    try:
-        resolved_exclude_path, exclude_source = resolve_exclude_regions(
-            exclude_regions, assets, logger
+        refuse_tables_of_unrecorded_filters(
+            output,
+            sample_name,
+            own=MOTIF_TABLES,
+            creates_the_record=False,
+            output_format=output_format,
+            compress=compress,
         )
     except ValueError as e:
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")

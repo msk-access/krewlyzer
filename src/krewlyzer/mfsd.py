@@ -262,21 +262,37 @@ def mfsd(
     """
     # Before any work: mFSD's tables depend on no assay or targets, but a run in another format
     # than the folder's leaves its earlier tables beside the new ones, and downstream reads the
-    # Parquet. run-all checks its own folder; it calls `mfsd_stage`, not this command.
+    # Parquet. The filters too: mFSD reads the BAM, and run-all gives it the sample's mapq and
+    # length range (`--mfsd-bam` included), so other ones would put a second fragment set under
+    # the record. Not the other two: run-all always runs mFSD without the proper-pair filter, and
+    # the Rust reader drops duplicates whatever `--skip-duplicates` says. run-all checks its own
+    # folder; it calls `mfsd_stage`, not this command.
     from .core.output_provenance import (
         ConfigurationMismatch,
+        filter_settings,
         refuse_a_different_configuration,
+        refuse_tables_of_unrecorded_filters,
     )
+    from .validate.contract import STAGE_TABLES
 
     try:
         refuse_a_different_configuration(
             output,
             _sample_name(bam_input, sample_name),
-            {},
+            filter_settings(mapq=mapq, minlen=minlen, maxlen=maxlen),
             output_format=output_format,
             compress=compress,
         )
-    except ConfigurationMismatch as e:
+        # Nor beside tables another step made with filters the record does not name.
+        refuse_tables_of_unrecorded_filters(
+            output,
+            _sample_name(bam_input, sample_name),
+            own=STAGE_TABLES["mfsd"],
+            creates_the_record=False,
+            output_format=output_format,
+            compress=compress,
+        )
+    except ConfigurationMismatch as e:  # `UnrecordedFilters` is one
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
 

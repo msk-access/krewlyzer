@@ -110,15 +110,15 @@ All notable changes to this project will be documented in this file.
   `--output-format` and `--compress`; the configuration check compares it on every call, so every
   entry point refuses another format once the folder holds a record, and names the option to pass.
   `uxm`, `mfsd` and `motif` write no record, so one of them run alone in a fresh folder is not
-  checked. `mfsd` now runs the check too, for the format alone. A record from before this release
-  is judged by its record files (one `.parquet` record is Parquet; a `.parquet` and a `.tsv` are
-  `both`, though no refusal then advises `--output-format both`, since two runs look the same). A
-  copy of the record in an extension the field does not name (a TSV run published over a Parquet
-  one) makes the folder mixed, refused whatever the format. A hand rerun without `--output-format`
-  into a Parquet folder that worked before is now refused: each one left stale Parquet. For
-  Nextflow, where no task can see the published folder, `validate-output` reports a table in an
-  extension outside `table_formats` as `FORMAT.MIXED` (error), and a pre-release record with
-  tables in two extensions as `FORMAT.UNJUDGED` (skip).
+  checked. `mfsd` now runs the check too (for the format, and its read filters below). A record from
+  before this release is judged by its record files (one `.parquet` record is Parquet; a `.parquet`
+  and a `.tsv` are `both`, though no refusal then advises `--output-format both`, since two runs
+  look the same). A copy of the record in an extension the field does not name (a TSV run published
+  over a Parquet one) makes the folder mixed, refused whatever the format. A hand rerun without
+  `--output-format` into a Parquet folder that worked before is now refused: each one left stale
+  Parquet. For Nextflow, where no task can see the published folder, `validate-output` reports a
+  table in an extension outside `table_formats` as `FORMAT.MIXED` (error), and a pre-release record
+  with tables in two extensions as `FORMAT.UNJUDGED` (skip).
 
 - **Writers and readers of a sample's outputs take the format from the caller, with no default.**
   `write_motif_tables`, `record_stage_outcomes`, the `uxm`/`mfsd`/`region-mds` stage functions,
@@ -299,13 +299,19 @@ All notable changes to this project will be documented in this file.
 - **`extract` no longer replaces a record run-all or a single tool wrote into.** Run into a folder
   `run-all` had finished (`run-all -A xs1`, then `extract -A xs1`), it rewrote
   `{sample}.metadata.parquet`, downstream's completion marker, with extraction's fields alone:
-  about thirty columns dropped, `krewlyzer_version`, `pon_applied` and every `{stage}_status`
-  among them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
+  about thirty columns dropped, `krewlyzer_version`, `pon_applied` and every `{stage}_status` among
+  them. `validate-output` errors rose, but a reader of the marker alone still saw a complete
   sample. It now stops before writing anything when any copy of the record (`.tsv`, `.tsv.gz`,
   `.parquet`) holds a provenance column or a stage status, which only run-all and the single tools
-  write (`output_provenance.refuse_to_replace_a_later_record`). Updating only its own fields was
-  not enough: a new BED from other filters would leave every table made from the old one under
-  its recorded `ran`. A rerun of `extract` over a record it wrote alone is still allowed.
+  write, or when any table the output contract declares beside its own exists for the sample, in
+  any format, but UXM's, which reads the BAM at a fixed mapq and never the BED
+  (`output_provenance.refuse_to_replace_a_later_record`, `contract.feature_table_suffixes`). The
+  record alone was not enough: a run-all killed between writing the record and stamping it, or a
+  folder from before provenance, has feature tables beside a record that looks like extraction's,
+  and `extract` with new filters replaced the BED and the marker under them. Updating only its own
+  fields was not enough either: a new BED from other filters would leave every table made from the
+  old one under its recorded `ran`. A rerun of `extract` into a folder it wrote alone is still
+  allowed.
 - **The record's filters and GC flag say what the run did.** `write_extraction_outputs` wrote
   `filters_mapq` 20, `filters_min_length` 65 and `filters_max_length` 1000 whatever the run used;
   they now come from the `ExtractionResult`, which carries the filters `extract_sample` applied,
@@ -317,6 +323,60 @@ All notable changes to this project will be documented in this file.
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (`tests/invariants/test_extract_record.py`).
+- **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
+  then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
+  extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
+  one record. `extract -x` with another blacklist was the same case. The five read filters and the
+  blacklist are now settings a rerun is checked against (`output_provenance.FILTER_FIELDS`):
+  run-all, `extract`, `motif`, `region-mds` (the three filters it takes; it applies no blacklist)
+  and `mfsd` (mapq and the length range, which run-all gives it; it runs without the proper-pair
+  filter in run-all and drops duplicates whatever its flag says) refuse a run whose filters differ
+  from the record's, before writing anything. The record gains `filters_skip_duplicates` and
+  `filters_require_proper_pair`, which it did not hold, and `filters_blacklist_sha256`: the SHA-256
+  of the blacklist file's bytes, so the same file at another path (the bundled one sits at another
+  path in every install) is the same blacklist, and an edited one under the same name is not. A
+  record without them was written before the filters were recorded truthfully (every record a
+  release wrote said 20/65/1000), so its values are not compared. `-x` given a directory is
+  refused, as a missing file is, and so is anything else not a regular file (a pipe, as process
+  substitution gives, or a device): the digest reads it before the filter does, so a pipe would
+  leave the filter nothing and `/dev/zero` would never end. `-x /dev/null` excludes nothing.
+  run-all extracts that folder's BED again rather than reuse it, as it now does a BED with no
+  record beside it, unless feature tables were made from it, whether or not it is still there: then
+  it refuses, like `extract`, so a run-all folder whose record lacks these columns, from any
+  earlier build, is rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`, which
+  cannot extract again, refuse such a folder when it holds the BED or tables another step made
+  (their own they replace), and otherwise warn that the filters could not be compared: one check
+  for all four (`output_provenance.refuse_tables_of_unrecorded_filters`). The BED counts, so the
+  order the tools run in no longer decides: `motif --minlen 150` over an old `extract` folder
+  warned and ran, and `fsd` then read the BED unchecked. run-all also refuses a folder of tables
+  with no record beside it, since its record would vouch for them; a single tool writes no record
+  there, and runs. The tools reading the BED compare a BED from another folder with the output
+  folder's record: `fsd -i a/S.bed.gz -o b` rewrote b's FSD from a's minlen-150 fragments under b's
+  record, which says 65. Another genome, assay, targets (the GC factor table beside the BED comes
+  with it), other filters or another blacklist are refused, and so is a BED or a folder whose
+  record cannot name the filters, or a BED whose record beside it cannot be read; so is a BED not
+  named for the sample (`fsd -i b/T.bed.gz -s S` in a folder two samples share), whatever made it.
+  A link to a BED is followed to its end, as the reader follows it, and judged, with the GC factor
+  table beside it, at the last file along it that an extraction claims
+  (`output_provenance.bed_as_extracted`, `gc_assets.resolve_gc_factors`): `fsd -i c/S.bed.gz -o b`
+  over `c/S.bed.gz -> b/S.bed.gz` reads b's own BED, and was refused; `fsd -i b/S.bed.gz -o b` over
+  `b/S.bed.gz -> a/S.bed.gz`, or through a renamed link
+  (`b/S.bed.gz -> b/S.v1.bed.gz -> a/S.bed.gz`), read a's minlen-150 fragments under b's record,
+  and is refused. A file of another name no extraction claims (a versioned `S.v1.bed.gz` beside the
+  link with no record of that name, or a git-annex, DataLad or DVC object in a store holding no
+  file named `*.metadata.*`) holds the BED of the link's own folder, read with the table beside the
+  link: judged by it, the folder's own BED was refused as another sample's, and the tools refitted
+  GC factors and removed extract's table. A renamed file in another folder holding any record is
+  that folder's, and is refused as not named for the sample. `extract` and run-all refuse a folder
+  where a file extraction writes (the BED, its index, the record, a GC factor table) is a link:
+  written through, `b/S.bed.gz -> a/S.bed.gz` rewrote a's BED under a's record, and nothing in b
+  could see it (`output_provenance.refuse_links_where_extraction_writes`). A link to a feature
+  table is not refused: a tool that writes the table writes through it. From the sample's own BED
+  in the folder, or into a folder without a record (Nextflow's tasks), they run as before
+  (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
+  `tests/invariants/test_rerun_bed.py`); a samplesheet BED that Nextflow stages as a link, a route
+  the pipeline cannot reach today, is read with the GC factor table beside its source, where there
+  is one, rather than refitted.
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,

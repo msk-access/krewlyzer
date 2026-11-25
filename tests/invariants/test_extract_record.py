@@ -195,6 +195,9 @@ def _extraction(directory, gc_observations):
         mapq=20,
         minlen=65,
         maxlen=1000,
+        skip_duplicates=True,
+        require_proper_pair=True,
+        blacklist_sha256="",
     )
 
 

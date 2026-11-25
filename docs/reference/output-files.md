@@ -1165,8 +1165,10 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `target_regions` | str | Path to the target BED, when in panel mode |
 | `extraction_time_seconds` | float | Wall-clock extraction time |
 | `mds_score` | float | Genome-wide motif diversity score |
-| `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`) |
+| `filters_mapq` | int | The minimum MAPQ the extraction applied (`--mapq`). Before this release every record said 20, whatever the run used |
 | `filters_min_length` / `filters_max_length` | int | The fragment length range the extraction applied (`--minlen` / `--maxlen`). Before this release every record said 65 and 1000, whatever the run used |
+| `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose filters can be trusted |
+| `filters_blacklist_sha256` | str | The SHA-256 of the blacklist file the extraction applied (`--exclude-regions`, else the genome's bundled one), by its bytes: the same file at another path gives the same value, an edited one another. Empty when none was applied. New in this release |
 | `gc_correction_computed` | bool | Whether an off-target GC factor table was written for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`) |
 | `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
@@ -1190,14 +1192,52 @@ mean.
 | `fsc_e1_aggregation` | bool | run-all's E1 setting (`False` with `--disable-e1-aggregation`). Recorded so a rerun with the other setting is refused; absent from directories written before this release |
 | `table_formats` | str | The extensions the folder's tables are written in: `.parquet`, `.tsv`, `.tsv.gz`, `.parquet,.tsv` or `.parquet,.tsv.gz` (from `--output-format` and `--compress`; compression changes no Parquet file). Recorded so a rerun in another format is refused; absent from directories written before this release |
 
-**One folder, one configuration.** A rerun into a sample's folder must use the settings
-recorded there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by
-file name) and, where gene FSC is written, `fsc_e1_aggregation`. run-all, `extract` and every
-feature tool that takes these settings refuse a run with others before writing anything, naming
-the setting; `uxm` compares the genome, which picks its markers. Without that, a rerun that
-writes fewer tables (a panel folder rerun without its assay) left the first run's extra tables
--- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second run's. `extract` rewrites
-this table only over a record it wrote alone (see *Optional stages* below). The output format is one
+**One folder, one configuration.** A rerun into a sample's folder must use the settings recorded
+there: `genome` (`hg19` and `GRCh37` are one build), `assay`, the target regions (by file name),
+the five read filters, the blacklist (by content) and, where gene FSC is written,
+`fsc_e1_aggregation`. run-all, `extract` and every feature tool that takes these settings refuse a
+run with others before writing anything, naming the setting; `motif` and `region-mds` compare the
+filters they take (`motif` the blacklist too), since they read the BAM again rather than the BED,
+`mfsd` its mapq and length range (run-all gives it those, runs it without the proper-pair filter,
+and it drops duplicates whatever its flag says), and `uxm` compares the genome, which picks its
+markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its assay)
+left the first run's extra tables -- `TFBS.ontarget`, `FSC.regions.e1only` -- reading as the second
+run's, and a run-all after `extract --mapq 30` kept that BED and wrote its motif tables at mapq 20,
+under one record. The filters are compared only when the record holds all six: one without them may
+hold values its run did not use (every record a release wrote said 20/65/1000), so a rerun is not
+refused for those values. run-all extracts that folder's BED again instead of reusing it (as it
+does a BED with no record beside it), unless tables were made from it, whether or not it is still
+there: then it refuses, like `extract`, since a run stopped after extracting would leave a new BED
+and a fresh record over them. A run-all folder whose record lacks the filter columns, from any
+earlier build, is therefore rerun into a fresh output folder. `motif`, `region-mds` and `mfsd`
+cannot extract again, so over such a record they refuse when the folder holds the BED or tables
+another step made, and otherwise warn that the filters could not be compared, and run. run-all also
+refuses tables with no record beside them, since the record it writes would vouch for them; a
+single tool writes no record into such a folder, and runs. A tool reading the BED from another
+folder (`fsd -i a/S.bed.gz -o b`) compares the genome, assay, targets, read filters and blacklist
+recorded beside that BED with the output folder's record (the GC factor table beside the BED comes
+with it), and refuses other ones, a record on either side that cannot name the filters, or one
+beside the BED that cannot be read. It refuses a BED not named for the sample
+(`fsd -i b/T.bed.gz -s S`) whatever made it. A link to a BED is followed to its end, as the reader
+follows it, and judged, with the GC factor table beside it, at the last file along it that an
+extraction claims: one of the same name, or a renamed one with a record of its name beside the link
+or any record (a file named `*.metadata.*`) in its own folder if that is another. A file of another
+name no extraction claims (a versioned `S.v1.bed.gz` beside the link with no record of that name,
+or a git-annex, DataLad or DVC object in a store that holds no record) holds the BED of the link's
+own folder, read with the table beside the link; a renamed file in another folder holding any
+record is refused as not named for the sample. Into a folder without a record the BED tool runs.
+`extract` and run-all refuse a folder where a file extraction writes -- the BED, its index, the
+record, a GC factor table -- is a link (as Nextflow stages inputs, or `ln -s`): written through, it
+would rewrite the file it points to in another folder. A link to a feature table is not refused: a
+tool that writes the table writes through it.
+
+**`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
+anything, a folder holding any table the output contract declares other than its own record and
+factor table and UXM's, which never reads the BED (in any format), or a record holding a provenance
+column or a stage status (see *Optional stages* below). Either means something read this BED, and a
+new BED would leave that table under its recorded `ran`. The record alone is not enough to tell: a
+run-all killed before its final stamp, or a folder from before provenance was recorded, has feature
+tables beside a record that looks like extraction's. The output format is one
 of these settings for every tool, `mfsd` included: every CLI defaults to `-F tsv` and Nextflow
 writes Parquet, so a tool run by hand without `-F` into a Nextflow folder rewrote its tables as
 TSV and left the Parquet ones, which downstream reads, from the earlier run. The refusal names
