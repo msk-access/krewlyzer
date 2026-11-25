@@ -7044,12 +7044,22 @@ no warning, no error. Never delete it to "clean up" a directory.</p>
 <tr>
 <td><code>filters_mapq</code></td>
 <td>int</td>
-<td>The minimum MAPQ the extraction applied (<code>--mapq</code>)</td>
+<td>The minimum MAPQ the extraction applied (<code>--mapq</code>). Before this release every record said 20, whatever the run used</td>
 </tr>
 <tr>
 <td><code>filters_min_length</code> / <code>filters_max_length</code></td>
 <td>int</td>
 <td>The fragment length range the extraction applied (<code>--minlen</code> / <code>--maxlen</code>). Before this release every record said 65 and 1000, whatever the run used</td>
+</tr>
+<tr>
+<td><code>filters_skip_duplicates</code> / <code>filters_require_proper_pair</code></td>
+<td>bool</td>
+<td>Whether the extraction skipped duplicate reads and required proper pairs (<code>--[no-]skip-duplicates</code> / <code>--[no-]require-proper-pair</code>). New in this release, so a record holding them is one whose filters can be trusted</td>
+</tr>
+<tr>
+<td><code>filters_blacklist_sha256</code></td>
+<td>str</td>
+<td>The SHA-256 of the blacklist file the extraction applied (<code>--exclude-regions</code>, else the genome's bundled one), by its bytes: the same file at another path gives the same value, an edited one another. Empty when none was applied. New in this release</td>
 </tr>
 <tr>
 <td><code>gc_correction_computed</code></td>
@@ -7138,14 +7148,51 @@ mean.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>One folder, one configuration.</strong> A rerun into a sample's folder must use the settings
-recorded there: <code>genome</code> (<code>hg19</code> and <code>GRCh37</code> are one build), <code>assay</code>, the target regions (by
-file name) and, where gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> is written, <code>fsc_e1_aggregation</code>. run-all, <code>extract</code> and every
-feature tool that takes these settings refuse a run with others before writing anything, naming
-the setting; <code>uxm</code> compares the genome, which picks its markers. Without that, a rerun that
-writes fewer tables (a panel folder rerun without its assay) left the first run's extra tables
--- <code>TFBS.ontarget</code>, <code>FSC.regions.e1only</code> -- reading as the second run's. <code>extract</code> rewrites
-this table only over a record it wrote alone (see <em>Optional stages</em> below). The output format is one
+<p><strong>One folder, one configuration.</strong> A rerun into a sample's folder must use the settings recorded
+there: <code>genome</code> (<code>hg19</code> and <code>GRCh37</code> are one build), <code>assay</code>, the target regions (by file name),
+the five read filters, the blacklist (by content) and, where gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> is written,
+<code>fsc_e1_aggregation</code>. run-all, <code>extract</code> and every feature tool that takes these settings refuse a
+run with others before writing anything, naming the setting; <code>motif</code> and <code>region-mds</code> compare the
+filters they take (<code>motif</code> the blacklist too), since they read the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> again rather than the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>,
+<code>mfsd</code> its mapq and length range (run-all gives it those, runs it without the proper-pair filter,
+and it drops duplicates whatever its flag says), and <code>uxm</code> compares the genome, which picks its
+markers. Without that, a rerun that writes fewer tables (a panel folder rerun without its assay)
+left the first run's extra tables -- <code>TFBS.ontarget</code>, <code>FSC.regions.e1only</code> -- reading as the second
+run's, and a run-all after <code>extract --mapq 30</code> kept that <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> and wrote its motif tables at mapq 20,
+under one record. The filters are compared only when the record holds all six: one without them may
+hold values its run did not use (every record a release wrote said 20/65/1000), so a rerun is not
+refused for those values. run-all extracts that folder's <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> again instead of reusing it (as it
+does a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with no record beside it), unless tables were made from it, whether or not it is still
+there: then it refuses, like <code>extract</code>, since a run stopped after extracting would leave a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>
+and a fresh record over them. A run-all folder whose record lacks the filter columns, from any
+earlier build, is therefore rerun into a fresh output folder. <code>motif</code>, <code>region-mds</code> and <code>mfsd</code>
+cannot extract again, so over such a record they refuse when the folder holds the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> or tables
+another step made, and otherwise warn that the filters could not be compared, and run. run-all also
+refuses tables with no record beside them, since the record it writes would vouch for them; a
+single tool writes no record into such a folder, and runs. A tool reading the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from another
+folder (<code>fsd -i a/S.bed.gz -o b</code>) compares the genome, assay, targets, read filters and blacklist
+recorded beside that <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with the output folder's record (the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> comes
+with it), and refuses other ones, a record on either side that cannot name the filters, or one
+beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> that cannot be read. It refuses a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> not named for the sample
+(<code>fsd -i b/T.bed.gz -s S</code>) whatever made it. A link to a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> is followed to its end, as the reader
+follows it, and judged, with the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside it, at the last file along it that an
+extraction claims: one of the same name, or a renamed one with a record of its name beside the link
+or any record (a file named <code>*.metadata.*</code>) in its own folder if that is another. A file of another
+name no extraction claims (a versioned <code>S.v1.bed.gz</code> beside the link with no record of that name,
+or a git-annex, DataLad or DVC object in a store that holds no record) holds the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> of the link's
+own folder, read with the table beside the link; a renamed file in another folder holding any
+record is refused as not named for the sample. Into a folder without a record the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> tool runs.
+<code>extract</code> and run-all refuse a folder where a file extraction writes -- the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, its index, the
+record, a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table -- is a link (as Nextflow stages inputs, or <code>ln -s</code>): written through, it
+would rewrite the file it points to in another folder. A link to a feature table is not refused: a
+tool that writes the table writes through it.</p>
+<p><strong><code>extract</code> rewrites this table only in a folder it wrote alone.</strong> It refuses, before writing
+anything, a folder holding any table the output contract declares other than its own record and
+factor table and <abbr title="Fragment-level Methylation - Methylation state of individual fragments">UXM</abbr>'s, which never reads the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> (in any format), or a record holding a provenance
+column or a stage status (see <em>Optional stages</em> below). Either means something read this <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and a
+new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> would leave that table under its recorded <code>ran</code>. The record alone is not enough to tell: a
+run-all killed before its final stamp, or a folder from before provenance was recorded, has feature
+tables beside a record that looks like extraction's. The output format is one
 of these settings for every tool, <code>mfsd</code> included: every CLI defaults to <code>-F tsv</code> and Nextflow
 writes Parquet, so a tool run by hand without <code>-F</code> into a Nextflow folder rewrote its tables as
 <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> and left the Parquet ones, which downstream reads, from the earlier run. The refusal names
@@ -7295,7 +7342,7 @@ produced by one build against one baseline.</p>
     <span class="md-icon" title="Last update">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
     </span>
-    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 22:55:47 UTC"><span class="timeago" datetime="2026-11-23T22:55:47+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 22:55:47 UTC">2026-11-23</span>
+    <span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 25, 2026 19:13:19 UTC"><span class="timeago" datetime="2026-11-25T19:13:19+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 25, 2026 19:13:19 UTC">2026-11-25</span>
   </span>
 
     

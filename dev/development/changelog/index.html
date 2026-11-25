@@ -3356,15 +3356,15 @@
   <code>--output-format</code> and <code>--compress</code>; the configuration check compares it on every call, so every
   entry point refuses another format once the folder holds a record, and names the option to pass.
   <code>uxm</code>, <code>mfsd</code> and <code>motif</code> write no record, so one of them run alone in a fresh folder is not
-  checked. <code>mfsd</code> now runs the check too, for the format alone. A record from before this release
-  is judged by its record files (one <code>.parquet</code> record is Parquet; a <code>.parquet</code> and a <code>.tsv</code> are
-  <code>both</code>, though no refusal then advises <code>--output-format both</code>, since two runs look the same). A
-  copy of the record in an extension the field does not name (a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run published over a Parquet
-  one) makes the folder mixed, refused whatever the format. A hand rerun without <code>--output-format</code>
-  into a Parquet folder that worked before is now refused: each one left stale Parquet. For
-  Nextflow, where no task can see the published folder, <code>validate-output</code> reports a table in an
-  extension outside <code>table_formats</code> as <code>FORMAT.MIXED</code> (error), and a pre-release record with
-  tables in two extensions as <code>FORMAT.UNJUDGED</code> (skip).</p>
+  checked. <code>mfsd</code> now runs the check too (for the format, and its read filters below). A record from
+  before this release is judged by its record files (one <code>.parquet</code> record is Parquet; a <code>.parquet</code>
+  and a <code>.tsv</code> are <code>both</code>, though no refusal then advises <code>--output-format both</code>, since two runs
+  look the same). A copy of the record in an extension the field does not name (a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run published
+  over a Parquet one) makes the folder mixed, refused whatever the format. A hand rerun without
+  <code>--output-format</code> into a Parquet folder that worked before is now refused: each one left stale
+  Parquet. For Nextflow, where no task can see the published folder, <code>validate-output</code> reports a
+  table in an extension outside <code>table_formats</code> as <code>FORMAT.MIXED</code> (error), and a pre-release record
+  with tables in two extensions as <code>FORMAT.UNJUDGED</code> (skip).</p>
 </li>
 <li>
 <p><strong>Writers and readers of a sample's outputs take the format from the caller, with no default.</strong>
@@ -3550,13 +3550,19 @@
 <li><strong><code>extract</code> no longer replaces a record run-all or a single tool wrote into.</strong> Run into a folder
   <code>run-all</code> had finished (<code>run-all -A xs1</code>, then <code>extract -A xs1</code>), it rewrote
   <code>{sample}.metadata.parquet</code>, downstream's completion marker, with extraction's fields alone:
-  about thirty columns dropped, <code>krewlyzer_version</code>, <code>pon_applied</code> and every <code>{stage}_status</code>
-  among them. <code>validate-output</code> errors rose, but a reader of the marker alone still saw a complete
+  about thirty columns dropped, <code>krewlyzer_version</code>, <code>pon_applied</code> and every <code>{stage}_status</code> among
+  them. <code>validate-output</code> errors rose, but a reader of the marker alone still saw a complete
   sample. It now stops before writing anything when any copy of the record (<code>.tsv</code>, <code>.tsv.gz</code>,
   <code>.parquet</code>) holds a provenance column or a stage status, which only run-all and the single tools
-  write (<code>output_provenance.refuse_to_replace_a_later_record</code>). Updating only its own fields was
-  not enough: a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from other filters would leave every table made from the old one under
-  its recorded <code>ran</code>. A rerun of <code>extract</code> over a record it wrote alone is still allowed.</li>
+  write, or when any table the output contract declares beside its own exists for the sample, in
+  any format, but <abbr title="Fragment-level Methylation - Methylation state of individual fragments">UXM</abbr>'s, which reads the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> at a fixed mapq and never the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>
+  (<code>output_provenance.refuse_to_replace_a_later_record</code>, <code>contract.feature_table_suffixes</code>). The
+  record alone was not enough: a run-all killed between writing the record and stamping it, or a
+  folder from before provenance, has feature tables beside a record that looks like extraction's,
+  and <code>extract</code> with new filters replaced the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> and the marker under them. Updating only its own
+  fields was not enough either: a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from other filters would leave every table made from the
+  old one under its recorded <code>ran</code>. A rerun of <code>extract</code> into a folder it wrote alone is still
+  allowed.</li>
 <li><strong>The record's filters and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> flag say what the run did.</strong> <code>write_extraction_outputs</code> wrote
   <code>filters_mapq</code> 20, <code>filters_min_length</code> 65 and <code>filters_max_length</code> 1000 whatever the run used;
   they now come from the <code>ExtractionResult</code>, which carries the filters <code>extract_sample</code> applied,
@@ -3568,6 +3574,60 @@
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (<code>tests/invariants/test_extract_record.py</code>).</li>
+<li><strong>run-all no longer scores a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> extracted with other filters.</strong> <code>extract --mapq 30 -F parquet</code>
+  then <code>run-all</code> (mapq 20) into the same folder exited 0: the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> existed, so run-all kept it and
+  extract's record, and read the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> again at mapq 20 for the motif tables. Two filter sets under
+  one record. <code>extract -x</code> with another blacklist was the same case. The five read filters and the
+  blacklist are now settings a rerun is checked against (<code>output_provenance.FILTER_FIELDS</code>):
+  run-all, <code>extract</code>, <code>motif</code>, <code>region-mds</code> (the three filters it takes; it applies no blacklist)
+  and <code>mfsd</code> (mapq and the length range, which run-all gives it; it runs without the proper-pair
+  filter in run-all and drops duplicates whatever its flag says) refuse a run whose filters differ
+  from the record's, before writing anything. The record gains <code>filters_skip_duplicates</code> and
+  <code>filters_require_proper_pair</code>, which it did not hold, and <code>filters_blacklist_sha256</code>: the SHA-256
+  of the blacklist file's bytes, so the same file at another path (the bundled one sits at another
+  path in every install) is the same blacklist, and an edited one under the same name is not. A
+  record without them was written before the filters were recorded truthfully (every record a
+  release wrote said 20/65/1000), so its values are not compared. <code>-x</code> given a directory is
+  refused, as a missing file is, and so is anything else not a regular file (a pipe, as process
+  substitution gives, or a device): the digest reads it before the filter does, so a pipe would
+  leave the filter nothing and <code>/dev/zero</code> would never end. <code>-x /dev/null</code> excludes nothing.
+  run-all extracts that folder's <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> again rather than reuse it, as it now does a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with no
+  record beside it, unless feature tables were made from it, whether or not it is still there: then
+  it refuses, like <code>extract</code>, so a run-all folder whose record lacks these columns, from any
+  earlier build, is rerun into a fresh output folder. <code>motif</code>, <code>region-mds</code> and <code>mfsd</code>, which
+  cannot extract again, refuse such a folder when it holds the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> or tables another step made
+  (their own they replace), and otherwise warn that the filters could not be compared: one check
+  for all four (<code>output_provenance.refuse_tables_of_unrecorded_filters</code>). The <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> counts, so the
+  order the tools run in no longer decides: <code>motif --minlen 150</code> over an old <code>extract</code> folder
+  warned and ran, and <code>fsd</code> then read the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> unchecked. run-all also refuses a folder of tables
+  with no record beside it, since its record would vouch for them; a single tool writes no record
+  there, and runs. The tools reading the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> compare a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from another folder with the output
+  folder's record: <code>fsd -i a/S.bed.gz -o b</code> rewrote b's <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> from a's minlen-150 fragments under b's
+  record, which says 65. Another genome, assay, targets (the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> comes
+  with it), other filters or another blacklist are refused, and so is a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> or a folder whose
+  record cannot name the filters, or a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> whose record beside it cannot be read; so is a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> not
+  named for the sample (<code>fsd -i b/T.bed.gz -s S</code> in a folder two samples share), whatever made it.
+  A link to a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> is followed to its end, as the reader follows it, and judged, with the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor
+  table beside it, at the last file along it that an extraction claims
+  (<code>output_provenance.bed_as_extracted</code>, <code>gc_assets.resolve_gc_factors</code>): <code>fsd -i c/S.bed.gz -o b</code>
+  over <code>c/S.bed.gz -&gt; b/S.bed.gz</code> reads b's own <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and was refused; <code>fsd -i b/S.bed.gz -o b</code> over
+  <code>b/S.bed.gz -&gt; a/S.bed.gz</code>, or through a renamed link
+  (<code>b/S.bed.gz -&gt; b/S.v1.bed.gz -&gt; a/S.bed.gz</code>), read a's minlen-150 fragments under b's record,
+  and is refused. A file of another name no extraction claims (a versioned <code>S.v1.bed.gz</code> beside the
+  link with no record of that name, or a git-annex, DataLad or DVC object in a store holding no
+  file named <code>*.metadata.*</code>) holds the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> of the link's own folder, read with the table beside the
+  link: judged by it, the folder's own <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> was refused as another sample's, and the tools refitted
+  <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factors and removed extract's table. A renamed file in another folder holding any record is
+  that folder's, and is refused as not named for the sample. <code>extract</code> and run-all refuse a folder
+  where a file extraction writes (the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, its index, the record, a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table) is a link:
+  written through, <code>b/S.bed.gz -&gt; a/S.bed.gz</code> rewrote a's <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> under a's record, and nothing in b
+  could see it (<code>output_provenance.refuse_links_where_extraction_writes</code>). A link to a feature
+  table is not refused: a tool that writes the table writes through it. From the sample's own <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>
+  in the folder, or into a folder without a record (Nextflow's tasks), they run as before
+  (<code>output_provenance.refuse_a_bed_the_record_does_not_describe</code>,
+  <code>tests/invariants/test_rerun_bed.py</code>); a samplesheet <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> that Nextflow stages as a link, a route
+  the pipeline cannot reach today, is read with the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside its source, where there
+  is one, rather than refitted.</li>
 <li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,

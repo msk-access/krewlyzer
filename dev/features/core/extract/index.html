@@ -1447,7 +1447,7 @@ Use mouse to pan and zoom
 <td><code>-x</code></td>
 <td>PATH</td>
 <td>bundled blacklist</td>
-<td><abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> file of regions to exclude (default: the genome's bundled blacklist, with or without <code>--gc-correct</code>; if it is missing, that is an error). To exclude nothing, pass an empty file</td>
+<td><abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> file of regions to exclude (default: the genome's bundled blacklist, with or without <code>--gc-correct</code>; if it is missing, that is an error). To exclude nothing, pass an empty file or <code>/dev/null</code>. A directory is refused, and so is anything else not a regular file (a pipe, as process substitution gives, or a device): its bytes are read for the record's digest and again by the filter</td>
 </tr>
 <tr>
 <td><code>--mapq</code></td>
@@ -1536,11 +1536,18 @@ Use mouse to pan and zoom
 </tbody>
 </table>
 <p><code>{sample}.metadata.*</code> is the sample's record, and downstream's completion marker. It repeats the
-filters this run applied (<code>filters_mapq</code>, <code>filters_min_length</code>, <code>filters_max_length</code>) and says in
-<code>gc_correction_computed</code> whether the off-target factor table was written. <code>extract</code> refuses a folder whose
-record run-all or a single tool has already written into, before writing anything: replacing
-that record would drop its provenance and stage columns, and a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> would leave the tables
-made from the old one looking current. Rerunning <code>extract</code> over its own record is allowed.</p>
+filters this run applied (<code>filters_mapq</code>, <code>filters_min_length</code>, <code>filters_max_length</code>,
+<code>filters_skip_duplicates</code>, <code>filters_require_proper_pair</code>, and <code>filters_blacklist_sha256</code>, the
+blacklist's SHA-256) and says in <code>gc_correction_computed</code> whether the off-target factor table was
+written.</p>
+<p><code>extract</code> refuses, before writing anything, a folder that holds any feature table for the sample
+(<abbr title="Fragment-level Methylation - Methylation state of individual fragments">UXM</abbr>'s aside: it reads the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> at a fixed mapq, never the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>) or whose record run-all or a single
+tool has written into: a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> would leave the tables made from the old one looking current, and
+replacing that record would drop its provenance and stage columns. Rerunning <code>extract</code> over a
+folder it wrote alone is allowed, with the same genome, assay, targets, format and filters; other
+filters are refused like any other setting. run-all reuses a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> <code>extract</code> wrote only when the
+filters match; with others it is refused. Both refuse a folder where the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, its index, the record
+or a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table is a link to a file elsewhere, which writing would rewrite.</p>
 <p><code>--chromosomes</code> was removed. It was accepted and ignored, so a run asking for one chromosome
 wrote the whole genome; it is now refused as an unknown option. There is no chromosome subset:
 to lower memory, lower <code>--threads</code>.</p>
@@ -1712,7 +1719,7 @@ Use mouse to pan and zoom
 <span class="md-icon" title="Last update">
 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M21 13.1c-.1 0-.3.1-.4.2l-1 1 2.1 2.1 1-1c.2-.2.2-.6 0-.8l-1.3-1.3c-.1-.1-.2-.2-.4-.2m-1.9 1.8-6.1 6V23h2.1l6.1-6.1zM12.5 7v5.2l4 2.4-1 1L11 13V7zM11 21.9c-5.1-.5-9-4.8-9-9.9C2 6.5 6.5 2 12 2c5.3 0 9.6 4.1 10 9.3-.3-.1-.6-.2-1-.2s-.7.1-1 .2C19.6 7.2 16.2 4 12 4c-4.4 0-8 3.6-8 8 0 4.1 3.1 7.5 7.1 7.9l-.1.2z"></path></svg>
 </span>
-<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 23, 2026 18:43:53 UTC"><span class="timeago" datetime="2026-11-23T18:43:53+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 23, 2026 18:43:53 UTC">2026-11-23</span>
+<span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-timeago" title="November 25, 2026 16:05:12 UTC"><span class="timeago" datetime="2026-11-25T16:05:12+00:00" locale="en"></span></span><span class="git-revision-date-localized-plugin git-revision-date-localized-plugin-iso_date" title="November 25, 2026 16:05:12 UTC">2026-11-25</span>
 </span>
 <span class="md-source-file__fact">
 <span class="md-icon" title="Created">
