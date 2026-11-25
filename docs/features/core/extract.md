@@ -57,7 +57,7 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
 | `--skip-target-regions` | | FLAG | | Disable panel mode even when --assay is specified |
 | `--gc-correct` | | FLAG | True | Compute GC correction factors. `--no-gc-correct` skips only the factor tables: `--assay` targets and the blacklist still apply, as in `run-all` |
-| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`; if it is missing, that is an error). To exclude nothing, pass an empty file |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`; if it is missing, that is an error). To exclude nothing, pass an empty file or `/dev/null`. A directory is refused, and so is a pipe (process substitution): its bytes are read for the record's digest, and the filter would get nothing |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length |

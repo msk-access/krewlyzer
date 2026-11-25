@@ -428,6 +428,17 @@ class TestResolveExcludeRegions:
         with pytest.raises(ValueError, match="nope.bed"):
             resolve_exclude_regions(tmp_path / "nope.bed", mock_assets, mock_logger)
 
+    def test_an_explicit_pipe_is_an_error(self, mock_assets, mock_logger, tmp_path):
+        """A pipe, as process substitution gives, would be read once for the record's digest
+        and the filter would get nothing. Refused here, before anything reads it: a run that
+        read it would wait for a writer."""
+        import os
+
+        pipe = tmp_path / "regions.pipe"
+        os.mkfifo(pipe)
+        with pytest.raises(ValueError, match="is a pipe"):
+            resolve_exclude_regions(pipe, mock_assets, mock_logger)
+
     def test_the_genomes_bundled_blacklist_by_default(
         self, mock_assets, mock_logger, tmp_path
     ):

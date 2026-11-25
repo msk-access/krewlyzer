@@ -318,6 +318,19 @@ def test_a_directory_as_the_blacklist_is_refused_in_one_line(sample, tmp_path, t
     assert "is a directory" in _message(result), _message(result)
 
 
+def test_dev_null_as_the_blacklist_excludes_nothing(sample, tmp_path):
+    """`-x /dev/null` is the usual way to say "exclude nothing". It is no regular file, and the
+    directory check refused it as "a directory" (sixth review); it is read as an empty file is.
+    """
+    import hashlib
+
+    out = tmp_path / "out"
+    result = _cli(*_extract_args(sample, out, "/dev/null"))
+
+    assert result.exit_code == 0, _message(result)
+    assert record(out)["filters_blacklist_sha256"] == hashlib.sha256(b"").hexdigest()
+
+
 @pytest.mark.parametrize("name", list(FILTERS))
 def test_extract_with_other_filters_than_its_record_is_refused(sample, tmp_path, name):
     """As for the genome: the folder's filters are the folder's, whichever tool wrote them."""
@@ -879,6 +892,48 @@ def test_a_bed_tool_reads_its_own_bed_beside_an_old_record(sample, tmp_path):
     result = _fsd(sample, out / f"{SAMPLE}.bed.gz", out)
 
     assert result.exit_code == 0, result.output
+
+
+def _link_bed(source, folder):
+    """Links in `folder` to `source`'s BED and its index, as `ln -s` makes them."""
+    folder.mkdir(exist_ok=True)
+    for name in (f"{SAMPLE}.bed.gz", f"{SAMPLE}.bed.gz.tbi"):
+        (folder / name).unlink(missing_ok=True)
+        if (source / name).exists():
+            (folder / name).symlink_to(source / name)
+
+
+def test_a_bed_tool_reads_a_link_to_the_folders_own_bed(sample, tmp_path):
+    """A link is judged by the file it points to: `fsd -i c/S.bed.gz -o b` over
+    `c/S.bed.gz -> b/S.bed.gz` reads b's own BED, and was refused as "c/ holds no record of S"
+    (sixth review)."""
+    b, c = tmp_path / "b", tmp_path / "c"
+    assert synth_run_all(sample, b) is None
+    _link_bed(b, c)
+
+    result = _fsd(sample, c / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code == 0, _message(result)
+
+
+def test_a_bed_tool_refuses_a_link_in_the_folder_to_a_bed_extracted_with_other_filters(
+    sample, tmp_path
+):
+    """The same rule from the other side: named as the folder's own, `b/S.bed.gz -> a/S.bed.gz`
+    holds a's fragments, and was read under b's record."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+    assert synth_run_all(sample, b) is None
+    _link_bed(a, b)
+    before = _files(b)
+
+    result = _fsd(sample, b / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "filters_min_length=65 in b/, 150 in a/" in _message(result), _message(
+        result
+    )
+    assert _files(b) == before
 
 
 # ── 1d. Links where extraction writes ────────────────────────────────────────────────────────

@@ -610,15 +610,18 @@ def refuse_a_bed_the_record_does_not_describe(
     anything into a folder without a record, where nothing claims the tables are one sample's
     (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
 
+    A link is judged by the file it points to, whose fragments the tool reads: a link elsewhere to
+    the folder's own BED is that BED, and a link in the folder to another folder's BED is not.
+
     Called by the `run_features` tools and `region-entropy`, after
     `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing
     setting with both values, or `UnrecordedFilters`.
     """
-    bed = Path(bed_path).absolute()
+    bed = Path(bed_path).resolve()
     folder = Path(output_dir)
     # As the tools name the sample from the BED.
     bed_sample = bed.name.replace(".bed.gz", "").replace(".bed", "")
-    if bed_sample == sample and bed.parent.resolve() == folder.resolve():
+    if bed_sample == sample and bed.parent == folder.resolve():
         return
     ours = _read_record(
         record_path(folder, sample, output_format=output_format, compress=compress)

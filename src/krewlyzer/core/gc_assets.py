@@ -135,8 +135,12 @@ def resolve_gc_factors(
     Every reader goes through this. Before it existed, three call sites looked only for a plain
     `.tsv`, which production (`--output-format both --compress`) never writes, and silently ran
     uncorrected.
+
+    Beside a link to a BED means beside the file it points to, as the BED check judges it
+    (`refuse_a_bed_the_record_does_not_describe`): extraction wrote the table with that file. In
+    a Nextflow task, the BED and its tables are linked in from one extraction's folder.
     """
-    bed_path = Path(bed_path)
+    bed_path = Path(bed_path).resolve()
     places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]
     if output_dir is not None:
         places.append((Path(output_dir), sample))

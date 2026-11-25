@@ -1866,7 +1866,7 @@ krewlyzer extract -i sample.bam -r hg19.fa -o output_dir/ [options]
 | `--target-regions` | `-T` | PATH | | Target BED (panel mode: GC from off-target) |
 | `--skip-target-regions` | | FLAG | | Disable panel mode even when --assay is specified |
 | `--gc-correct` | | FLAG | True | Compute GC correction factors. `--no-gc-correct` skips only the factor tables: `--assay` targets and the blacklist still apply, as in `run-all` |
-| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`; if it is missing, that is an error). To exclude nothing, pass an empty file |
+| `--exclude-regions` | `-x` | PATH | bundled blacklist | BED file of regions to exclude (default: the genome's bundled blacklist, with or without `--gc-correct`; if it is missing, that is an error). To exclude nothing, pass an empty file or `/dev/null`. A directory is refused, and so is a pipe (process substitution): its bytes are read for the record's digest, and the filter would get nothing |
 | `--mapq` | `-q` | INT | 20 | Minimum mapping quality |
 | `--minlen` | | INT | 65 | Minimum fragment length |
 | `--maxlen` | | INT | 1000 | Maximum fragment length |
@@ -10925,14 +10925,16 @@ cannot extract again, so over such a record they refuse when the folder holds th
 another step made, and otherwise warn that the filters could not be compared, and run. run-all also
 refuses tables with no record beside them, since the record it writes would vouch for them; a
 single tool writes no record into such a folder, and runs. A tool reading the BED from another
-folder (`fsd -i a/S.bed.gz -o b`) compares the genome, assay, targets and read filters recorded
-beside that BED with the output folder's record (the GC factor table beside the BED comes with it),
-and refuses other ones, a record on either side that cannot name the filters, or one beside the BED
-that cannot be read. It refuses a BED not named for the sample (`fsd -i b/T.bed.gz -s S`) whatever
-made it. Into a folder without a record the BED tool runs. `extract` and run-all refuse a folder
-where a file extraction writes -- the BED, its index, the record, a GC factor table -- is a link
-(as Nextflow stages inputs, or `ln -s`): written through, it would rewrite the file it points to in
-another folder.
+folder (`fsd -i a/S.bed.gz -o b`) compares the genome, assay, targets, read filters and blacklist
+recorded beside that BED with the output folder's record (the GC factor table beside the BED comes
+with it), and refuses other ones, a record on either side that cannot name the filters, or one
+beside the BED that cannot be read. It refuses a BED not named for the sample
+(`fsd -i b/T.bed.gz -s S`) whatever made it. A link to a BED is judged by the file it points to,
+whose fragments it reads, and the GC factor table used is the one beside that file. Into a folder
+without a record the BED tool runs. `extract` and run-all refuse a folder where a file extraction
+writes -- the BED, its index, the record, a GC factor table -- is a link (as Nextflow stages
+inputs, or `ln -s`): written through, it would rewrite the file it points to in another folder. A
+link to a feature table is not refused: a tool that writes the table writes through it.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

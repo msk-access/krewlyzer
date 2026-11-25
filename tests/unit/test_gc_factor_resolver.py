@@ -54,6 +54,18 @@ def test_beside_the_bed_wins_over_the_output_dir(tmp_path):
     assert c.path == beside
 
 
+def test_beside_a_linked_bed_is_beside_the_file_it_points_to(tmp_path):
+    # Extraction wrote the table with the BED, and the tools judge a linked BED by its file
+    # (`refuse_a_bed_the_record_does_not_describe`). Beside the link, another table was read
+    # with that BED's fragments (sixth review).
+    bed = _touch(tmp_path / "b" / "s.bed.gz")
+    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    _touch(tmp_path / "c" / "s.correction_factors.parquet")
+    (tmp_path / "c" / "s.bed.gz").symlink_to(bed)
+    c = resolve_gc_factors(tmp_path / "c" / "s.bed.gz", None, "s", "off_target")
+    assert c.path.samefile(table)
+
+
 def test_output_dir_is_searched_by_sample_name(tmp_path):
     bed = _touch(tmp_path / "in" / "renamed.bed.gz")
     table = _touch(tmp_path / "out" / "s.correction_factors.ontarget.parquet")
