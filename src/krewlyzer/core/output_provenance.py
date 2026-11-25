@@ -589,14 +589,16 @@ def bed_as_extracted(bed_path: Path) -> Path:
     One rule for the BED check (`refuse_a_bed_the_record_does_not_describe`) and the factor-table
     lookup (`gc_assets.resolve_gc_factors`), so a tool reads a BED's fragments with that BED's
     table. A link is followed, hop by hop, while the next file keeps its name (`c/S.bed.gz ->
-    b/S.bed.gz` is b's BED) or has a record of its own name beside it (another extraction's BED,
-    linked under another name). It stops at a file of another name with no record beside it: a
-    git-annex, DataLad or DVC object, or `S.bed.gz -> S.v1.bed.gz`, holds the BED of the folder
-    the link is in. Followed there, the folder's own BED was refused as another sample's, and the
-    tools refitted GC factors from it and removed extract's table.
+    b/S.bed.gz` is b's BED) or an extraction claims it: beside the link, a record of its name; in
+    another folder, any record there (`b/S.bed.gz -> a/S.v1.bed.gz` is a's file, and is refused
+    as not named for the sample). It stops at a file of another name no extraction claims, which
+    holds the BED of the folder the link is in: `S.bed.gz -> S.v1.bed.gz` beside it, or a
+    git-annex, DataLad or DVC object in a store that holds no record. Followed there, the folder's
+    own BED was refused as another sample's, and the tools refitted GC factors from it and removed
+    extract's table.
 
-    Not told apart: a link to another sample's BED in a folder holding no record of it, which
-    stands for the link.
+    Not told apart, and taken as the link's BED: a renamed file in a folder holding no record, and
+    another sample's BED beside the link with no record of it.
     """
     path = Path(bed_path).absolute()
     path = path.parent.resolve() / path.name
@@ -604,12 +606,22 @@ def bed_as_extracted(bed_path: Path) -> Path:
     while path.is_symlink():
         hop = path.parent / path.readlink()
         hop = hop.parent.resolve() / hop.name
-        stem = hop.name.removesuffix(".gz").removesuffix(".bed")
-        renamed = hop.name != path.name and not any(
-            (hop.parent / f"{stem}.metadata{ext}").exists() for ext in TABLE_EXTENSIONS
-        )
-        if renamed or hop in seen:  # a loop of links: reading the BED fails on its own
+        if hop in seen:  # a loop of links: reading the BED fails on its own
             break
+        if hop.name != path.name:
+            if hop.parent == path.parent:
+                stem = hop.name.removesuffix(".gz").removesuffix(".bed")
+                records = [
+                    hop.parent / f"{stem}.metadata{ext}" for ext in TABLE_EXTENSIONS
+                ]
+            else:  # a store holds no record; a folder extraction wrote holds one
+                records = [
+                    p
+                    for ext in TABLE_EXTENSIONS
+                    for p in hop.parent.glob(f"*.metadata{ext}")
+                ]
+            if not any(p.exists() for p in records):
+                break
         seen.add(hop)
         path = hop
     return path
@@ -644,8 +656,9 @@ def refuse_a_bed_the_record_does_not_describe(
     (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
 
     A link is judged where `bed_as_extracted` places it: a link elsewhere to the folder's own BED
-    is that BED, a link in the folder to another folder's BED is not, and a link in the folder to
-    an annex object or a versioned file of another name is the folder's own.
+    is that BED; a link in the folder to a file in another extraction's folder is not, whatever
+    its name; a link in the folder to a versioned file beside it, or to an annex or DVC object, is
+    the folder's own.
 
     Called by the `run_features` tools and `region-entropy`, after
     `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing

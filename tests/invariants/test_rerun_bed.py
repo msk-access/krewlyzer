@@ -984,6 +984,31 @@ def test_a_bed_tool_refuses_a_link_to_an_annexed_bed_extracted_with_other_filter
     )
 
 
+def test_a_bed_tool_refuses_a_link_to_a_renamed_bed_in_another_extractions_folder(
+    sample, tmp_path
+):
+    """`b/S.bed.gz -> a/S.v1.bed.gz`, a's record beside it: a renamed file in a folder extraction
+    wrote is that folder's, not b's BED held under another name. Taken as b's, a's minlen-150
+    fragments were read under b's record (review of the seventh fix)."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+    assert synth_run_all(sample, b) is None
+    for name in (f"{SAMPLE}.bed.gz", f"{SAMPLE}.bed.gz.tbi"):
+        renamed = a / name.replace(SAMPLE, f"{SAMPLE}.v1", 1)
+        (a / name).rename(renamed)
+        (b / name).unlink()
+        (b / name).symlink_to(renamed)
+    before = _files(b)
+
+    result = _fsd(sample, b / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert f"{SAMPLE}.v1.bed.gz is not named {SAMPLE}.bed.gz" in _message(
+        result
+    ), _message(result)
+    assert _files(b) == before
+
+
 # ── 1d. Links where extraction writes ────────────────────────────────────────────────────────
 #
 # Nextflow stages a task's inputs as links, and so can a person (`ln -s`). Written through, a link

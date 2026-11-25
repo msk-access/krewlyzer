@@ -140,9 +140,10 @@ def resolve_gc_factors(
 
     Beside the BED means where extraction wrote it, as the BED check places it
     (`output_provenance.bed_as_extracted`): a link is followed to the BED it points to, with that
-    BED's table, but not to an annex object or a versioned file of another name, which holds the
-    BED of the link's own folder. In a Nextflow task, a BED the pipeline extracted is linked in
-    from that extraction's folder, with its tables.
+    BED's table, but not to a file of another name no extraction claims (an annex or DVC object,
+    or a versioned file beside the link), which holds the BED of the link's own folder. In a
+    Nextflow task, a BED the pipeline extracted is linked in from that extraction's folder, with
+    its tables; a samplesheet BED staged as a link is read with the table beside its source.
     """
     bed_path = bed_as_extracted(bed_path)
     places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]

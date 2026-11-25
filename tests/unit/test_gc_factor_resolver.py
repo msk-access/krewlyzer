@@ -11,9 +11,11 @@ from pathlib import Path
 
 import pytest
 
+from krewlyzer.assets import AssetManager
 from krewlyzer.core.gc_assets import (
     GcFactorsChoice,
     factor_table_base,
+    resolve_gc_assets,
     resolve_gc_factors,
 )
 
@@ -115,6 +117,39 @@ def test_a_link_to_another_extractions_bed_is_followed_whatever_its_name(tmp_pat
     (tmp_path / "b" / "s.bed.gz").symlink_to(target)
     c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
     assert c.found and c.path.samefile(table)
+
+
+@pytest.mark.parametrize(
+    "record",
+    ["s.metadata.parquet", "t.metadata.tsv.gz"],
+    ids=["its-own", "another-samples"],
+)
+def test_a_renamed_file_in_a_folder_extraction_wrote_is_not_beside_the_link(
+    tmp_path, record
+):
+    # `b/s.bed.gz -> a/s.v1.bed.gz`, a record in a: the file is a's, not b's BED held under
+    # another name, and b's table was read with a's fragments (review of the seventh fix).
+    target = _touch(tmp_path / "a" / "s.v1.bed.gz")
+    _touch(tmp_path / "a" / record)
+    table_b = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.bed.gz").symlink_to(target)
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    assert not (c.found and c.path.samefile(table_b))
+
+
+def test_the_tools_use_the_table_beside_a_link_to_a_store_object_and_do_not_refit(
+    tmp_path,
+):
+    # A refit (`factors_out` set) is the one path to `run_features` removing extract's table from
+    # the output folder. The CLI tests cannot see it: the synthetic sample fits no table.
+    obj = _touch(tmp_path / "store" / "SHA256E-s1--0a1b.bed.gz")
+    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.bed.gz").symlink_to(obj)
+    gc = resolve_gc_assets(
+        AssetManager("hg19"), tmp_path / "b", "s", tmp_path / "b" / "s.bed.gz"
+    )
+    assert gc.factors_input is not None and gc.factors_input.samefile(table)
+    assert gc.factors_out is None
 
 
 def test_output_dir_is_searched_by_sample_name(tmp_path):

@@ -318,7 +318,9 @@ def resolve_exclude_regions(
             raise ValueError(f"Exclude regions file not found: {explicit_path}")
         # Its bytes are the blacklist's digest in the record (`blacklist_digest`), read before
         # the filter reads them, so it must read the same twice, and end: a regular file.
-        # `/dev/null` reads as an empty file, so it is one.
+        # `/dev/null` reads as an empty file, so it is one. Not caught, on macOS only:
+        # `/dev/stdin` or `/dev/fd/N` open on a regular file pass as that file, but share its
+        # read position, so the filter reads nothing after the digest (Linux opens it anew).
         if Path(explicit_path).is_dir():
             raise ValueError(
                 f"Exclude regions {explicit_path} is a directory, not a BED file"

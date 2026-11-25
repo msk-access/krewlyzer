@@ -360,17 +360,21 @@ All notable changes to this project will be documented in this file.
   beside that file (`output_provenance.bed_as_extracted`, `gc_assets.resolve_gc_factors`):
   `fsd -i c/S.bed.gz -o b` over `c/S.bed.gz -> b/S.bed.gz` reads b's own BED, and was refused;
   `fsd -i b/S.bed.gz -o b` over `b/S.bed.gz -> a/S.bed.gz` read a's minlen-150 fragments under b's
-  record, and is refused. A link to a file of another name with no record beside it (a git-annex,
-  DataLad or DVC object, or a versioned `S.v1.bed.gz`) is the BED of the link's own folder, read
-  with the table beside the link: followed, it was refused as another sample's, and the tools
-  refitted GC factors and removed extract's table. `extract` and run-all refuse a folder where a
-  file extraction writes (the BED, its index, the record, a GC factor table) is a link: written
-  through, `b/S.bed.gz -> a/S.bed.gz` rewrote a's BED under a's record, and nothing in b could see
-  it (`output_provenance.refuse_links_where_extraction_writes`). A link to a feature table is not
+  record, and is refused. A link to a file of another name no extraction claims (a versioned
+  `S.v1.bed.gz` beside the link with no record of that name, or a git-annex, DataLad or DVC object
+  in a store that holds no record) is the BED of the link's own folder, read with the table beside
+  the link: followed, it was refused as another sample's, and the tools refitted GC factors and
+  removed extract's table. A renamed file in a folder holding any record is that folder's, and is
+  refused as not named for the sample. `extract` and run-all refuse a folder where a file
+  extraction writes (the BED, its index, the record, a GC factor table) is a link: written through,
+  `b/S.bed.gz -> a/S.bed.gz` rewrote a's BED under a's record, and nothing in b could see it
+  (`output_provenance.refuse_links_where_extraction_writes`). A link to a feature table is not
   refused: a tool that writes the table writes through it. From the sample's own BED in the folder,
-  or into a folder without a record (Nextflow's tasks, for the BEDs the pipeline extracts), they
-  run as before (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
-  `tests/invariants/test_rerun_bed.py`).
+  or into a folder without a record (Nextflow's tasks), they run as before
+  (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
+  `tests/invariants/test_rerun_bed.py`); a samplesheet BED that Nextflow stages as a link, a route
+  the pipeline cannot reach today, is read with the GC factor table beside its source, where there
+  is one, rather than refitted.
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
