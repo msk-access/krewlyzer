@@ -588,27 +588,31 @@ def bed_as_extracted(bed_path: Path) -> Path:
 
     One rule for the BED check (`refuse_a_bed_the_record_does_not_describe`) and the factor-table
     lookup (`gc_assets.resolve_gc_factors`), so a tool reads a BED's fragments with that BED's
-    table. A link is followed, hop by hop, while the next file keeps its name (`c/S.bed.gz ->
-    b/S.bed.gz` is b's BED) or an extraction claims it: beside the link, a record of its name; in
-    another folder, any record there (`b/S.bed.gz -> a/S.v1.bed.gz` is a's file, and is refused
-    as not named for the sample). It stops at a file of another name no extraction claims, which
-    holds the BED of the folder the link is in: `S.bed.gz -> S.v1.bed.gz` beside it, or a
-    git-annex, DataLad or DVC object in a store that holds no record. Followed there, the folder's
-    own BED was refused as another sample's, and the tools refitted GC factors from it and removed
-    extract's table.
+    table. A link is followed to its end, as the reader follows it, and the BED stands at the last
+    file along it that an extraction claims: the path given; a file of the same name
+    (`c/S.bed.gz -> b/S.bed.gz` is b's BED); or a renamed file with a record of its name beside the
+    link, or with any record in its own folder if that is another (`b/S.bed.gz -> a/S.v1.bed.gz` is
+    a's file, refused as not named for the sample; `b/S.bed.gz -> b/S.v1.bed.gz -> a/S.bed.gz` is
+    a's BED). A file no extraction claims holds the bytes of the BED before it: `S.bed.gz ->
+    S.v1.bed.gz` beside the link, or a git-annex, DataLad or DVC object in a store that holds no
+    record, is the BED of the folder the link is in. Judged by such a file, the folder's own BED
+    was refused as another sample's, and the tools refitted GC factors and removed extract's table;
+    judged short of a's file, a's fragments were read under b's record and table.
 
-    Not told apart, and taken as the link's BED: a renamed file in a folder holding no record, and
+    A record here is any file named `*.metadata{.tsv,.tsv.gz,.parquet}`, read by name only. Not
+    told apart, and taken as the link's BED: a renamed file in a folder holding no record, and
     another sample's BED beside the link with no record of it.
     """
     path = Path(bed_path).absolute()
     path = path.parent.resolve() / path.name
-    seen = {path}
+    stand, seen = path, {path}
     while path.is_symlink():
         hop = path.parent / path.readlink()
         hop = hop.parent.resolve() / hop.name
         if hop in seen:  # a loop of links: reading the BED fails on its own
             break
-        if hop.name != path.name:
+        claimed = hop.name == path.name
+        if not claimed:
             if hop.parent == path.parent:
                 stem = hop.name.removesuffix(".gz").removesuffix(".bed")
                 records = [
@@ -620,11 +624,12 @@ def bed_as_extracted(bed_path: Path) -> Path:
                     for ext in TABLE_EXTENSIONS
                     for p in hop.parent.glob(f"*.metadata{ext}")
                 ]
-            if not any(p.exists() for p in records):
-                break
+            claimed = any(p.exists() for p in records)
         seen.add(hop)
         path = hop
-    return path
+        if claimed:
+            stand = path
+    return stand
 
 
 def refuse_a_bed_the_record_does_not_describe(
@@ -655,10 +660,10 @@ def refuse_a_bed_the_record_does_not_describe(
     anything into a folder without a record, where nothing claims the tables are one sample's
     (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
 
-    A link is judged where `bed_as_extracted` places it: a link elsewhere to the folder's own BED
-    is that BED; a link in the folder to a file in another extraction's folder is not, whatever
-    its name; a link in the folder to a versioned file beside it, or to an annex or DVC object, is
-    the folder's own.
+    A link is judged where `bed_as_extracted` places it: a link elsewhere to the folder's own BED,
+    under its own name, is that BED; a link in the folder that reaches a file in another
+    extraction's folder is not, whatever the names along the way; a link in the folder to a
+    versioned file beside it, or to an annex or DVC object, is the folder's own.
 
     Called by the `run_features` tools and `region-entropy`, after
     `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing

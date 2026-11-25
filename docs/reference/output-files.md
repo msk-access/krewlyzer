@@ -1218,16 +1218,18 @@ folder (`fsd -i a/S.bed.gz -o b`) compares the genome, assay, targets, read filt
 recorded beside that BED with the output folder's record (the GC factor table beside the BED comes
 with it), and refuses other ones, a record on either side that cannot name the filters, or one
 beside the BED that cannot be read. It refuses a BED not named for the sample
-(`fsd -i b/T.bed.gz -s S`) whatever made it. A link to a BED is judged by the file it points to,
-whose fragments it reads, and the GC factor table used is the one beside that file; a link to a
-file of another name no extraction claims (a versioned `S.v1.bed.gz` beside the link with no record
-of that name, or a git-annex, DataLad or DVC object in a store that holds no record) is the BED of
-the link's own folder, read with the table beside the link, and a renamed file in a folder holding
-any record is refused as not named for the sample. Into a folder without a record the BED tool
-runs. `extract` and run-all refuse a folder where a file extraction writes -- the BED, its index,
-the record, a GC factor table -- is a link (as Nextflow stages inputs, or `ln -s`): written
-through, it would rewrite the file it points to in another folder. A link to a feature table is not
-refused: a tool that writes the table writes through it.
+(`fsd -i b/T.bed.gz -s S`) whatever made it. A link to a BED is followed to its end, as the reader
+follows it, and judged, with the GC factor table beside it, at the last file along it that an
+extraction claims: one of the same name, or a renamed one with a record of its name beside the link
+or any record (a file named `*.metadata.*`) in its own folder if that is another. A file of another
+name no extraction claims (a versioned `S.v1.bed.gz` beside the link with no record of that name,
+or a git-annex, DataLad or DVC object in a store that holds no record) holds the BED of the link's
+own folder, read with the table beside the link; a renamed file in another folder holding any
+record is refused as not named for the sample. Into a folder without a record the BED tool runs.
+`extract` and run-all refuse a folder where a file extraction writes -- the BED, its index, the
+record, a GC factor table -- is a link (as Nextflow stages inputs, or `ln -s`): written through, it
+would rewrite the file it points to in another folder. A link to a feature table is not refused: a
+tool that writes the table writes through it.
 
 **`extract` rewrites this table only in a folder it wrote alone.** It refuses, before writing
 anything, a folder holding any table the output contract declares other than its own record and

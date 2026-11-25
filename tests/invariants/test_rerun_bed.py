@@ -1009,6 +1009,37 @@ def test_a_bed_tool_refuses_a_link_to_a_renamed_bed_in_another_extractions_folde
     assert _files(b) == before
 
 
+@pytest.mark.parametrize(
+    "middle",
+    [f"b/{SAMPLE}.v1.bed.gz", f"beds/{SAMPLE}_cfDNA.bed.gz"],
+    ids=["renamed-link-beside", "folder-of-renamed-links"],
+)
+def test_a_bed_tool_refuses_a_chain_through_a_renamed_link_to_another_extractions_bed(
+    sample, tmp_path, middle
+):
+    """`b/S.bed.gz -> <renamed link> -> a/S.bed.gz`: the rule stopped at the renamed link, which
+    no record claims, and took the chain as b's own BED, while the reader followed it to a's
+    minlen-150 fragments and wrote them under b's record (ninth review)."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+    assert synth_run_all(sample, b) is None
+    for name in (f"{SAMPLE}.bed.gz", f"{SAMPLE}.bed.gz.tbi"):
+        link = tmp_path / (middle + name.removeprefix(f"{SAMPLE}.bed.gz"))
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to(a / name)
+        (b / name).unlink()
+        (b / name).symlink_to(link)
+    before = _files(b)
+
+    result = _fsd(sample, b / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "filters_min_length=65 in b/, 150 in a/" in _message(result), _message(
+        result
+    )
+    assert _files(b) == before
+
+
 # ── 1d. Links where extraction writes ────────────────────────────────────────────────────────
 #
 # Nextflow stages a task's inputs as links, and so can a person (`ln -s`). Written through, a link

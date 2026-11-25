@@ -137,6 +137,38 @@ def test_a_renamed_file_in_a_folder_extraction_wrote_is_not_beside_the_link(
     assert not (c.found and c.path.samefile(table_b))
 
 
+@pytest.mark.parametrize(
+    "middle",
+    ["b/s.v1.bed.gz", "beds/s_cfDNA.bed.gz"],
+    ids=["renamed-link-beside", "folder-of-renamed-links"],
+)
+def test_a_chain_through_a_renamed_link_uses_the_table_of_the_bed_it_reaches(
+    tmp_path, middle
+):
+    # `b/s.bed.gz -> <renamed link> -> a/s.bed.gz`: the reader reaches a's BED, so a's table goes
+    # with it, not b's (ninth review).
+    bed = _touch(tmp_path / "a" / "s.bed.gz")
+    _touch(tmp_path / "a" / "s.metadata.parquet")
+    table = _touch(tmp_path / "a" / "s.correction_factors.parquet")
+    _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    link = tmp_path / middle
+    link.parent.mkdir(exist_ok=True)
+    link.symlink_to(bed)
+    (tmp_path / "b" / "s.bed.gz").symlink_to(link)
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    assert c.found and c.path.samefile(table)
+
+
+def test_a_versioned_file_beside_the_link_held_in_an_annex_is_the_links_bed(tmp_path):
+    # `b/s.bed.gz -> s.v1.bed.gz -> <annex object>`: no record claims anything after the link.
+    obj = _touch(tmp_path / "store" / "SHA256E-s1--0a1b.bed.gz")
+    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.v1.bed.gz").symlink_to(obj)
+    (tmp_path / "b" / "s.bed.gz").symlink_to(tmp_path / "b" / "s.v1.bed.gz")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    assert c.found and c.path.samefile(table)
+
+
 def test_the_tools_use_the_table_beside_a_link_to_a_store_object_and_do_not_refit(
     tmp_path,
 ):
