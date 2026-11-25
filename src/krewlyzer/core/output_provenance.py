@@ -582,6 +582,39 @@ def refuse_tables_of_unrecorded_filters(
         )
 
 
+def bed_as_extracted(bed_path: Path) -> Path:
+    """The path that stands for a BED where extraction wrote it: its folder holds the BED's record
+    and GC factor tables, and its name is the one extraction gave it.
+
+    One rule for the BED check (`refuse_a_bed_the_record_does_not_describe`) and the factor-table
+    lookup (`gc_assets.resolve_gc_factors`), so a tool reads a BED's fragments with that BED's
+    table. A link is followed, hop by hop, while the next file keeps its name (`c/S.bed.gz ->
+    b/S.bed.gz` is b's BED) or has a record of its own name beside it (another extraction's BED,
+    linked under another name). It stops at a file of another name with no record beside it: a
+    git-annex, DataLad or DVC object, or `S.bed.gz -> S.v1.bed.gz`, holds the BED of the folder
+    the link is in. Followed there, the folder's own BED was refused as another sample's, and the
+    tools refitted GC factors from it and removed extract's table.
+
+    Not told apart: a link to another sample's BED in a folder holding no record of it, which
+    stands for the link.
+    """
+    path = Path(bed_path).absolute()
+    path = path.parent.resolve() / path.name
+    seen = {path}
+    while path.is_symlink():
+        hop = path.parent / path.readlink()
+        hop = hop.parent.resolve() / hop.name
+        stem = hop.name.removesuffix(".gz").removesuffix(".bed")
+        renamed = hop.name != path.name and not any(
+            (hop.parent / f"{stem}.metadata{ext}").exists() for ext in TABLE_EXTENSIONS
+        )
+        if renamed or hop in seen:  # a loop of links: reading the BED fails on its own
+            break
+        seen.add(hop)
+        path = hop
+    return path
+
+
 def refuse_a_bed_the_record_does_not_describe(
     bed_path: Path,
     output_dir: Path,
@@ -610,14 +643,15 @@ def refuse_a_bed_the_record_does_not_describe(
     anything into a folder without a record, where nothing claims the tables are one sample's
     (tools run by hand, and Nextflow's tasks, each writing its own folder with the BED staged in).
 
-    A link is judged by the file it points to, whose fragments the tool reads: a link elsewhere to
-    the folder's own BED is that BED, and a link in the folder to another folder's BED is not.
+    A link is judged where `bed_as_extracted` places it: a link elsewhere to the folder's own BED
+    is that BED, a link in the folder to another folder's BED is not, and a link in the folder to
+    an annex object or a versioned file of another name is the folder's own.
 
     Called by the `run_features` tools and `region-entropy`, after
     `refuse_a_different_configuration`. Raises `ConfigurationMismatch` naming each differing
     setting with both values, or `UnrecordedFilters`.
     """
-    bed = Path(bed_path).resolve()
+    bed = bed_as_extracted(bed_path)
     folder = Path(output_dir)
     # As the tools name the sample from the BED.
     bed_sample = bed.name.replace(".bed.gz", "").replace(".bed", "")

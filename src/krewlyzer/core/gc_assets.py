@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 import logging
 
+from .output_provenance import bed_as_extracted
+
 if TYPE_CHECKING:
     from ..assets import AssetManager
 
@@ -136,11 +138,13 @@ def resolve_gc_factors(
     `.tsv`, which production (`--output-format both --compress`) never writes, and silently ran
     uncorrected.
 
-    Beside a link to a BED means beside the file it points to, as the BED check judges it
-    (`refuse_a_bed_the_record_does_not_describe`): extraction wrote the table with that file. In
-    a Nextflow task, the BED and its tables are linked in from one extraction's folder.
+    Beside the BED means where extraction wrote it, as the BED check places it
+    (`output_provenance.bed_as_extracted`): a link is followed to the BED it points to, with that
+    BED's table, but not to an annex object or a versioned file of another name, which holds the
+    BED of the link's own folder. In a Nextflow task, a BED the pipeline extracted is linked in
+    from that extraction's folder, with its tables.
     """
-    bed_path = Path(bed_path).resolve()
+    bed_path = bed_as_extracted(bed_path)
     places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]
     if output_dir is not None:
         places.append((Path(output_dir), sample))

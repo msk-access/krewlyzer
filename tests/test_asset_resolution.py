@@ -436,8 +436,23 @@ class TestResolveExcludeRegions:
 
         pipe = tmp_path / "regions.pipe"
         os.mkfifo(pipe)
-        with pytest.raises(ValueError, match="is a pipe"):
+        with pytest.raises(ValueError, match="is not a regular file"):
             resolve_exclude_regions(pipe, mock_assets, mock_logger)
+
+    def test_an_explicit_device_is_an_error(self, mock_assets, mock_logger):
+        """`/dev/zero` was read without end for the record's digest, and a terminal waited for
+        input (seventh review)."""
+        with pytest.raises(ValueError, match="is not a regular file"):
+            resolve_exclude_regions(Path("/dev/zero"), mock_assets, mock_logger)
+
+    def test_dev_null_is_taken_as_excluding_nothing(self, mock_assets, mock_logger):
+        """The one device taken: it reads as an empty file."""
+        import os
+
+        assert resolve_exclude_regions(Path(os.devnull), mock_assets, mock_logger) == (
+            Path(os.devnull),
+            "explicit",
+        )
 
     def test_the_genomes_bundled_blacklist_by_default(
         self, mock_assets, mock_logger, tmp_path

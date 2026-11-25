@@ -936,6 +936,54 @@ def test_a_bed_tool_refuses_a_link_in_the_folder_to_a_bed_extracted_with_other_f
     assert _files(b) == before
 
 
+def _hold_bed(folder, held):
+    """`folder`'s BED and index moved to `held` and linked back, as git-annex, DataLad and DVC
+    hold a file: under another name, with no record of that name beside it."""
+    for name in (f"{SAMPLE}.bed.gz", f"{SAMPLE}.bed.gz.tbi"):
+        if (folder / name).exists():
+            target = held.with_name(held.name + name.removeprefix(f"{SAMPLE}.bed.gz"))
+            target.parent.mkdir(exist_ok=True)
+            (folder / name).rename(target)
+            (folder / name).symlink_to(target)
+
+
+@pytest.mark.parametrize(
+    "held",
+    ["store/SHA256E-s1--0a1b.bed.gz", "b/S.v1.bed.gz"],
+    ids=["annex", "versioned"],
+)
+def test_a_bed_tool_reads_its_own_bed_held_under_another_name(sample, tmp_path, held):
+    """`b/S.bed.gz` a link to an annex object or a versioned file is the folder's own BED. Judged
+    by the name it points to, it was refused as "not named S.bed.gz" (seventh review).
+    """
+    b = tmp_path / "b"
+    assert synth_run_all(sample, b) is None
+    _hold_bed(b, tmp_path / held)
+
+    result = _fsd(sample, b / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code == 0, _message(result)
+
+
+def test_a_bed_tool_refuses_a_link_to_an_annexed_bed_extracted_with_other_filters(
+    sample, tmp_path
+):
+    """`b/S.bed.gz -> a/S.bed.gz -> <annex object>`: the link is followed to a's BED, the last file
+    extraction named, and a's record is compared, not the object's name."""
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _extract(sample, a, "--minlen", "150").exit_code == 0
+    assert synth_run_all(sample, b) is None
+    _hold_bed(a, tmp_path / "store" / "SHA256E-s1--0a1b.bed.gz")
+    _link_bed(a, b)
+
+    result = _fsd(sample, b / f"{SAMPLE}.bed.gz", b)
+
+    assert result.exit_code != 0, _message(result)
+    assert "filters_min_length=65 in b/, 150 in a/" in _message(result), _message(
+        result
+    )
+
+
 # ── 1d. Links where extraction writes ────────────────────────────────────────────────────────
 #
 # Nextflow stages a task's inputs as links, and so can a person (`ln -s`). Written through, a link

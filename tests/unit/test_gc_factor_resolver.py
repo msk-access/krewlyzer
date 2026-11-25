@@ -66,6 +66,57 @@ def test_beside_a_linked_bed_is_beside_the_file_it_points_to(tmp_path):
     assert c.path.samefile(table)
 
 
+@pytest.mark.parametrize(
+    "held",
+    ["store/SHA256E-s1--0a1b.bed.gz", "store/0a1b2c", "b/s.v1.bed.gz"],
+    ids=["annex-object", "dvc-object", "versioned"],
+)
+def test_beside_a_link_to_a_renamed_file_without_a_record_is_beside_the_link(
+    tmp_path, held
+):
+    # The BED held as a git-annex, DataLad or DVC object, or as a versioned file: following the
+    # link looked for the object's table, found none, and the run refitted and deleted the table
+    # beside the link (seventh review).
+    obj = _touch(tmp_path / held)
+    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.bed.gz").symlink_to(obj)
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    assert c.found and c.path.samefile(table)
+
+
+def test_a_chain_of_links_is_followed_to_the_last_file_extraction_named(tmp_path):
+    # `d/s.bed.gz -> c/s.bed.gz -> b/s.bed.gz -> <annex object>`: b's BED is held in an annex, c
+    # links it, and a Nextflow task (d) stages c's link. b is where it was extracted.
+    obj = _touch(tmp_path / "store" / "SHA256E-s1--0a1b.bed.gz")
+    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.bed.gz").symlink_to(obj)
+    for link, target in (("c", "b"), ("d", "c")):
+        _touch(tmp_path / link / "s.correction_factors.parquet")
+        (tmp_path / link / "s.bed.gz").symlink_to(tmp_path / target / "s.bed.gz")
+    c = resolve_gc_factors(tmp_path / "d" / "s.bed.gz", None, "s", "off_target")
+    assert c.found and c.path.samefile(table)
+
+
+def test_a_loop_of_links_is_not_followed_forever(tmp_path):
+    (tmp_path / "x").mkdir()
+    (tmp_path / "y").mkdir()
+    (tmp_path / "x" / "s.bed.gz").symlink_to(tmp_path / "y" / "s.bed.gz")
+    (tmp_path / "y" / "s.bed.gz").symlink_to(tmp_path / "x" / "s.bed.gz")
+    c = resolve_gc_factors(tmp_path / "x" / "s.bed.gz", None, "s", "off_target")
+    assert c.kind == "none"
+
+
+def test_a_link_to_another_extractions_bed_is_followed_whatever_its_name(tmp_path):
+    # A record beside the target says extraction wrote it there: its table came with it.
+    target = _touch(tmp_path / "a" / "t.bed.gz")
+    _touch(tmp_path / "a" / "t.metadata.parquet")
+    table = _touch(tmp_path / "a" / "t.correction_factors.parquet")
+    _touch(tmp_path / "b" / "s.correction_factors.parquet")
+    (tmp_path / "b" / "s.bed.gz").symlink_to(target)
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    assert c.found and c.path.samefile(table)
+
+
 def test_output_dir_is_searched_by_sample_name(tmp_path):
     bed = _touch(tmp_path / "in" / "renamed.bed.gz")
     table = _touch(tmp_path / "out" / "s.correction_factors.ontarget.parquet")
