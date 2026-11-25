@@ -90,7 +90,9 @@ Each step's task-level plan is written when the step starts, against the spec se
   0.9.x outputs predate #79, so their `local_depth` is the broken column. Settles per-anchor vs
   per-bin support and the affordability stop while a per-bin column can still be added to Step 5.
 - **Step 1 — `fragment.rs`, `MatePairer`, `FilterPolicy`** (spec §3 Step 1).
-- **Step 2 — Projections onto `FragmentRecord`** (spec §3 Step 2).
+- **Step 2 — Projections onto `FragmentRecord`** (spec §3 Step 2), plus the GC redesign's
+  Step 2 part (§7, 20 Nov). The unified pipeline's Phase-1 tally is already gone
+  (`fix/factor-table-leftovers`).
 - **Step 3 — Value-changing policies** (spec §3 Step 3), measured with the harness (§1): one
   extraction per test sample, each policy a projection of it.
   - Each policy against **the same base** (its main effect), and **all together** (the
@@ -198,7 +200,7 @@ allocation before any cohort-wide export; the penumbra map's thresholds, or a nu
 
 **Open, new:**
 
-None beyond the spec's.
+The GC work's two questions (20 Nov entry below).
 
 **Answered (18 Nov):** the healthy donors were sequenced on the clinical side; the second test
 cohort is krewlyzer output from clinical ACCESS BAMs mirrored for research, so also clinical-side.
@@ -247,7 +249,39 @@ largest single stage was writing the region-entropy QC tables through unbuffered
 141 of 160 tables are bit-identical and FSD/MDS differ at ~1e-16, so Step 1's diff against the
 oracle uses a relative tolerance of 1e-12, not equality.
 
-**Settled:** everything in §1.
+**Decided (20 Nov): the GC redesign (#92) folds into Steps 1-5**, in this one release, so every
+weight change lands before the single per-sample pass (6b) and the one PON rebuild. One Rust
+`GcModel` (the table plus a provenance hash) replaces the factor tables; each consumer derives
+its weights from it at read time, with no post-hoc rescaling.
+
+| Step | GC work |
+|---|---|
+| 1, in parallel | `GcModel` with provenance and a strict loader; the 2-D fit, its normalisation and sparse rules; the territory-masked exhaustive reference builder; truth tests for injected bias; deletion of the dead code. Begun in #97. |
+| 2 | One GC-observation projection from `FragmentRecord`; the territory mask; one on-target interval set; a shared GC key. |
+| 3 | Spec §2d rows "Unresolved GC", "GC length bin" and "Off-target GC model", the flank taken from the Step 0 GC-by-distance curve; then validation on donors (held-out chromosomes, totals, injected bias, depth, donor MAD, residual GC dependence, on-target transfer). |
+| 4 | mFSD's GC definition and weighting. |
+| 5 | QC columns, contract entries, Nextflow, a `validate-output` check. |
+
+**Step 2 acceptance, beyond the spec's:** what `fix/factor-table-leftovers` fixed still holds (it
+reaches this branch through `develop`, and removed the Phase-1 tally). Only extraction fits a GC
+table, beside the BED, and an off-target table there is extraction's only if extraction's record
+does not say it wrote none. Every feature step, whether run-all, a single tool or the PON build,
+corrects with that table (or one the user names) or runs uncorrected. run-all records which; a
+single tool records it only into extraction's record while no run has recorded one; the PON build
+writes no sample record; and the single-tool `region-entropy` and `mfsd` record no GC choice (their
+own branch, and Step 4). The PON build refuses such a donor
+(`tests/invariants/test_factor_table_writes.py`) and, as for any failed donor, stops, or with
+`--allow-failures` leaves it out (`pon/build.py`); `--from-outputs` refuses a donor recorded as
+corrected with a table extraction did not write. Step 2's GC-observation projection does not depend
+on the order the BED meets its contigs: a test gives it a second chromosome map, and is seen
+failing before it passes.
+
+**Open for the GC work:** mFSD weighted or not by default (Step 4); fixed-N subsampling for the
+fit, trading fit noise for depth-independence (Step 3).
+
+**Settled:** everything in §1. A single tool with no table beside its BED (after Step 1, no model)
+runs uncorrected and warns, as run-all does; it neither refuses nor re-reads the reference
+(operator, 26 Nov; `fix/factor-table-leftovers`).
 
 ## 8. Consequences, stated before starting (spec §5)
 
