@@ -691,6 +691,7 @@ def run_all(
             extract_sample,
             write_motif_tables,
             write_extraction_outputs,
+            write_gc_factor_table,
             ExtractionResult,
         )
 
@@ -846,8 +847,6 @@ def run_all(
                         is_panel_mode
                         and len(extraction_result.gc_observations_ontarget) > 0
                     ):
-                        from .core.sample_processor import write_gc_factor_table
-
                         write_gc_factor_table(
                             extraction_result.gc_observations_ontarget,
                             assets,

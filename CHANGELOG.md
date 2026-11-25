@@ -332,8 +332,8 @@ All notable changes to this project will be documented in this file.
   (`gc_correction::write_factor_tables`). The on-target writes in run-all and `process_sample`
   (`build-pon`) logged "Wrote 0 ... GC factors" (the off-target one in `process_sample`, "Computed
   0") when nothing was fitted or written; every write from extraction's observations now goes
-  through one helper, `sample_processor.write_gc_factor_table`, which names a table only when it wrote one and warns,
-  per population, when none could be fitted or the computation failed
+  through one helper, `sample_processor.write_gc_factor_table`, which names a table only when it
+  wrote one and warns, per population, when none could be fitted or the computation failed
   (`tests/invariants/test_factor_table_writes.py`).
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and

@@ -302,7 +302,11 @@ def extract(
             )
 
         # Use unified extract_sample() for extraction
-        from .core.sample_processor import extract_sample, write_extraction_outputs
+        from .core.sample_processor import (
+            extract_sample,
+            write_extraction_outputs,
+            write_gc_factor_table,
+        )
 
         result = extract_sample(
             input_path=bam_input,
@@ -341,8 +345,6 @@ def extract(
             and gc_correct
             and len(result.gc_observations_ontarget) > 0
         ):
-            from .core.sample_processor import write_gc_factor_table
-
             write_gc_factor_table(
                 result.gc_observations_ontarget,
                 assets,
