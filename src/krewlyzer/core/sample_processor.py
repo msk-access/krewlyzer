@@ -80,9 +80,9 @@ def write_gc_factor_table(
     """
     label = population.replace("_", "-")  # off_target -> off-target
     # Only an off-target table is refitted when missing (`resolve_gc_assets`); say so, or the
-    # line reads as if the folder will stay without one.
+    # line reads as if the folder will stay without one. "Try": the refit can fit nothing too.
     none_written = "no factor table written" + (
-        " (a feature step reading this BED refits one from it)"
+        " (a feature step reading this BED will try to refit one from it)"
         if population == "off_target"
         else ""
     )

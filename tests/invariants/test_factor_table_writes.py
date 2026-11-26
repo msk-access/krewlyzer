@@ -11,8 +11,9 @@ the log after one that does not exist. Three ways that went wrong:
 - A population with no observations at all (a panel whose targets no fragment reaches) was
   skipped at every call site without a word.
 
-The two strict xfails at the end pin defects of the unified pipeline's refit, which writes the
-other kind of table (`write_gc_factor_table`); this module does not fix them.
+The two strict xfails at the end pin two defects of the other writer of a factor table, the
+unified pipeline's refit (`write_gc_factor_table`'s docstring says when it runs). They are fixed
+where the refit is removed (#92), not here.
 """
 
 from __future__ import annotations
@@ -116,6 +117,79 @@ def _warned_none(caplog, population):
     ]
 
 
+def _assert_warned_no_fragments(caplog, population):
+    """The missing table was warned about, and for this reason rather than an unfittable one."""
+    warned = _warned_none(caplog, population)
+    assert warned, f"a {population} population with no fragments went unsaid"
+    assert all(f"no {population} fragments" in m.lower() for m in warned), warned
+
+
+def _unreached_targets(directory):
+    """One target no fragment of the synthetic sample reaches: no on-target observations."""
+    targets = directory / "unreached.bed"
+    targets.write_text("chr2\t299990\t299999\n")
+    return targets
+
+
+def _whole_genome_targets(sample, directory):
+    """Targets covering every contig: no off-target observations."""
+    targets = directory / "everything.bed"
+    targets.write_text("".join(f"{c.name}\t0\t{c.length}\n" for c in sample.contigs))
+    return targets
+
+
+def _extract(sample, out, targets):
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    return CliRunner().invoke(
+        app,
+        [
+            "extract",
+            "-i",
+            str(sample.bam),
+            "-r",
+            str(sample.reference),
+            "-o",
+            str(out),
+            "-s",
+            SAMPLE,
+            "-x",
+            str(sample.assets.blacklist),
+            "-T",
+            str(targets),
+            "-F",
+            "parquet",
+        ],
+    )
+
+
+def _process_sample(sample, out, targets):
+    """`build-pon`'s path with every feature off: extraction and its factor tables."""
+    from krewlyzer.core.sample_processor import SampleParams, process_sample
+
+    out.mkdir()
+    process_sample(
+        input_path=sample.bam,
+        output_dir=out,
+        sample_name=SAMPLE,
+        reference=sample.reference,
+        params=SampleParams(threads=1, exclude_regions=sample.assets.blacklist),
+        target_regions=targets,
+        enable_fsc=False,
+        enable_fsr=False,
+        enable_fsd=False,
+        enable_wps=False,
+        enable_ocf=False,
+        enable_tfbs=False,
+        enable_atac=False,
+        pon_mode=True,
+        output_format="tsv",
+        compress=False,
+    )
+
+
 def test_run_all_names_no_on_target_table_it_did_not_write(sample, tmp_path, caplog):
     """A panel run-all on the synthetic sample: too few fragments to fit any factor."""
     out = tmp_path / "out"
@@ -134,29 +208,9 @@ def test_run_all_names_no_on_target_table_it_did_not_write(sample, tmp_path, cap
 
 def test_process_sample_names_no_table_it_did_not_write(sample, tmp_path, caplog):
     """`build-pon`'s path, both populations."""
-    from krewlyzer.core.sample_processor import SampleParams, process_sample
-
     out = tmp_path / "out"
-    out.mkdir()
     with caplog.at_level(logging.DEBUG):
-        process_sample(
-            input_path=sample.bam,
-            output_dir=out,
-            sample_name=SAMPLE,
-            reference=sample.reference,
-            params=SampleParams(threads=1, exclude_regions=sample.assets.blacklist),
-            target_regions=sample.assets.targets,
-            enable_fsc=False,
-            enable_fsr=False,
-            enable_fsd=False,
-            enable_wps=False,
-            enable_ocf=False,
-            enable_tfbs=False,
-            enable_atac=False,
-            pon_mode=True,
-            output_format="tsv",
-            compress=False,
-        )
+        _process_sample(sample, out, sample.assets.targets)
     assert not any("correction_factors" in p.name for p in out.iterdir())
     assert _claims(caplog) == []
     assert _warned_none(caplog, "off-target")
@@ -164,75 +218,67 @@ def test_process_sample_names_no_table_it_did_not_write(sample, tmp_path, caplog
 
 
 def test_extract_names_no_on_target_table_it_did_not_write(sample, tmp_path, caplog):
-    from typer.testing import CliRunner
-
-    from krewlyzer.cli import app
-
     out = tmp_path / "out"
     with caplog.at_level(logging.DEBUG):
-        result = CliRunner().invoke(
-            app,
-            [
-                "extract",
-                "-i",
-                str(sample.bam),
-                "-r",
-                str(sample.reference),
-                "-o",
-                str(out),
-                "-s",
-                SAMPLE,
-                "-x",
-                str(sample.assets.blacklist),
-                "-T",
-                str(sample.assets.targets),
-                "-F",
-                "parquet",
-            ],
-        )
+        result = _extract(sample, out, sample.assets.targets)
     assert result.exit_code == 0, result.output
     assert not any("correction_factors" in p.name for p in out.iterdir())
     assert _claims(caplog) == []
     assert _warned_none(caplog, "on-target")
 
 
+# A population with no observations at all is still expected, so its missing table is warned
+# about, with that reason. Each write site is pinned: a site that skipped the write when there
+# was nothing to fit said nothing, and that is the defect these tests catch.
+
+
 def test_extract_warns_when_no_fragment_reaches_a_target(sample, tmp_path, caplog):
-    """A panel extract whose one target no fragment reaches has no on-target observations at all.
-    The population was expected, so its missing table is warned about, with that reason.
-    """
-    from typer.testing import CliRunner
-
-    from krewlyzer.cli import app
-
-    targets = tmp_path / "unreached.bed"
-    targets.write_text("chr2\t299990\t299999\n")
     out = tmp_path / "out"
     with caplog.at_level(logging.DEBUG):
-        result = CliRunner().invoke(
-            app,
-            [
-                "extract",
-                "-i",
-                str(sample.bam),
-                "-r",
-                str(sample.reference),
-                "-o",
-                str(out),
-                "-s",
-                SAMPLE,
-                "-x",
-                str(sample.assets.blacklist),
-                "-T",
-                str(targets),
-                "-F",
-                "parquet",
-            ],
-        )
+        result = _extract(sample, out, _unreached_targets(tmp_path))
     assert result.exit_code == 0, result.output
     assert not any("correction_factors.ontarget" in p.name for p in out.iterdir())
-    warned = _warned_none(caplog, "on-target")
-    assert warned, "an on-target population with no fragments went unsaid"
-    assert all("no on-target fragments" in m.lower() for m in warned), warned
+    _assert_warned_no_fragments(caplog, "on-target")
+
+
+def test_run_all_warns_when_no_fragment_reaches_a_target(sample, tmp_path, caplog):
+    out = tmp_path / "out"
+    with caplog.at_level(logging.DEBUG):
+        code = synth_run_all(
+            sample,
+            out,
+            skip_target_regions=False,
+            target_regions=_unreached_targets(tmp_path),
+        )
+    assert code is None
+    assert not any("correction_factors.ontarget" in p.name for p in out.iterdir())
+    _assert_warned_no_fragments(caplog, "on-target")
+
+
+@pytest.mark.parametrize("population", ["off-target", "on-target"])
+def test_process_sample_warns_when_a_population_has_no_fragments(
+    sample, tmp_path, caplog, population
+):
+    targets = (
+        _whole_genome_targets(sample, tmp_path)
+        if population == "off-target"
+        else _unreached_targets(tmp_path)
+    )
+    with caplog.at_level(logging.DEBUG):
+        _process_sample(sample, tmp_path / "out", targets)
+    _assert_warned_no_fragments(caplog, population)
+
+
+def test_extraction_outputs_warn_when_nothing_is_off_target(tmp_path, caplog):
+    """`write_extraction_outputs`, the off-target write of extract and run-all."""
+    from krewlyzer.core.sample_processor import write_extraction_outputs
+
+    with caplog.at_level(logging.DEBUG):
+        write_extraction_outputs(
+            _extraction(tmp_path, {}), tmp_path, genome="hg19", output_format="parquet"
+        )
+    assert not any("correction_factors" in p.name for p in tmp_path.iterdir())
+    _assert_warned_no_fragments(caplog, "off-target")
 
 
 # Known defects of the unified pipeline's refit, pinned until fragment-model Step 2 removes it
@@ -285,12 +331,13 @@ def test_run_all_writes_no_table_its_extraction_could_not_fit(tmp_path, caplog):
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="the refit numbers the valid regions' chromosomes and the BED's separately "
-    "(pipeline.rs Phase 1); removed with the Phase-1 tally (#92)",
+    reason="the refit numbers chromosomes in the order it first meets them, once for the valid "
+    "regions and again for the BED (pipeline.rs Phase 1); removed with the Phase-1 tally (#92)",
 )
 def test_the_refit_does_not_depend_on_the_beds_contig_order(tmp_path):
     """The same fragments, written chr1-first and chr2-first, refit the same table. Each fragment
-    is checked against its own chromosome's valid regions, whatever order the BED meets them in.
+    is checked against its own chromosome's valid regions, whatever order the BED meets them in
+    (and whichever contigs it lacks: one missing ahead of another shifts it the same way).
     """
     import random
 

@@ -336,12 +336,20 @@ All notable changes to this project will be documented in this file.
   observations now goes through one helper, `sample_processor.write_gc_factor_table`, which names
   a table only when it wrote one and warns, per population, when there was nothing to fit, none
   could be fitted, or the computation failed; for the off-target table the warning adds that a
-  feature step reading the BED refits one (`tests/invariants/test_factor_table_writes.py`). Two
-  defects of that refit remain, pinned by strict xfails in the same file until fragment-model
-  Step 2 deletes it (#92): after run-all's or the PON build's own extraction fitted no off-target
-  table, the refit fits one from the whole BED (on-target fragments included, in panel mode) while
-  the record says none was computed; and it checks fragments against another chromosome's valid
-  regions when the BED's contig order differs from theirs.
+  feature step reading the BED will try to refit one
+  (`tests/invariants/test_factor_table_writes.py`, which pins each write site). Two defects of
+  that refit remain, pinned by strict xfails in the same file until fragment-model Step 2 deletes
+  it (#92). After run-all's or the PON build's own extraction fitted no off-target table, the
+  refit fits one from the whole BED (on-target fragments included, in panel mode) and corrects
+  with it, while the record says none was computed. That run records the table as `recomputed`,
+  but a rerun into the same folder finds it beside the BED and records it by format (`parquet`,
+  `tsv.gz` or `tsv`), as if extraction had written it; the PON build's GC gate accepts a donor
+  corrected with it either way. After a rerun, `gc_correction_computed=False` beside
+  `gc_correction_applied_offtarget=True` is the one sign that the table was refitted. And the refit
+  numbers chromosomes in the order it first meets them, once for the valid regions and again for
+  the BED, so unless the BED meets the valid regions' contigs in their order from the first, its
+  fragments are checked against another chromosome's valid regions: a contig one side lacks,
+  ahead of others, shifts every one after it.
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
