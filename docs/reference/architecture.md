@@ -137,7 +137,8 @@ _core.run_unified_pipeline(
     wps_background_regions, wps_background_output, wps_empty,
     fsd_arms, fsd_output,
     ocf_regions, ocf_output,
-    target_regions_path, bait_padding, silent
+    target_regions_path, bait_padding,
+    output_format, compress, silent
 )
 
 # GC correction

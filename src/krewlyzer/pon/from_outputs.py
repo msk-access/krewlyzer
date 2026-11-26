@@ -45,7 +45,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from krewlyzer.core.gc_assets import gc_populations_needed
+from krewlyzer.core.gc_assets import FACTOR_KINDS, gc_populations_needed
+from krewlyzer.core.output_provenance import extraction_wrote_no_factor_table
 from krewlyzer.core.output_utils import TABLE_EXTENSIONS, read_table, resolve_table_path
 
 logger = logging.getLogger("build-pon")
@@ -193,6 +194,16 @@ def gc_reason(sample_dir: Path, stem: str) -> Optional[str]:
         )
         if kind.startswith("none"):
             return f"not GC-corrected, {population.replace('_', '-')} ({kind})"
+        # The in-process build reads only extraction's table (`resolve_gc_factors`). Builds before
+        # the refit's removal recorded a feature step's refit as `recomputed`, or, over a folder a
+        # tool had refitted into, as a table kind beside extraction's record of computing none.
+        if kind not in {k for k, _ in FACTOR_KINDS} or (
+            population == "off_target" and extraction_wrote_no_factor_table(meta)
+        ):
+            return (
+                f"GC-corrected with a {population.replace('_', '-')} table not extraction's "
+                f"({kind}); re-extract it"
+            )
     return None
 
 

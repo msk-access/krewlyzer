@@ -63,13 +63,12 @@ def write_gc_factor_table(
     """Fit one population's GC factors and write its table. True only if a table was written.
 
     The one place a factor table is written from extraction's observations (extract, run-all and
-    the PON build, both populations), so the log names a table only when one was written: the
-    tools reading the folder find a table by existence, and a line naming one that was not
-    ("Wrote 0 on-target GC factors") sends a reader after a table that does not exist. A
-    population with no observations, or none Rust can fit (it returns 0 and writes nothing), is
-    warned about with that reason. ``assets`` is an `AssetManager` or a genome name; a failure to
-    resolve it is a failed computation like any other, warned about, never raised: the record
-    says no table.
+    the PON build, both populations), so the log names a table only when one was written: the tools
+    reading the folder take the table they find beside the BED, and a line naming one that was not
+    ("Wrote 0 on-target GC factors") sends a reader after a table that does not exist. A population
+    with no observations, or none Rust can fit (it returns 0 and writes nothing), is warned about
+    with that reason. ``assets`` is an `AssetManager` or a genome name; a failure to resolve it is
+    a failed computation like any other, warned about, never raised: the record says no table.
 
     No other writer exists: the feature step only reads the table beside the BED, so with none
     written here every feature that corrects with it runs uncorrected, which run_features warns

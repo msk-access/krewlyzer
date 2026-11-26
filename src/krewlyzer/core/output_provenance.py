@@ -632,6 +632,53 @@ def bed_as_extracted(bed_path: Path) -> Path:
     return stand
 
 
+def extraction_wrote_no_factor_table(record: Any) -> bool:
+    """Whether a sample record says its extraction wrote no off-target GC factor table.
+
+    `gc_correction_computed` is extraction's own outcome: `write_extraction_outputs` sets it True
+    only once the table is written, and no later step changes it. Builds before the refit's
+    removal fitted a table from the whole BED when extraction wrote none, into the folder a
+    feature step wrote to, under extraction's name; in run-all's folder that is beside the BED.
+    So a table used beside a record saying False is not extraction's. Only an explicit False
+    says so: a record without the column, or with it empty, says nothing.
+    """
+    import pandas as pd
+
+    if record is None or record.empty or "gc_correction_computed" not in record.columns:
+        return False
+    value = record["gc_correction_computed"].iloc[0]
+    if isinstance(value, str):
+        return value.strip().lower() in ("false", "0")
+    if pd.isna(value):
+        return False
+    return not bool(value)
+
+
+def extraction_wrote_none_beside(directory: Path, stem: str, ext: str) -> bool:
+    """Whether extraction's record of `stem` in `directory` says it wrote no off-target table.
+
+    The record in the table's format (`ext`), else whichever exists: a TSV tool's refit beside a
+    Parquet extraction is judged by that extraction's record. A record that cannot be read says
+    nothing, as no record does, and is warned about.
+    """
+    base = directory / f"{stem}.metadata"
+    own = base.with_name(base.name + ext)
+    path = own if own.exists() else resolve_table_path(base)
+    if path is None:
+        return False
+    try:
+        record = _read_record(path)
+    except (
+        Exception
+    ) as exc:  # a damaged record: say so, and judge the table as without one
+        logger.warning(
+            f"{path.name} could not be read ({type(exc).__name__}): whether extraction wrote the "
+            "GC factor table beside the BED cannot be told, so it is used"
+        )
+        return False
+    return extraction_wrote_no_factor_table(record)
+
+
 def refuse_a_bed_the_record_does_not_describe(
     bed_path: Path,
     output_dir: Path,

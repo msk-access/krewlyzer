@@ -22,10 +22,10 @@ from .synth import make_sample
 pytestmark = [pytest.mark.invariant, pytest.mark.rust]
 
 
-def _plant_stale_tables(directory: Path, sample: str, populations=POPULATIONS):
+def _plant_stale_tables(directory: Path, sample: str):
     directory.mkdir(parents=True, exist_ok=True)
     planted = []
-    for population in populations:
+    for population in POPULATIONS:
         base = factor_table_base(directory, sample, population)
         for _, ext in FACTOR_KINDS:
             path = Path(f"{base}{ext}")

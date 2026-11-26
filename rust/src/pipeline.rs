@@ -209,7 +209,7 @@ pub fn run_unified_pipeline(
             }
         }
     } else {
-        // Only extraction fits a table. The caller has recorded and warned why there is none.
+        // Only extraction fits a table. The caller has warned why there is none.
         info!("pipeline: no GC correction factor table; features run uncorrected");
         None
     };

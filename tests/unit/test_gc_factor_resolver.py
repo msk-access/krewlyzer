@@ -46,6 +46,81 @@ def test_precedence_is_parquet_then_tsv_gz_then_tsv(tmp_path):
     assert resolve_gc_factors(bed, "off_target").kind == "none"
 
 
+def _record(directory: Path, output_format: str, compress: bool, **columns) -> None:
+    """Extraction's record of `s`, in the format a run of this format writes."""
+    import pandas as pd
+
+    from krewlyzer.core.output_utils import write_table
+
+    write_table(
+        pd.DataFrame([{"sample_id": "s", **columns}]),
+        directory / "s.metadata",
+        output_format=output_format,
+        compress=compress,
+    )
+
+
+@pytest.mark.parametrize(
+    "table_ext, output_format, compress",
+    [
+        (".parquet", "parquet", False),
+        (".tsv.gz", "tsv", True),
+        (".tsv", "tsv", False),
+        (".tsv", "parquet", False),  # a TSV tool run into a Parquet extraction's folder
+    ],
+)
+def test_a_table_extraction_recorded_it_did_not_write_is_not_used(
+    tmp_path, table_ext, output_format, compress
+):
+    # Builds before the refit's removal fitted a table beside the BED after extraction wrote none
+    # (run-all's feature step writes into the BED's folder), under extraction's name. A rerun then
+    # took it for extraction's table. Extraction's record says it wrote none, so it is not.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / f"s.correction_factors{table_ext}")
+    _record(tmp_path, output_format, compress, gc_correction_computed=False)
+    c = resolve_gc_factors(bed, "off_target")
+    assert not c.found
+    assert c.record() == (
+        "none:beside the BED but not extraction's, whose record says it wrote none"
+    )
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [{"gc_correction_computed": True}, {}, {"gc_correction_computed": None}],
+    ids=["wrote-one", "not-recorded", "empty"],
+)
+def test_a_table_is_extractions_unless_its_record_says_it_wrote_none(tmp_path, columns):
+    # The contrast: a record that does not say "none" leaves the table extraction's. Without
+    # this, the test above passes on a lookup that never finds a table beside a record.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.parquet")
+    _record(tmp_path, "parquet", False, **columns)
+    assert resolve_gc_factors(bed, "off_target").found
+
+
+def test_a_record_that_cannot_be_read_is_warned_of_and_says_nothing(tmp_path, caplog):
+    # Judged as no record, as before the check: the lookup neither fails the run nor quietly
+    # drops the table on a damaged record.
+    import logging
+
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.parquet")
+    (tmp_path / "s.metadata.parquet").write_bytes(b"not parquet")
+    with caplog.at_level(logging.WARNING, logger="core.output_provenance"):
+        assert resolve_gc_factors(bed, "off_target").found
+    assert any("could not be read" in r.getMessage() for r in caplog.records)
+
+
+def test_extractions_record_of_off_target_says_nothing_of_the_on_target_table(tmp_path):
+    # `gc_correction_computed` is the off-target table's; no feature step ever fitted an
+    # on-target one.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.ontarget.parquet")
+    _record(tmp_path, "parquet", False, gc_correction_computed=False)
+    assert resolve_gc_factors(bed, "on_target").found
+
+
 def test_beside_a_linked_bed_is_beside_the_file_it_points_to(tmp_path):
     # Extraction wrote the table with the BED, and the tools judge a linked BED by its file
     # (`refuse_a_bed_the_record_does_not_describe`). Beside the link, another table was read

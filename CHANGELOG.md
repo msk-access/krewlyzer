@@ -68,6 +68,49 @@ All notable changes to this project will be documented in this file.
   sufficient.
 ### Changed
 
+- **Only extraction fits a GC factor table; a feature step corrects with that table or runs
+  uncorrected.** A feature step that found no off-target table beside its BED refitted one from the
+  whole BED -- on-target fragments included in panel mode, so not the model extraction fits -- into
+  its output folder, and corrected with it. It did so after run-all's or `build-pon`'s own
+  extraction fitted none (a panel whose targets hold almost every fragment), while the record said
+  none was computed; in every single tool and in Nextflow's tool-level mode; and in a run-all rerun
+  over a folder a single tool had refitted into, which took that table for extraction's;
+  `build-pon`'s GC gate accepted a donor corrected with it. The refit also numbered chromosomes
+  once for the valid regions and again for the BED, so unless the BED met its contigs in the valid
+  regions' order, its fragments were checked against another chromosome's valid regions. The refit
+  is removed (`run_unified_pipeline` no longer takes `gc_ref_path`, `valid_regions_path` or
+  `correction_out_path`), and a table is looked for only beside the BED: one in the output folder
+  may be another extraction's. With none, every feature that corrects with it runs uncorrected;
+  run-all and the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) warn with each
+  cause and its remedy, for the on-target table too: re-extract with GC correction, unless too few
+  fragments left nothing to fit. run-all records it (`gc_factors_offtarget=none:<reason>`,
+  `gc_correction_applied_offtarget=False`). A single tool records it only into extraction's record,
+  and only while no run has recorded one: into a folder without a record it records nothing.
+  `region-entropy` and `mfsd` record no GC choice. A table beside the BED is not used either when
+  extraction's record says it wrote none (`gc_correction_computed=False`): a feature step of an
+  earlier build fitted it there, under extraction's name, and a rerun reusing the BED took it for
+  extraction's. With no record beside the BED, the table there is used, whatever wrote it.
+  `build-pon` writes no sample record: it refuses such a donor, from a BAM or a BED, and stops;
+  with `--allow-failures` it leaves the donor out. `build-pon --from-outputs` refuses a donor
+  recorded as corrected with a table extraction did not write.
+  `tests/invariants/test_factor_table_writes.py` pins these, and that the table extraction fitted
+  changes the features.
+
+  > **Output change:** where extraction fits no off-target table (a panel whose targets hold almost
+  > every fragment), run-all, a single tool and Nextflow's tool-level mode now write uncorrected
+  > GC-weighted features, where they used to correct them with a table refitted from the whole BED:
+  > FSC, FSR, FSD, WPS, OCF and genome-wide TFBS and ATAC, and, where the on-target table is
+  > missing too, panel WPS, TFBS and ATAC and run-all's mFSD, which fall back to the off-target
+  > one. `build-pon`, from a BAM or a BED.gz, now stops on such a donor, or with `--allow-failures`
+  > leaves it out. A single tool or tool-level mode given a BED with no extraction table beside it
+  > does the same, and `region-entropy` no longer uses a table it finds in its output folder. A
+  > folder an earlier build wrote into after extraction fitted no table can hold a refitted table
+  > beside the BED, under extraction's name: run-all's folder, a single tool's with `-o` set to the
+  > BED's own folder, or a `build-pon --keep-sample-outputs` cache. It is not used where
+  > extraction's record says it wrote none. It is used where there is no record (a kept PON cache),
+  > or where a 0.9.x record says a table was computed when none was written. run-all and `extract`
+  > refuse a 0.9.x folder, whose record does not list the read filters: re-extract into a fresh
+  > folder, and do not give such a folder's BEDs to a single tool or `build-pon`.
 - **`krewlyzer fsc` and `fsr` choose the window by mode, as run-all does.** Without
   `--continue-n`, a run with target regions now writes one 100 kb bin per row, and one without
   writes 50 (5 Mb). Both tools defaulted to 50 whatever the mode, so a panel sample's single-tool
@@ -327,7 +370,7 @@ All notable changes to this project will be documented in this file.
   `-F both`, Rust wrote the TSV factor table and then failed on the Parquet one: the record said
   `gc_correction_computed=False` while a `.tsv` table sat in the folder, and every tool reading it
   found and used that table. Extraction's Rust writer (`compute_and_write_gc_factors`), now the
-  only one (next entry), writes every format or none, removing what it wrote before raising
+  only one (see Changed), writes every format or none, removing what it wrote before raising
   (`gc_correction::write_factor_tables`). run-all's on-target write logged "Wrote 0 ... GC
   factors", and `process_sample`'s (`build-pon`) two writes "Computed 0", when nothing was fitted
   or written, and a population with no observations at all (a panel
@@ -336,24 +379,6 @@ All notable changes to this project will be documented in this file.
   a table only when it wrote one and warns, per population, when there was nothing to fit, none
   could be fitted, or the computation failed (`tests/invariants/test_factor_table_writes.py`, which
   pins each write site).
-- **Only extraction fits a GC factor table; a feature step corrects with that table or runs
-  uncorrected.** A feature step that found no off-target table beside its BED refitted one from
-  the whole BED -- on-target fragments included in panel mode, so not the model extraction fits --
-  into its output folder, and corrected with it. It did so after run-all's or `build-pon`'s own
-  extraction fitted none (a panel whose targets hold almost every fragment), while the record said
-  none was computed; in every single tool and in Nextflow's tool-level mode, whose results then
-  differed from run-all's; and in a run-all rerun over a folder a single tool had refitted into,
-  which took that table for extraction's; `build-pon`'s GC gate accepted a donor corrected with it.
-  The refit also numbered chromosomes once for the valid regions and again for the BED, so unless
-  the BED met its contigs in the valid regions' order, its fragments were checked against another
-  chromosome's valid regions. The refit is removed (`run_unified_pipeline` no longer takes
-  `gc_ref_path`, `valid_regions_path` or `correction_out_path`), and a table is looked for only
-  beside the BED: one in the output folder may be another extraction's. With none,
-  every feature that corrects with it runs uncorrected, a warning names the cause and the remedy
-  (re-extract with GC correction), and the record says `gc_factors_offtarget=none:<reason>` and
-  `gc_correction_applied_offtarget=False`. `build-pon` refuses such a donor, from a BAM or a BED,
-  and stops; with `--allow-failures` it leaves the donor out
-  (`tests/invariants/test_factor_table_writes.py`).
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under

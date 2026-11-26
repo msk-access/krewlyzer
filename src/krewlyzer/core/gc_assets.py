@@ -1,8 +1,9 @@
 """
 GC factor tables: where a sample's table is, or why there is none.
 
-Only extraction fits a table, and writes it beside the BED it fitted it from. Every feature step
-reads that table, or runs without GC correction and records why (`GcFactorsChoice.record`).
+Only extraction fits a table, and writes it beside the BED it fitted it from. A feature step
+reads that table through `resolve_gc_factors`, or, with none, runs without GC correction;
+`run_features` warns why, and run-all records the choice (`GcFactorsChoice.record`).
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from .output_provenance import bed_as_extracted
+from .output_provenance import bed_as_extracted, extraction_wrote_none_beside
 
 logger = logging.getLogger("krewlyzer.core.gc_assets")
 
@@ -45,6 +46,8 @@ def check_reference_contigs(n_missing: int, n_fetch_failed: int, n_total: int) -
 POPULATIONS = ("off_target", "on_target")
 #: Search order for an existing table: full-precision Parquet first, then compressed TSV, then TSV.
 FACTOR_KINDS = (("parquet", ".parquet"), ("tsv.gz", ".tsv.gz"), ("tsv", ".tsv"))
+#: Why a table beside the BED is not used: its extraction recorded writing none.
+NOT_EXTRACTIONS = "beside the BED but not extraction's, whose record says it wrote none"
 
 
 def factor_table_base(directory: Path, sample: str, population: str) -> Path:
@@ -61,9 +64,7 @@ def factor_table_base(directory: Path, sample: str, population: str) -> Path:
     return Path(directory) / f"{sample}{suffix}"
 
 
-def remove_factor_tables(
-    directory: Path, sample: str, populations: tuple = POPULATIONS
-) -> list:
+def remove_factor_tables(directory: Path, sample: str) -> list:
     """Remove a sample's factor tables, in every format, before a run writes its own.
 
     A table belongs to the BED it was fitted on. The resolver finds one in any format, Parquet
@@ -72,7 +73,7 @@ def remove_factor_tables(
     recorded the correction as applied. Returns the paths removed.
     """
     removed = []
-    for population in populations:
+    for population in POPULATIONS:
         base = factor_table_base(directory, sample, population)
         for _, ext in FACTOR_KINDS:
             path = Path(f"{base}{ext}")
@@ -141,20 +142,26 @@ def resolve_gc_factors(bed_path: Path, population: str) -> GcFactorsChoice:
     the table beside the link. In a
     Nextflow task, a BED the pipeline extracted is linked in from that extraction's folder, with
     its tables; a samplesheet BED staged as a link is read with the table beside its source.
+
+    An off-target table beside a record in which extraction says it wrote none is not
+    extraction's (`output_provenance.extraction_wrote_none_beside`): builds before the refit's
+    removal fitted one there, from the whole BED, when run-all's feature step found none, and a
+    rerun reusing that BED took it for extraction's. No step fits an on-target table but
+    extraction, and the record says nothing of it.
     """
     bed_path = bed_as_extracted(bed_path)
     stem = bed_path.name.removesuffix(".gz").removesuffix(".bed")
     base = factor_table_base(bed_path.parent, stem, population)
+    searched = (base.name + ".{parquet,tsv.gz,tsv}",)
     for kind, ext in FACTOR_KINDS:
         candidate = base.with_name(base.name + ext)
         if candidate.exists():
+            if population == "off_target" and extraction_wrote_none_beside(
+                bed_path.parent, stem, ext
+            ):
+                return GcFactorsChoice(None, "none", NOT_EXTRACTIONS, searched)
             return GcFactorsChoice(candidate, kind)
-    return GcFactorsChoice(
-        None,
-        "none",
-        "not found beside the BED",
-        (base.name + ".{parquet,tsv.gz,tsv}",),
-    )
+    return GcFactorsChoice(None, "none", "not found beside the BED", searched)
 
 
 def resolve_feature_gc_tables(

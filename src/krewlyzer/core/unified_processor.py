@@ -345,15 +345,21 @@ def run_features(
     if gc_correct and not gc_off.found:
         logger.warning(
             f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)}). "
-            "Only extraction fits one, and it wrote none for this BED (no length bin had enough "
-            "off-target fragments, or it ran with --no-gc-correct), or the table was not kept "
-            "beside the BED. Every feature that corrects with it runs without GC correction; to "
-            "correct them, re-extract with GC correction and keep its table beside the BED."
+            "Every feature that corrects with it runs without GC correction. Only extraction "
+            "fits one, and its log says why it wrote none. With too few off-target fragments "
+            "to fit (a panel whose targets hold almost every fragment) there is nothing to fit, "
+            "and re-extracting changes nothing. If it ran with --no-gc-correct, or its table "
+            "was not kept beside the BED, re-extract with GC correction and keep the table "
+            "beside the BED."
         )
     if gc_correct and is_panel_mode and not gc_on.found:
         logger.warning(
             f"GC factors (on-target) {gc_on.reason} (looked for {', '.join(gc_on.searched)}); "
-            "on-target features fall back to the off-target table and gene FSC runs uncorrected"
+            "on-target features fall back to the off-target table and gene FSC runs "
+            "uncorrected. With too few on-target fragments to fit there is nothing to fit. If "
+            "extraction ran with --no-gc-correct or without these target regions, or its "
+            "tables were not kept beside the BED, re-extract with GC correction and the target "
+            "regions, and keep its tables beside the BED."
         )
     for _label, _c in (("off-target", gc_off), ("on-target", gc_on)):
         if _c.path is not None:
@@ -685,8 +691,8 @@ def run_features(
             genes = load_gene_bed(assay=resolved_assay, genome=gene_genome)
             outputs.fsc_gene = output_dir / f"{sample_name}.FSC.gene.tsv"
 
-            # Gene regions are on-target: use the on-target table (resolved in 4b). Rust loads it
-            # from the path; the Python dict path it replaces loaded zero factors.
+            # Gene regions are on-target: use the on-target table (resolved in section 2). Rust
+            # loads it from the path; the Python dict path it replaces loaded zero factors.
             gene_fsc_factors = gc_ontarget_str
             if gene_fsc_factors:
                 logger.info(
@@ -1151,7 +1157,7 @@ def run_features(
     if enable_tfbs or enable_atac:
         from .region_entropy_processor import process_region_entropy
 
-        # Note: gc_str and gc_ontarget_str are resolved above (section 4b)
+        # Note: gc_str and gc_ontarget_str are resolved above (section 2)
 
         # Use pon_parquet directly for Z-score normalization (Rust implementation)
         entropy_pon_parquet = (

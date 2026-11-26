@@ -161,6 +161,12 @@ Both BAM/CRAM and BED.gz inputs are supported:
 !!! note
     **MDS baseline requires BAM/CRAM input** because it needs fragment end sequences for k-mer extraction. BED.gz files only contain coordinates.
 
+!!! warning "A BED.gz donor needs its GC factor tables"
+    Give each BED.gz beside the GC factor table `krewlyzer extract` wrote with it
+    (`{sample}.correction_factors.*`, and `.ontarget.*` too for a panel). No step but extraction
+    fits one, and a donor without them is refused: the build stops, or with `--allow-failures`
+    leaves that donor out.
+
 ## Output
 
 !!! note "Intermediate file format"

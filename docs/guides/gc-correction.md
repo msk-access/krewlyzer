@@ -112,10 +112,16 @@ the kind of table each population used (`gc_factors_offtarget`, `gc_factors_onta
 
 **Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
 almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
-every single tool run the features that correct with it uncorrected, warn with the cause, and
-record `gc_correction_applied_offtarget=False`. A table elsewhere, such as in the folder a tool
-writes to, is never used: it may be another extraction's. `build-pon` refuses such a donor, from a
-BAM or a BED, and stops; with `--allow-failures` it leaves the donor out.
+the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) run the features that correct
+with it uncorrected, and warn. run-all records `gc_correction_applied_offtarget=False`; a single
+tool records it only into extraction's record, and only while no run has recorded one. A table
+elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
+Nor is one beside the BED when extraction's record says it wrote none
+(`gc_correction_computed=False`): a feature step of an earlier build fitted it there, under
+extraction's name. With no record beside the BED, as in a `build-pon --keep-sample-outputs` cache,
+the table there is used, whatever wrote it. `build-pon` refuses a donor without extraction's table,
+from a BAM or a BED, and stops; with `--allow-failures` it leaves the donor out. `--from-outputs`
+refuses a donor recorded as corrected with a table extraction did not write.
 
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
