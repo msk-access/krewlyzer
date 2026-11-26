@@ -110,6 +110,12 @@ Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three car
 factors and GC correction does not depend on the output format. Each sample's metadata records
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
+**When extraction fitted no off-target table** (a panel whose targets hold almost every fragment),
+`run-all` corrects nothing with one: those features run uncorrected and the metadata records
+`gc_correction_applied_offtarget=False`. `build-pon` from a BAM refits none either and leaves the
+donor out. A single tool that finds no table beside its BED refits one from the whole BED,
+on-target fragments included, and warns that it did (`recomputed`).
+
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
     `.tsv` factor table. Runs with `--output-format parquet`, or with `--compress` (the Nextflow

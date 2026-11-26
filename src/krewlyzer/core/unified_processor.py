@@ -148,6 +148,7 @@ def run_features(
     output_format: str,
     compress: bool,
     owns_sample_record: bool = False,  # run-all and the PON build: rewrite the sample's record
+    refit_gc_factors: bool = True,
 ) -> FeatureOutputs:
     """
     Run unified feature extraction pipeline.
@@ -187,6 +188,10 @@ def run_features(
             ML pipelines (faster IO, typed columns, ~5x smaller). "both" writes both.
         compress: When True and writing TSV, gzip-compress the output (`.tsv.gz`).
             Has no effect when output_format="parquet" (Parquet uses Snappy internally).
+        refit_gc_factors: Whether an off-target factor table missing beside the BED is refitted
+            from it (`resolve_gc_assets`). False for run-all and the PON build after their own
+            extraction, which decided that table: with none, every feature runs without off-target
+            correction and the record says so.
 
     Returns:
         FeatureOutputs dataclass with paths to all generated files
@@ -338,7 +343,13 @@ def run_features(
 
     # GC correction assets
     gc = resolve_gc_assets(
-        assets, output_dir, sample_name, bed_path, gc_correct, genome
+        assets,
+        output_dir,
+        sample_name,
+        bed_path,
+        gc_correct,
+        genome,
+        refit=refit_gc_factors,
     )
     outputs.gc_factors = gc.factors_out
 
@@ -664,14 +675,21 @@ def run_features(
         sample_name,
         gc_correct=gc_correct,
         panel_mode=bool(is_panel_mode),
-        refitted=gc.factors_input is None,
+        refitted=gc.factors_out
+        is not None,  # Phase 1 was asked to fit one from the BED
     )
     gc_str = str(gc_off.path) if gc_off.found else None
     gc_ontarget_str = str(gc_on.path) if gc_on.found else None
     if gc_correct and not gc_off.found:
+        # After the Rust pass: with no off-target table found, it corrected nothing either.
+        why = (
+            "; this run uses only the table its own extraction fitted and refits none"
+            if not refit_gc_factors
+            else ""
+        )
         logger.warning(
-            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)}); "
-            "panel WPS, TFBS and ATAC run without GC correction"
+            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)})"
+            f"{why}; every feature this run corrects with that table runs without GC correction"
         )
     if gc_correct and is_panel_mode and not gc_on.found:
         logger.warning(

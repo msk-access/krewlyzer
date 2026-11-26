@@ -906,6 +906,9 @@ def run_all(
                 output_dir=output,
                 sample_name=sample,
                 owns_sample_record=True,  # run-all writes the whole sample
+                # The off-target table is extraction's (this run's, or a rerun's vouched one): none
+                # beside the BED means none was fitted, not one to refit from on-target fragments.
+                refit_gc_factors=False,
                 genome=genome,
                 enable_fsc=True,
                 enable_fsr=True,

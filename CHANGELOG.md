@@ -329,27 +329,31 @@ All notable changes to this project will be documented in this file.
   found and used that table. Both Rust writers of a factor table -- extraction's
   `compute_and_write_gc_factors` and the unified pipeline's refit for a feature step that finds no
   table beside its BED -- now write every format or none, removing what they wrote before raising
-  (`gc_correction::write_factor_tables`). The on-target writes in run-all and `process_sample`
-  (`build-pon`) logged "Wrote 0 ... GC factors" (the off-target one in `process_sample`, "Computed
-  0") when nothing was fitted or written, and a population with no observations at all (a panel
+  (`gc_correction::write_factor_tables`). run-all's on-target write logged "Wrote 0 ... GC
+  factors", and `process_sample`'s (`build-pon`) two writes and `extract`'s on-target one "Computed
+  0", when nothing was fitted or written, and a population with no observations at all (a panel
   whose targets no fragment reaches) was skipped without a word. Every write from extraction's
   observations now goes through one helper, `sample_processor.write_gc_factor_table`, which names
   a table only when it wrote one and warns, per population, when there was nothing to fit, none
-  could be fitted, or the computation failed; for the off-target table the warning adds that a
-  feature step reading the BED will try to refit one
-  (`tests/invariants/test_factor_table_writes.py`, which pins each write site). Two defects of
-  that refit remain, pinned by strict xfails in the same file until fragment-model Step 2 deletes
-  it (#92). After run-all's or the PON build's own extraction fitted no off-target table, the
-  refit fits one from the whole BED (on-target fragments included, in panel mode) and corrects
-  with it, while the record says none was computed. That run records the table as `recomputed`,
-  but a rerun into the same folder finds it beside the BED and records it by format (`parquet`,
-  `tsv.gz` or `tsv`), as if extraction had written it; the PON build's GC gate accepts a donor
-  corrected with it either way. After a rerun, `gc_correction_computed=False` beside
-  `gc_correction_applied_offtarget=True` is the one sign that the table was refitted. And the refit
-  numbers chromosomes in the order it first meets them, once for the valid regions and again for
-  the BED, so unless the BED meets the valid regions' contigs in their order from the first, its
-  fragments are checked against another chromosome's valid regions: a contig one side lacks,
-  ahead of others, shifts every one after it.
+  could be fitted, or the computation failed (`tests/invariants/test_factor_table_writes.py`, which
+  pins each write site).
+- **run-all and `build-pon` correct only with the off-target table their own extraction fitted.**
+  When extraction fitted none (a panel whose targets hold almost every fragment), the feature step
+  refitted one from the whole BED, on-target fragments included, and corrected with it while the
+  record said none was computed; a rerun into the folder found that table beside the BED and
+  recorded it by format, as if extraction had written it, and `build-pon`'s GC gate accepted a donor
+  corrected with it. Both now leave that table to extraction (`run_features(refit_gc_factors=False)`):
+  every feature that corrects with it runs uncorrected, the record says
+  `gc_factors_offtarget=none:<reason>` and `gc_correction_applied_offtarget=False`, on a rerun too,
+  and `build-pon` leaves the donor out. A single tool that finds no table beside its BED still refits
+  one (#92 decides whether it should). In outputs written before this release,
+  `gc_correction_computed=False` beside `gc_correction_applied_offtarget=True` marks a refitted
+  table.
+- **The refit reads each fragment against its own chromosome's valid regions.** It numbered
+  chromosomes in the order it first met them, once for the valid regions and again for the BED, so
+  unless the BED met its contigs in the valid regions' order, its fragments were checked against
+  another chromosome's valid regions. It now uses one chromosome map for both, as the feature pass
+  does (`rust/src/pipeline.rs`).
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under

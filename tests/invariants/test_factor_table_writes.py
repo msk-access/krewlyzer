@@ -1,19 +1,20 @@
-"""A GC factor table from extraction exists exactly when the run says it wrote one.
+"""A GC factor table exists exactly when a run says it wrote one, and run-all and the PON build use
+only the one their own extraction fitted.
 
 The tools reading a sample's folder find its factor table by existence (`resolve_gc_factors`), so a
 table left behind is used, and a log line naming a table that was not written sends whoever reads
-the log after one that does not exist. Three ways that went wrong:
+the log after one that does not exist. The ways that went wrong:
 
 - With `-F both`, Rust wrote the TSV table and then failed on the Parquet one. The record said
   `gc_correction_computed=False` while a `.tsv` table sat in the folder for every tool to use.
-- The on-target factor writes in run-all and `process_sample` logged "Wrote 0 ... factors" (and the
-  off-target one in `process_sample` "Computed 0") when nothing was fitted and nothing written.
+- run-all's on-target factor write logged "Wrote 0 ... factors", and the PON build's two writes and
+  extract's on-target one "Computed 0", when nothing was fitted and nothing written.
 - A population with no observations at all (a panel whose targets no fragment reaches) was
   skipped at every call site without a word.
-
-The two strict xfails at the end pin two defects of the other writer of a factor table, the
-unified pipeline's refit (`write_gc_factor_table`'s docstring says when it runs). They are fixed
-where the refit is removed (#92), not here.
+- After run-all's or the PON build's own extraction fitted no off-target table, the feature step
+  refitted one from the whole BED, on-target fragments included, and corrected with it.
+- That refit read the BED's fragments against another chromosome's valid regions unless the BED met
+  its contigs in the valid regions' order.
 """
 
 from __future__ import annotations
@@ -281,63 +282,83 @@ def test_extraction_outputs_warn_when_nothing_is_off_target(tmp_path, caplog):
     _assert_warned_no_fragments(caplog, "off-target")
 
 
-# Known defects of the unified pipeline's refit, pinned until fragment-model Step 2 removes it
-# (#92: the Phase-1 tally is deleted there). Each test asserts the correct behaviour and is strict:
-# the day the defect goes, it XPASSes, fails the build, and its marker has to come out. Only an
-# assertion counts as the expected failure (`raises`); a broken premise fails outright through
-# `pytest.fail`, so neither pin can outlive its defect by failing for another reason.
+# The unified pipeline's refit fits an off-target table from the whole BED when none sits beside it.
+# run-all and the PON build must not reach it after their own extraction, whose table that is to
+# fit or not; a single tool that reaches it must read each fragment against its own chromosome.
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="run-all refits, from the whole BED (on-target included), the table its own "
-    "extraction could not fit; removed with the Phase-1 tally (#92)",
-)
-def test_run_all_writes_no_table_its_extraction_could_not_fit(tmp_path, caplog):
-    """A panel run-all whose targets hold almost every fragment: extraction, off-target only, fits
-    nothing (the on-target table it fits is right). No off-target table may then appear in the
-    folder, and the record says none, on a rerun into that folder too.
+def _dense_panel(directory):
+    """A panel whose targets hold all but a sliver of the fragments: extraction's off-target tally
+    is too small to fit, while the whole BED (on-target fragments included) fits a table.
     """
-    from krewlyzer.core.gc_assets import FACTOR_KINDS, factor_table_base
-
     from .synth import Contig, SynthProfile
 
     profile = SynthProfile(
         "dense", n_fragments=60_000, length_mixture=((167, 2, 1.0),), seed=7
     )
     contigs = (Contig("chr1", 300_000), Contig("chr2", 300_000))
-    dense = make_sample(tmp_path / "in", profile, contigs=contigs)
-    targets = tmp_path / "targets.bed"
+    dense = make_sample(directory / "in", profile, contigs=contigs)
+    targets = directory / "targets.bed"
     targets.write_text("chr1\t0\t300000\nchr2\t0\t298500\n")
-    out = tmp_path / "out"
+    return dense, targets
+
+
+def _off_target_tables(out):
+    from krewlyzer.core.gc_assets import FACTOR_KINDS, factor_table_base
+
     base = factor_table_base(out, SAMPLE, "off_target").name
-    off_target = {f"{base}{ext}" for _, ext in FACTOR_KINDS}
+    names = {f"{base}{ext}" for _, ext in FACTOR_KINDS}
+    return sorted(p.name for p in out.iterdir() if p.name in names)
+
+
+def test_run_all_writes_no_table_its_extraction_could_not_fit(tmp_path):
+    """Extraction fits no off-target table (the on-target one it fits is right), so every feature
+    runs without off-target correction and the record says so; a rerun into the folder finds no
+    table beside the BED and records the same.
+    """
+    dense, targets = _dense_panel(tmp_path)
+    out = tmp_path / "out"
     for run in ("first", "rerun"):
-        with caplog.at_level(logging.DEBUG):
-            code = synth_run_all(
-                dense, out, skip_target_regions=False, target_regions=targets
-            )
-        if code is not None:
-            pytest.fail(f"{run} run-all exited {code}")
-        if run == "first" and not _warned_none(caplog, "off-target"):
-            pytest.fail("premise broken: extraction fitted an off-target table")
-        tables = sorted(p.name for p in out.iterdir() if p.name in off_target)
-        assert tables == [], f"{run}: {tables}"
+        code = synth_run_all(
+            dense, out, skip_target_regions=False, target_regions=targets
+        )
+        assert code is None, f"{run} run-all exited {code}"
         record = pd.read_parquet(out / f"{SAMPLE}.metadata.parquet").iloc[0]
-        assert str(record["gc_factors_offtarget"]).startswith("none"), run
+        assert not record["gc_correction_computed"], f"{run}: extraction fitted one"
+        assert _off_target_tables(out) == [], run
+        assert str(record["gc_factors_offtarget"]).startswith("none:"), run
+        assert not record["gc_correction_applied_offtarget"], run
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="the refit numbers chromosomes in the order it first meets them, once for the valid "
-    "regions and again for the BED (pipeline.rs Phase 1); removed with the Phase-1 tally (#92)",
-)
+def test_run_all_corrects_with_the_table_its_extraction_fitted(tmp_path):
+    """The contrast: targets on one contig leave the other off-target, extraction fits its table,
+    and run-all corrects with it. Without this, the test above passes on a run-all that never
+    corrects anything.
+    """
+    dense, _ = _dense_panel(tmp_path)
+    targets = tmp_path / "chr1.bed"
+    targets.write_text("chr1\t0\t300000\n")
+    out = tmp_path / "out"
+    code = synth_run_all(dense, out, skip_target_regions=False, target_regions=targets)
+    assert code is None
+    record = pd.read_parquet(out / f"{SAMPLE}.metadata.parquet").iloc[0]
+    assert record["gc_correction_computed"]
+    assert _off_target_tables(out) != []
+    assert record["gc_factors_offtarget"] in ("parquet", "tsv.gz", "tsv")
+    assert record["gc_correction_applied_offtarget"]
+
+
+def test_process_sample_writes_no_table_its_extraction_could_not_fit(tmp_path):
+    """The PON build's own extraction, as run-all's: no off-target table is fitted from the BED."""
+    dense, targets = _dense_panel(tmp_path)
+    out = tmp_path / "out"
+    _process_sample(dense, out, targets)
+    assert _off_target_tables(out) == []
+
+
 def test_the_refit_does_not_depend_on_the_beds_contig_order(tmp_path):
-    """The same fragments, written chr1-first and chr2-first, refit the same table. Each fragment
-    is checked against its own chromosome's valid regions, whatever order the BED meets them in
-    (and whichever contigs it lacks: one missing ahead of another shifts it the same way).
+    """The same fragments, written chr1-first and chr2-first, refit the same table: each fragment is
+    read against its own chromosome's valid regions, whatever order the BED meets them in.
     """
     import random
 
@@ -372,10 +393,6 @@ def test_the_refit_does_not_depend_on_the_beds_contig_order(tmp_path):
             compress=False,
             silent=True,
         )
-        if first == "chr1" and not table.exists():
-            pytest.fail(
-                "premise broken: the refit wrote no table from the chr1-first BED"
-            )
         assert table.exists(), f"no table refitted from the {first}-first BED"
         tables.append(pd.read_csv(table, sep="\t"))
     pd.testing.assert_frame_equal(tables[0], tables[1])

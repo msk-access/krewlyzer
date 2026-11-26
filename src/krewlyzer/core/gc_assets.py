@@ -178,8 +178,9 @@ def resolve_feature_gc_tables(
 ) -> "tuple[GcFactorsChoice, GcFactorsChoice]":
     """The (off-target, on-target) factor tables run_features' Python-side consumers use.
 
-    `refitted` is True when no table sat beside the BED, so the Rust pass refitted factors from
-    the BED itself (Phase 1, a different tally from extract's); that choice is recorded as
+    `refitted` is True when no table sat beside the BED and the Rust pass was asked to refit one
+    from the BED itself (Phase 1, a different tally from extract's; `resolve_gc_assets` never asks
+    for run-all or the PON build after their own extraction). That choice is recorded as
     `recomputed` and warned about, because its values differ from run-all's.
     """
     if not gc_correct:
@@ -249,6 +250,7 @@ def resolve_gc_assets(
     bedgz_input: Path,
     gc_correct: bool = True,
     genome: str = "hg19",
+    refit: bool = True,
 ) -> GcAssets:
     """
     Resolve GC correction assets with automatic pre-computed factors detection.
@@ -263,6 +265,11 @@ def resolve_gc_assets(
         bedgz_input: Input BED.gz file (checked for adjacent correction_factors.tsv)
         gc_correct: Whether GC correction is requested
         genome: Genome build for logging
+        refit: Whether a missing off-target table may be refitted from the BED (the Rust pass's
+            Phase 1). False for run-all and the PON build after their own extraction: the table
+            beside the BED is the one extraction fitted, and when it fitted none the features run
+            without off-target correction. A refit would fit from the whole BED, on-target
+            fragments included in panel mode.
 
     Returns:
         GcAssets dataclass with resolved paths and enabled status
@@ -279,6 +286,9 @@ def resolve_gc_assets(
         result.factors_input = pre.path
         result.gc_correct_enabled = True
         logger.info(f"Using pre-computed GC factors: {pre.path.name}")
+        return result
+    if not refit:
+        # Warned once, by run_features, with every feature that then runs uncorrected.
         return result
 
     # Resolve bundled GC assets

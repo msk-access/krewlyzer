@@ -222,17 +222,19 @@ pub fn run_unified_pipeline(
         let ref_data = ReferenceData::load(&gc_ref)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load GC reference: {}", e)))?;
             
-        // 2. Load Valid Regions (needs mutable ChromosomeMap for loading)
-        let mut valid_chrom_map = crate::bed::ChromosomeMap::new();
-        let valid_regions = Arc::new(ValidRegionFilter::load(&valid_reg, &mut valid_chrom_map)
+        // 2. Load Valid Regions. One ChromosomeMap for them and the BED, as Phase 2 shares one:
+        //    ids are handed out in the order names are first met, so a second map read a BED
+        //    against another chromosome's valid regions unless it met the contigs in their order.
+        let mut chrom_map = crate::bed::ChromosomeMap::new();
+        let valid_regions = Arc::new(ValidRegionFilter::load(&valid_reg, &mut chrom_map)
             .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load valid regions: {}", e)))?);
-    
+
         // 3. Observed Counts
         let obs_consumer = GcObservationConsumer::new(valid_regions);
-        
+
         // Run Engine
         let engine = engine::FragmentAnalyzer::new(obs_consumer, 500_000); // 500k batch
-        let obs_result = engine.process_file(&bed_path, &mut crate::bed::ChromosomeMap::new(), silent)
+        let obs_result = engine.process_file(&bed_path, &mut chrom_map, silent)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Phase 1 failed: {}", e)))?;
             
         // 4. Compute Factors (use .observed field, not .counts)
