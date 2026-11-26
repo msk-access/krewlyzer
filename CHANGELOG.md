@@ -326,34 +326,34 @@ All notable changes to this project will be documented in this file.
 - **A GC factor table is written in every format or none, and named only when written.** With
   `-F both`, Rust wrote the TSV factor table and then failed on the Parquet one: the record said
   `gc_correction_computed=False` while a `.tsv` table sat in the folder, and every tool reading it
-  found and used that table. Both Rust writers of a factor table -- extraction's
-  `compute_and_write_gc_factors` and the unified pipeline's refit for a feature step that finds no
-  table beside its BED -- now write every format or none, removing what they wrote before raising
+  found and used that table. Extraction's Rust writer (`compute_and_write_gc_factors`), now the
+  only one (next entry), writes every format or none, removing what it wrote before raising
   (`gc_correction::write_factor_tables`). run-all's on-target write logged "Wrote 0 ... GC
-  factors", and `process_sample`'s (`build-pon`) two writes and `extract`'s on-target one "Computed
-  0", when nothing was fitted or written, and a population with no observations at all (a panel
+  factors", and `process_sample`'s (`build-pon`) two writes "Computed 0", when nothing was fitted
+  or written, and a population with no observations at all (a panel
   whose targets no fragment reaches) was skipped without a word. Every write from extraction's
   observations now goes through one helper, `sample_processor.write_gc_factor_table`, which names
   a table only when it wrote one and warns, per population, when there was nothing to fit, none
   could be fitted, or the computation failed (`tests/invariants/test_factor_table_writes.py`, which
   pins each write site).
-- **run-all and `build-pon` correct only with the off-target table their own extraction fitted.**
-  When extraction fitted none (a panel whose targets hold almost every fragment), the feature step
-  refitted one from the whole BED, on-target fragments included, and corrected with it while the
-  record said none was computed; a rerun into the folder found that table beside the BED and
-  recorded it by format, as if extraction had written it, and `build-pon`'s GC gate accepted a donor
-  corrected with it. Both now leave that table to extraction (`run_features(refit_gc_factors=False)`):
-  every feature that corrects with it runs uncorrected, the record says
-  `gc_factors_offtarget=none:<reason>` and `gc_correction_applied_offtarget=False`, on a rerun too,
-  and `build-pon` leaves the donor out. A single tool that finds no table beside its BED still refits
-  one (#92 decides whether it should). In outputs written before this release,
-  `gc_correction_computed=False` beside `gc_correction_applied_offtarget=True` marks a refitted
-  table.
-- **The refit reads each fragment against its own chromosome's valid regions.** It numbered
-  chromosomes in the order it first met them, once for the valid regions and again for the BED, so
-  unless the BED met its contigs in the valid regions' order, its fragments were checked against
-  another chromosome's valid regions. It now uses one chromosome map for both, as the feature pass
-  does (`rust/src/pipeline.rs`).
+- **Only extraction fits a GC factor table; a feature step corrects with that table or runs
+  uncorrected.** A feature step that found no off-target table beside its BED refitted one from
+  the whole BED -- on-target fragments included in panel mode, so not the model extraction fits --
+  into its output folder, and corrected with it. It did so after run-all's or `build-pon`'s own
+  extraction fitted none (a panel whose targets hold almost every fragment), while the record said
+  none was computed; in every single tool and in Nextflow's tool-level mode, whose results then
+  differed from run-all's; and in a run-all rerun over a folder a single tool had refitted into,
+  which took that table for extraction's; `build-pon`'s GC gate accepted a donor corrected with it.
+  The refit also numbered chromosomes once for the valid regions and again for the BED, so unless
+  the BED met its contigs in the valid regions' order, its fragments were checked against another
+  chromosome's valid regions. The refit is removed (`run_unified_pipeline` no longer takes
+  `gc_ref_path`, `valid_regions_path` or `correction_out_path`), and a table is looked for only
+  beside the BED: one in the output folder may be another extraction's. With none,
+  every feature that corrects with it runs uncorrected, a warning names the cause and the remedy
+  (re-extract with GC correction), and the record says `gc_factors_offtarget=none:<reason>` and
+  `gc_correction_applied_offtarget=False`. `build-pon` refuses such a donor, from a BAM or a BED,
+  and stops; with `--allow-failures` it leaves the donor out
+  (`tests/invariants/test_factor_table_writes.py`).
 - **run-all no longer scores a BED extracted with other filters.** `extract --mapq 30 -F parquet`
   then `run-all` (mapq 20) into the same folder exited 0: the BED existed, so run-all kept it and
   extract's record, and read the BAM again at mapq 20 for the motif tables. Two filter sets under
@@ -407,7 +407,7 @@ All notable changes to this project will be documented in this file.
   (`output_provenance.refuse_a_bed_the_record_does_not_describe`,
   `tests/invariants/test_rerun_bed.py`); a samplesheet BED that Nextflow stages as a link, a route
   the pipeline cannot reach today, is read with the GC factor table beside its source, where there
-  is one, rather than refitted.
+  is one.
 - **Tool-level Nextflow mode (`--use_runall false`) runs, and publishes run-all's tables.**
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a `*.X.tsv` under the Parquet default (`fsc`, `fsr`, `fsd`, `ocf`, `motif` twice,
@@ -641,8 +641,8 @@ All notable changes to this project will be documented in this file.
     `--gc-correct/--no-gc-correct`. Its `--gc-factors` validation now accepts the six-column table
     in any format; it used to reject run-all's own Parquet tables.
   - Nextflow tool-level mode passes extract's factor tables to every GC-weighted tool; each used to
-    refit factors from the BED with a different algorithm. A tool that still has to refit records
-    `recomputed` and warns.
+    refit factors from the BED with a different algorithm. No tool refits now (see the entry on
+    which step fits a GC factor table).
   - `--no-gc-correct` is honoured by these consumers; previously a stale table was applied anyway.
   - `metadata` records which kind of table each population used (`gc_factors_offtarget`,
     `gc_factors_ontarget`, `gc_correction_applied_*`), plus `fragments_on_missing_contig` and
@@ -653,8 +653,8 @@ All notable changes to this project will be documented in this file.
     directories written before this fix. Both apply one rule: a panel donor needs its on-target
     table too (`--from-outputs` checked only off-target, so a panel donor whose on-target fit did
     not run entered the baseline with uncorrected gene FSC).
-  - A factor table never outlives the BED it was fitted on: writing a new BED, or refitting from
-    one, first removes that sample's earlier tables in every format. A rerun that fitted nothing,
+  - A factor table never outlives the BED it was fitted on: writing a new BED first removes that
+    sample's earlier tables in every format. A rerun that fitted nothing,
     or wrote another format, used to reuse the previous run's weights (the resolver prefers
     Parquet) while the metadata recorded the correction as applied.
   - Both loaders require all six documented columns; a table without `length_bin_max` passed

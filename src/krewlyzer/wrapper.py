@@ -906,9 +906,6 @@ def run_all(
                 output_dir=output,
                 sample_name=sample,
                 owns_sample_record=True,  # run-all writes the whole sample
-                # The off-target table is extraction's (this run's, or a rerun's vouched one): none
-                # beside the BED means none was fitted, not one to refit from on-target fragments.
-                refit_gc_factors=False,
                 genome=genome,
                 enable_fsc=True,
                 enable_fsr=True,
@@ -1029,9 +1026,7 @@ def run_all(
                 # variants sit in captured regions, whose GC bias differs from off-target.
                 gc_choice = None
                 if is_panel_mode:
-                    gc_choice = resolve_gc_factors(
-                        bedgz_file, output, sample, "on_target"
-                    )
+                    gc_choice = resolve_gc_factors(bedgz_file, "on_target")
                     if gc_choice.path is not None:
                         logger.info(
                             f"mFSD: on-target GC factors ({gc_choice.path.name})"
@@ -1042,9 +1037,7 @@ def run_all(
                             "using the off-target table"
                         )
                 if gc_choice is None or not gc_choice.found:
-                    gc_choice = resolve_gc_factors(
-                        bedgz_file, output, sample, "off_target"
-                    )
+                    gc_choice = resolve_gc_factors(bedgz_file, "off_target")
                 if not gc_choice.found:
                     logger.warning(
                         f"mFSD: no GC factors ({gc_choice.reason}); running uncorrected"

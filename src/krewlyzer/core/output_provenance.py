@@ -723,7 +723,7 @@ def refuse_a_bed_the_record_does_not_describe(
         )
     differing = []
     # What extraction recorded: the BED's fragments, and the GC factor table beside it, fitted on
-    # the off-target fragments the targets left (`resolve_gc_factors` looks beside the BED first).
+    # the off-target fragments the targets left (`resolve_gc_factors` looks only beside the BED).
     for field in ("genome", "assay", "target_regions", *FILTER_FIELDS):
         if field not in ours.columns or field not in theirs.columns:
             continue  # in a record written before the field was recorded

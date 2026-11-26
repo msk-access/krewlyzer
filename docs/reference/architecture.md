@@ -131,8 +131,7 @@ _core.extract_motif.process_bam_parallel(
 
 # Unified pipeline
 _core.run_unified_pipeline(
-    bed_path, gc_ref_path, valid_regions_path,
-    correction_out_path, correction_input_path,
+    bed_path, correction_input_path,
     fsc_bins, fsc_output,
     wps_regions, wps_output,
     wps_background_regions, wps_background_output, wps_empty,
@@ -150,10 +149,7 @@ _core.gc.compute_and_write_gc_factors(...)
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `bed_path` | PathBuf | Input .bed.gz file path |
-| `gc_ref_path` | Option<PathBuf> | GC reference parquet for computing factors |
-| `valid_regions_path` | Option<PathBuf> | Valid regions BED for GC |
-| `correction_out_path` | Option<PathBuf> | Output path for computed GC factors |
-| `correction_input_path` | Option<PathBuf> | Pre-computed GC factors TSV |
+| `correction_input_path` | Option<PathBuf> | The GC factor table extraction wrote beside the BED, any format (`None`: uncorrected; the pipeline fits none) |
 | `fsc_bins` | Option<PathBuf> | FSC/FSR bins BED |
 | `fsc_output` | Option<PathBuf> | FSC output TSV path |
 | `wps_regions` | Option<PathBuf> | WPS foreground anchors BED |

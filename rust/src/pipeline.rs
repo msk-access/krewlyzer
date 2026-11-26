@@ -13,7 +13,7 @@
 use pyo3::prelude::*;
 use std::path::PathBuf;
 use anyhow::{Result, Context};
-use log::{info, debug, warn};
+use log::info;
 use crate::bed::{Fragment, ChromosomeMap};
 use crate::engine::{FragmentConsumer, FragmentAnalyzer};
 use crate::fsc::FscConsumer;
@@ -136,9 +136,7 @@ impl FragmentConsumer for MultiConsumer {
 #[pyfunction]
 #[pyo3(signature = (
     bed_path,
-    // GC Correction (Optional)
-    gc_ref_path=None, valid_regions_path=None, correction_out_path=None,
-    // Pre-computed factors (skip computation if provided)
+    // GC correction: the factor table extraction fitted beside the BED (none = uncorrected)
     correction_input_path=None,
     // FSC Args
     fsc_bins=None, fsc_output=None,
@@ -164,11 +162,8 @@ impl FragmentConsumer for MultiConsumer {
 pub fn run_unified_pipeline(
     _py: Python,
     bed_path: PathBuf,
-    // GC Correction
-    gc_ref_path: Option<PathBuf>,
-    valid_regions_path: Option<PathBuf>,
-    correction_out_path: Option<PathBuf>,
-    // Pre-computed factors (load instead of compute if provided)
+    // GC correction: the factor table extraction fitted beside the BED. This pipeline fits none;
+    // without one, every feature it computes is uncorrected.
     correction_input_path: Option<PathBuf>,
     // FSC
     fsc_bins: Option<PathBuf>, fsc_output: Option<PathBuf>,
@@ -192,12 +187,11 @@ pub fn run_unified_pipeline(
     // Progress control
     silent: bool,
 ) -> PyResult<()> {
-    use crate::gc_correction::{ReferenceData, ValidRegionFilter, GcObservationConsumer, compute_gcfix_factors, CorrectionFactors};
-    use crate::engine;
+    use crate::gc_correction::CorrectionFactors;
     use std::sync::Arc;
     
     // ═══════════════════════════════════════════════════════════════════
-    // Phase 1: GC Correction Factors (Load or Compute)
+    // Phase 1: GC Correction Factors (load extraction's table, or none)
     // ═══════════════════════════════════════════════════════════════════
     let factors = if let Some(input_path) = correction_input_path {
         // Load exactly the pre-computed table the caller resolved (beside the BED).
@@ -214,58 +208,9 @@ pub fn run_unified_pipeline(
                     "pipeline: cannot load GC correction factors from {:?}: {:#}", input_path, e)));
             }
         }
-    } else if let (Some(gc_ref), Some(valid_reg), Some(out_factors)) = (gc_ref_path, valid_regions_path, correction_out_path) {
-        // Compute factors from scratch
-        info!("Phase 1: Computing GC correction factors...");
-        
-        // 1. Load Reference Data
-        let ref_data = ReferenceData::load(&gc_ref)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load GC reference: {}", e)))?;
-            
-        // 2. Load Valid Regions. One ChromosomeMap for them and the BED, as Phase 2 shares one:
-        //    ids are handed out in the order names are first met, so a second map read a BED
-        //    against another chromosome's valid regions unless it met the contigs in their order.
-        let mut chrom_map = crate::bed::ChromosomeMap::new();
-        let valid_regions = Arc::new(ValidRegionFilter::load(&valid_reg, &mut chrom_map)
-            .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to load valid regions: {}", e)))?);
-
-        // 3. Observed Counts
-        let obs_consumer = GcObservationConsumer::new(valid_regions);
-
-        // Run Engine
-        let engine = engine::FragmentAnalyzer::new(obs_consumer, 500_000); // 500k batch
-        let obs_result = engine.process_file(&bed_path, &mut chrom_map, silent)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Phase 1 failed: {}", e)))?;
-            
-        // 4. Compute Factors (use .observed field, not .counts)
-        let computed = compute_gcfix_factors(&obs_result.observed, &ref_data, None)
-            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("Factor computation failed: {}", e)))?;
-            
-        // 5. Write factors: dispatch by output_format (TSV / Parquet / both). Nothing is written
-        //    when no length bin could be fitted (a header-only table is refused on load).
-        if computed.data.is_empty() {
-            warn!("pipeline: no length bin could be fitted; GC correction skipped and no factor table written");
-        }
-        // Use string-based stem extraction to avoid Path::with_extension()
-        // mangling compound names like "correction_factors.ontarget".
-        use crate::output_utils::validated_output_format;
-        let fmt = validated_output_format(output_format);
-        let factors_str = out_factors.to_string_lossy();
-        let factors_stem = if let Some(stripped) = factors_str.strip_suffix(".tsv") {
-            stripped
-        } else {
-            &factors_str
-        };
-        debug!("pipeline: writing off-target GC factors → {} (format={})", factors_stem, fmt);
-        // Every format or none (`write_factor_tables`), as extraction's writer.
-        if !computed.data.is_empty() {
-            crate::gc_correction::write_factor_tables(&computed, factors_stem, fmt, compress)
-                .map_err(|e| pyo3::exceptions::PyIOError::new_err(format!("Failed to write factors: {}", e)))?;
-        }
-        
-        Some(computed)
     } else {
-        info!("GC correction skipped (no factors provided and no reference files)");
+        // Only extraction fits a table. The caller has recorded and warned why there is none.
+        info!("pipeline: no GC correction factor table; features run uncorrected");
         None
     };
 

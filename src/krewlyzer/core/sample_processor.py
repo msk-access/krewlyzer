@@ -71,12 +71,9 @@ def write_gc_factor_table(
     resolve it is a failed computation like any other, warned about, never raised: the record
     says no table.
 
-    The other writer is the unified pipeline's refit: a single tool that finds no off-target table
-    beside its BED fits one from the whole BED (whether it should is #92 Step 2's question).
-    run-all and the PON build never refit after their own extraction
-    (`run_features(refit_gc_factors=False)`), so with no table written here their features run
-    without off-target correction, which run_features warns about and the record shows. Rust's
-    `write_factor_tables` holds both writers to every format or none.
+    No other writer exists: the feature step only reads the table beside the BED, so with none
+    written here every feature that corrects with it runs uncorrected, which run_features warns
+    about and the record shows. Rust's `write_factor_tables` writes every format or none.
     """
     label = population.replace("_", "-")  # off_target -> off-target
     none_written = "no factor table written"
@@ -1189,9 +1186,6 @@ def process_sample(
         output_dir=output_dir,
         sample_name=sample_name,
         owns_sample_record=True,  # the PON build writes the whole sample
-        # After its own extraction the off-target table is extraction's to fit or not, as in
-        # run-all. A pre-extracted BED is read as a single tool reads one (#92 Step 2 decides).
-        refit_gc_factors=not is_bam,
         genome=params.genome,
         enable_fsc=enable_fsc,
         enable_fsr=enable_fsr,

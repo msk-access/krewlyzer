@@ -29,9 +29,6 @@ def configure_threads(num_threads: int = 0) -> None:
 
 def run_unified_pipeline(
     bed_path: str,
-    gc_ref_path: str | None,
-    valid_regions_path: str | None,
-    correction_out_path: str | None,
     correction_input_path: str | None,
     fsc_bins: str | None,
     fsc_output: str | None,

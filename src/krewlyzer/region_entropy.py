@@ -230,21 +230,21 @@ def region_entropy(
     target_regions_str = str(resolved_target_path) if is_panel_mode else None
 
     # GC correction factors, as run-all resolves them: --gc-factors for the off-target table if
-    # given, otherwise the tables extract wrote beside the BED (or in the output directory).
+    # given, otherwise the tables extract wrote beside the BED.
     # Without this the single tool ran uncorrected unless the flag was passed, unlike run-all.
     gc_str = gc_ontarget_str = None
     if gc_correct:
         if gc_factors and gc_factors.exists():
             gc_str = str(gc_factors)
         else:
-            off = resolve_gc_factors(bedgz_input, output, sample_name, "off_target")
+            off = resolve_gc_factors(bedgz_input, "off_target")
             gc_str = str(off.path) if off.found else None
             if not off.found:
                 logger.warning(
                     f"No GC factors ({off.reason}); TFBS/ATAC run uncorrected"
                 )
         if is_panel_mode:
-            on = resolve_gc_factors(bedgz_input, output, sample_name, "on_target")
+            on = resolve_gc_factors(bedgz_input, "on_target")
             gc_ontarget_str = str(on.path) if on.found else None
 
     # Use PON parquet directly for Z-score normalization (Rust implementation)

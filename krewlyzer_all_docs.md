@@ -817,10 +817,7 @@ All feature computation goes through `run_unified_pipeline`:
 pub fn run_unified_pipeline(
     _py: Python,
     bed_path: PathBuf,
-    // GC Correction
-    gc_ref_path: Option<PathBuf>,
-    valid_regions_path: Option<PathBuf>,
-    correction_out_path: Option<PathBuf>,
+    // GC correction: the factor table extraction fitted beside the BED (None = uncorrected)
     correction_input_path: Option<PathBuf>,
     // FSC
     fsc_bins: Option<PathBuf>, fsc_output: Option<PathBuf>,
@@ -871,14 +868,13 @@ def tool_name(
     # 1. Initialize AssetManager
     assets = AssetManager(genome)
     
-    # 2. Resolve GC assets (use helper)
-    from .core.gc_assets import resolve_gc_assets
-    gc = resolve_gc_assets(assets, output, sample_name, input, gc_correct, genome)
+    # 2. Run the unified pipeline through run_features, as run-all does. It finds the GC
+    #    factor table extraction wrote beside the BED (core.gc_assets.resolve_gc_factors),
+    #    or runs uncorrected and records why: no feature step fits a table.
+    from .core.unified_processor import run_features
+    outputs = run_features(input, output, sample_name, enable_<feature>=True, ...)
     
-    # 3. Call Rust backend
-    _core.run_unified_pipeline(...)
-    
-    # 4. Post-process (Python)
+    # 3. Post-process (Python)
     from .core.tool_processor import process_tool
     process_tool(output_file, ...)
 ```
@@ -7294,16 +7290,17 @@ When `--target-regions` is provided to `extract`:
 - Generates both `.correction_factors.*` (off-target) and `.correction_factors.ontarget.*` (on-target), in the run's `--output-format`
 
 **Which table a feature uses.** Every consumer finds its table through one resolver
-(`core.gc_assets.resolve_gc_factors`): beside the BED first, then in the output directory;
-Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
+(`core.gc_assets.resolve_gc_factors`): beside the BED only, where extraction wrote it with the
+BED's fragments; Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
 factors and GC correction does not depend on the output format. Each sample's metadata records
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
-**When extraction fitted no off-target table** (a panel whose targets hold almost every fragment),
-`run-all` corrects nothing with one: those features run uncorrected and the metadata records
-`gc_correction_applied_offtarget=False`. `build-pon` from a BAM refits none either and leaves the
-donor out. A single tool that finds no table beside its BED refits one from the whole BED,
-on-target fragments included, and warns that it did (`recomputed`).
+**Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
+almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
+every single tool run the features that correct with it uncorrected, warn with the cause, and
+record `gc_correction_applied_offtarget=False`. A table elsewhere, such as in the folder a tool
+writes to, is never used: it may be another extraction's. `build-pon` refuses such a donor, from a
+BAM or a BED, and stops; with `--allow-failures` it leaves the donor out.
 
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
@@ -8783,8 +8780,7 @@ _core.extract_motif.process_bam_parallel(
 
 # Unified pipeline
 _core.run_unified_pipeline(
-    bed_path, gc_ref_path, valid_regions_path,
-    correction_out_path, correction_input_path,
+    bed_path, correction_input_path,
     fsc_bins, fsc_output,
     wps_regions, wps_output,
     wps_background_regions, wps_background_output, wps_empty,
@@ -8802,10 +8798,7 @@ _core.gc.compute_and_write_gc_factors(...)
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `bed_path` | PathBuf | Input .bed.gz file path |
-| `gc_ref_path` | Option<PathBuf> | GC reference parquet for computing factors |
-| `valid_regions_path` | Option<PathBuf> | Valid regions BED for GC |
-| `correction_out_path` | Option<PathBuf> | Output path for computed GC factors |
-| `correction_input_path` | Option<PathBuf> | Pre-computed GC factors TSV |
+| `correction_input_path` | Option<PathBuf> | The GC factor table extraction wrote beside the BED, any format (`None`: uncorrected; the pipeline fits none) |
 | `fsc_bins` | Option<PathBuf> | FSC/FSR bins BED |
 | `fsc_output` | Option<PathBuf> | FSC output TSV path |
 | `wps_regions` | Option<PathBuf> | WPS foreground anchors BED |
@@ -10886,8 +10879,8 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `filters_min_length` / `filters_max_length` | int | The fragment length range the extraction applied (`--minlen` / `--maxlen`). Before this release every record said 65 and 1000, whatever the run used |
 | `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose filters can be trusted |
 | `filters_blacklist_sha256` | str | The SHA-256 of the blacklist file the extraction applied (`--exclude-regions`, else the genome's bundled one), by its bytes: the same file at another path gives the same value, an edited one another. Empty when none was applied. New in this release |
-| `gc_correction_computed` | bool | Whether extraction wrote an off-target GC factor table for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`). run-all then corrects nothing with an off-target table (`gc_correction_applied_offtarget=False`). In outputs from earlier releases, `False` here beside `gc_correction_applied_offtarget=True` marks a table the feature step refitted from the whole BED |
-| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv`, `recomputed` (refitted from the BED by a single tool that found none beside it; run-all and the PON build never refit after their own extraction), or `none:<reason>` |
+| `gc_correction_computed` | bool | Whether extraction wrote an off-target GC factor table for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`). No feature step fits one, so the features then correct nothing with an off-target table (`gc_correction_applied_offtarget=False`) |
+| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv` (the table extraction wrote beside the BED), or `none:<reason>` |
 | `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
 | `fragments_on_missing_contig` | int | Fragments on contigs the reference FASTA lacks under either `chr` spelling, such as decoys and alts; their GC is unresolved and they enter no GC model. A non-primary contig at another length counts here too. Warned about above 1% of fragments. A primary contig the reference lacks, or has at another length, is refused before extraction |
 | `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched; they enter no GC model, and any is warned about |

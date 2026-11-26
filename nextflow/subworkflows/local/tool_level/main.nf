@@ -47,8 +47,8 @@ workflow TOOL_LEVEL {
 
     // Combine extracted BEDs with extract's GC factor tables and the sample's settings.
     // The tables are staged beside the BED in every tool's work directory, so each tool resolves
-    // them as run-all does. Without them every tool refitted its own factors from the BED with a
-    // different algorithm (all fragments, no on/off-target split).
+    // them as run-all does. Without them every tool runs without GC correction: only extraction
+    // fits a table.
     ch_extracted = KREWLYZER_EXTRACT.out.bed
         .join(KREWLYZER_EXTRACT.out.gc_factors, remainder: true)
         .join(ch_extract.map { meta, bam, bai, pon, targets, anchors -> [meta, pon, targets, anchors] })

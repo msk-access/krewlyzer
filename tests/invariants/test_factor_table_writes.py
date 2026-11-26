@@ -1,5 +1,4 @@
-"""A GC factor table exists exactly when a run says it wrote one, and run-all and the PON build use
-only the one their own extraction fitted.
+"""A GC factor table exists exactly when a run says it wrote one, and only extraction writes one.
 
 The tools reading a sample's folder find its factor table by existence (`resolve_gc_factors`), so a
 table left behind is used, and a log line naming a table that was not written sends whoever reads
@@ -7,14 +6,14 @@ the log after one that does not exist. The ways that went wrong:
 
 - With `-F both`, Rust wrote the TSV table and then failed on the Parquet one. The record said
   `gc_correction_computed=False` while a `.tsv` table sat in the folder for every tool to use.
-- run-all's on-target factor write logged "Wrote 0 ... factors", and the PON build's two writes and
-  extract's on-target one "Computed 0", when nothing was fitted and nothing written.
+- run-all's on-target factor write logged "Wrote 0 ... factors", and the PON build's two writes
+  "Computed 0", when nothing was fitted and nothing written.
 - A population with no observations at all (a panel whose targets no fragment reaches) was
   skipped at every call site without a word.
-- After run-all's or the PON build's own extraction fitted no off-target table, the feature step
-  refitted one from the whole BED, on-target fragments included, and corrected with it.
-- That refit read the BED's fragments against another chromosome's valid regions unless the BED met
-  its contigs in the valid regions' order.
+- A feature step that found no off-target table beside its BED refitted one from the whole BED,
+  on-target fragments included, and corrected with it: after run-all's or the PON build's own
+  extraction had fitted none, in every single tool, and in the next run-all over a folder a single
+  tool had refitted into, which took that table for extraction's.
 """
 
 from __future__ import annotations
@@ -87,7 +86,7 @@ def test_a_format_that_fails_leaves_no_table_in_the_other(tmp_path):
     assert not (tmp_path / f"{base.name}.tsv").exists(), "half a table was left"
     (tmp_path / f"{base.name}.parquet").rmdir()  # the test's own obstacle, not a table
     bed = tmp_path / f"{SAMPLE}.bed.gz"
-    assert not resolve_gc_factors(bed, tmp_path, SAMPLE, "off_target").found
+    assert not resolve_gc_factors(bed, "off_target").found
 
 
 def test_both_formats_are_written_when_both_succeed(tmp_path):
@@ -166,21 +165,25 @@ def _extract(sample, out, targets):
     )
 
 
-def _process_sample(sample, out, targets):
-    """`build-pon`'s path with every feature off: extraction and its factor tables."""
+def _process_sample(sample, out, targets, *, input_path=None, arms=None):
+    """`build-pon`'s path: extraction (from the BAM unless `input_path` is a BED) and its factor
+    tables, every feature off unless `arms` turns FSD on (and with it the PON's GC gate).
+    """
     from krewlyzer.core.sample_processor import SampleParams, process_sample
 
     out.mkdir()
     process_sample(
-        input_path=sample.bam,
+        input_path=input_path or sample.bam,
         output_dir=out,
         sample_name=SAMPLE,
         reference=sample.reference,
-        params=SampleParams(threads=1, exclude_regions=sample.assets.blacklist),
+        params=SampleParams(
+            threads=1, exclude_regions=sample.assets.blacklist, arms_file=arms
+        ),
         target_regions=targets,
         enable_fsc=False,
         enable_fsr=False,
-        enable_fsd=False,
+        enable_fsd=arms is not None,
         enable_wps=False,
         enable_ocf=False,
         enable_tfbs=False,
@@ -282,9 +285,8 @@ def test_extraction_outputs_warn_when_nothing_is_off_target(tmp_path, caplog):
     _assert_warned_no_fragments(caplog, "off-target")
 
 
-# The unified pipeline's refit fits an off-target table from the whole BED when none sits beside it.
-# run-all and the PON build must not reach it after their own extraction, whose table that is to
-# fit or not; a single tool that reaches it must read each fragment against its own chromosome.
+# No feature step fits a factor table: with none beside the BED, every path -- run-all, the PON
+# build, a single tool -- runs without off-target correction, and only extraction's table is used.
 
 
 def _dense_panel(directory):
@@ -356,43 +358,114 @@ def test_process_sample_writes_no_table_its_extraction_could_not_fit(tmp_path):
     assert _off_target_tables(out) == []
 
 
-def test_the_refit_does_not_depend_on_the_beds_contig_order(tmp_path):
-    """The same fragments, written chr1-first and chr2-first, refit the same table: each fragment is
-    read against its own chromosome's valid regions, whatever order the BED meets them in.
+def _arms(sample):
+    return sample.directory / "arms.validated.bed"  # written by synth_run_all
+
+
+def _single_tool(bed, out, targets, arms):
+    """`krewlyzer fsd`'s path: run_features as a single tool calls it."""
+    from krewlyzer.core.unified_processor import run_features
+
+    return run_features(
+        bed,
+        out,
+        SAMPLE,
+        enable_fsd=True,
+        fsd_arms=arms,
+        target_regions=targets,
+        output_format="parquet",
+        compress=False,
+    )
+
+
+def test_a_single_tool_corrects_as_run_all_does(tmp_path):
+    """Invariant 6 on the panel whose extraction fits no off-target table: a single tool reading
+    that extraction's BED fits none either, so its table equals run-all's."""
+    dense, targets = _dense_panel(tmp_path)
+    out = tmp_path / "out"
+    code = synth_run_all(dense, out, skip_target_regions=False, target_regions=targets)
+    assert code is None
+    tool = tmp_path / "tool"
+    tool.mkdir()
+    from krewlyzer.core.output_utils import resolve_table_path
+
+    outputs = _single_tool(out / f"{SAMPLE}.bed.gz", tool, targets, _arms(dense))
+    assert _off_target_tables(tool) == []
+    assert not outputs.gc_factors_choice["off_target"].found
+    # `outputs.fsd` names the .tsv; each run wrote the Parquet table it resolves to.
+    pd.testing.assert_frame_equal(
+        pd.read_parquet(resolve_table_path(outputs.fsd)),
+        pd.read_parquet(resolve_table_path(out / outputs.fsd.name)),
+    )
+
+
+def test_a_single_tool_leaves_no_table_a_run_all_rerun_takes_for_extractions(tmp_path):
+    """A single tool run into run-all's folder writes no table beside the BED, so the next run-all
+    over that folder still finds none and records it."""
+    dense, targets = _dense_panel(tmp_path)
+    out = tmp_path / "out"
+    code = synth_run_all(dense, out, skip_target_regions=False, target_regions=targets)
+    assert code is None
+    _single_tool(out / f"{SAMPLE}.bed.gz", out, targets, _arms(dense))
+    assert _off_target_tables(out) == []
+    code = synth_run_all(dense, out, skip_target_regions=False, target_regions=targets)
+    assert code is None
+    record = pd.read_parquet(out / f"{SAMPLE}.metadata.parquet").iloc[0]
+    assert str(record["gc_factors_offtarget"]).startswith("none:")
+    assert not record["gc_correction_applied_offtarget"]
+
+
+def test_a_table_in_the_output_folder_but_not_beside_the_bed_is_not_used(tmp_path):
+    """A BED's table is the one beside it. Another extraction's table in the folder a tool writes
+    to describes other fragments, so the BED runs uncorrected rather than corrected with it.
     """
-    import random
+    dense, targets = _dense_panel(tmp_path)
+    chr1 = tmp_path / "chr1.bed"
+    chr1.write_text("chr1\t0\t300000\n")
+    fitted = tmp_path / "fitted"
+    code = synth_run_all(dense, fitted, skip_target_regions=False, target_regions=chr1)
+    assert code is None
+    assert _off_target_tables(fitted) != []
+    extracted = tmp_path / "extracted"
+    result = _extract(dense, extracted, targets)
+    assert result.exit_code == 0, result.output
+    tool = tmp_path / "tool"
+    tool.mkdir()
+    for name in _off_target_tables(fitted):
+        (tool / name).write_bytes((fitted / name).read_bytes())
+    outputs = _single_tool(extracted / f"{SAMPLE}.bed.gz", tool, targets, _arms(dense))
+    assert not outputs.gc_factors_choice["off_target"].found
 
-    from krewlyzer import _core
-    from krewlyzer.assets import AssetManager
 
-    assets = AssetManager("hg19")
-    rng = random.Random(3)
-    rows = [("chr1", 5_000_000, 5_000_167, 0.5)]
-    for _ in range(30_000):
-        start = 100_000 + rng.randrange(190_000)
-        gc = round(min(max(rng.gauss(0.5, 0.05), 0.0), 1.0), 2)
-        rows.append(("chr2", start, start + 167, gc))
+def test_process_sample_fits_no_table_from_a_pre_extracted_bed(tmp_path):
+    """The PON build given extraction's BED instead of the BAM: as from the BAM, no table."""
+    dense, targets = _dense_panel(tmp_path)
+    extracted = tmp_path / "extracted"
+    result = _extract(dense, extracted, targets)
+    assert result.exit_code == 0, result.output
+    out = tmp_path / "out"
+    _process_sample(dense, out, targets, input_path=extracted / f"{SAMPLE}.bed.gz")
+    assert _off_target_tables(out) == []
 
-    tables = []
-    for first, second in (("chr1", "chr2"), ("chr2", "chr1")):
-        raw = tmp_path / f"{first}_first.bed"
-        with open(raw, "w") as fh:
-            for chrom in (first, second):
-                for c, s, e, g in sorted(r for r in rows if r[0] == chrom):
-                    fh.write(f"{c}\t{s}\t{e}\t{g}\t1.0\n")
-        bed = tmp_path / f"{first}_first.bed.gz"
-        pysam.tabix_compress(str(raw), str(bed), force=True)
-        table = tmp_path / f"{first}_first.correction_factors.tsv"
-        _core.run_unified_pipeline(
-            str(bed),
-            str(assets.resolve("gc_reference")),
-            str(assets.resolve("valid_regions")),
-            str(table),
-            None,
-            output_format="tsv",
-            compress=False,
-            silent=True,
+
+@pytest.mark.parametrize("given", ["bam", "bed"])
+def test_the_pon_build_refuses_a_donor_with_no_off_target_table(tmp_path, given):
+    """A donor whose extraction fitted no off-target table is refused by the PON's GC gate,
+    whichever input the build was given (`build-pon` then stops, or skips it with
+    `--allow-failures`)."""
+    dense, targets = _dense_panel(tmp_path)
+    # synth_run_all writes the arms file FSD reads; its own outputs are not used here.
+    code = synth_run_all(
+        dense, tmp_path / "arms_run", skip_target_regions=False, target_regions=targets
+    )
+    assert code is None
+    input_path = None
+    if given == "bed":
+        extracted = tmp_path / "extracted"
+        result = _extract(dense, extracted, targets)
+        assert result.exit_code == 0, result.output
+        input_path = extracted / f"{SAMPLE}.bed.gz"
+    with pytest.raises(RuntimeError, match="no off-target GC factor table"):
+        _process_sample(
+            dense, tmp_path / "out", targets, input_path=input_path, arms=_arms(dense)
         )
-        assert table.exists(), f"no table refitted from the {first}-first BED"
-        tables.append(pd.read_csv(table, sep="\t"))
-    pd.testing.assert_frame_equal(tables[0], tables[1])

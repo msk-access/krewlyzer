@@ -33,11 +33,7 @@ import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import (
-    remove_factor_tables,
-    resolve_feature_gc_tables,
-    resolve_gc_assets,
-)
+from .gc_assets import resolve_feature_gc_tables
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
@@ -87,7 +83,6 @@ class FeatureOutputs:
     ocf_ontarget_sync: Optional[Path] = None  # On-target OCF sync data
     ocf_offtarget: Optional[Path] = None  # Off-target OCF (panel mode)
     ocf_sync_offtarget: Optional[Path] = None  # Off-target OCF sync data
-    gc_factors: Optional[Path] = None  # GC correction factors
     # Which factor table each population used, or why none (recorded in metadata)
     gc_factors_choice: Optional[dict] = None
     panel_mode: bool = (
@@ -148,7 +143,6 @@ def run_features(
     output_format: str,
     compress: bool,
     owns_sample_record: bool = False,  # run-all and the PON build: rewrite the sample's record
-    refit_gc_factors: bool = True,
 ) -> FeatureOutputs:
     """
     Run unified feature extraction pipeline.
@@ -188,10 +182,6 @@ def run_features(
             ML pipelines (faster IO, typed columns, ~5x smaller). "both" writes both.
         compress: When True and writing TSV, gzip-compress the output (`.tsv.gz`).
             Has no effect when output_format="parquet" (Parquet uses Snappy internally).
-        refit_gc_factors: Whether an off-target factor table missing beside the BED is refitted
-            from it (`resolve_gc_assets`). False for run-all and the PON build after their own
-            extraction, which decided that table: with none, every feature runs without off-target
-            correction and the record says so.
 
     Returns:
         FeatureOutputs dataclass with paths to all generated files
@@ -341,17 +331,35 @@ def run_features(
     except ValueError as e:
         raise FileNotFoundError(f"Invalid genome: {e}")
 
-    # GC correction assets
-    gc = resolve_gc_assets(
-        assets,
-        output_dir,
-        sample_name,
-        bed_path,
-        gc_correct,
-        genome,
-        refit=refit_gc_factors,
+    # GC factor tables: the ones extraction fitted beside the BED, or none -- no feature step fits
+    # one. One resolver (core.gc_assets.resolve_gc_factors) for the Rust pass and for gene FSC,
+    # panel WPS, TFBS and ATAC. Each Python call site used to build its own
+    # `.correction_factors[.ontarget].tsv` path; production (`--output-format both --compress`)
+    # writes only `.tsv.gz` and `.parquet`, so those features ran uncorrected against PON donors
+    # that were corrected (TSV is forced for PON builds).
+    gc_off, gc_on = resolve_feature_gc_tables(
+        bed_path, gc_correct=gc_correct, panel_mode=bool(is_panel_mode)
     )
-    outputs.gc_factors = gc.factors_out
+    gc_str = str(gc_off.path) if gc_off.found else None
+    gc_ontarget_str = str(gc_on.path) if gc_on.found else None
+    if gc_correct and not gc_off.found:
+        logger.warning(
+            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)}). "
+            "Only extraction fits one, and it wrote none for this BED (no length bin had enough "
+            "off-target fragments, or it ran with --no-gc-correct), or the table was not kept "
+            "beside the BED. Every feature that corrects with it runs without GC correction; to "
+            "correct them, re-extract with GC correction and keep its table beside the BED."
+        )
+    if gc_correct and is_panel_mode and not gc_on.found:
+        logger.warning(
+            f"GC factors (on-target) {gc_on.reason} (looked for {', '.join(gc_on.searched)}); "
+            "on-target features fall back to the off-target table and gene FSC runs uncorrected"
+        )
+    for _label, _c in (("off-target", gc_off), ("on-target", gc_on)):
+        if _c.path is not None:
+            logger.info(f"  GC factors ({_label}): {_c.path.name} [{_c.kind}]")
+    outputs.gc_factors_choice = {"off_target": gc_off, "on_target": gc_on}
+    outputs.panel_mode = bool(is_panel_mode)
 
     # FSC/FSR bins (shared - only load if either enabled)
     need_fsc_bins = enable_fsc or enable_fsr
@@ -458,23 +466,14 @@ def run_features(
     # 4. RUN RUST UNIFIED PIPELINE
     # =========================================================================
 
-    if gc.factors_out:
-        # Refitting from the BED into output_dir: an older table there, in any format, would win
-        # the next lookup over the one written now (or stand in for none, if nothing fits).
-        remove_factor_tables(output_dir, sample_name, ("off_target",))
-
     logger.info("Running Rust unified pipeline...")
     rust_start = time.time()
 
     try:
         _core.run_unified_pipeline(
             str(bed_path),
-            # GC Correction (compute)
-            str(gc.gc_ref) if gc.gc_ref else None,
-            str(gc.valid_regions) if gc.valid_regions else None,
-            str(gc.factors_out) if gc.factors_out else None,
-            # GC Correction (load pre-computed)
-            str(gc.factors_input) if gc.factors_input else None,
+            # GC correction: extraction's off-target table, or None (uncorrected)
+            gc_str,
             # FSC
             str(res_bins) if need_fsc_bins else None,
             str(out_fsc_counts) if need_fsc_bins else None,
@@ -661,46 +660,6 @@ def run_features(
             logger.debug(
                 f"fsc_counts.ontarget format conversion: {out_fsc_counts_on.name}"
             )
-
-    # =========================================================================
-    # 4b. RESOLVE GC FACTOR TABLES (every Python-side consumer)
-    # =========================================================================
-    # One resolver (core.gc_assets.resolve_gc_factors) for gene FSC, panel WPS, TFBS and ATAC.
-    # Each call site used to build its own `.correction_factors[.ontarget].tsv` path; production
-    # (`--output-format both --compress`) writes only `.tsv.gz` and `.parquet`, so these features
-    # ran uncorrected against PON donors that were corrected (TSV is forced for PON builds).
-    gc_off, gc_on = resolve_feature_gc_tables(
-        bed_path,
-        output_dir,
-        sample_name,
-        gc_correct=gc_correct,
-        panel_mode=bool(is_panel_mode),
-        refitted=gc.factors_out
-        is not None,  # Phase 1 was asked to fit one from the BED
-    )
-    gc_str = str(gc_off.path) if gc_off.found else None
-    gc_ontarget_str = str(gc_on.path) if gc_on.found else None
-    if gc_correct and not gc_off.found:
-        # After the Rust pass: with no off-target table found, it corrected nothing either.
-        why = (
-            "; this run uses only the table its own extraction fitted and refits none"
-            if not refit_gc_factors
-            else ""
-        )
-        logger.warning(
-            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)})"
-            f"{why}; every feature this run corrects with that table runs without GC correction"
-        )
-    if gc_correct and is_panel_mode and not gc_on.found:
-        logger.warning(
-            f"GC factors (on-target) {gc_on.reason} (looked for {', '.join(gc_on.searched)}); "
-            "on-target features fall back to the off-target table and gene FSC runs uncorrected"
-        )
-    for _label, _c in (("off-target", gc_off), ("on-target", gc_on)):
-        if _c.path is not None:
-            logger.info(f"  GC factors ({_label}): {_c.path.name} [{_c.kind}]")
-    outputs.gc_factors_choice = {"off_target": gc_off, "on_target": gc_on}
-    outputs.panel_mode = bool(is_panel_mode)
 
     # What each optional stage below did, recorded once at the end (`record_stage_outcomes`).
     # Each one carries on past its own failure, so this is the only place it is visible.
@@ -948,9 +907,6 @@ def run_features(
                 logger.info(f"Running panel WPS ({resolved_assay})...")
                 _core.run_unified_pipeline(
                     str(bed_path),
-                    None,
-                    None,
-                    None,  # GC already computed
                     # Use on-target GC factors for panel WPS: anchors overlap
                     # capture regions, so on-target correction is more accurate.
                     # Falls back to off-target if on-target factors unavailable.

@@ -105,16 +105,17 @@ When `--target-regions` is provided to `extract`:
 - Generates both `.correction_factors.*` (off-target) and `.correction_factors.ontarget.*` (on-target), in the run's `--output-format`
 
 **Which table a feature uses.** Every consumer finds its table through one resolver
-(`core.gc_assets.resolve_gc_factors`): beside the BED first, then in the output directory;
-Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
+(`core.gc_assets.resolve_gc_factors`): beside the BED only, where extraction wrote it with the
+BED's fragments; Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
 factors and GC correction does not depend on the output format. Each sample's metadata records
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
-**When extraction fitted no off-target table** (a panel whose targets hold almost every fragment),
-`run-all` corrects nothing with one: those features run uncorrected and the metadata records
-`gc_correction_applied_offtarget=False`. `build-pon` from a BAM refits none either and leaves the
-donor out. A single tool that finds no table beside its BED refits one from the whole BED,
-on-target fragments included, and warns that it did (`recomputed`).
+**Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
+almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
+every single tool run the features that correct with it uncorrected, warn with the cause, and
+record `gc_correction_applied_offtarget=False`. A table elsewhere, such as in the folder a tool
+writes to, is never used: it may be another extraction's. `build-pon` refuses such a donor, from a
+BAM or a BED, and stops; with `--allow-failures` it leaves the donor out.
 
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
