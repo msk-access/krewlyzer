@@ -308,8 +308,8 @@ reports a call that does not -- at any length, which the script's fixed lookahea
 entry is needed for such a function.
 
 `RULES` remains for the older writers that still default to `"tsv"`: the ones in the table above,
-and about twenty processor writers that no gate covers yet (in `core/fsc_processor.py`,
-`fsd_processor.py`, `fsr_processor.py`, `motif_processor.py`, `motif_pon.py`, `ocf_processor.py`).
+and the processor writers that no gate covers yet (in `core/fsc_processor.py`,
+`fsr_processor.py`, `motif_processor.py`, `motif_pon.py`, `ocf_processor.py`).
 Moving those to required arguments is tracked as its own change; until then, a call to one of them
 that omits the format writes TSV silently.
 

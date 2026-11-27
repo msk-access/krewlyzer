@@ -270,6 +270,19 @@ def strip_table_extension(name: str) -> str:
     return name
 
 
+def written_table(path: Path, *, output_format: str, compress: bool) -> Path:
+    """The table a run of this format wrote for ``path``: its Parquet when it wrote one, else its TSV.
+
+    ``path`` may carry any table extension; callers usually name the ``.tsv``. For a reader that
+    must take *this* run's file: `resolve_table_path` takes the first file that exists, in its own
+    order, and so can take one an earlier run left in the folder. Parquet first because under
+    ``both`` it is the full-precision copy (several TSVs are written at four decimals).
+    """
+    path = Path(path)
+    base = path.parent / strip_table_extension(path.name)
+    return table_paths(base, output_format=output_format, compress=compress)[0]
+
+
 def resolve_table_path(base: Path) -> "Path | None":
     """Find the file actually written for ``base``, whatever the output format.
 

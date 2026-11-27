@@ -16,9 +16,9 @@ import numpy as np
 import logging
 
 from .output_utils import (
-    read_table,
-    resolve_table_path,
+    read_exact_table,
     write_table,
+    written_table,
     cleanup_intermediate_tsv,
 )
 
@@ -342,7 +342,7 @@ def aggregate_by_gene(
     base_path = Path(str(output_path).removesuffix(".tsv"))
     converted = False
     if output_format != "tsv" or compress:
-        df = read_table(tsv_path)
+        df = read_exact_table(tsv_path)
         if df is None:
             # Do not fall through quietly: the caller would then be handed a
             # path for a format that was never produced. Keep the .tsv Rust
@@ -386,8 +386,9 @@ def apply_fsc_gene_pon(
     fsc_gene_path: Path,
     pon,
     output_path: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Optional[Path]:
     """
     Apply FSC gene PON baseline z-score normalization.
@@ -414,23 +415,26 @@ def apply_fsc_gene_pon(
     if output_path is None:
         output_path = fsc_gene_path
 
-    # Callers name the `.tsv`, but the Rust writer honours --output-format and
-    # may have written only `.parquet`. A bare `.exists()` was False there, so
-    # this returned None and no `depth_zscore` column was ever added under
-    # `--output-format parquet` -- the format 0.9.0 makes the Nextflow default.
-    if resolve_table_path(fsc_gene_path) is None:
-        logger.warning(
-            f"FSC gene file not found: {fsc_gene_path} (nor .tsv.gz / .parquet)"
-        )
+    # The table this run wrote, exactly. Callers name the `.tsv`, but the writer
+    # honours --output-format and may have written only `.parquet`. A bare
+    # `.exists()` was False there, so this returned None and no `depth_zscore`
+    # column was ever added under `--output-format parquet` -- the format 0.9.0
+    # makes the Nextflow default. Any format that exists is no better: it can be
+    # an earlier run's.
+    source = written_table(
+        fsc_gene_path, output_format=output_format, compress=compress
+    )
+    if not source.exists():
+        logger.warning(f"FSC gene file not found: {source}")
         return None
 
     if not pon or not pon.fsc_gene_baseline:
         logger.debug("No FSC gene baseline in PON, skipping z-score")
         return fsc_gene_path
 
-    df = read_table(fsc_gene_path)
+    df = read_exact_table(source)
     if df is None:
-        logger.warning(f"FSC gene file could not be read: {fsc_gene_path}")
+        logger.warning(f"FSC gene file could not be read: {source}")
         return fsc_gene_path
 
     if "gene" not in df.columns or "normalized_depth" not in df.columns:
@@ -461,8 +465,9 @@ def apply_fsc_region_pon(
     fsc_region_path: Path,
     pon,
     output_path: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Optional[Path]:
     """
     Apply FSC region (exon/probe) PON baseline z-score normalization.
@@ -489,21 +494,21 @@ def apply_fsc_region_pon(
     if output_path is None:
         output_path = fsc_region_path
 
-    # Same as apply_fsc_gene_pon above: the caller names the `.tsv` and the
-    # writer may have produced only `.parquet`.
-    if resolve_table_path(fsc_region_path) is None:
-        logger.warning(
-            f"FSC region file not found: {fsc_region_path} (nor .tsv.gz / .parquet)"
-        )
+    # Same as apply_fsc_gene_pon above: exactly the table this run wrote.
+    source = written_table(
+        fsc_region_path, output_format=output_format, compress=compress
+    )
+    if not source.exists():
+        logger.warning(f"FSC region file not found: {source}")
         return None
 
     if not pon or not pon.fsc_region_baseline:
         logger.debug("No FSC region baseline in PON, skipping z-score")
         return fsc_region_path
 
-    df = read_table(fsc_region_path)
+    df = read_exact_table(source)
     if df is None:
-        logger.warning(f"FSC region file could not be read: {fsc_region_path}")
+        logger.warning(f"FSC region file could not be read: {source}")
         return fsc_region_path
 
     required_cols = ["chrom", "start", "end", "normalized_depth"]
@@ -560,8 +565,9 @@ def apply_fsc_region_pon(
 def filter_fsc_to_e1(
     fsc_regions_path: Path,
     output_path: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
 ) -> Optional[Path]:
     """
     Filter FSC regions to E1 (first exon) per gene.
@@ -587,11 +593,12 @@ def filter_fsc_to_e1(
     """
     fsc_regions_path = Path(fsc_regions_path)
 
-    # Same again: resolve across formats rather than assuming the `.tsv`.
-    if resolve_table_path(fsc_regions_path) is None:
-        logger.warning(
-            f"FSC regions file not found: {fsc_regions_path} (nor .tsv.gz / .parquet)"
-        )
+    # Same again: exactly the table this run wrote, rather than assuming the `.tsv`.
+    regions_file = written_table(
+        fsc_regions_path, output_format=output_format, compress=compress
+    )
+    if not regions_file.exists():
+        logger.warning(f"FSC regions file not found: {regions_file}")
         return None
 
     # Default output base path: strip suffix so write_table appends the right one
@@ -612,10 +619,9 @@ def filter_fsc_to_e1(
         # Strip suffix so write_table controls the final extension
         output_base = Path(output_path).with_suffix("")
 
-    # Read input with Parquet-first auto-detection
-    df = read_table(fsc_regions_path)
+    df = read_exact_table(regions_file)
     if df is None:
-        logger.warning(f"FSC regions file not found or unreadable: {fsc_regions_path}")
+        logger.warning(f"FSC regions file not found or unreadable: {regions_file}")
         return None
 
     # Validate required columns

@@ -35,7 +35,14 @@ REQUIRED = {
     "krewlyzer.region_mds": ("region_mds_stage",),
     "krewlyzer.core.pon_integration": ("load_requested_pon",),
     "krewlyzer.core.unified_processor": ("run_features",),
-    "krewlyzer.core.output_utils": ("convert_rust_tsv",),
+    "krewlyzer.core.output_utils": ("convert_rust_tsv", "written_table"),
+    # They read the table this run wrote, which the format decides: a default reads the wrong one.
+    "krewlyzer.core.fsd_processor": ("process_fsd",),
+    "krewlyzer.core.fsc_processor": (
+        "apply_fsc_gene_pon",
+        "apply_fsc_region_pon",
+        "filter_fsc_to_e1",
+    ),
 }
 
 CASES = [(module, name) for module, names in REQUIRED.items() for name in names]

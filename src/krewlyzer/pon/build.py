@@ -100,7 +100,6 @@ from krewlyzer import _core
 
 # Import unified sample processor
 from krewlyzer import __version__
-from krewlyzer.core.output_utils import read_table
 from krewlyzer.core.sample_processor import process_sample, SampleParams, SampleOutputs
 
 # Import asset resolution functions
@@ -2085,10 +2084,15 @@ def _compute_region_mds_exon_baseline(
         f"Computing region-MDS exon baseline from {len(valid_paths)} samples..."
     )
 
+    # Exactly each donor's file. The build writes it as TSV, and `--from-outputs` hands on the
+    # path it resolved; a Parquet-first read took an earlier run's `.parquet` beside the TSV in a
+    # kept cache and fitted the baseline from that run's values.
+    from krewlyzer.core.output_utils import read_exact_table
+
     frames = []
     for path in valid_paths:
         try:
-            frame = read_table(Path(path))
+            frame = read_exact_table(Path(path))
         except Exception as exc:
             logger.warning(f"Could not read {Path(path).name}: {exc}")
             continue

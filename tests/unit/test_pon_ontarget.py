@@ -294,6 +294,8 @@ class TestProcessFsdBaselineTable:
         result = process_fsd(
             fsd_file,
             pon_parquet_path=None,
+            output_format="tsv",
+            compress=False,
             baseline_table="fsd_baseline_ontarget",
         )
         assert result == fsd_file
@@ -318,6 +320,8 @@ class TestProcessFsdBaselineTable:
         process_fsd(
             fsd_file,
             pon_parquet_path=pon_file,
+            output_format="tsv",
+            compress=False,
             baseline_table="fsd_baseline_ontarget",
         )
 

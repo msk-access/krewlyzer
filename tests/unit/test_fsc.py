@@ -228,7 +228,7 @@ def test_filter_fsc_to_e1(tmp_path):
     df.to_csv(regions_file, sep="\t", index=False)
 
     # Filter to E1 only
-    e1_output = filter_fsc_to_e1(regions_file)
+    e1_output = filter_fsc_to_e1(regions_file, output_format="tsv", compress=False)
 
     # Verify output
     assert e1_output is not None
@@ -253,7 +253,9 @@ def test_filter_fsc_to_e1_nonexistent_file(tmp_path):
     """Test filter_fsc_to_e1 handles missing input gracefully."""
     from krewlyzer.core.fsc_processor import filter_fsc_to_e1
 
-    result = filter_fsc_to_e1(tmp_path / "nonexistent.tsv")
+    result = filter_fsc_to_e1(
+        tmp_path / "nonexistent.tsv", output_format="tsv", compress=False
+    )
     assert result is None
 
 
@@ -313,7 +315,7 @@ def test_aggregate_by_gene_returns_the_tsv_when_conversion_is_skipped(
 ):
     """A failed read-back must not yield a path for a format never written.
 
-    The conversion is guarded on read_table() returning a frame. If it returns
+    The conversion is guarded on read_exact_table() returning a frame. If it returns
     None the write and cleanup are skipped, so reporting the converted
     extension would hand the caller a path that does not exist -- the same
     defect the return value was fixed for, reached down a different branch.
@@ -329,7 +331,7 @@ def test_aggregate_by_gene_returns_the_tsv_when_conversion_is_skipped(
     gene_bed = tmp_path / "genes.bed"
     gene_bed.write_text("chr1\t0\t1000\tTP53\tTP53_target_01\n")
 
-    monkeypatch.setattr(fsc_processor, "read_table", lambda *a, **k: None)
+    monkeypatch.setattr(fsc_processor, "read_exact_table", lambda *a, **k: None)
 
     written = fsc_processor.aggregate_by_gene(
         Path(str(bed_file) + ".gz"),
