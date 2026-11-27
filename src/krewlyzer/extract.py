@@ -305,7 +305,6 @@ def extract(
         from .core.sample_processor import (
             extract_sample,
             write_extraction_outputs,
-            write_gc_factor_table,
         )
 
         result = extract_sample(
@@ -328,7 +327,7 @@ def extract(
 
         logger.info(f"Extracted {result.fragment_count:,} fragments")
 
-        # Write extraction outputs (BED index, metadata, GC factors)
+        # Write extraction outputs (BED index, metadata, GC factors, on-target ones for a panel)
         written = write_extraction_outputs(
             result=result,
             output_dir=output,
@@ -338,18 +337,6 @@ def extract(
             output_format=output_format,
             compress=compress,
         )
-
-        # On-target GC correction (panel mode only) - additional to standard outputs
-        if resolved_target_path and gc_correct:
-            write_gc_factor_table(
-                result.gc_observations_ontarget,
-                assets,
-                output,
-                sample_name,
-                "on_target",
-                output_format=output_format,
-                compress=compress,
-            )
 
         # Name only what was written: `written` holds a factor table only when one exists.
         logger.info(f"Output: {result.bed_path}")

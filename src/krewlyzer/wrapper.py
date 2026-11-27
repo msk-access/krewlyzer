@@ -691,7 +691,6 @@ def run_all(
             extract_sample,
             write_motif_tables,
             write_extraction_outputs,
-            write_gc_factor_table,
             ExtractionResult,
         )
 
@@ -840,19 +839,6 @@ def run_all(
                         compress=resolved_compress,
                     )
                     bedgz_file = extraction_result.bed_path
-
-                    # Compute on-target GC factors for panel mode
-                    # These are used by mFSD and gene-level FSC for accurate panel analysis
-                    if is_panel_mode:
-                        write_gc_factor_table(
-                            extraction_result.gc_observations_ontarget,
-                            assets,
-                            output,
-                            sample,
-                            "on_target",
-                            output_format=resolved_output_format,
-                            compress=resolved_compress,
-                        )
 
                 # Write motif outputs (EDM, BPM, MDS with z-score)
                 _, motif_outcomes = write_motif_tables(

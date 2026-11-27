@@ -392,7 +392,15 @@ fabricated baseline shipped for months.
 Per-sample features used to be extracted to a temp directory and deleted on
 success, so every rebuild re-ran extraction over every BAM — hours — and
 leave-one-out calibration would have cost *n* of those. The script keeps them,
-and they survive a failed build so a rerun skips what finished.
+and they survive a failed build. A rerun re-extracts every donor; a successful
+build ends by printing the `--from-outputs` command that rebuilds from the kept
+folders instead, with how many donors it can rebuild from and each it would
+refuse. A donor given as a BED is not extracted, so its folder cannot be rebuilt
+from.
+
+The directory must be new or empty: `build-pon` refuses one an earlier run used,
+because the rebuild reads every folder and file in it as this build's. Give each
+build its own `KEEP_DIR`.
 
 ### After the build
 

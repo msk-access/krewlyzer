@@ -334,7 +334,8 @@ def build_pon(
         help="Write each sample's feature outputs here and keep them. Without "
         "this they are extracted to a temp directory and deleted, so every "
         "rebuild re-runs extraction over every BAM from scratch -- hours -- "
-        "and leave-one-out calibration is not affordable at all.",
+        "and leave-one-out calibration is not affordable at all. Must be a new "
+        "or empty directory; rebuild from a used one with --from-outputs.",
     ),
     threads: int = typer.Option(
         4, "--threads", "-p", help="Total threads (divided among parallel samples)"
@@ -442,6 +443,19 @@ def build_pon(
     if from_outputs is None and not reference.exists():
         logger.error(f"Reference FASTA not found: {reference}")
         raise typer.Exit(1)
+
+    # A kept cache holds this build's files only. The in-process aggregation and the
+    # `--from-outputs` rebuild this build prints read every donor folder in it, and every file in
+    # a folder, as this build's: an earlier build's donor, or the record of a donor this build
+    # failed or read from a BED, would be built from as if this build had written it.
+    if keep_sample_outputs is not None and keep_sample_outputs.exists():
+        if not keep_sample_outputs.is_dir() or any(keep_sample_outputs.iterdir()):
+            logger.error(
+                f"--keep-sample-outputs {keep_sample_outputs} is not a new or empty directory. "
+                "Give a new one; to rebuild from an earlier build's kept outputs, use "
+                f"build-pon --from-outputs {keep_sample_outputs}."
+            )
+            raise typer.Exit(1)
 
     # Validate user-provided override files
     from krewlyzer.core.asset_validation import validate_file, FileSchema
@@ -1232,7 +1246,8 @@ def build_pon(
     except Exception:
         # On error, cleanup before re-raising -- but never when the caller
         # asked to keep the outputs. A failed build is exactly when the
-        # completed samples are worth having: the rerun skips them.
+        # completed samples are worth having: a rerun re-extracts every donor,
+        # while `--from-outputs` reads the kept folders.
         if keep_sample_outputs is not None:
             logger.info(f"Build failed; per-sample outputs kept in {temp_output_dir}")
         elif temp_output_dir and Path(temp_output_dir).exists():
@@ -1741,14 +1756,48 @@ def build_pon(
             target_arg = " --skip-target-regions"
         else:
             target_arg = ""
-        logger.info(
-            "  Rebuild from them without re-reading a BAM:\n"
-            f"    krewlyzer build-pon --from-outputs {temp_output_dir} "
-            f"--assay {assay} -G {genome}{target_arg} -r {reference} -o {output}"
+        _log_rebuild_command(
+            f"krewlyzer build-pon --from-outputs {temp_output_dir} "
+            f"--assay {assay} -G {genome}{target_arg} -r {reference} -o {output}",
+            Path(temp_output_dir),
         )
     elif temp_output_dir and Path(temp_output_dir).exists():
         shutil.rmtree(temp_output_dir)
         logger.debug(f"Cleaned up temp directory: {temp_output_dir}")
+
+
+def _log_rebuild_command(command: str, cache: Path) -> None:
+    """Name the command that rebuilds this PON from the kept cache, and the donors it would refuse.
+
+    Judged by what the folders hold, as `--from-outputs` judges them (`incomplete_reason`), not by
+    what the build was given: a donor given as a BED is not extracted, so its folder holds no record
+    and no motif tables, and a BAM donor whose motif or region-mds tables were not written lacks
+    them too. Each refused folder is named with its reason, and with none to rebuild from, no
+    command is offered.
+    """
+    from krewlyzer.pon import from_outputs as _from_outputs
+
+    folders = _from_outputs.discover_samples(cache)
+    reasons = {d: _from_outputs.incomplete_reason(d) for d in folders}
+    refused = {d: r for d, r in reasons.items() if r is not None}
+    for directory, reason in refused.items():
+        logger.warning(f"  {directory.name} cannot be rebuilt from: {reason}")
+    rebuildable = len(folders) - len(refused)
+    if rebuildable == 0:
+        logger.warning(
+            f"  None of its {len(folders)} donor folders can be rebuilt from with "
+            "--from-outputs; rebuild from the sample list."
+        )
+        return
+    logger.info(
+        "  Rebuild from them without re-reading a BAM "
+        f"({rebuildable} of {len(folders)} donors):\n    {command}"
+    )
+    if refused:
+        logger.warning(
+            f"  That rebuild refuses the {len(refused)} donors named above, and with "
+            f"--allow-failures builds from the other {rebuildable}."
+        )
 
 
 def _compute_gc_bias_model(all_gc_data: List[dict]) -> GcBiasModel:
