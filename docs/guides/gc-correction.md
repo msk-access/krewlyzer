@@ -91,7 +91,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -g reference.fa \
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
-| **Region Entropy** | `--gc-correct`, `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region Entropy** | `--gc-correct` | From extract | TFBS/ATAC fragment weighting |
 | **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
@@ -111,10 +111,13 @@ factors and GC correction does not depend on the output format. Each sample's me
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
 **Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
-almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
-the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) run the features that correct
-with it uncorrected, and warn. run-all records `gc_correction_applied_offtarget=False`; a single
-tool records it only into extraction's record, and only while no run has recorded one. A table
+almost every fragment), or the table is not beside the BED, no feature step fits one: run-all, the
+tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) and `region-entropy` run the
+features that correct with it uncorrected, and warn, saying whether re-extracting can give one. A
+panel with no on-target table corrects panel WPS, TFBS and ATAC with the off-target one, runs gene
+FSC uncorrected, and warns. run-all records `gc_correction_applied_offtarget=False`; a single tool
+records it only into extraction's record, and only while no run has recorded one. A table
+that cannot be read stops the run before any feature that corrects with it is computed. A table
 elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
 Nor is one beside the BED when extraction's record says it wrote none
 (`gc_correction_computed=False`): a feature step of an earlier build fitted it there, under

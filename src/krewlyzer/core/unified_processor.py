@@ -33,7 +33,7 @@ import logging
 import time
 
 from ..assets import AssetManager
-from .gc_assets import resolve_feature_gc_tables
+from .gc_assets import report_gc_tables, resolve_feature_gc_tables
 from .fsc_processor import process_fsc
 from .fsr_processor import process_fsr
 from .fsd_processor import process_fsd
@@ -342,28 +342,19 @@ def run_features(
     )
     gc_str = str(gc_off.path) if gc_off.found else None
     gc_ontarget_str = str(gc_on.path) if gc_on.found else None
-    if gc_correct and not gc_off.found:
-        logger.warning(
-            f"GC factors (off-target) {gc_off.reason} (looked for {', '.join(gc_off.searched)}). "
-            "Every feature that corrects with it runs without GC correction. Only extraction "
-            "fits one, and its log says why it wrote none. With too few off-target fragments "
-            "to fit (a panel whose targets hold almost every fragment) there is nothing to fit, "
-            "and re-extracting changes nothing. If it ran with --no-gc-correct, or its table "
-            "was not kept beside the BED, re-extract with GC correction and keep the table "
-            "beside the BED."
-        )
-    if gc_correct and is_panel_mode and not gc_on.found:
-        logger.warning(
-            f"GC factors (on-target) {gc_on.reason} (looked for {', '.join(gc_on.searched)}); "
+    report_gc_tables(
+        gc_off,
+        gc_on,
+        gc_correct=gc_correct,
+        panel_mode=bool(is_panel_mode),
+        off_effect="Every feature that corrects with it runs without GC correction.",
+        on_effect=(
             "on-target features fall back to the off-target table and gene FSC runs "
-            "uncorrected. With too few on-target fragments to fit there is nothing to fit. If "
-            "extraction ran with --no-gc-correct or without these target regions, or its "
-            "tables were not kept beside the BED, re-extract with GC correction and the target "
-            "regions, and keep its tables beside the BED."
-        )
-    for _label, _c in (("off-target", gc_off), ("on-target", gc_on)):
-        if _c.path is not None:
-            logger.info(f"  GC factors ({_label}): {_c.path.name} [{_c.kind}]")
+            "uncorrected."
+        ),
+        log=logger,
+    )
+    # run-all's mFSD corrects with these too, so it neither looks again nor warns again.
     outputs.gc_factors_choice = {"off_target": gc_off, "on_target": gc_on}
     outputs.panel_mode = bool(is_panel_mode)
 

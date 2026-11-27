@@ -175,3 +175,37 @@ def test_feature_command_exposes_output_format(command):
         "Parquet and its output is unreadable downstream"
     )
     assert "--compress" in output, f"'{command}' does not expose --compress"
+
+
+def test_no_command_gives_one_flag_to_two_options():
+    """Click binds a flag two options claim to the later one, and warns on every run.
+
+    region-entropy gave `-F` to `--gc-factors` and to `--output-format`, so `-F` never named a
+    factor table, every run (`--help` too) printed four warnings, and the docs advertised it.
+    """
+    import collections
+
+    import click
+    import typer.main
+
+    def leaves(group, prefix=()):
+        for name, command in group.commands.items():
+            if isinstance(command, click.Group):
+                yield from leaves(command, prefix + (name,))
+            else:
+                yield " ".join(prefix + (name,)), command
+
+    shared = {}
+    for name, command in leaves(typer.main.get_command(app)):
+        counts = collections.Counter(
+            flag
+            for param in command.params
+            for flag in (
+                *getattr(param, "opts", ()),
+                *getattr(param, "secondary_opts", ()),
+            )
+        )
+        reused = sorted(flag for flag, n in counts.items() if n > 1)
+        if reused:
+            shared[name] = reused
+    assert shared == {}, f"flags claimed by two options: {shared}"

@@ -172,12 +172,3 @@ class TestDualOutputArchitecture:
                 assert ".ontarget.tsv" in pattern
             else:
                 assert pattern.endswith(".tsv")
-
-    def test_ontarget_uses_ontarget_gc(self):
-        """On-target outputs should use on-target GC factors."""
-        gc_offtarget = "path/to/correction_factors.tsv"
-        gc_ontarget = "path/to/correction_factors.ontarget.tsv"
-
-        gc_for_ontarget = gc_ontarget if gc_ontarget else gc_offtarget
-
-        assert gc_for_ontarget == gc_ontarget

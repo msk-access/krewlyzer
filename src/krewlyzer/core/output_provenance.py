@@ -902,12 +902,18 @@ def record_pon_used(
     *,
     output_format: str,
     compress: bool,
+    gc_factors: Optional[dict] = None,
 ) -> bool:
     """A standalone scorer's entry in the sample's record, after it has scored.
 
     `motif`, `region-entropy` and `region-mds` do not go through `run_features`, so without this
     they checked the record (`refuse_a_second_pon`) but never wrote it: after `extract`, one could
     score with PON A and a later tool with PON B, unnoticed. Raise-only, like every single tool.
+
+    ``gc_factors`` are the tables a scorer that corrects with them used (`region-entropy`), as
+    `stamp_metadata` takes them: recorded where no run has stamped the record, like the tools on
+    the unified pipeline. Without them region-entropy filled the record in with no GC columns,
+    and every later single tool keeps a record that has been filled in.
     """
     return stamp_metadata(
         output_dir,
@@ -916,6 +922,7 @@ def record_pon_used(
         pon_path=pon_path if pon is not None else None,
         output_format=output_format,
         compress=compress,
+        gc_factors=gc_factors,
         owns_record=False,
     )
 
@@ -989,9 +996,11 @@ def stamp_metadata(
                 f"{existing.name} already records how this sample was run; a single tool keeps it"
             )
             return False
-        gc_factors = (
-            None  # raising the PON record says nothing about this tool's GC tables
-        )
+        # Raising the PON record says nothing about this tool's GC tables, and GC fields absent
+        # from a stamped record are not filled in either: builds before the GC-lookup fix stamped
+        # the PON fields with none, and `from_outputs.gc_reason` refuses such a folder on their
+        # absence. One tool's tables written in would vouch for features it never computed.
+        gc_factors = None
 
     for name, value in fields.items():
         frame[name] = value

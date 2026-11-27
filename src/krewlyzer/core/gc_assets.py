@@ -2,8 +2,11 @@
 GC factor tables: where a sample's table is, or why there is none.
 
 Only extraction fits a table, and writes it beside the BED it fitted it from. A feature step
-reads that table through `resolve_gc_factors`, or, with none, runs without GC correction;
-`run_features` warns why, and run-all records the choice (`GcFactorsChoice.record`).
+reads that table through `resolve_gc_factors`, or, with none, runs without GC correction.
+run_features (run-all and the unified-pipeline tools) and `region-entropy` find and check their
+tables with `resolve_feature_gc_tables`, say which they use and why one is missing with
+`report_gc_tables`, and record the choice (`GcFactorsChoice.record`); run-all's mFSD takes
+run_features' choice. The single `mfsd` tool takes its table by name (`--correction-factors`).
 """
 
 from dataclasses import dataclass
@@ -167,8 +170,9 @@ def resolve_gc_factors(bed_path: Path, population: str) -> GcFactorsChoice:
 def resolve_feature_gc_tables(
     bed_path: Path, gc_correct: bool, panel_mode: bool
 ) -> "tuple[GcFactorsChoice, GcFactorsChoice]":
-    """The (off-target, on-target) factor tables run_features corrects with: the Rust pass and
-    every Python-side consumer (gene FSC, panel WPS, TFBS, ATAC).
+    """The (off-target, on-target) factor tables a sample's features correct with: run_features'
+    Rust pass and its Python-side consumers (gene FSC, panel WPS, TFBS, ATAC), the single tool
+    `region-entropy`, and run-all's mFSD, which takes run_features' choice.
     """
     if not gc_correct:
         off = on = GcFactorsChoice(None, "none", "gc correction disabled")
@@ -195,6 +199,46 @@ def resolve_feature_gc_tables(
                     "refusing to run rather than record a correction that did not happen"
                 ) from e
     return off, on
+
+
+def report_gc_tables(
+    off: GcFactorsChoice,
+    on: GcFactorsChoice,
+    *,
+    gc_correct: bool,
+    panel_mode: bool,
+    off_effect: str,
+    on_effect: str,
+    log: logging.Logger,
+) -> None:
+    """Log the tables `resolve_feature_gc_tables` chose, and warn of a missing one: why it is
+    missing, what runs without it (``off_effect``, ``on_effect``: the caller's features), and
+    whether re-extracting can give one.
+
+    One text for every consumer. region-entropy had its own, which said only that TFBS and ATAC
+    ran uncorrected, nothing of when re-extracting helps, and nothing at all of a missing
+    on-target table.
+    """
+    if gc_correct and not off.found:
+        log.warning(
+            f"GC factors (off-target) {off.reason} (looked for {', '.join(off.searched)}). "
+            f"{off_effect} Only extraction fits one, and its log says why it wrote none. With "
+            "too few off-target fragments to fit (a panel whose targets hold almost every "
+            "fragment) there is nothing to fit, and re-extracting changes nothing. If it ran "
+            "with --no-gc-correct, or its table was not kept beside the BED, re-extract with GC "
+            "correction and keep the table beside the BED."
+        )
+    if gc_correct and panel_mode and not on.found:
+        log.warning(
+            f"GC factors (on-target) {on.reason} (looked for {', '.join(on.searched)}); "
+            f"{on_effect} With too few on-target fragments to fit there is nothing to fit. If "
+            "extraction ran with --no-gc-correct or without these target regions, or its "
+            "tables were not kept beside the BED, re-extract with GC correction and the target "
+            "regions, and keep its tables beside the BED."
+        )
+    for label, choice in (("off-target", off), ("on-target", on)):
+        if choice.path is not None:
+            log.info(f"  GC factors ({label}): {choice.path.name} [{choice.kind}]")
 
 
 def require_gc_for_pon(choices: dict, panel_mode: bool) -> None:
