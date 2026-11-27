@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3311,14 +3311,57 @@
   sufficient.</p>
 <h3 id="changed">Changed</h3>
 <ul>
-<li><strong><code>krewlyzer fsc</code> and <code>fsr</code> choose the window by mode, as run-all does.</strong> Without
+<li><strong>Only extraction fits a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table; a feature step corrects with that table or runs
+  uncorrected.</strong> A feature step that found no off-target table beside its <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> refitted one from the
+  whole <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> -- on-target fragments included in panel mode, so not the model extraction fits -- into
+  its output folder, and corrected with it. It did so after run-all's or <code>build-pon</code>'s own
+  extraction fitted none (a panel whose targets hold almost every fragment), while the record said
+  none was computed; in every single tool and in Nextflow's tool-level mode; and in a run-all rerun
+  over a folder a single tool had refitted into, which took that table for extraction's;
+  <code>build-pon</code>'s <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> gate accepted a donor corrected with it. The refit also numbered chromosomes
+  once for the valid regions and again for the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, so unless the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> met its contigs in the valid
+  regions' order, its fragments were checked against another chromosome's valid regions. The refit
+  is removed (<code>run_unified_pipeline</code> no longer takes <code>gc_ref_path</code>, <code>valid_regions_path</code> or
+  <code>correction_out_path</code>), and a table is looked for only beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>: one in the output folder
+  may be another extraction's. With none, every feature that corrects with it runs uncorrected;
+  run-all and the tools on the unified pipeline (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>wps</code>, <code>ocf</code>) warn with each
+  cause and its remedy, for the on-target table too: re-extract with <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> correction, unless too few
+  fragments left nothing to fit. run-all records it (<code>gc_factors_offtarget=none:&lt;reason&gt;</code>,
+  <code>gc_correction_applied_offtarget=False</code>). A single tool records it only into extraction's record,
+  and only while no run has recorded one: into a folder without a record it records nothing.
+  <code>region-entropy</code> and <code>mfsd</code> record no <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> choice. A table beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> is not used either when
+  extraction's record says it wrote none (<code>gc_correction_computed=False</code>): a feature step of an
+  earlier build fitted it there, under extraction's name, and a rerun reusing the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> took it for
+  extraction's. With no record beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, the table there is used, whatever wrote it.
+  <code>build-pon</code> writes no sample record: it refuses such a donor, from a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> or a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and stops;
+  with <code>--allow-failures</code> it leaves the donor out. <code>build-pon --from-outputs</code> refuses a donor
+  recorded as corrected with a table extraction did not write.
+  <code>tests/invariants/test_factor_table_writes.py</code> pins these, and that the table extraction fitted
+  changes the features.</li>
+</ul>
+<blockquote>
+<p><strong>Output change:</strong> where extraction fits no off-target table (a panel whose targets hold almost
+every fragment), run-all, a single tool and Nextflow's tool-level mode now write uncorrected
+<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted features, where they used to correct them with a table refitted from the whole <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>:
+<abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>, <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>, <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr>, <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> and genome-wide <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>, and, where the on-target table is
+missing too, panel <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr>, <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> and <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> and run-all's <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr>, which fall back to the off-target
+one. <code>build-pon</code>, from a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> or a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>.gz, now stops on such a donor, or with <code>--allow-failures</code>
+leaves it out. A single tool or tool-level mode given a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with no extraction table beside it
+does the same, and <code>region-entropy</code> no longer uses a table it finds in its output folder. A
+folder an earlier build wrote into after extraction fitted no table can hold a refitted table
+beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, under extraction's name: run-all's folder, a single tool's with <code>-o</code> set to the
+<abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>'s own folder, or a <code>build-pon --keep-sample-outputs</code> cache. It is not used where
+extraction's record says it wrote none. It is used where there is no record (a kept <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> cache),
+or where a 0.9.x record says a table was computed when none was written. run-all and <code>extract</code>
+refuse a 0.9.x folder, whose record does not list the read filters: re-extract into a fresh
+folder, and do not give such a folder's BEDs to a single tool or <code>build-pon</code>.
+- <strong><code>krewlyzer fsc</code> and <code>fsr</code> choose the window by mode, as run-all does.</strong> Without
   <code>--continue-n</code>, a run with target regions now writes one 100 kb bin per row, and one without
   writes 50 (5 Mb). Both tools defaulted to 50 whatever the mode, so a panel sample's single-tool
   <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> held 1/50th of run-all's rows (on the synthetic sample, none). An explicit
   <code>--continue-n</code> is kept. The rule is one helper, <code>fsc_processor.default_continue_n</code>, that run-all
-  calls too; its two numbers are in the claims registry.</li>
-<li>
-<p><strong><code>krewlyzer motif</code> excludes the genome's blacklist and takes run-all's read filters.</strong> It
+  calls too; its two numbers are in the claims registry.
+- <strong><code>krewlyzer motif</code> excludes the genome's blacklist and takes run-all's read filters.</strong> It
   passed no blacklist and fixed mapq 20, 65-1000 bp and duplicates skipped, so its tables counted
   fragments run-all's excluded (on the synthetic sample, <abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> 0.960 against run-all's 0.927).
   It now takes <code>-x/--exclude-regions</code> (default: the bundled blacklist), <code>--mapq</code>, <code>--minlen</code>,
@@ -3328,7 +3371,8 @@
   <code>asset_resolution.resolve_exclude_regions</code>. Run-all passed the bundled path even where the
   file did not exist; that is now a warning, and the run keeps the fragments. <code>extract</code>'s
   fallback to a path that does not exist is removed.</p>
-</li>
+</blockquote>
+<ul>
 <li>
 <p><strong>A rerun into a sample's folder must use the settings recorded there.</strong> A rerun with other
   settings writes another set of tables, and whatever the first run wrote that the second does not
@@ -3574,6 +3618,19 @@
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
   (<code>tests/invariants/test_extract_record.py</code>).</li>
+<li><strong>A <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table is written in every format or none, and named only when written.</strong> With
+  <code>-F both</code>, Rust wrote the <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> factor table and then failed on the Parquet one: the record said
+  <code>gc_correction_computed=False</code> while a <code>.tsv</code> table sat in the folder, and every tool reading it
+  found and used that table. Extraction's Rust writer (<code>compute_and_write_gc_factors</code>), now the
+  only one (see Changed), writes every format or none, removing what it wrote before raising
+  (<code>gc_correction::write_factor_tables</code>). run-all's on-target write logged "Wrote 0 ... <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>
+  factors", and <code>process_sample</code>'s (<code>build-pon</code>) two writes "Computed 0", when nothing was fitted
+  or written, and a population with no observations at all (a panel
+  whose targets no fragment reaches) was skipped without a word. Every write from extraction's
+  observations now goes through one helper, <code>sample_processor.write_gc_factor_table</code>, which names
+  a table only when it wrote one and warns, per population, when there was nothing to fit, none
+  could be fitted, or the computation failed (<code>tests/invariants/test_factor_table_writes.py</code>, which
+  pins each write site).</li>
 <li><strong>run-all no longer scores a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> extracted with other filters.</strong> <code>extract --mapq 30 -F parquet</code>
   then <code>run-all</code> (mapq 20) into the same folder exited 0: the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> existed, so run-all kept it and
   extract's record, and read the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> again at mapq 20 for the motif tables. Two filter sets under
@@ -3627,7 +3684,7 @@
   (<code>output_provenance.refuse_a_bed_the_record_does_not_describe</code>,
   <code>tests/invariants/test_rerun_bed.py</code>); a samplesheet <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> that Nextflow stages as a link, a route
   the pipeline cannot reach today, is read with the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside its source, where there
-  is one, rather than refitted.</li>
+  is one.</li>
 <li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
@@ -3872,8 +3929,8 @@
     <code>--gc-correct/--no-gc-correct</code>. Its <code>--gc-factors</code> validation now accepts the six-column table
     in any format; it used to reject run-all's own Parquet tables.</li>
 <li>Nextflow tool-level mode passes extract's factor tables to every <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted tool; each used to
-    refit factors from the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with a different algorithm. A tool that still has to refit records
-    <code>recomputed</code> and warns.</li>
+    refit factors from the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with a different algorithm. No tool refits now (see the entry on
+    which step fits a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table).</li>
 <li><code>--no-gc-correct</code> is honoured by these consumers; previously a stale table was applied anyway.</li>
 <li><code>metadata</code> records which kind of table each population used (<code>gc_factors_offtarget</code>,
     <code>gc_factors_ontarget</code>, <code>gc_correction_applied_*</code>), plus <code>fragments_on_missing_contig</code> and
@@ -3884,8 +3941,8 @@
     directories written before this fix. Both apply one rule: a panel donor needs its on-target
     table too (<code>--from-outputs</code> checked only off-target, so a panel donor whose on-target fit did
     not run entered the baseline with uncorrected gene <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>).</li>
-<li>A factor table never outlives the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> it was fitted on: writing a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, or refitting from
-    one, first removes that sample's earlier tables in every format. A rerun that fitted nothing,
+<li>A factor table never outlives the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> it was fitted on: writing a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> first removes that
+    sample's earlier tables in every format. A rerun that fitted nothing,
     or wrote another format, used to reuse the previous run's weights (the resolver prefers
     Parquet) while the metadata recorded the correction as applied.</li>
 <li>Both loaders require all six documented columns; a table without <code>length_bin_max</code> passed
