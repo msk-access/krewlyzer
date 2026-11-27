@@ -16,6 +16,7 @@ the same reason.
 from __future__ import annotations
 
 import gzip
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -670,3 +671,117 @@ def test_a_donor_whose_extraction_wrote_its_table_is_accepted(tmp_path):
         gc_correction_computed=True,
     )
     assert from_outputs.gc_reason(d, "s") is None
+
+
+# The command a kept cache (`--keep-sample-outputs`) is rebuilt with, judged by what its folders
+# hold, as `--from-outputs` judges them: a donor given as a BED, or one whose motif or region-mds
+# tables were not written, is refused by that rebuild.
+
+REBUILD = "krewlyzer build-pon --from-outputs CACHE"
+
+
+def _hint(cache, caplog):
+    from krewlyzer.pon.build import _log_rebuild_command
+
+    with caplog.at_level(logging.INFO, logger="build-pon"):
+        _log_rebuild_command(REBUILD, cache)
+    offered = any(REBUILD in r.getMessage() for r in caplog.records)
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    return offered, warnings
+
+
+def test_the_rebuild_command_counts_and_names_the_donors_it_refuses(corpus, caplog):
+    victim = sorted(corpus.iterdir())[0]
+    for table in victim.glob("*.EndMotif.*"):
+        table.unlink()
+
+    offered, warnings = _hint(corpus, caplog)
+
+    assert offered
+    assert f"{N_SAMPLES - 1} of {N_SAMPLES}" in caplog.text
+    assert any(victim.name in w and "EndMotif" in w for w in warnings), warnings
+
+
+def test_a_complete_cache_is_offered_with_no_warning(corpus, caplog):
+    offered, warnings = _hint(corpus, caplog)
+
+    assert offered and f"{N_SAMPLES} of {N_SAMPLES}" in caplog.text
+    assert not warnings, warnings
+
+
+@pytest.mark.parametrize("contents", ["none", "a donor with no record or motif tables"])
+def test_no_command_is_offered_when_no_donor_can_be_rebuilt(tmp_path, caplog, contents):
+    """A BED cohort's cache (features, but no record and no motif tables), or an empty one."""
+    cache = tmp_path / "kept"
+    cache.mkdir()
+    if contents != "none":
+        donor = cache / "DONOR0-T"
+        donor.mkdir()
+        (donor / "DONOR0-T.FSD.tsv").write_text("arm\n1p\n")
+
+    offered, warnings = _hint(cache, caplog)
+
+    assert not offered
+    assert warnings, "no word on why nothing can be rebuilt"
+
+
+# A kept cache holds only this build's files: `--from-outputs` and the in-process aggregation read
+# every folder and file in it as this build's, so the build refuses a directory an earlier run used.
+
+
+def _build_keeping(tmp_path, keep):
+    from typer.testing import CliRunner
+
+    from krewlyzer.cli import app
+
+    listing = tmp_path / "samples.txt"
+    listing.write_text("/nonexistent.bam\n")
+    return CliRunner().invoke(
+        app,
+        [
+            "build-pon",
+            str(listing),
+            "--assay",
+            "xs1",
+            "-r",
+            "/dev/null",
+            "-o",
+            str(tmp_path / "x.pon.parquet"),
+            "--keep-sample-outputs",
+            str(keep),
+        ],
+    )
+
+
+def _refusals(caplog, keep):
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.levelno >= logging.ERROR and str(keep) in r.getMessage()
+    ]
+
+
+def test_a_kept_directory_an_earlier_run_used_is_refused(tmp_path, caplog):
+    """An earlier build's donor folder would be rebuilt from as this build's, or its record read
+    for a donor this build failed or read from a BED. Refused before any work, untouched.
+    """
+    keep = tmp_path / "kept"
+    (keep / "DONOR0-T").mkdir(parents=True)
+    with caplog.at_level(logging.ERROR, logger="build-pon"):
+        result = _build_keeping(tmp_path, keep)
+
+    assert result.exit_code == 1
+    refusals = _refusals(caplog, keep)
+    assert refusals and "--from-outputs" in refusals[0], caplog.text
+    assert [p.name for p in keep.iterdir()] == ["DONOR0-T"]
+
+
+@pytest.mark.parametrize("state", ["absent", "empty"])
+def test_a_new_or_empty_kept_directory_is_not_refused(tmp_path, caplog, state):
+    keep = tmp_path / "kept"
+    if state == "empty":
+        keep.mkdir()
+    with caplog.at_level(logging.ERROR, logger="build-pon"):
+        _build_keeping(tmp_path, keep)
+
+    assert not _refusals(caplog, keep), caplog.text

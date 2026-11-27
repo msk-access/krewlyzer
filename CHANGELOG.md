@@ -73,11 +73,12 @@ All notable changes to this project will be documented in this file.
   whole BED -- on-target fragments included in panel mode, so not the model extraction fits -- into
   its output folder, and corrected with it. It did so after run-all's or `build-pon`'s own
   extraction fitted none (a panel whose targets hold almost every fragment), while the record said
-  none was computed; in every single tool and in Nextflow's tool-level mode; and in a run-all rerun
-  over a folder a single tool had refitted into, which took that table for extraction's;
+  none was computed; in every single tool and in Nextflow's tool-level mode; and in a rerun over a
+  folder an earlier feature step had refitted into, which took that table for extraction's;
   `build-pon`'s GC gate accepted a donor corrected with it. The refit also numbered chromosomes
-  once for the valid regions and again for the BED, so unless the BED met its contigs in the valid
-  regions' order, its fragments were checked against another chromosome's valid regions. The refit
+  once for the valid regions and again for the BED, so unless the BED met the valid regions'
+  contigs in their order, with no contig only one of them holds ahead of the others, its fragments
+  were checked against another chromosome's valid regions. The refit
   is removed (`run_unified_pipeline` no longer takes `gc_ref_path`, `valid_regions_path` or
   `correction_out_path`), and a table is looked for only beside the BED: one in the output folder
   may be another extraction's. With none, every feature that corrects with it runs uncorrected;
@@ -90,7 +91,7 @@ All notable changes to this project will be documented in this file.
   extraction's record says it wrote none (`gc_correction_computed=False`): a feature step of an
   earlier build fitted it there, under extraction's name, and a rerun reusing the BED took it for
   extraction's. With no record beside the BED, the table there is used, whatever wrote it.
-  `build-pon` writes no sample record: it refuses such a donor, from a BAM or a BED, and stops;
+  `build-pon` refuses a donor whose extraction fitted no table, from a BAM or a BED, and stops;
   with `--allow-failures` it leaves the donor out. `build-pon --from-outputs` refuses a donor
   recorded as corrected with a table extraction did not write.
   `tests/invariants/test_factor_table_writes.py` pins these, and that the table extraction fitted
@@ -107,7 +108,8 @@ All notable changes to this project will be documented in this file.
   > folder an earlier build wrote into after extraction fitted no table can hold a refitted table
   > beside the BED, under extraction's name: run-all's folder, a single tool's with `-o` set to the
   > BED's own folder, or a `build-pon --keep-sample-outputs` cache. It is not used where
-  > extraction's record says it wrote none. It is used where there is no record (a kept PON cache),
+  > extraction's record says it wrote none. It is used where there is no record (a PON cache kept
+  > by 0.9.2 or earlier),
   > or where a 0.9.x record says a table was computed when none was written. run-all and `extract`
   > refuse a 0.9.x folder, whose record does not list the read filters: re-extract into a fresh
   > folder, and do not give such a folder's BEDs to a single tool or `build-pon`.
@@ -296,6 +298,30 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **A `build-pon --keep-sample-outputs` cache carries each donor's record, and only this build's
+  files.** A successful build ends by printing the `--from-outputs` command that rebuilds the PON
+  from the cache without re-reading a BAM, and that rebuild refused every donor as written before
+  the GC-lookup fix: it reads each donor's GC provenance from its record (`{sample}.metadata`), and
+  the PON build wrote none. run-all and `extract` write the record through
+  `write_extraction_outputs`; the build's per-donor path wrote the two factor tables itself and
+  skipped it. `write_extraction_outputs` now writes the on-target table too, under one rule (GC
+  correction on, and target regions given), and run-all, `extract` and the build all call it
+  (`tests/invariants/test_pon_cache_record.py` compares the build's record with `extract`'s for
+  the same settings). A record makes an earlier build's folders readable too, so the cache must
+  now hold this build's files only: `--keep-sample-outputs` must be a new or empty directory, and
+  one an earlier run used is refused before any work, naming `--from-outputs` to rebuild from it.
+  Reused, the printed rebuild would have built from an earlier build's donors as well, read an
+  earlier record for a donor this build failed or read from a BED, or judged a donor by an earlier
+  run's `.metadata.parquet` where the build judged it by its own TSV record; the in-process build
+  would have collected an earlier build's region-MDS tables for a donor whose own were not
+  written. The printed command now comes with what `--from-outputs` would make of each folder
+  (`incomplete_reason`): how many donors it can rebuild from, and each one it refuses with the
+  reason, such as a donor given as a BED, which the build does not extract, so its folder holds no
+  record and no motif tables. With none to rebuild from, no command is printed.
+
+  > **Output change:** each donor's folder in a kept cache gains `{sample}.metadata.tsv` and the
+  > BED's tabix index. `build-pon` refuses a `--keep-sample-outputs` directory that holds
+  > anything, so a rerun of `scripts/build_pon.sh` needs a new `KEEP_DIR`.
 - **`krewlyzer extract --no-gc-correct` applies the assay's targets and the bundled blacklist.**
   `extract` built its AssetManager only under `--gc-correct`, and both the assay's bundled
   targets and the genome's blacklist are resolved through it. So `extract --no-gc-correct -A xs1`

@@ -62,8 +62,9 @@ OUTPUT="${OUTPUT_DIR}/${ASSAY}.${VARIANT}.pon.parquet"
 #
 # Without this they are extracted to a temp directory and deleted on success,
 # so every rebuild re-runs extraction over every BAM -- hours -- and
-# leave-one-out calibration costs n of those. They also survive a failed build,
-# so a rerun skips what finished.
+# leave-one-out calibration costs n of those. They also survive a failed build;
+# `build-pon --from-outputs` rebuilds from them. It must be a new or empty
+# directory: build-pon refuses one an earlier run used, so give each build its own.
 KEEP_DIR="${KEEP_DIR:-${OUTPUT_DIR}/${VARIANT}.sample_outputs}"
 
 # Recorded in the PON alongside a salted digest of the sample IDs. Free text;

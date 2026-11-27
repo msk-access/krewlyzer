@@ -10,7 +10,7 @@ This module provides the core extraction infrastructure used by all commands:
 Architecture:
     extract_sample()          - Core extraction, returns ExtractionResult
     write_motif_outputs()     - Write motif files from ExtractionResult
-    write_extraction_outputs() - Write BED metadata + GC factors
+    write_extraction_outputs() - Write the record, BED index and GC factor tables (every path)
     process_sample()          - High-level orchestrator (backward compatible)
 
 The separation allows each command to use exactly what it needs while
@@ -834,17 +834,23 @@ def write_extraction_outputs(
     """
     Write extraction outputs (BED index, metadata, GC factors).
 
+    The one writer of what an extraction leaves beside its BED, for every path that extracts:
+    run-all, `extract` and the PON build (`process_sample`). The tools reading the folder, and
+    `build-pon --from-outputs` reading a kept cache, judge the BED by this record, so a path that
+    skipped it left a folder they refused, or one they judged by an earlier extraction's record.
+
     After extract_sample() writes the BED.gz file, this function:
     - Creates tabix index for the BED.gz
     - Writes the sample's record, `{sample}.metadata.*`
-    - Computes and writes GC correction factors
+    - Computes and writes GC correction factors, off-target and, for a panel, on-target
 
     Files written:
     - {sample}.bed.gz.tbi: Tabix index (for random access)
     - {sample}.metadata.{tsv,tsv.gz,parquet}: The record: the filters the extraction applied,
-      and whether a GC factor table was written
-    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: GC correction factors, when any length
-      bin could be fitted
+      and whether an off-target GC factor table was written
+    - {sample}.correction_factors.{parquet,tsv.gz,tsv}: off-target GC correction factors, when
+      any length bin could be fitted
+    - {sample}.correction_factors.ontarget.{parquet,tsv.gz,tsv}: on-target ones, for a panel
 
     Args:
         result: ExtractionResult from extract_sample()
@@ -854,8 +860,8 @@ def write_extraction_outputs(
         compute_gc_factors: Whether to compute GC correction (default: True)
 
     Returns:
-        Dict mapping output type to file path:
-        {'tbi': Path, 'metadata': Path, 'gc_factors': Path}
+        Dict mapping output type to file path, naming a factor table only when one was written:
+        {'tbi': Path, 'metadata': Path, 'gc_factors': Path, 'gc_factors_ontarget': Path}
 
     Raises:
         ValueError: If result.bed_path is None
@@ -939,6 +945,23 @@ def write_extraction_outputs(
     ):
         outputs["gc_factors"] = factor_table_path(output_dir, sample, "off_target")
         meta_flat["gc_correction_computed"] = True
+    # A panel's on-target features (gene FSC, panel WPS, mFSD) correct with their own table.
+    if (
+        compute_gc_factors
+        and result.is_panel_mode
+        and write_gc_factor_table(
+            result.gc_observations_ontarget,
+            genome,
+            output_dir,
+            sample,
+            "on_target",
+            output_format=output_format,
+            compress=compress,
+        )
+    ):
+        outputs["gc_factors_ontarget"] = factor_table_path(
+            output_dir, sample, "on_target"
+        )
 
     # The record is rewritten from scratch, but a setting extraction does not decide (run-all's E1
     # aggregation) is the folder's, not this run's. Carried over for run-all re-extracting a deleted
@@ -999,7 +1022,7 @@ def process_sample(
     pon_model: Optional[Path] = None,
     assay: Optional[str] = None,
     temp_dir: Optional[Path] = None,
-    # Output format (forwarded to GC factor writes; feature outputs use run_features params)
+    # Output format of every table: extraction's record and factor tables, and the features
     output_format: str,
     compress: bool,
     write_motif_files: bool = False,
@@ -1008,9 +1031,11 @@ def process_sample(
     Process a single sample through full feature extraction pipeline.
 
     This is the high-level orchestrator that combines extraction with
-    all feature extraction. It is used by:
-    - wrapper.py (run-all): Single sample with all features
-    - pon/build.py (build-pon): Multi-sample PON building
+    all feature extraction. It is used by pon/build.py (build-pon), once per donor.
+
+    From a BAM it writes what run-all and `extract` write beside the BED (the record, the GC
+    factor tables and the index, `write_extraction_outputs`), then the features. A BED input
+    is not extracted, so nothing is written for it before the features.
 
     For extraction-only use cases, use extract_sample() directly.
 
@@ -1035,7 +1060,6 @@ def process_sample(
         FileNotFoundError: If input file doesn't exist
     """
     params = params or SampleParams()
-    assets = AssetManager(params.genome)
 
     input_path = Path(input_path)
     output_dir = Path(output_dir)
@@ -1148,27 +1172,19 @@ def process_sample(
             f"[{short_id}] +{elapsed:.0f}s | Extract done | {result.fragment_count:,} frags | Mem: {current_mem:.1f}GB"
         )
 
-        # === Compute GC correction factors for downstream tools ===
-        # Off-target factors (WGS-like, primary); on-target in panel mode (FSC, RegionEntropy).
-        write_gc_factor_table(
-            result.gc_observations,
-            assets,
+        # === The record and GC factor tables, by the writer run-all and `extract` use ===
+        # `run_features` below stamps this record, and `build-pon --from-outputs` judges a kept
+        # cache's donor by it. Without it every donor was refused as written before the GC-lookup
+        # fix, or an earlier extraction's record in the folder was stamped and disowned the
+        # tables written here.
+        write_extraction_outputs(
+            result,
             output_dir,
-            sample_name,
-            "off_target",
+            genome=params.genome,
+            assay=assay,
             output_format=output_format,
             compress=compress,
         )
-        if result.is_panel_mode:
-            write_gc_factor_table(
-                result.gc_observations_ontarget,
-                assets,
-                output_dir,
-                sample_name,
-                "on_target",
-                output_format=output_format,
-                compress=compress,
-            )
     else:
         outputs.bed_path = input_path
         logger.info("Using pre-extracted BED.gz")

@@ -7168,7 +7168,15 @@ fabricated baseline shipped for months.
 Per-sample features used to be extracted to a temp directory and deleted on
 success, so every rebuild re-ran extraction over every BAM — hours — and
 leave-one-out calibration would have cost *n* of those. The script keeps them,
-and they survive a failed build so a rerun skips what finished.
+and they survive a failed build. A rerun re-extracts every donor; a successful
+build ends by printing the `--from-outputs` command that rebuilds from the kept
+folders instead, with how many donors it can rebuild from and each it would
+refuse. A donor given as a BED is not extracted, so its folder cannot be rebuilt
+from.
+
+The directory must be new or empty: `build-pon` refuses one an earlier run used,
+because the rebuild reads every folder and file in it as this build's. Give each
+build its own `KEEP_DIR`.
 
 ### After the build
 
@@ -7309,8 +7317,8 @@ tool records it only into extraction's record, and only while no run has recorde
 elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
 Nor is one beside the BED when extraction's record says it wrote none
 (`gc_correction_computed=False`): a feature step of an earlier build fitted it there, under
-extraction's name. With no record beside the BED, as in a `build-pon --keep-sample-outputs` cache,
-the table there is used, whatever wrote it. `build-pon` refuses a donor without extraction's table,
+extraction's name. With no record beside the BED, as in a `build-pon --keep-sample-outputs` cache
+kept by 0.9.2 or earlier, the table there is used, whatever wrote it. `build-pon` refuses a donor without extraction's table,
 from a BAM or a BED, and stops; with `--allow-failures` it leaves the donor out. `--from-outputs`
 refuses a donor recorded as corrected with a table extraction did not write.
 
