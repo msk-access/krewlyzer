@@ -3316,11 +3316,12 @@
   whole <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> -- on-target fragments included in panel mode, so not the model extraction fits -- into
   its output folder, and corrected with it. It did so after run-all's or <code>build-pon</code>'s own
   extraction fitted none (a panel whose targets hold almost every fragment), while the record said
-  none was computed; in every single tool and in Nextflow's tool-level mode; and in a run-all rerun
-  over a folder a single tool had refitted into, which took that table for extraction's;
+  none was computed; in every single tool and in Nextflow's tool-level mode; and in a rerun over a
+  folder an earlier feature step had refitted into, which took that table for extraction's;
   <code>build-pon</code>'s <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> gate accepted a donor corrected with it. The refit also numbered chromosomes
-  once for the valid regions and again for the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, so unless the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> met its contigs in the valid
-  regions' order, its fragments were checked against another chromosome's valid regions. The refit
+  once for the valid regions and again for the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, so unless the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> met the valid regions'
+  contigs in their order, with no contig only one of them holds ahead of the others, its fragments
+  were checked against another chromosome's valid regions. The refit
   is removed (<code>run_unified_pipeline</code> no longer takes <code>gc_ref_path</code>, <code>valid_regions_path</code> or
   <code>correction_out_path</code>), and a table is looked for only beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>: one in the output folder
   may be another extraction's. With none, every feature that corrects with it runs uncorrected;
@@ -3333,7 +3334,7 @@
   extraction's record says it wrote none (<code>gc_correction_computed=False</code>): a feature step of an
   earlier build fitted it there, under extraction's name, and a rerun reusing the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> took it for
   extraction's. With no record beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, the table there is used, whatever wrote it.
-  <code>build-pon</code> writes no sample record: it refuses such a donor, from a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> or a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and stops;
+  <code>build-pon</code> refuses a donor whose extraction fitted no table, from a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> or a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and stops;
   with <code>--allow-failures</code> it leaves the donor out. <code>build-pon --from-outputs</code> refuses a donor
   recorded as corrected with a table extraction did not write.
   <code>tests/invariants/test_factor_table_writes.py</code> pins these, and that the table extraction fitted
@@ -3351,7 +3352,8 @@ does the same, and <code>region-entropy</code> no longer uses a table it finds i
 folder an earlier build wrote into after extraction fitted no table can hold a refitted table
 beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, under extraction's name: run-all's folder, a single tool's with <code>-o</code> set to the
 <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>'s own folder, or a <code>build-pon --keep-sample-outputs</code> cache. It is not used where
-extraction's record says it wrote none. It is used where there is no record (a kept <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> cache),
+extraction's record says it wrote none. It is used where there is no record (a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> cache kept
+by 0.9.2 or earlier),
 or where a 0.9.x record says a table was computed when none was written. run-all and <code>extract</code>
 refuse a 0.9.x folder, whose record does not list the read filters: re-extract into a fresh
 folder, and do not give such a folder's BEDs to a single tool or <code>build-pon</code>.
@@ -3548,7 +3550,32 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
-<li><strong><code>krewlyzer extract --no-gc-correct</code> applies the assay's targets and the bundled blacklist.</strong>
+<li><strong>A <code>build-pon --keep-sample-outputs</code> cache carries each donor's record, and only this build's
+  files.</strong> A successful build ends by printing the <code>--from-outputs</code> command that rebuilds the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
+  from the cache without re-reading a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>, and that rebuild refused every donor as written before
+  the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-lookup fix: it reads each donor's <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> provenance from its record (<code>{sample}.metadata</code>), and
+  the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build wrote none. run-all and <code>extract</code> write the record through
+  <code>write_extraction_outputs</code>; the build's per-donor path wrote the two factor tables itself and
+  skipped it. <code>write_extraction_outputs</code> now writes the on-target table too, under one rule (<abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>
+  correction on, and target regions given), and run-all, <code>extract</code> and the build all call it
+  (<code>tests/invariants/test_pon_cache_record.py</code> compares the build's record with <code>extract</code>'s for
+  the same settings). A record makes an earlier build's folders readable too, so the cache must
+  now hold this build's files only: <code>--keep-sample-outputs</code> must be a new or empty directory, and
+  one an earlier run used is refused before any work, naming <code>--from-outputs</code> to rebuild from it.
+  Reused, the printed rebuild would have built from an earlier build's donors as well, read an
+  earlier record for a donor this build failed or read from a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, or judged a donor by an earlier
+  run's <code>.metadata.parquet</code> where the build judged it by its own <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> record; the in-process build
+  would have collected an earlier build's region-<abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> tables for a donor whose own were not
+  written. The printed command now comes with what <code>--from-outputs</code> would make of each folder
+  (<code>incomplete_reason</code>): how many donors it can rebuild from, and each one it refuses with the
+  reason, such as a donor given as a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, which the build does not extract, so its folder holds no
+  record and no motif tables. With none to rebuild from, no command is printed.</li>
+</ul>
+<blockquote>
+<p><strong>Output change:</strong> each donor's folder in a kept cache gains <code>{sample}.metadata.tsv</code> and the
+<abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>'s tabix index. <code>build-pon</code> refuses a <code>--keep-sample-outputs</code> directory that holds
+anything, so a rerun of <code>scripts/build_pon.sh</code> needs a new <code>KEEP_DIR</code>.
+- <strong><code>krewlyzer extract --no-gc-correct</code> applies the assay's targets and the bundled blacklist.</strong>
 <code>extract</code> built its AssetManager only under <code>--gc-correct</code>, and both the assay's bundled
   targets and the genome's blacklist are resolved through it. So <code>extract --no-gc-correct -A xs1</code>
   ran in WGS mode with no blacklist and exited 0, while run-all, which always builds the
@@ -3560,8 +3587,8 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   correction and carry on without the targets and the blacklist, and with <code>--no-gc-correct</code> it
   ran without them. Held by
   <code>tests/invariants/test_extract_assets_without_gc.py</code>, which also runs run-all on the same
-  sample and compares the regions each hands to extraction.</li>
-<li><strong>A named assay or the default blacklist whose bundled file is missing is an error, not WGS.</strong>
+  sample and compares the regions each hands to extraction.
+- <strong>A named assay or the default blacklist whose bundled file is missing is an error, not WGS.</strong>
   For a genome krewlyzer knows whose data folder lacks the files, <code>resolve_target_regions</code> took a
   named panel assay's missing targets for WGS, at debug level, and <code>resolve_exclude_regions</code> only
   warned that the blacklist was missing. So <code>extract -A xs1</code> and <code>run-all -A xs1</code> exited 0 with
@@ -3586,14 +3613,14 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   extract (with and without <code>--gc-correct</code>) and run-all. An explicit <code>-T</code> or <code>-x</code> that is an LFS
   pointer is refused the same way. Five tests that take the bundled blacklist by default are now
   marked <code>requires_data</code> (without the data, or with only its LFS pointers, they had run without
-  one), and the synthetic motif test passes the harness's own blacklist.</li>
-<li><strong>Nextflow: an unknown <code>--genome</code> stops the run at launch.</strong> It failed every extract task
+  one), and the synthetic motif test passes the harness's own blacklist.
+- <strong>Nextflow: an unknown <code>--genome</code> stops the run at launch.</strong> It failed every extract task
   instead, which the institutional retry-then-ignore error strategy turned into a run that
   finished with no samples. <code>nextflow_schema.json</code> now lists the builds as an enum, and <code>main.nf</code>
   checks <code>params.genome</code> against that list before any task is submitted (nothing validated
   params against the schema). Held by <code>tests/unit/test_nextflow_genome.py</code>, which also checks
-  the enum against the builds the CLI accepts.</li>
-<li><strong><code>extract</code> no longer replaces a record run-all or a single tool wrote into.</strong> Run into a folder
+  the enum against the builds the CLI accepts.
+- <strong><code>extract</code> no longer replaces a record run-all or a single tool wrote into.</strong> Run into a folder
   <code>run-all</code> had finished (<code>run-all -A xs1</code>, then <code>extract -A xs1</code>), it rewrote
   <code>{sample}.metadata.parquet</code>, downstream's completion marker, with extraction's fields alone:
   about thirty columns dropped, <code>krewlyzer_version</code>, <code>pon_applied</code> and every <code>{stage}_status</code> among
@@ -3608,8 +3635,8 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   and <code>extract</code> with new filters replaced the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> and the marker under them. Updating only its own
   fields was not enough either: a new <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> from other filters would leave every table made from the
   old one under its recorded <code>ran</code>. A rerun of <code>extract</code> into a folder it wrote alone is still
-  allowed.</li>
-<li><strong>The record's filters and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> flag say what the run did.</strong> <code>write_extraction_outputs</code> wrote
+  allowed.
+- <strong>The record's filters and <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> flag say what the run did.</strong> <code>write_extraction_outputs</code> wrote
   <code>filters_mapq</code> 20, <code>filters_min_length</code> 65 and <code>filters_max_length</code> 1000 whatever the run used;
   they now come from the <code>ExtractionResult</code>, which carries the filters <code>extract_sample</code> applied,
   and a result without them is refused rather than recorded with a default.
@@ -3619,8 +3646,8 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   <code>.metadata.json</code>) only when it exists. A factor computation that raised (an unreadable <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> reference,
   for one) is now warned about rather than logged at debug. Each
   record value is pinned by two runs that must record two different values
-  (<code>tests/invariants/test_extract_record.py</code>).</li>
-<li><strong>A <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table is written in every format or none, and named only when written.</strong> With
+  (<code>tests/invariants/test_extract_record.py</code>).
+- <strong>A <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table is written in every format or none, and named only when written.</strong> With
   <code>-F both</code>, Rust wrote the <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> factor table and then failed on the Parquet one: the record said
   <code>gc_correction_computed=False</code> while a <code>.tsv</code> table sat in the folder, and every tool reading it
   found and used that table. Extraction's Rust writer (<code>compute_and_write_gc_factors</code>), now the
@@ -3632,8 +3659,8 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   observations now goes through one helper, <code>sample_processor.write_gc_factor_table</code>, which names
   a table only when it wrote one and warns, per population, when there was nothing to fit, none
   could be fitted, or the computation failed (<code>tests/invariants/test_factor_table_writes.py</code>, which
-  pins each write site).</li>
-<li><strong>run-all no longer scores a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> extracted with other filters.</strong> <code>extract --mapq 30 -F parquet</code>
+  pins each write site).
+- <strong>run-all no longer scores a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> extracted with other filters.</strong> <code>extract --mapq 30 -F parquet</code>
   then <code>run-all</code> (mapq 20) into the same folder exited 0: the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> existed, so run-all kept it and
   extract's record, and read the <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> again at mapq 20 for the motif tables. Two filter sets under
   one record. <code>extract -x</code> with another blacklist was the same case. The five read filters and the
@@ -3686,25 +3713,25 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   (<code>output_provenance.refuse_a_bed_the_record_does_not_describe</code>,
   <code>tests/invariants/test_rerun_bed.py</code>); a samplesheet <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> that Nextflow stages as a link, a route
   the pipeline cannot reach today, is read with the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table beside its source, where there
-  is one.</li>
-<li><strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
+  is one.
+- <strong>Tool-level Nextflow mode (<code>--use_runall false</code>) runs, and publishes run-all's tables.</strong>
   Measured on the synthetic sample, it could not produce a sample. Eight outputs in six modules
   required a <code>*.X.tsv</code> under the Parquet default (<code>fsc</code>, <code>fsr</code>, <code>fsd</code>, <code>ocf</code>, <code>motif</code> twice,
   <code>region_mds</code> twice). <code>motif</code> was handed the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, in a tuple one item short, where it reads the
   <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>. And no module had a <code>publishDir</code>, so even a green run would have left <code>--outdir</code> empty.
-  Had any table been written, a panel sample's would not have been run-all's:</li>
-<li><code>fsr</code>, <code>fsd</code>, <code>wps</code>, <code>ocf</code>, <code>motif</code> and <code>region-entropy</code> were given no assay, and <code>extract</code>
-    the pipeline-wide <code>params.assay</code> rather than the sample's;</li>
-<li><code>fsd</code>, <code>wps</code> and <code>ocf</code> were given the pipeline-wide targets, five tools the pipeline-wide <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
+  Had any table been written, a panel sample's would not have been run-all's:
+  - <code>fsr</code>, <code>fsd</code>, <code>wps</code>, <code>ocf</code>, <code>motif</code> and <code>region-entropy</code> were given no assay, and <code>extract</code>
+    the pipeline-wide <code>params.assay</code> rather than the sample's;
+  - <code>fsd</code>, <code>wps</code> and <code>ocf</code> were given the pipeline-wide targets, five tools the pipeline-wide <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
     and <code>motif</code> none, and <code>wps</code> the pipeline-wide anchors, instead of the ones <code>INPUT_CHECK</code>
-    resolves per sample for run-all;</li>
-<li>none of the scorers was given <code>--skip-pon</code> or <code>--pon-variant</code>;</li>
-<li><code>extract</code> and <code>motif</code> ignored run-all's read filters, and <code>motif</code> the blacklist (see
-    Changed);</li>
-<li>panel <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> were written at 5 Mb windows, where run-all writes 100 kb bins (see Changed);</li>
-<li><code>mfsd</code> read the main <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> where run-all reads the samplesheet's duplex <code>mfsd_bam</code> with duplex
-    weighting on, and wrote a <code>mFSD.distributions</code> table run-all does not.</li>
-</ul>
+    resolves per sample for run-all;
+  - none of the scorers was given <code>--skip-pon</code> or <code>--pon-variant</code>;
+  - <code>extract</code> and <code>motif</code> ignored run-all's read filters, and <code>motif</code> the blacklist (see
+    Changed);
+  - panel <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr>/<abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr> were written at 5 Mb windows, where run-all writes 100 kb bins (see Changed);
+  - <code>mfsd</code> read the main <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr> where run-all reads the samplesheet's duplex <code>mfsd_bam</code> with duplex
+    weighting on, and wrote a <code>mFSD.distributions</code> table run-all does not.</p>
+</blockquote>
 <p>Every module now takes the sample's assay (run-all's rule), <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, targets and <abbr title="Windowed Protection Score - Nucleosome positioning signal around regulatory sites">WPS</abbr> anchors, and
   each option run-all passes that its tool takes. Each declares the tables run-all's module
   declares for its stage, as <code>*.X.{parquet,tsv,tsv.gz}</code>: required where every run writes it,
