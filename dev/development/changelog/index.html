@@ -3418,7 +3418,9 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   <code>process_sample</code> defaulted to <code>output_format="tsv"</code>, so a caller that left it out wrote -- or
   read -- <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> beside a Parquet run (invariant #6). <code>process_sample</code> did exactly that: its own
   <code>run_features</code> call passed no format (harmless only because the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build passes <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>). They now
-  require <code>output_format</code> and <code>compress</code> by keyword, so mypy reports a call without them. A writer
+  require <code>output_format</code> and <code>compress</code> by keyword, so mypy reports a call without them.
+  <code>process_fsd</code>, <code>apply_fsc_gene_pon</code>, <code>apply_fsc_region_pon</code> and <code>filter_fsc_to_e1</code> followed,
+  since each now uses the format to choose the file it reads (see <em>Fixed</em>). A writer
   in that form needs no <code>scripts/check_output_format.py</code> rule; the rule in
   <code>.agents/rules/development.md</code> says so, and names the older processor writers that still default.</p>
 </li>
@@ -3849,9 +3851,34 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   standalone scorers (<code>motif</code>, <code>region-entropy</code>, <code>region-mds</code>), which do not go through
   <code>run_features</code>, now write their <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> into the record once they have scored, so the next tool is
   checked against it.</li>
+<li><strong>The metadata stamp reads the file this run wrote.</strong> It found <code>.tsv</code> first and then read
+  Parquet first, so a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run beside an earlier run's <code>.parquet</code> wrote the earlier run's row back.</li>
+<li><strong>A rerun into a used folder ships this run's tables.</strong> The Rust pass writes <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> counts, <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> and
+  the <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr>/<abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr> sync tables as plain <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr>, and Python read each back Parquet-first to normalise it
+  and write the run's formats. A rerun in the same format found the earlier run's <code>.parquet</code> beside
+  the fresh <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> and used it: <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> and <abbr title="Fragment Size Ratio - Ratio of short to long fragments">FSR</abbr>, on-target included, were computed from the first run's
+  counts, and <abbr title="Orientation-aware cfDNA Fragmentation - Fragment end patterns near open chromatin">OCF</abbr> and the sync tables were the first run's, copied. The format guard refuses only
+  a change of format, and the stale table carries this run's name and format, so neither it nor
+  <code>validate-output</code> could tell. Each of these reads now names the file this run wrote
+  (<code>read_exact_table</code>), as do the <abbr title="Fragment Size Coverage - Coverage depth by fragment size across genomic bins">FSC</abbr> gene, region and E1 steps (a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run beside an earlier
+  Parquet run scored that run's tables), the region-entropy loader, and the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> build's <code>MDS.exon</code>
+  baseline, which was fitted from a <code>.parquet</code> an earlier run had left in a kept cache rather than
+  the <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> each donor wrote. Region entropy also removes its output before Rust writes it: whether
+  Rust wrote is asked by looking for that file, so an earlier run's was taken for this run's. No
+  <code>core</code> processor module imports the resolving readers now, and a test fails if one does.</li>
 <li>
-<p><strong>The metadata stamp reads the file this run wrote.</strong> It found <code>.tsv</code> first and then read
-  Parquet first, so a <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> run beside an earlier run's <code>.parquet</code> wrote the earlier run's row back.</p>
+<p><strong><abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> reads the table this run's format wrote.</strong> It resolved <code>.tsv</code> first, so under <code>--compress</code>
+  it took the uncompressed log-ratios an earlier run with a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> had left and normalised them a
+  second time. <code>output_utils.written_table</code> names the file a run of a format wrote -- the Parquet
+  where there is one, so under <code>both</code> the log-ratios now come from the full-precision table rather
+  than the <abbr title="Tab-Separated Values - Plain text tabular data format">TSV</abbr> rounded to four decimals. Without a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>, or with one that has no rows for the
+  baseline asked for (a custom <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> without <code>fsd_baseline_ontarget</code>, where the normaliser writes
+  nothing), <abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> is no longer rewritten: Rust has written exactly the run's formats, and its tables
+  ship as written, the second case with a warning that they are raw counts. The rewrite warned
+  "<abbr title="Fragment Size Distribution - Distribution of fragment lengths across chromosome arms">FSD</abbr> output not found for format conversion" on every Parquet or compressed run, and under
+  <code>--compress</code> could ship an earlier run's log-ratios as this run's counts. The normaliser now
+  writes to a name of its own, removed before and after, so what is read back is what it wrote. A run with a <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> no longer leaves an
+  uncompressed <code>FSD.tsv</code> beside its <code>FSD.tsv.gz</code> for the next run to read.</p>
 </li>
 <li>
 <p><strong><abbr title="Motif Diversity Score - Entropy/diversity of end motif patterns">MDS</abbr> is the same in two runs of the same input.</strong> <code>compute_mds</code> summed the entropy over a
