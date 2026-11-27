@@ -86,8 +86,8 @@ def test_the_fsd_ontarget_branch_resolves_the_written_file():
     source = (_ROOT / "src/krewlyzer/core/unified_processor.py").read_text()
     block = source[source.index("# On-target FSD: use fsd_baseline_ontarget") :][:1400]
 
-    assert (
-        "resolve_table_path(out_fsd_on)" in block
+    assert re.search(
+        r"written_table\(\s*out_fsd_on", block
     ), "the on-target FSD branch is testing a hardcoded .tsv again"
     assert not re.search(r"\bout_fsd_on\.exists\(\)", block), (
         "`.exists()` on the .tsv is back; under --output-format parquet that "

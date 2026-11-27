@@ -84,17 +84,14 @@ _WRITERS = {
     "apply_pon_zscore",
     "run_region_mds",
 }
-_RESOLVING_READERS = {"read_table", "load_entropy_tsv"}
+_RESOLVING_READERS = {"read_table"}
 
 #: Reads that follow a write but legitimately target a *different*, earlier
-#: file rather than the one just written. Each needs a reason.
-_ALLOWED = {
-    # The degradation branch re-reads the raw entropy input, not the output.
-    ("core/region_entropy_processor.py", "process_region_entropy"),
-    # A 700-line orchestrator: its reads target other features' outputs
-    # entirely, not anything it wrote in the same call.
-    ("core/unified_processor.py", "run_features"),
-}
+#: file rather than the one just written. Each needs a reason. Empty: the two it
+#: held were `run_features`, whose reads did target what the Rust pass had just
+#: written (see the module-wide rule below), and `process_region_entropy`,
+#: through `load_entropy_tsv`, which now reads exactly the file it is given.
+_ALLOWED: set[tuple[str, str]] = set()
 
 
 def _read_after_write() -> list[tuple[str, str, list[str]]]:
@@ -155,3 +152,32 @@ def test_the_allowlist_has_no_dead_entries():
     live = {(f, fn) for f, fn, _ in _read_after_write()}
     dead = sorted(_ALLOWED - live)
     assert not dead, f"_ALLOWED names sites that no longer read after writing: {dead}"
+
+
+def test_no_resolving_reader_where_a_sample_s_tables_are_written():
+    """The scan above sees only Python writes, and most reads here follow Rust's.
+
+    The Rust pass writes FSC counts, FSD, OCF and the TFBS/ATAC sync tables, and each module
+    below reads them back to normalise them and write the run's formats. A same-format rerun into
+    a used folder then found the earlier run's ``.parquet`` (`read_table`) or ``.tsv``
+    (`resolve_table_path`) and shipped it: FSC and FSR from the first run's counts, OCF and the
+    sync tables copied, FSD's log-ratios normalised twice. In these modules every read names the
+    file this run wrote (`read_exact_table`, `table_paths`), so the resolving readers are not
+    imported at all.
+    """
+    found = []
+    for path in sorted((_SRC / "core").glob("*_processor.py")):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.alias):
+                name = node.name
+            elif isinstance(node, ast.Name):
+                name = node.id
+            elif isinstance(node, ast.Attribute):
+                name = node.attr
+            else:
+                continue
+            if name in ("read_table", "resolve_table_path"):
+                found.append(f"core/{path.name}:{node.lineno} {name}")
+    assert not found, "resolving reader in a table-writing module:\n  " + "\n  ".join(
+        found
+    )

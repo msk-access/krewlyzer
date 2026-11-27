@@ -15,8 +15,6 @@ import logging
 
 from .output_utils import (
     read_exact_table,
-    read_table,
-    resolve_table_path,
     write_table,
     cleanup_intermediate_tsv,
 )
@@ -105,9 +103,13 @@ class RegionEntropyBaseline:
 
 def load_entropy_tsv(path: Path) -> pd.DataFrame:
     """
-    Load region entropy file (TSV, TSV.gz, or Parquet).
+    Load exactly this region entropy file (TSV, TSV.gz, or Parquet).
 
     Columns: label, count, mean_size, entropy
+
+    Exact, never a sibling: every caller names the file it means -- the raw table Rust just wrote,
+    the TSV a PON build wrote, or one `--from-outputs` resolved -- and a Parquet-first read would
+    take an earlier run's `.parquet` beside it instead.
 
     Args:
         path: Path to TSV or Parquet file
@@ -115,8 +117,8 @@ def load_entropy_tsv(path: Path) -> pd.DataFrame:
     Returns:
         DataFrame with entropy data
     """
-    df = read_table(path)
-    assert df is not None, f"read_table returned None for existing file: {path}"
+    df = read_exact_table(path)
+    assert df is not None, f"read_exact_table returned None for existing file: {path}"
     return df
 
 
@@ -144,10 +146,9 @@ def process_region_entropy(
     """
     from krewlyzer import _core
 
-    # The caller names the `.tsv`; the writer honours --output-format and may
-    # have produced only `.parquet`. A bare `.exists()` skipped the whole step.
-    if resolve_table_path(raw_path) is None:
-        logger.warning(f"Entropy file not found: {raw_path} (nor .tsv.gz / .parquet)")
+    # Rust writes the raw table as plain TSV under exactly this name, whatever the run's format.
+    if not raw_path.exists():
+        logger.warning(f"Entropy file not found: {raw_path}")
         return 0
 
     if pon_parquet_path is None:
@@ -170,6 +171,10 @@ def process_region_entropy(
         )
         return 0
 
+    # Whether Rust wrote its output is asked below by looking for the file, so a file of that
+    # name must not be here already: an earlier run's, found there, was taken for Rust's and its
+    # entropy and z-scores shipped as this run's. Only this run's own output name is removed.
+    output_path.unlink(missing_ok=True)
     n_matched = _core.region_entropy.apply_pon_zscore(
         str(raw_path), str(pon_parquet_path), str(output_path), baseline_table
     )
@@ -180,7 +185,8 @@ def process_region_entropy(
     # asserting on a file that was never created.
     #
     # `.exists()` and not resolve_table_path(): the question here is "did Rust
-    # write its plain TSV *just now*", which is exactly one filename. Resolving
+    # write its plain TSV *just now*", which is exactly one filename -- and the
+    # file was removed before the call, so it can only be this run's. Resolving
     # would accept a `.parquet` left by a previous run into the same directory
     # -- a re-run, or a Nextflow retry -- and then read that stale file below
     # as though it were this run's z-scored result.
@@ -203,9 +209,8 @@ def process_region_entropy(
     # Rust apply_pon_zscore writes plain TSV; re-write through write_table()
     # to honour --output-format and --compress flags (parquet, gzip).
     #
-    # read_exact_table, not load_entropy_tsv: the latter goes through
-    # read_table, which is parquet-first, so a stale `.parquet` sibling would
-    # be preferred over the TSV holding this run's z-scores -- the same way the
+    # read_exact_table: a Parquet-first read would prefer a stale `.parquet`
+    # sibling over the TSV holding this run's z-scores -- the same way the
     # FSD write-back discarded its own log-ratios (c92ed86).
     scored = read_exact_table(output_path)
     if scored is None:  # pragma: no cover -- guarded by the exists() check above

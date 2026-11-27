@@ -18,9 +18,8 @@ import logging
 
 from .output_utils import (
     read_exact_table,
-    read_table,
-    resolve_table_path,
     write_table,
+    written_table,
 )
 
 logger = logging.getLogger("core.fsd_processor")
@@ -30,8 +29,9 @@ def process_fsd(
     fsd_raw_path: Path,
     output_path: Optional[Path] = None,
     pon_parquet_path: Optional[Path] = None,
-    output_format: str = "tsv",
-    compress: bool = False,
+    *,
+    output_format: str,
+    compress: bool,
     baseline_table: str = "fsd_baseline",
 ) -> Path:
     """
@@ -41,15 +41,17 @@ def process_fsd(
     - Log-ratios vs PoN (when PoN provided): log2(sample / PoN_expected)
     - PoN stability scores: 1 / (variance + k)
 
-    After Rust processing, the result is written through write_table()
-    to honour --output-format and --compress flags (TSV, Parquet, gzip).
+    The Rust writer has already written the run's formats. With a PON the normalised result is
+    written over them through write_table(), honouring --output-format and --compress; without
+    one, or when the normaliser writes nothing (the PON has no rows for `baseline_table`), they
+    ship as Rust wrote them.
 
     Args:
         fsd_raw_path: Path to raw FSD.tsv from Rust
         output_path: Output path (default: overwrite input).
             write_table() strips known extensions and appends the correct one(s).
         pon_parquet_path: Path to PON parquet for normalization
-        output_format: One of "tsv", "parquet", or "both"
+        output_format: One of "tsv", "parquet", or "both"; this run's, which decides the file read
         compress: If True, gzip-compress TSV output (.tsv.gz)
         baseline_table: PON baseline table name ("fsd_baseline" or "fsd_baseline_ontarget")
 
@@ -58,86 +60,107 @@ def process_fsd(
         .tsv, .tsv.gz, or .parquet extensions depending on output_format)
 
     Raises:
+        FileNotFoundError: If this run's Rust pass wrote no FSD table
         RuntimeError: If FSD processing fails
     """
-    # The Rust writer became format-aware, so with --output-format parquet it
-    # writes {sample}.FSD.parquet and no .tsv at all -- while callers still name
-    # the .tsv. `exists()` on that name was then False and the whole of this
-    # function, PON normalisation included, was skipped in silence. Measured:
-    # FSD came out as raw counts under `parquet`, log-ratios under `tsv`, with
-    # no warning either way. 0.9.0 makes parquet the Nextflow default, which
-    # would have turned that from affecting nobody into affecting every run.
-    resolved = resolve_table_path(fsd_raw_path)
-    if resolved is None:
+    # The table this run's Rust pass wrote, exactly. The writer is format-aware: under `parquet`
+    # it writes {sample}.FSD.parquet and no .tsv, while callers name the .tsv. A bare `exists()`
+    # on that name skipped this whole function, PON normalisation included, under `parquet`;
+    # resolving across formats instead (`.tsv` first) took the uncompressed log-ratios an earlier
+    # `--compress` run had left and normalised them a second time.
+    source = written_table(fsd_raw_path, output_format=output_format, compress=compress)
+    if not source.exists():
         raise FileNotFoundError(
-            f"FSD output not found: {fsd_raw_path} (nor .tsv.gz / .parquet)"
+            f"FSD output not found: {source} (this run's Rust pass wrote none)"
         )
 
     output_path = output_path or fsd_raw_path
 
-    # Apply PON log-ratio normalization via Rust
-    # Rust writes the result as TSV to output_path (or in-place if same as input)
-    if pon_parquet_path and pon_parquet_path.exists():
-        try:
-            from krewlyzer import _core
-
-            # The normaliser parses TSV line by line, so anything else has to
-            # be materialised first. Kept here rather than teaching Rust every
-            # container format: the normalisation is what matters, not the box
-            # it arrived in.
-            normalise_input = resolved
-            staged: Optional[Path] = None
-            if resolved.suffix != ".tsv":
-                staged = output_path.with_suffix(".pon_input.tsv")
-                frame = read_table(resolved)
-                if frame is None:
-                    raise RuntimeError(f"could not read FSD table at {resolved}")
-                frame.to_csv(staged, sep="\t", index=False)
-                normalise_input = staged
-                logger.debug(f"staged {resolved.name} as TSV for PON normalisation")
-
-            arms_processed = _core.fsd.apply_pon_logratio(
-                str(normalise_input),
-                str(pon_parquet_path),
-                str(output_path) if output_path != normalise_input else None,
-                baseline_table=baseline_table,
-            )
-            if arms_processed > 0:
-                logger.info(f"FSD PON: {arms_processed} arms normalized")
-            else:
-                # Not a debug line: zero arms means the output is raw counts
-                # wearing the same column names as log-ratios, and nothing
-                # downstream can tell the difference.
-                logger.warning(
-                    "FSD PON: no arms matched the baseline -- output is RAW "
-                    "COUNTS, not log-ratios. Check that the PON arm names match "
-                    "the arms BED used for this run."
-                )
-        except Exception as e:
-            logger.error(f"FSD PON processing failed: {e}")
-            raise RuntimeError(f"FSD PON processing failed: {e}")
-        finally:
-            if staged is not None and staged.exists():
-                staged.unlink()
-    else:
+    if not (pon_parquet_path and pon_parquet_path.exists()):
+        # Nothing to normalise, and Rust has written exactly this run's formats. Rewriting them
+        # dates from when it wrote only TSV: it read a plain FSD.tsv that `parquet` and
+        # compressed runs never have, warning "not found" on every one, and under --compress
+        # read one an earlier run with a PON had left, shipping that run's log-ratios.
         logger.debug(f"No PON provided for FSD: {fsd_raw_path}")
+        return output_path
 
-    # Re-write through write_table() to honour output_format and compress.
-    # Rust always writes raw TSV; we read it back and produce the requested
-    # output format(s): .tsv, .tsv.gz, .parquet, or both.
-    _write_fsd_output(output_path, output_format, compress)
+    # The normaliser writes to a name nothing else uses, removed first, so what is read back is
+    # what it wrote on this call. It writes nothing when the PON has no rows for
+    # `baseline_table` (a custom PON without the on-target baseline) or the table is empty. The
+    # write-back used to run regardless and read whatever file had the output name: under
+    # --compress an earlier run's plain log-ratio FSD.tsv, under `both` the four-decimal TSV
+    # over the full-precision Parquet.
+    normalised = output_path.with_suffix(".pon_output.tsv")
+    staged: Optional[Path] = None
+    try:
+        from krewlyzer import _core
+
+        normalised.unlink(missing_ok=True)
+
+        # The normaliser parses TSV line by line, so anything else has to
+        # be materialised first. Kept here rather than teaching Rust every
+        # container format: the normalisation is what matters, not the box
+        # it arrived in.
+        normalise_input = source
+        if source.suffix != ".tsv":
+            staged = output_path.with_suffix(".pon_input.tsv")
+            frame = read_exact_table(source)
+            if frame is None:
+                raise RuntimeError(f"could not read FSD table at {source}")
+            frame.to_csv(staged, sep="\t", index=False)
+            normalise_input = staged
+            logger.debug(f"staged {source.name} as TSV for PON normalisation")
+
+        arms_processed = _core.fsd.apply_pon_logratio(
+            str(normalise_input),
+            str(pon_parquet_path),
+            str(normalised),
+            baseline_table=baseline_table,
+        )
+        if not normalised.exists():
+            # As without a PON: Rust's tables are this run's, in this run's formats. A warning,
+            # not debug: they are raw counts under a run that applied a PON.
+            logger.warning(
+                f"FSD PON: the PON has no '{baseline_table}' rows, or the FSD table is empty -- "
+                f"{output_path.name} ships as Rust wrote it, RAW COUNTS with no log-ratios."
+            )
+            return output_path
+        if arms_processed > 0:
+            logger.info(f"FSD PON: {arms_processed} arms normalized")
+        else:
+            # Not a debug line: zero arms means the output is raw counts
+            # wearing the same column names as log-ratios, and nothing
+            # downstream can tell the difference.
+            logger.warning(
+                "FSD PON: no arms matched the baseline -- output is RAW "
+                "COUNTS, not log-ratios. Check that the PON arm names match "
+                "the arms BED used for this run."
+            )
+
+        # The normaliser wrote plain TSV; write it as the run's formats (.tsv, .tsv.gz, .parquet).
+        _write_fsd_output(normalised, output_path, output_format, compress)
+    except Exception as e:
+        logger.error(f"FSD PON processing failed: {e}")
+        raise RuntimeError(f"FSD PON processing failed: {e}")
+    finally:
+        for temporary in (staged, normalised):
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     return output_path
 
 
-def _write_fsd_output(tsv_path: Path, output_format: str, compress: bool) -> None:
-    """Read Rust-written FSD TSV and re-write through write_table().
+def _write_fsd_output(
+    normalised: Path, output_path: Path, output_format: str, compress: bool
+) -> None:
+    """Read the normaliser's TSV and write it as the run's formats through write_table().
 
     This ensures --output-format and --compress flags are honoured
     for FSD output, producing .parquet and/or .tsv.gz as requested.
 
     Args:
-        tsv_path: Path to the Rust-written TSV file
+        normalised: Path to the TSV the PON normaliser wrote
+        output_path: The run's FSD table; write_table() replaces its extension
         output_format: One of "tsv", "parquet", or "both"
         compress: If True, gzip-compress TSV output
     """
@@ -147,10 +170,9 @@ def _write_fsd_output(tsv_path: Path, output_format: str, compress: bool) -> Non
     # normalisation. Resolving would silently discard the log-ratios we just
     # computed and write the raw counts straight back -- which is exactly what
     # it did, with "41 arms normalized" logged immediately above.
-    df = read_exact_table(tsv_path)
+    df = read_exact_table(normalised)
     if df is None:
-        logger.warning(f"FSD output not found for format conversion: {tsv_path}")
-        return
+        raise RuntimeError(f"could not read the normalised FSD table at {normalised}")
 
     logger.debug(
         f"FSD format conversion: {len(df)} rows, "
@@ -158,12 +180,5 @@ def _write_fsd_output(tsv_path: Path, output_format: str, compress: bool) -> Non
     )
 
     # write_table() strips known extensions (.tsv, .tsv.gz, .parquet) from
-    # the path and appends the correct one(s), so passing the raw .tsv path
-    # works correctly here.
-    write_table(df, tsv_path, output_format=output_format, compress=compress)
-
-    # If output_format is "parquet" only, clean up the intermediate Rust TSV
-    # (write_table already wrote the .parquet file)
-    if output_format == "parquet" and tsv_path.exists():
-        tsv_path.unlink()
-        logger.debug(f"Removed intermediate TSV: {tsv_path.name}")
+    # the path and appends the correct one(s).
+    write_table(df, output_path, output_format=output_format, compress=compress)

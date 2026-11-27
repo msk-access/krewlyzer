@@ -170,7 +170,9 @@ All notable changes to this project will be documented in this file.
   `process_sample` defaulted to `output_format="tsv"`, so a caller that left it out wrote -- or
   read -- TSV beside a Parquet run (invariant #6). `process_sample` did exactly that: its own
   `run_features` call passed no format (harmless only because the PON build passes TSV). They now
-  require `output_format` and `compress` by keyword, so mypy reports a call without them. A writer
+  require `output_format` and `compress` by keyword, so mypy reports a call without them.
+  `process_fsd`, `apply_fsc_gene_pon`, `apply_fsc_region_pon` and `filter_fsc_to_e1` followed,
+  since each now uses the format to choose the file it reads (see *Fixed*). A writer
   in that form needs no `scripts/check_output_format.py` rule; the rule in
   `.agents/rules/development.md` says so, and names the older processor writers that still default.
 
@@ -596,6 +598,31 @@ All notable changes to this project will be documented in this file.
   checked against it.
 - **The metadata stamp reads the file this run wrote.** It found `.tsv` first and then read
   Parquet first, so a TSV run beside an earlier run's `.parquet` wrote the earlier run's row back.
+- **A rerun into a used folder ships this run's tables.** The Rust pass writes FSC counts, OCF and
+  the TFBS/ATAC sync tables as plain TSV, and Python read each back Parquet-first to normalise it
+  and write the run's formats. A rerun in the same format found the earlier run's `.parquet` beside
+  the fresh TSV and used it: FSC and FSR, on-target included, were computed from the first run's
+  counts, and OCF and the sync tables were the first run's, copied. The format guard refuses only
+  a change of format, and the stale table carries this run's name and format, so neither it nor
+  `validate-output` could tell. Each of these reads now names the file this run wrote
+  (`read_exact_table`), as do the FSC gene, region and E1 steps (a TSV run beside an earlier
+  Parquet run scored that run's tables), the region-entropy loader, and the PON build's `MDS.exon`
+  baseline, which was fitted from a `.parquet` an earlier run had left in a kept cache rather than
+  the TSV each donor wrote. Region entropy also removes its output before Rust writes it: whether
+  Rust wrote is asked by looking for that file, so an earlier run's was taken for this run's. No
+  `core` processor module imports the resolving readers now, and a test fails if one does.
+- **FSD reads the table this run's format wrote.** It resolved `.tsv` first, so under `--compress`
+  it took the uncompressed log-ratios an earlier run with a PON had left and normalised them a
+  second time. `output_utils.written_table` names the file a run of a format wrote -- the Parquet
+  where there is one, so under `both` the log-ratios now come from the full-precision table rather
+  than the TSV rounded to four decimals. Without a PON, or with one that has no rows for the
+  baseline asked for (a custom PON without `fsd_baseline_ontarget`, where the normaliser writes
+  nothing), FSD is no longer rewritten: Rust has written exactly the run's formats, and its tables
+  ship as written, the second case with a warning that they are raw counts. The rewrite warned
+  "FSD output not found for format conversion" on every Parquet or compressed run, and under
+  `--compress` could ship an earlier run's log-ratios as this run's counts. The normaliser now
+  writes to a name of its own, removed before and after, so what is read back is what it wrote. A run with a PON no longer leaves an
+  uncompressed `FSD.tsv` beside its `FSD.tsv.gz` for the next run to read.
 
 - **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
   Python `set` of k-mers, which iterates in the per-process string-hash order, so the sum ran in

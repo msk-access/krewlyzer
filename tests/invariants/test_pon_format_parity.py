@@ -31,7 +31,7 @@ import pytest
 
 from krewlyzer.core.fsc_processor import apply_fsc_gene_pon, apply_fsc_region_pon
 from krewlyzer.core.fsd_processor import process_fsd
-from krewlyzer.core.output_utils import read_table
+from krewlyzer.core.output_utils import read_table, table_paths
 from krewlyzer.pon.model import PonModel
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -95,8 +95,15 @@ def test_fsd_logratios_are_identical_across_formats(tmp_path, pon):
     for fmt in FORMATS:
         d = tmp_path / fmt
         d.mkdir()
-        _fsd_frame(pon).to_csv(d / "s.FSD.tsv", sep="\t", index=False)
-        process_fsd(d / "s.FSD.tsv", pon_parquet_path=_PON, output_format=fmt)
+        # What the format-aware Rust writer leaves: exactly this format's files.
+        for path in table_paths(d / "s.FSD", output_format=fmt, compress=False):
+            if path.suffix == ".parquet":
+                _fsd_frame(pon).to_parquet(path, index=False)
+            else:
+                _fsd_frame(pon).to_csv(path, sep="\t", index=False)
+        process_fsd(
+            d / "s.FSD.tsv", pon_parquet_path=_PON, output_format=fmt, compress=False
+        )
         frame = _written(d, "s.FSD")
         logr = sorted(c for c in frame.columns if c.endswith("_logR"))
         assert logr, (
@@ -139,7 +146,7 @@ def test_fsc_gene_zscore_appears_under_every_format(tmp_path, pon, fmt):
         frame.to_csv(d / "s.FSC.gene.tsv", sep="\t", index=False)
         frame.to_parquet(d / "s.FSC.gene.parquet")
 
-    apply_fsc_gene_pon(d / "s.FSC.gene.tsv", pon, output_format=fmt)
+    apply_fsc_gene_pon(d / "s.FSC.gene.tsv", pon, output_format=fmt, compress=False)
     out = _written(d, "s.FSC.gene")
     assert "depth_zscore" in out.columns, f"no depth_zscore under {fmt}"
     assert out["depth_zscore"].notna().any(), f"depth_zscore all NaN under {fmt}"
@@ -169,7 +176,9 @@ def test_fsc_region_zscore_appears_under_every_format(tmp_path, pon, fmt):
         frame.to_csv(d / "s.FSC.regions.tsv", sep="\t", index=False)
         frame.to_parquet(d / "s.FSC.regions.parquet")
 
-    apply_fsc_region_pon(d / "s.FSC.regions.tsv", pon, output_format=fmt)
+    apply_fsc_region_pon(
+        d / "s.FSC.regions.tsv", pon, output_format=fmt, compress=False
+    )
     out = _written(d, "s.FSC.regions")
     assert "depth_zscore" in out.columns, f"no depth_zscore under {fmt}"
     assert out["depth_zscore"].notna().any(), f"depth_zscore all NaN under {fmt}"

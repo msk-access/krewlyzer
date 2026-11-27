@@ -179,7 +179,7 @@ def test_process_fsd_run_twice_is_also_stable(fsd_and_pon):
     from krewlyzer.core.fsd_processor import process_fsd
 
     fsd, pon = fsd_and_pon
-    process_fsd(fsd, pon_parquet_path=pon, output_format="tsv")
+    process_fsd(fsd, pon_parquet_path=pon, output_format="tsv", compress=False)
     once = fsd.read_text()
-    process_fsd(fsd, pon_parquet_path=pon, output_format="tsv")
+    process_fsd(fsd, pon_parquet_path=pon, output_format="tsv", compress=False)
     assert fsd.read_text() == once

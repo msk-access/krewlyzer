@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 import logging
 
-from .output_utils import read_table, write_table, cleanup_intermediate_tsv
+from .output_utils import read_exact_table, write_table, cleanup_intermediate_tsv
 
 logger = logging.getLogger("core.ocf_processor")
 
@@ -93,7 +93,9 @@ def _write_ocf_output(tsv_path: Path, output_format: str, compress: bool) -> Non
         output_format: One of "tsv", "parquet", or "both"
         compress: If True, gzip-compress TSV output
     """
-    df = read_table(tsv_path)
+    # Exactly the TSV Rust wrote. Parquet-first (`read_table`) took the `.parquet` an earlier run
+    # had converted it to, so a rerun into the folder shipped that run's OCF.
+    df = read_exact_table(tsv_path)
     if df is None:
         logger.warning(f"OCF output not found for format conversion: {tsv_path}")
         return
@@ -142,7 +144,7 @@ def apply_ocf_python_pon(
         convert_ocf_output(ocf_path, output_format, compress)
         return 0
 
-    df = read_table(ocf_path)
+    df = read_exact_table(ocf_path)
     if df is None:
         logger.warning(f"OCF file not found for Python PON: {ocf_path}")
         return 0

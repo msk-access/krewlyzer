@@ -64,6 +64,26 @@ def test_the_baseline_is_fitted_from_the_data(tmp_path):
     assert entry["n_samples"] == 3
 
 
+def test_the_baseline_is_fitted_from_the_file_each_donor_wrote(tmp_path):
+    """The build writes each donor's MDS.exon as TSV. A `.parquet` beside it -- an earlier run's,
+    in a kept cache -- was preferred by the Parquet-first reader, and the baseline was fitted
+    from that run's values instead."""
+    paths = _cohort(
+        tmp_path,
+        [
+            [("TP53", "ex1", 0.90)],
+            [("TP53", "ex1", 0.94)],
+            [("TP53", "ex1", 0.98)],
+        ],
+    )
+    for path in paths:
+        pd.DataFrame(
+            [("TP53", "ex1", 0.10)], columns=["gene", "name", "mds"]
+        ).to_parquet(Path(path).with_suffix(".parquet"), index=False)
+    entry = _compute_region_mds_exon_baseline(paths).exon_baseline[("TP53", "ex1")]
+    assert entry["mds_mean"] == pytest.approx(0.94)
+
+
 def test_two_cohorts_give_two_baselines(tmp_path):
     """Anti-degeneracy, applied to the block itself (invariant #1)."""
     a = _compute_region_mds_exon_baseline(

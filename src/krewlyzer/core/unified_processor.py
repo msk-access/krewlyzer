@@ -51,9 +51,9 @@ from .utils import resolve_path as _resolve_path
 from .utils import resolve_bool as _resolve_bool
 from .utils import resolve_str as _resolve_str
 from .output_utils import (
-    read_table,
-    resolve_table_path,
+    read_exact_table,
     write_table,
+    written_table,
     cleanup_intermediate_tsv,
 )
 
@@ -546,8 +546,10 @@ def run_features(
 
     # Process FSC
     if enable_fsc and out_fsc_counts and out_fsc_counts.exists():
-        # Use read_table() for Parquet-first auto-detection (handles .tsv, .tsv.gz, .parquet)
-        df_counts = read_table(out_fsc_counts)
+        # Exactly the TSV the Rust pass just wrote. Parquet-first (`read_table`) took the
+        # `.parquet` an earlier run converted it to, so a rerun into the folder computed FSC and
+        # FSR from that run's counts.
+        df_counts = read_exact_table(out_fsc_counts)
         assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSC: --skip-pon active, outputting raw values (no z-scores)")
@@ -570,7 +572,7 @@ def run_features(
         out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
         if is_panel_mode and out_fsc_counts_on.exists():
             outputs.fsc_ontarget = output_dir / f"{sample_name}.FSC.ontarget.tsv"
-            df_counts_on = read_table(out_fsc_counts_on)
+            df_counts_on = read_exact_table(out_fsc_counts_on)
             assert (
                 df_counts_on is not None
             ), "fsc_counts_on file missing after existence check"
@@ -592,8 +594,8 @@ def run_features(
 
     # Process FSR (same fsc_counts input, different normalization → ratio output)
     if enable_fsr and out_fsc_counts and out_fsc_counts.exists():
-        # Use read_table() for Parquet-first auto-detection
-        df_counts = read_table(out_fsc_counts)
+        # Exactly the TSV the Rust pass wrote, as for FSC above.
+        df_counts = read_exact_table(out_fsc_counts)
         assert df_counts is not None, "fsc_counts file missing after existence check"
         if skip_pon_zscore and pon:
             logger.info("  FSR: --skip-pon active, outputting raw values (no z-scores)")
@@ -617,7 +619,7 @@ def run_features(
         # feature_serializer.from_outputs() already reads this file (L343-352).
         out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
         if is_panel_mode and out_fsc_counts_on.exists() and outputs.fsr_ontarget:
-            df_counts_on = read_table(out_fsc_counts_on)
+            df_counts_on = read_exact_table(out_fsc_counts_on)
             assert (
                 df_counts_on is not None
             ), "fsc_counts_on file missing after existence check"
@@ -633,10 +635,10 @@ def run_features(
             logger.info(f"✓ FSR on-target: {outputs.fsr_ontarget.name}")
 
     # Convert fsc_counts to requested output format.
-    # FSC and FSR have already consumed the raw TSV via read_table() above;
+    # FSC and FSR have already consumed the raw TSV above;
     # now re-write to produce .parquet / .tsv.gz as requested.
     if out_fsc_counts and out_fsc_counts.exists():
-        df_counts_fmt = read_table(out_fsc_counts)
+        df_counts_fmt = read_exact_table(out_fsc_counts)
         if df_counts_fmt is not None:
             write_table(
                 df_counts_fmt,
@@ -652,7 +654,7 @@ def run_features(
     # Convert on-target fsc_counts if present (panel mode)
     out_fsc_counts_on = output_dir / f"{sample_name}.fsc_counts.ontarget.tsv"
     if out_fsc_counts_on.exists():
-        df_counts_on_fmt = read_table(out_fsc_counts_on)
+        df_counts_on_fmt = read_exact_table(out_fsc_counts_on)
         if df_counts_on_fmt is not None:
             write_table(
                 df_counts_on_fmt,
@@ -820,11 +822,20 @@ def run_features(
     # Use pon_parquet only when skip_pon_zscore is False, consistent with
     # how FSC/FSR/WPS/OCF/TFBS/ATAC all respect the --skip-pon flag.
     fsd_pon_path = pon_parquet if (pon_parquet and not skip_pon_zscore) else None
-    # resolve_table_path, not .exists(): `outputs.fsd` names the .tsv, but
+    # `written_table`, not .exists(): `outputs.fsd` names the .tsv, but
     # the Rust writer honours --output-format and may have written only
     # .parquet or .tsv.gz. The bare exists() check silently skipped FSD
-    # post-processing -- PON normalisation included -- under parquet.
-    if enable_fsd and outputs.fsd and resolve_table_path(outputs.fsd) is not None:
+    # post-processing -- PON normalisation included -- under parquet. Exactly
+    # this run's format, not any that exists, which can be an earlier run's.
+    if (
+        enable_fsd
+        and outputs.fsd
+        and written_table(
+            outputs.fsd,
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        ).exists()
+    ):
         if skip_pon_zscore and pon:
             logger.info(
                 "  FSD: --skip-pon active, outputting raw values (no log-ratios)"
@@ -839,16 +850,18 @@ def run_features(
 
         # On-target FSD: use fsd_baseline_ontarget table from PON
         #
-        # `resolve_table_path`, not `.exists()` on the `.tsv` -- the same fix
-        # already applied to the genome-wide branch fifteen lines above, and
+        # `written_table`, not `.exists()` on the `.tsv` -- the same fix
+        # already applied to the genome-wide branch above, and once
         # missed here. The FSD writer honours --output-format, so under
         # `parquet` this `.tsv` never exists, the whole block was skipped, and
         # the on-target table shipped unscored: 69 columns and zero `_logR`
         # against the genome-wide table's 137. Confirmed on a real XS1 and XS2
         # plasma sample before the fix.
         out_fsd_on = output_dir / f"{sample_name}.FSD.ontarget.tsv"
-        resolved_fsd_on = resolve_table_path(out_fsd_on)
-        if is_panel_mode and resolved_fsd_on is not None:
+        fsd_on_written = written_table(
+            out_fsd_on, output_format=resolved_output_format, compress=resolved_compress
+        ).exists()
+        if is_panel_mode and fsd_on_written:
             outputs.fsd_ontarget = out_fsd_on
             process_fsd(
                 out_fsd_on,
@@ -863,7 +876,7 @@ def run_features(
         elif is_panel_mode:
             logger.warning(
                 f"FSD on-target table not found for {sample_name} (looked for "
-                f"{out_fsd_on.name} in any format); it will carry no PON "
+                f"{out_fsd_on.name} as this run's format); it will carry no PON "
                 "log-ratios."
             )
 
@@ -1217,7 +1230,7 @@ def run_features(
                 if out_tfbs_sync_raw.exists():
                     outputs.tfbs_sync = output_dir / f"{sample_name}.TFBS.sync.tsv"
                     out_tfbs_sync_raw.rename(outputs.tfbs_sync)
-                    _df_sync = read_table(outputs.tfbs_sync)
+                    _df_sync = read_exact_table(outputs.tfbs_sync)
                     if _df_sync is not None:
                         write_table(
                             _df_sync,
@@ -1287,7 +1300,7 @@ def run_features(
                                 output_dir / f"{sample_name}.TFBS.ontarget.sync.tsv"
                             )
                             out_tfbs_ont_sync_raw.rename(outputs.tfbs_sync_ontarget)
-                            _df_sync = read_table(outputs.tfbs_sync_ontarget)
+                            _df_sync = read_exact_table(outputs.tfbs_sync_ontarget)
                             if _df_sync is not None:
                                 write_table(
                                     _df_sync,
@@ -1358,7 +1371,7 @@ def run_features(
                 if out_atac_sync_raw.exists():
                     outputs.atac_sync = output_dir / f"{sample_name}.ATAC.sync.tsv"
                     out_atac_sync_raw.rename(outputs.atac_sync)
-                    _df_sync = read_table(outputs.atac_sync)
+                    _df_sync = read_exact_table(outputs.atac_sync)
                     if _df_sync is not None:
                         write_table(
                             _df_sync,
@@ -1428,7 +1441,7 @@ def run_features(
                                 output_dir / f"{sample_name}.ATAC.ontarget.sync.tsv"
                             )
                             out_atac_ont_sync_raw.rename(outputs.atac_sync_ontarget)
-                            _df_sync = read_table(outputs.atac_sync_ontarget)
+                            _df_sync = read_exact_table(outputs.atac_sync_ontarget)
                             if _df_sync is not None:
                                 write_table(
                                     _df_sync,

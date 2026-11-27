@@ -67,7 +67,7 @@ def _run(tmp_path: Path, df: pd.DataFrame) -> Optional[pd.DataFrame]:
     """
     src = tmp_path / "S1.FSC.regions.tsv"
     df.to_csv(src, sep="\t", index=False)
-    out = filter_fsc_to_e1(src)
+    out = filter_fsc_to_e1(src, output_format="tsv", compress=False)
     if out is None:
         return None
     written = next(p for p in tmp_path.glob("*e1only*") if p.suffix == ".tsv")
@@ -186,4 +186,9 @@ def test_flags_present_but_none_set_falls_back_and_warns(tmp_path, caplog):
 
 
 def test_a_missing_input_returns_none_rather_than_raising(tmp_path):
-    assert filter_fsc_to_e1(tmp_path / "absent.FSC.regions.tsv") is None
+    assert (
+        filter_fsc_to_e1(
+            tmp_path / "absent.FSC.regions.tsv", output_format="tsv", compress=False
+        )
+        is None
+    )
