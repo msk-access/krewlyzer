@@ -185,15 +185,17 @@ def test_no_command_gives_one_flag_to_two_options():
     """
     import collections
 
-    import click
     import typer.main
 
-    def leaves(group, prefix=()):
-        for name, command in group.commands.items():
-            if isinstance(command, click.Group):
-                yield from leaves(command, prefix + (name,))
-            else:
-                yield " ".join(prefix + (name,)), command
+    # A group is whatever has subcommands: newer Typer vendors its own Click and does not
+    # install Click, so `click.Group` cannot be imported here.
+    def leaves(command, prefix=()):
+        subcommands = getattr(command, "commands", None)
+        if subcommands is None:
+            yield " ".join(prefix), command
+            return
+        for name, sub in subcommands.items():
+            yield from leaves(sub, prefix + (name,))
 
     shared = {}
     for name, command in leaves(typer.main.get_command(app)):
