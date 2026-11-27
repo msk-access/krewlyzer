@@ -9,16 +9,15 @@
 //! Use [`CorrectionFactors::load`] to read either format transparently (Parquet-first).
 //!
 //! ## On-target vs off-target
-//! Two independent write sites exist:
-//! - **Off-target**: `pipeline.rs` calls `write_tsv`/`write_parquet` after `compute_gcfix_factors`.
-//! - **On-target**: `compute_and_write_gc_factors` PyO3 fn called from Python (`sample_processor.py`)
-//!   with the on-target observation dict and a `*.correction_factors.ontarget.tsv` path.
+//! Extraction is the only writer: `compute_and_write_gc_factors`, called from Python
+//! (`sample_processor.py`) once per population with its observation dict, writes
+//! `*.correction_factors.*` (off-target) and `*.correction_factors.ontarget.*`. The unified
+//! pipeline only loads the table beside the BED (`pipeline.rs`, Phase 1).
 
 use anyhow::{Result, anyhow};
 use log::{info, debug};
 use lowess::prelude::*;
 use std::io::{Write, BufRead};
-use coitrees::IntervalTree;
 
 /// Configuration for GC bias correction
 #[derive(Clone, Debug)]
@@ -613,8 +612,7 @@ pub fn compute_and_write_gc_factors(
     output_format: &str,
     compress: bool,
 ) -> PyResult<u64> {
-    use crate::output_utils::{should_write_tsv, should_write_parquet, validated_output_format};
-    use std::path::PathBuf;
+    use crate::output_utils::validated_output_format;
     let fmt = validated_output_format(output_format);
     info!(
         "gc_correction: computing factors from {} observations (format={}, compress={})",
@@ -655,24 +653,61 @@ pub fn compute_and_write_gc_factors(
     } else {
         output_path
     };
-    if should_write_tsv(fmt) {
-        let tsv_out = if compress {
-            PathBuf::from(format!("{}.tsv.gz", stem))
-        } else {
-            PathBuf::from(format!("{}.tsv", stem))
-        };
-        factors.write_tsv(&tsv_out, compress)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write TSV: {}", e)))?;
-        info!("gc_correction: wrote {:?}", tsv_out);
-    }
-    if should_write_parquet(fmt) {
-        let parquet_out = PathBuf::from(format!("{}.parquet", stem));
-        factors.write_parquet(&parquet_out)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to write Parquet: {}", e)))?;
-        info!("gc_correction: wrote {:?}", parquet_out);
-    }
+    write_factor_tables(&factors, stem, fmt, compress).map_err(PyRuntimeError::new_err)?;
 
     Ok(n_factors)
+}
+
+/// Write a factor table at `stem` in every format `fmt` asks for, or in none.
+///
+/// The one Rust writer of a sample's factor table, called by extraction's
+/// `compute_and_write_gc_factors` (no other step fits one). With "both", a TSV written before
+/// the Parquet write failed was left behind, and every tool reading the folder used it while the
+/// caller recorded no table: on any failure the tables this call had started are removed first.
+pub(crate) fn write_factor_tables(
+    factors: &CorrectionFactors,
+    stem: &str,
+    fmt: &str,
+    compress: bool,
+) -> std::result::Result<Vec<std::path::PathBuf>, String> {
+    use crate::output_utils::{should_write_parquet, should_write_tsv};
+    use std::path::PathBuf;
+    let mut started: Vec<PathBuf> = Vec::new();
+    let mut write = || -> std::result::Result<(), String> {
+        if should_write_tsv(fmt) {
+            let tsv_out = PathBuf::from(format!("{}{}", stem, if compress { ".tsv.gz" } else { ".tsv" }));
+            started.push(tsv_out.clone());
+            factors.write_tsv(&tsv_out, compress).map_err(|e| format!("Failed to write TSV: {}", e))?;
+            info!("gc_correction: wrote {:?}", tsv_out);
+        }
+        if should_write_parquet(fmt) {
+            let parquet_out = PathBuf::from(format!("{}.parquet", stem));
+            started.push(parquet_out.clone());
+            factors.write_parquet(&parquet_out).map_err(|e| format!("Failed to write Parquet: {}", e))?;
+            info!("gc_correction: wrote {:?}", parquet_out);
+        }
+        Ok(())
+    };
+    match write() {
+        Ok(()) => Ok(started),
+        Err(e) => {
+            remove_started(&started);
+            Err(e)
+        }
+    }
+}
+
+/// Remove the factor tables a failed write had started, so none is left for a reader to find.
+/// Only files: a path that could not be created because something else is there is not ours.
+fn remove_started(paths: &[std::path::PathBuf]) {
+    for path in paths {
+        if path.is_file() {
+            match std::fs::remove_file(path) {
+                Ok(()) => log::warn!("gc_correction: removed {:?}, written before the failure", path),
+                Err(e) => log::warn!("gc_correction: could not remove {:?}: {}", path, e),
+            }
+        }
+    }
 }
 
 /// Validate a GC correction factor table by loading it exactly as every consumer does
@@ -695,101 +730,49 @@ fn variance(data: &[f64]) -> f64 {
     data.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n - 1.0)
 }
 
-use coitrees::{COITree, IntervalNode};
-use crate::bed::{ChromosomeMap, Fragment};
-use crate::engine::FragmentConsumer;
-use std::sync::Arc;
-
-/// Filters fragments based on valid regions (BED)
-pub struct ValidRegionFilter {
-    trees: HashMap<u32, COITree<usize, u32>>,
-}
-
-impl ValidRegionFilter {
-    pub fn load(path: &Path, chrom_map: &mut ChromosomeMap) -> Result<Self> {
-        let reader = crate::bed::get_reader(path)?;
-        let mut nodes_by_chrom: HashMap<u32, Vec<IntervalNode<usize, u32>>> = HashMap::new();
-        
-        for line in reader.lines() {
-            let line = line?;
-            if line.starts_with('#') || line.trim().is_empty() { continue; }
-            let fields: Vec<&str> = line.split('\t').collect();
-            if fields.len() < 3 { continue; }
-            
-            let chrom = fields[0].trim_start_matches("chr");
-            let start: i32 = fields[1].parse().unwrap_or(0);
-            let end: i32 = fields[2].parse().unwrap_or(0);
-            let end_closed = if end > start { end - 1 } else { start };
-            
-            let chrom_id = chrom_map.get_id(chrom);
-            
-            nodes_by_chrom.entry(chrom_id).or_default().push(
-                IntervalNode::new(start, end_closed, 0)
-            );
-        }
-        
-        let mut trees = HashMap::new();
-        for (chrom, nodes) in nodes_by_chrom {
-            trees.insert(chrom, COITree::new(&nodes));
-        }
-        
-        info!("Loaded valid regions filter covering {} chromosomes", trees.len());
-        Ok(Self { trees })
-    }
-    
-    /// Check if a fragment overlaps with valid regions
-    pub fn is_valid(&self, chrom: u32, start: u64, end: u64) -> bool {
-        if let Some(tree) = self.trees.get(&chrom) {
-            let s = start as i32;
-            let e = end as i32; // end is exclusive in fragment, but query is closed?
-            let e_closed = if e > s { e - 1 } else { s };
-            
-            // Standard check: query_count > 0 simply means some overlap.
-            tree.query_count(s, e_closed) > 0
-        } else {
-            false
-        }
-    }
-}
-
-/// Consumer to count observed fragments in valid regions
-#[derive(Clone)]
-pub struct GcObservationConsumer {
-    pub observed: HashMap<(LengthBin, u8), u64>,
-    pub valid_regions: Arc<ValidRegionFilter>, 
-}
-
-impl GcObservationConsumer {
-    pub fn new(valid_regions: Arc<ValidRegionFilter>) -> Self {
-        Self {
-             observed: HashMap::new(),
-             valid_regions,
-        }
-    }
-}
-
-impl FragmentConsumer for GcObservationConsumer {
-    fn name(&self) -> &str { "GcObservation" }
-    
-    fn consume(&mut self, fragment: &Fragment) {
-        if self.valid_regions.is_valid(fragment.chrom_id, fragment.start, fragment.end) {
-             if let Some(bin) = LengthBin::from_len(fragment.length) {
-                 let gc_byte = (fragment.gc * 100.0).round() as u8;
-                 *self.observed.entry((bin, gc_byte)).or_insert(0) += 1;
-             }
-        }
-    }
-    
-    fn merge(&mut self, other: Self) {
-        for (k, v) in other.observed {
-            *self.observed.entry(k).or_insert(0) += v;
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn one_bin() -> CorrectionFactors {
+        let mut data = HashMap::new();
+        data.insert(
+            (LengthBin(10), 40u8),
+            CorrectionBinStats { observed: 100, expected: 90, factor: 0.9 },
+        );
+        CorrectionFactors { data }
+    }
+
+    #[test]
+    fn write_factor_tables_writes_every_format_or_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let stem = dir.path().join("s.correction_factors");
+        let stem = stem.to_str().unwrap();
+
+        // The Parquet table cannot be created (a directory is there) after the TSV one was.
+        std::fs::create_dir(format!("{}.parquet", stem)).unwrap();
+        assert!(write_factor_tables(&one_bin(), stem, "both", false).is_err());
+        assert!(!std::path::Path::new(&format!("{}.tsv", stem)).exists(), "half a table left");
+
+        std::fs::remove_dir(format!("{}.parquet", stem)).unwrap();
+        let written = write_factor_tables(&one_bin(), stem, "both", false).unwrap();
+        assert_eq!(written.len(), 2);
+        assert!(written.iter().all(|p| p.is_file()));
+    }
+
+    #[test]
+    fn remove_started_removes_files_and_leaves_what_is_not_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let tsv = dir.path().join("s.correction_factors.tsv");
+        let parquet = dir.path().join("s.correction_factors.parquet");
+        std::fs::write(&tsv, "len_bin\tgc_bin\tfactor\n").unwrap();
+        std::fs::create_dir(&parquet).unwrap();
+
+        remove_started(&[tsv.clone(), parquet.clone()]);
+
+        assert!(!tsv.exists(), "a started table was left");
+        assert!(parquet.is_dir(), "removed what this call did not write");
+    }
     
     #[test]
     fn test_gc_correction_basic() {

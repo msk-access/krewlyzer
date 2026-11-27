@@ -41,12 +41,70 @@ from .motif_processor import compute_mds
 from ..assets import AssetManager
 from .gc_assets import (
     check_reference_contigs,
+    factor_table_base,
     factor_table_path,
     remove_factor_tables,
     require_gc_for_pon,
 )
 
 logger = logging.getLogger("krewlyzer.core.sample_processor")
+
+
+def write_gc_factor_table(
+    observations: Dict[Any, Any],
+    assets: Any,
+    output_dir: Path,
+    sample: str,
+    population: str,
+    *,
+    output_format: str,
+    compress: bool,
+) -> bool:
+    """Fit one population's GC factors and write its table. True only if a table was written.
+
+    The one place a factor table is written from extraction's observations (extract, run-all and
+    the PON build, both populations), so the log names a table only when one was written: the tools
+    reading the folder take the table they find beside the BED, and a line naming one that was not
+    ("Wrote 0 on-target GC factors") sends a reader after a table that does not exist. A population
+    with no observations, or none Rust can fit (it returns 0 and writes nothing), is warned about
+    with that reason. ``assets`` is an `AssetManager` or a genome name; a failure to resolve it is
+    a failed computation like any other, warned about, never raised: the record says no table.
+
+    No other writer exists: the feature step only reads the table beside the BED, so with none
+    written here every feature that corrects with it runs uncorrected, which run_features warns
+    about and the record shows. Rust's `write_factor_tables` writes every format or none.
+    """
+    label = population.replace("_", "-")  # off_target -> off-target
+    none_written = "no factor table written"
+    if not observations:
+        logger.warning(
+            f"No {label} fragments to fit GC factors for {sample}; {none_written}"
+        )
+        return False
+    try:
+        if isinstance(assets, str):
+            assets = AssetManager(assets)
+        n_factors = _core.gc.compute_and_write_gc_factors(
+            observations,
+            str(assets.resolve("gc_reference")),
+            str(assets.resolve("valid_regions")),
+            str(factor_table_path(output_dir, sample, population)),
+            output_format=output_format,
+            compress=compress,
+        )
+    except Exception as e:
+        logger.warning(
+            f"{label} GC factor computation failed for {sample}: {e}; {none_written}"
+        )
+        return False
+    if n_factors > 0:
+        logger.info(
+            f"Wrote {n_factors} {label} GC factors: "
+            f"{factor_table_base(output_dir, sample, population).name}.*"
+        )
+        return True
+    logger.warning(f"No {label} GC factor could be fitted for {sample}; {none_written}")
+    return False
 
 
 # =============================================================================
@@ -868,41 +926,19 @@ def write_extraction_outputs(
         TABLE_FORMATS: table_formats(output_format=output_format, compress=compress),
     }
 
-    # Compute GC correction factors
-    if compute_gc_factors and result.gc_observations:
-        factors_path = factor_table_path(output_dir, sample, "off_target")
-        try:
-            assets = AssetManager(genome)
-            gc_ref = assets.resolve("gc_reference")
-            valid_regions = assets.resolve("valid_regions")
-
-            n_factors = _core.gc.compute_and_write_gc_factors(
-                result.gc_observations,
-                str(gc_ref),
-                str(valid_regions),
-                str(factors_path),
-                output_format=output_format,
-                compress=compress,
-            )
-
-            # 0 is Rust's "no length bin could be fitted", and then it writes no table: the
-            # record and `outputs` say a table exists only when one was written.
-            if n_factors > 0:
-                outputs["gc_factors"] = factors_path
-                meta_flat["gc_correction_computed"] = True
-                logger.debug(
-                    f"  Wrote GC factors: {factors_path.name} ({n_factors} regions)"
-                )
-            else:
-                logger.warning(
-                    f"  No GC factor could be fitted for {sample}; no factor table written, "
-                    "so the tools reading this folder find none"
-                )
-        except Exception as e:
-            # Recorded as not computed; warned, since at debug it read like a sample too small to fit.
-            logger.warning(
-                f"  GC factor computation failed for {sample}, no factor table written: {e}"
-            )
+    # Compute GC correction factors. The record and `outputs` say a table exists only when one
+    # was written (`write_gc_factor_table`).
+    if compute_gc_factors and write_gc_factor_table(
+        result.gc_observations,
+        genome,
+        output_dir,
+        sample,
+        "off_target",
+        output_format=output_format,
+        compress=compress,
+    ):
+        outputs["gc_factors"] = factor_table_path(output_dir, sample, "off_target")
+        meta_flat["gc_correction_computed"] = True
 
     # The record is rewritten from scratch, but a setting extraction does not decide (run-all's E1
     # aggregation) is the folder's, not this run's. Carried over for run-all re-extracting a deleted
@@ -1113,49 +1149,26 @@ def process_sample(
         )
 
         # === Compute GC correction factors for downstream tools ===
-        # Off-target factors (WGS-like, primary)
-        if result.gc_observations:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_path = factor_table_path(output_dir, sample_name, "off_target")
-
-                n_factors = _core.gc.compute_and_write_gc_factors(
-                    result.gc_observations,
-                    str(gc_ref),
-                    str(valid_regions),
-                    str(factors_path),
-                    output_format=output_format,
-                    compress=compress,
-                )
-                logger.debug(
-                    f"  Computed {n_factors} off-target GC factors: {factors_path.name}"
-                )
-            except Exception as e:
-                logger.warning(f"  Off-target GC factor computation failed: {e}")
-
-        # On-target factors (panel mode - used by FSC, RegionEntropy)
-        if result.gc_observations_ontarget and result.is_panel_mode:
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_ontarget_path = factor_table_path(
-                    output_dir, sample_name, "on_target"
-                )
-
-                n_factors_on = _core.gc.compute_and_write_gc_factors(
-                    result.gc_observations_ontarget,
-                    str(gc_ref),
-                    str(valid_regions),
-                    str(factors_ontarget_path),
-                    output_format=output_format,
-                    compress=compress,
-                )
-                logger.info(
-                    f"  Computed {n_factors_on} on-target GC factors: {factors_ontarget_path.name}"
-                )
-            except Exception as e:
-                logger.debug(f"  On-target GC factor computation failed: {e}")
+        # Off-target factors (WGS-like, primary); on-target in panel mode (FSC, RegionEntropy).
+        write_gc_factor_table(
+            result.gc_observations,
+            assets,
+            output_dir,
+            sample_name,
+            "off_target",
+            output_format=output_format,
+            compress=compress,
+        )
+        if result.is_panel_mode:
+            write_gc_factor_table(
+                result.gc_observations_ontarget,
+                assets,
+                output_dir,
+                sample_name,
+                "on_target",
+                output_format=output_format,
+                compress=compress,
+            )
     else:
         outputs.bed_path = input_path
         logger.info("Using pre-extracted BED.gz")

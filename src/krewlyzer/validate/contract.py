@@ -575,7 +575,7 @@ CONTRACT: Tuple[TableRule, ...] = (
                 constant_reason="one PON per cohort, by the release it ships with",
             ),
             # Which GC factor table each population was corrected with, by kind
-            # (parquet / tsv.gz / tsv / recomputed / none:<reason>), never a filename.
+            # (parquet / tsv.gz / tsv / none:<reason>), never a filename.
             # Not required: directories from builds before the GC-lookup fix lack them,
             # and `build-pon --from-outputs` refuses those separately.
             *(

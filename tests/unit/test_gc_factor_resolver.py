@@ -11,11 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from krewlyzer.assets import AssetManager
 from krewlyzer.core.gc_assets import (
     GcFactorsChoice,
     factor_table_base,
-    resolve_gc_assets,
     resolve_gc_factors,
 )
 
@@ -31,8 +29,8 @@ def test_finds_the_tables_production_actually_writes(tmp_path):
     bed = _touch(tmp_path / "s.bed.gz")
     _touch(tmp_path / "s.correction_factors.tsv.gz")
     _touch(tmp_path / "s.correction_factors.ontarget.tsv.gz")
-    off = resolve_gc_factors(bed, tmp_path, "s", "off_target")
-    on = resolve_gc_factors(bed, tmp_path, "s", "on_target")
+    off = resolve_gc_factors(bed, "off_target")
+    on = resolve_gc_factors(bed, "on_target")
     assert (off.kind, off.path.name) == ("tsv.gz", "s.correction_factors.tsv.gz")
     assert (on.kind, on.path.name) == ("tsv.gz", "s.correction_factors.ontarget.tsv.gz")
 
@@ -42,18 +40,85 @@ def test_precedence_is_parquet_then_tsv_gz_then_tsv(tmp_path):
     for ext in (".tsv", ".tsv.gz", ".parquet"):
         _touch(tmp_path / f"s.correction_factors{ext}")
     for expected in ("parquet", "tsv.gz", "tsv"):
-        c = resolve_gc_factors(bed, tmp_path, "s", "off_target")
+        c = resolve_gc_factors(bed, "off_target")
         assert c.kind == expected
         c.path.unlink()
-    assert resolve_gc_factors(bed, tmp_path, "s", "off_target").kind == "none"
+    assert resolve_gc_factors(bed, "off_target").kind == "none"
 
 
-def test_beside_the_bed_wins_over_the_output_dir(tmp_path):
-    bed = _touch(tmp_path / "extract" / "s.bed.gz")
-    beside = _touch(tmp_path / "extract" / "s.correction_factors.tsv.gz")
-    _touch(tmp_path / "out" / "s.correction_factors.parquet")
-    c = resolve_gc_factors(bed, tmp_path / "out", "s", "off_target")
-    assert c.path == beside
+def _record(directory: Path, output_format: str, compress: bool, **columns) -> None:
+    """Extraction's record of `s`, in the format a run of this format writes."""
+    import pandas as pd
+
+    from krewlyzer.core.output_utils import write_table
+
+    write_table(
+        pd.DataFrame([{"sample_id": "s", **columns}]),
+        directory / "s.metadata",
+        output_format=output_format,
+        compress=compress,
+    )
+
+
+@pytest.mark.parametrize(
+    "table_ext, output_format, compress",
+    [
+        (".parquet", "parquet", False),
+        (".tsv.gz", "tsv", True),
+        (".tsv", "tsv", False),
+        (".tsv", "parquet", False),  # a TSV tool run into a Parquet extraction's folder
+    ],
+)
+def test_a_table_extraction_recorded_it_did_not_write_is_not_used(
+    tmp_path, table_ext, output_format, compress
+):
+    # Builds before the refit's removal fitted a table beside the BED after extraction wrote none
+    # (run-all's feature step writes into the BED's folder), under extraction's name. A rerun then
+    # took it for extraction's table. Extraction's record says it wrote none, so it is not.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / f"s.correction_factors{table_ext}")
+    _record(tmp_path, output_format, compress, gc_correction_computed=False)
+    c = resolve_gc_factors(bed, "off_target")
+    assert not c.found
+    assert c.record() == (
+        "none:beside the BED but not extraction's, whose record says it wrote none"
+    )
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [{"gc_correction_computed": True}, {}, {"gc_correction_computed": None}],
+    ids=["wrote-one", "not-recorded", "empty"],
+)
+def test_a_table_is_extractions_unless_its_record_says_it_wrote_none(tmp_path, columns):
+    # The contrast: a record that does not say "none" leaves the table extraction's. Without
+    # this, the test above passes on a lookup that never finds a table beside a record.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.parquet")
+    _record(tmp_path, "parquet", False, **columns)
+    assert resolve_gc_factors(bed, "off_target").found
+
+
+def test_a_record_that_cannot_be_read_is_warned_of_and_says_nothing(tmp_path, caplog):
+    # Judged as no record, as before the check: the lookup neither fails the run nor quietly
+    # drops the table on a damaged record.
+    import logging
+
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.parquet")
+    (tmp_path / "s.metadata.parquet").write_bytes(b"not parquet")
+    with caplog.at_level(logging.WARNING, logger="core.output_provenance"):
+        assert resolve_gc_factors(bed, "off_target").found
+    assert any("could not be read" in r.getMessage() for r in caplog.records)
+
+
+def test_extractions_record_of_off_target_says_nothing_of_the_on_target_table(tmp_path):
+    # `gc_correction_computed` is the off-target table's; no feature step ever fitted an
+    # on-target one.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _touch(tmp_path / "s.correction_factors.ontarget.parquet")
+    _record(tmp_path, "parquet", False, gc_correction_computed=False)
+    assert resolve_gc_factors(bed, "on_target").found
 
 
 def test_beside_a_linked_bed_is_beside_the_file_it_points_to(tmp_path):
@@ -64,7 +129,7 @@ def test_beside_a_linked_bed_is_beside_the_file_it_points_to(tmp_path):
     table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
     _touch(tmp_path / "c" / "s.correction_factors.parquet")
     (tmp_path / "c" / "s.bed.gz").symlink_to(bed)
-    c = resolve_gc_factors(tmp_path / "c" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "c" / "s.bed.gz", "off_target")
     assert c.path.samefile(table)
 
 
@@ -82,7 +147,7 @@ def test_beside_a_link_to_a_renamed_file_without_a_record_is_beside_the_link(
     obj = _touch(tmp_path / held)
     table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
     (tmp_path / "b" / "s.bed.gz").symlink_to(obj)
-    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
 
 
@@ -95,7 +160,7 @@ def test_a_chain_of_links_is_followed_to_the_last_file_extraction_named(tmp_path
     for link, target in (("c", "b"), ("d", "c")):
         _touch(tmp_path / link / "s.correction_factors.parquet")
         (tmp_path / link / "s.bed.gz").symlink_to(tmp_path / target / "s.bed.gz")
-    c = resolve_gc_factors(tmp_path / "d" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "d" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
 
 
@@ -104,7 +169,7 @@ def test_a_loop_of_links_is_not_followed_forever(tmp_path):
     (tmp_path / "y").mkdir()
     (tmp_path / "x" / "s.bed.gz").symlink_to(tmp_path / "y" / "s.bed.gz")
     (tmp_path / "y" / "s.bed.gz").symlink_to(tmp_path / "x" / "s.bed.gz")
-    c = resolve_gc_factors(tmp_path / "x" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "x" / "s.bed.gz", "off_target")
     assert c.kind == "none"
 
 
@@ -115,7 +180,7 @@ def test_a_link_to_another_extractions_bed_is_followed_whatever_its_name(tmp_pat
     table = _touch(tmp_path / "a" / "t.correction_factors.parquet")
     _touch(tmp_path / "b" / "s.correction_factors.parquet")
     (tmp_path / "b" / "s.bed.gz").symlink_to(target)
-    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
 
 
@@ -133,7 +198,7 @@ def test_a_renamed_file_in_a_folder_extraction_wrote_is_not_beside_the_link(
     _touch(tmp_path / "a" / record)
     table_b = _touch(tmp_path / "b" / "s.correction_factors.parquet")
     (tmp_path / "b" / "s.bed.gz").symlink_to(target)
-    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert not (c.found and c.path.samefile(table_b))
 
 
@@ -155,7 +220,7 @@ def test_a_chain_through_a_renamed_link_uses_the_table_of_the_bed_it_reaches(
     link.parent.mkdir(exist_ok=True)
     link.symlink_to(bed)
     (tmp_path / "b" / "s.bed.gz").symlink_to(link)
-    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
 
 
@@ -165,43 +230,23 @@ def test_a_versioned_file_beside_the_link_held_in_an_annex_is_the_links_bed(tmp_
     table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
     (tmp_path / "b" / "s.v1.bed.gz").symlink_to(obj)
     (tmp_path / "b" / "s.bed.gz").symlink_to(tmp_path / "b" / "s.v1.bed.gz")
-    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", None, "s", "off_target")
+    c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
 
 
-def test_the_tools_use_the_table_beside_a_link_to_a_store_object_and_do_not_refit(
-    tmp_path,
-):
-    # A refit (`factors_out` set) is the one path to `run_features` removing extract's table from
-    # the output folder. The CLI tests cannot see it: the synthetic sample fits no table.
-    obj = _touch(tmp_path / "store" / "SHA256E-s1--0a1b.bed.gz")
-    table = _touch(tmp_path / "b" / "s.correction_factors.parquet")
-    (tmp_path / "b" / "s.bed.gz").symlink_to(obj)
-    gc = resolve_gc_assets(
-        AssetManager("hg19"), tmp_path / "b", "s", tmp_path / "b" / "s.bed.gz"
-    )
-    assert gc.factors_input is not None and gc.factors_input.samefile(table)
-    assert gc.factors_out is None
-
-
-def test_output_dir_is_searched_by_sample_name(tmp_path):
-    bed = _touch(tmp_path / "in" / "renamed.bed.gz")
-    table = _touch(tmp_path / "out" / "s.correction_factors.ontarget.parquet")
-    c = resolve_gc_factors(bed, tmp_path / "out", "s", "on_target")
-    assert c.path == table and c.kind == "parquet"
-
-
-def test_without_an_output_dir_only_the_bed_side_is_searched(tmp_path):
-    # The table fed *into* the Rust pass: a table an earlier single-tool run left in the output
-    # directory must not be silently reused (unchanged behaviour of resolve_gc_assets).
-    bed = _touch(tmp_path / "in" / "s.bed.gz")
-    _touch(tmp_path / "out" / "s.correction_factors.parquet")
-    assert resolve_gc_factors(bed, None, "s", "off_target").kind == "none"
+@pytest.mark.parametrize("bed_name", ["s.bed.gz", "renamed.bed.gz"])
+def test_a_table_in_another_folder_is_never_used(tmp_path, bed_name):
+    # Only beside the BED: a table in the folder a tool writes to may be another extraction's,
+    # fitted from other fragments. The output folder was once searched by sample name too.
+    bed = _touch(tmp_path / "in" / bed_name)
+    for population in ("off_target", "on_target"):
+        _touch(Path(f"{factor_table_base(tmp_path / 'out', 's', population)}.parquet"))
+        assert resolve_gc_factors(bed, population).kind == "none"
 
 
 def test_not_found_says_what_was_searched_without_naming_the_sample(tmp_path):
     bed = _touch(tmp_path / "P-0000000.bed.gz")
-    c = resolve_gc_factors(bed, tmp_path, "P-0000000", "on_target")
+    c = resolve_gc_factors(bed, "on_target")
     assert c.path is None and c.kind == "none" and not c.found
     assert (
         "P-0000000.correction_factors.ontarget.{parquet,tsv.gz,tsv}" in c.searched
@@ -209,7 +254,7 @@ def test_not_found_says_what_was_searched_without_naming_the_sample(tmp_path):
     assert (
         "P-0000000" not in c.reason and "P-0000000" not in c.record()
     )  # metadata stays constant
-    assert c.record() == "none:not found beside the BED or in the output directory"
+    assert c.record() == "none:not found beside the BED"
 
 
 def test_record_is_the_kind_never_the_sample_name(tmp_path):
@@ -217,10 +262,7 @@ def test_record_is_the_kind_never_the_sample_name(tmp_path):
     # the degeneracy gate notice a cohort where nothing was corrected.
     bed = _touch(tmp_path / "P-0000000.bed.gz")
     _touch(tmp_path / "P-0000000.correction_factors.parquet")
-    assert (
-        resolve_gc_factors(bed, tmp_path, "P-0000000", "off_target").record()
-        == "parquet"
-    )
+    assert resolve_gc_factors(bed, "off_target").record() == "parquet"
 
 
 def test_base_path_is_the_one_place_that_spells_the_name(tmp_path):
@@ -250,9 +292,7 @@ def test_a_pon_donor_without_gc_tables_is_refused(tmp_path):
     from krewlyzer.core.gc_assets import require_gc_for_pon
 
     found = GcFactorsChoice(tmp_path / "d.correction_factors.parquet", "parquet")
-    missing = GcFactorsChoice(
-        None, "none", "not found beside the BED or in the output directory"
-    )
+    missing = GcFactorsChoice(None, "none", "not found beside the BED")
     require_gc_for_pon({"off_target": found, "on_target": found}, panel_mode=True)
     require_gc_for_pon({"off_target": found, "on_target": missing}, panel_mode=False)
     with pytest.raises(RuntimeError, match="off-target"):

@@ -638,3 +638,35 @@ def test_a_panel_donor_without_on_target_factors_is_refused_as_in_process(tmp_pa
 def test_a_whole_genome_donor_needs_only_off_target_factors(tmp_path):
     d = _metadata(tmp_path / "wgs", panel_mode=False, gc_factors_offtarget="parquet")
     assert from_outputs.gc_reason(d, "s") is None
+
+
+@pytest.mark.parametrize(
+    "columns",
+    [
+        # Builds before the refit's removal recorded a feature step's refit as `recomputed`.
+        {"gc_factors_offtarget": "recomputed"},
+        # Or, over a folder a single tool had refitted into, as extraction's table, beside a
+        # record of extraction computing none.
+        {"gc_factors_offtarget": "parquet", "gc_correction_computed": False},
+    ],
+    ids=["recomputed", "a-table-extraction-wrote-none-of"],
+)
+def test_a_donor_corrected_with_a_table_no_extraction_wrote_is_refused(
+    tmp_path, columns
+):
+    """The in-process build reads only extraction's table; `--from-outputs` accepted a donor
+    whose features were corrected with a refitted one. One rule for both paths."""
+    d = _metadata(tmp_path / "wgs", panel_mode=False, **columns)
+    reason = from_outputs.gc_reason(d, "s")
+    assert reason is not None and "not extraction's" in reason
+
+
+def test_a_donor_whose_extraction_wrote_its_table_is_accepted(tmp_path):
+    """The contrast: extraction's record says it wrote the table the features used."""
+    d = _metadata(
+        tmp_path / "wgs",
+        panel_mode=False,
+        gc_factors_offtarget="parquet",
+        gc_correction_computed=True,
+    )
+    assert from_outputs.gc_reason(d, "s") is None

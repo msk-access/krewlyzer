@@ -17,6 +17,7 @@ REQUIRED = {
         "write_motif_tables",
         "write_motif_outputs",
         "process_sample",
+        "write_gc_factor_table",
     ),
     "krewlyzer.core.output_provenance": (
         "record_stage_outcomes",

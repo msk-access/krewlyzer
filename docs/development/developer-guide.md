@@ -110,10 +110,7 @@ All feature computation goes through `run_unified_pipeline`:
 pub fn run_unified_pipeline(
     _py: Python,
     bed_path: PathBuf,
-    // GC Correction
-    gc_ref_path: Option<PathBuf>,
-    valid_regions_path: Option<PathBuf>,
-    correction_out_path: Option<PathBuf>,
+    // GC correction: the factor table extraction fitted beside the BED (None = uncorrected)
     correction_input_path: Option<PathBuf>,
     // FSC
     fsc_bins: Option<PathBuf>, fsc_output: Option<PathBuf>,
@@ -164,14 +161,13 @@ def tool_name(
     # 1. Initialize AssetManager
     assets = AssetManager(genome)
     
-    # 2. Resolve GC assets (use helper)
-    from .core.gc_assets import resolve_gc_assets
-    gc = resolve_gc_assets(assets, output, sample_name, input, gc_correct, genome)
+    # 2. Run the unified pipeline through run_features, as run-all does. It finds the GC
+    #    factor table extraction wrote beside the BED (core.gc_assets.resolve_gc_factors),
+    #    or runs uncorrected and records why: no feature step fits a table.
+    from .core.unified_processor import run_features
+    outputs = run_features(input, output, sample_name, enable_<feature>=True, ...)
     
-    # 3. Call Rust backend
-    _core.run_unified_pipeline(...)
-    
-    # 4. Post-process (Python)
+    # 3. Post-process (Python)
     from .core.tool_processor import process_tool
     process_tool(output_file, ...)
 ```

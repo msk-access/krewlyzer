@@ -93,9 +93,7 @@ def test_every_output_layout_resolves_the_same_factors(tmp_path):
     tables = {}
     for name in LAYOUTS:
         d, bed = _run_layout(tmp_path, name, ref, obs, valid)
-        off, _ = resolve_feature_gc_tables(
-            bed, d, "s", gc_correct=True, panel_mode=False, refitted=False
-        )
+        off, _ = resolve_feature_gc_tables(bed, gc_correct=True, panel_mode=False)
         assert off.found, f"{name}: no factor table resolved ({off.reason})"
         frame = (
             _read(off.path)
@@ -124,9 +122,7 @@ def test_gc_correction_off_resolves_nothing(tmp_path):
     valid = tmp_path / "valid.bed"
     valid.write_text("chr1\t0\t1000\n")
     d, bed = _run_layout(tmp_path, "production", ref, _observations(expected), valid)
-    off, on = resolve_feature_gc_tables(
-        bed, d, "s", gc_correct=False, panel_mode=True, refitted=False
-    )
+    off, on = resolve_feature_gc_tables(bed, gc_correct=False, panel_mode=True)
     assert not off.found and not on.found
     assert off.record() == "none:gc correction disabled"
 
@@ -144,9 +140,7 @@ def test_an_unreadable_table_stops_the_run_instead_of_being_recorded_as_applied(
     d, bed = _run_layout(tmp_path, "production", ref, _observations(expected), valid)
     ontarget = d / "s.correction_factors.ontarget.parquet"
     ontarget.write_bytes((d / "s.correction_factors.parquet").read_bytes())
-    resolve_feature_gc_tables(
-        bed, d, "s", gc_correct=True, panel_mode=True, refitted=False
-    )
+    resolve_feature_gc_tables(bed, gc_correct=True, panel_mode=True)
 
     broken = (
         ontarget if population == "on_target" else d / "s.correction_factors.parquet"
@@ -156,6 +150,4 @@ def test_an_unreadable_table_stops_the_run_instead_of_being_recorded_as_applied(
     with pytest.raises(
         RuntimeError, match=f"{label} GC factor table .* cannot be read"
     ):
-        resolve_feature_gc_tables(
-            bed, d, "s", gc_correct=True, panel_mode=True, refitted=False
-        )
+        resolve_feature_gc_tables(bed, gc_correct=True, panel_mode=True)

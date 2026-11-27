@@ -1,19 +1,17 @@
 """
-GC Correction Asset Resolution Helper.
+GC factor tables: where a sample's table is, or why there is none.
 
-Provides a centralized function for resolving GC correction assets
-to avoid code duplication across standalone tools.
+Only extraction fits a table, and writes it beside the BED it fitted it from. A feature step
+reads that table through `resolve_gc_factors`, or, with none, runs without GC correction;
+`run_features` warns why, and run-all records the choice (`GcFactorsChoice.record`).
 """
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 import logging
 
-from .output_provenance import bed_as_extracted
-
-if TYPE_CHECKING:
-    from ..assets import AssetManager
+from .output_provenance import bed_as_extracted, extraction_wrote_none_beside
 
 logger = logging.getLogger("krewlyzer.core.gc_assets")
 
@@ -48,6 +46,8 @@ def check_reference_contigs(n_missing: int, n_fetch_failed: int, n_total: int) -
 POPULATIONS = ("off_target", "on_target")
 #: Search order for an existing table: full-precision Parquet first, then compressed TSV, then TSV.
 FACTOR_KINDS = (("parquet", ".parquet"), ("tsv.gz", ".tsv.gz"), ("tsv", ".tsv"))
+#: Why a table beside the BED is not used: its extraction recorded writing none.
+NOT_EXTRACTIONS = "beside the BED but not extraction's, whose record says it wrote none"
 
 
 def factor_table_base(directory: Path, sample: str, population: str) -> Path:
@@ -64,9 +64,7 @@ def factor_table_base(directory: Path, sample: str, population: str) -> Path:
     return Path(directory) / f"{sample}{suffix}"
 
 
-def remove_factor_tables(
-    directory: Path, sample: str, populations: tuple = POPULATIONS
-) -> list:
+def remove_factor_tables(directory: Path, sample: str) -> list:
     """Remove a sample's factor tables, in every format, before a run writes its own.
 
     A table belongs to the BED it was fitted on. The resolver finds one in any format, Parquet
@@ -75,7 +73,7 @@ def remove_factor_tables(
     recorded the correction as applied. Returns the paths removed.
     """
     removed = []
-    for population in populations:
+    for population in POPULATIONS:
         base = factor_table_base(directory, sample, population)
         for _, ext in FACTOR_KINDS:
             path = Path(f"{base}{ext}")
@@ -110,7 +108,7 @@ class GcFactorsChoice:
     """Which GC factor table a run uses for one population, or why there is none."""
 
     path: Optional[Path]
-    kind: str  # "parquet" | "tsv.gz" | "tsv" | "recomputed" | "none"
+    kind: str  # "parquet" | "tsv.gz" | "tsv" | "none"
     reason: str = (
         ""  # why there is no table; never a filename (filenames carry the sample ID)
     )
@@ -125,14 +123,13 @@ class GcFactorsChoice:
         return self.kind if self.found else f"none:{self.reason}"
 
 
-def resolve_gc_factors(
-    bed_path: Path, output_dir: Optional[Path], sample: str, population: str
-) -> GcFactorsChoice:
+def resolve_gc_factors(bed_path: Path, population: str) -> GcFactorsChoice:
     """Find the GC factor table for `population`, in any format run-all writes.
 
-    Search order: beside the BED, under the BED's stem (the table extract wrote with it), then
-    `output_dir` under the sample name. Within each, Parquet, then `.tsv.gz`, then `.tsv`.
-    Pass `output_dir=None` to search beside the BED only.
+    Only beside the BED, under the BED's stem: the table extraction fitted from those fragments
+    and wrote with them. Parquet, then `.tsv.gz`, then `.tsv`. A table elsewhere, such as in the
+    folder a tool writes to, may be another extraction's, fitted from other fragments, so it is
+    never used.
 
     Every reader goes through this. Before it existed, three call sites looked only for a plain
     `.tsv`, which production (`--output-format both --compress`) never writes, and silently ran
@@ -145,49 +142,40 @@ def resolve_gc_factors(
     the table beside the link. In a
     Nextflow task, a BED the pipeline extracted is linked in from that extraction's folder, with
     its tables; a samplesheet BED staged as a link is read with the table beside its source.
+
+    An off-target table beside a record in which extraction says it wrote none is not
+    extraction's (`output_provenance.extraction_wrote_none_beside`): builds before the refit's
+    removal fitted one there, from the whole BED, when run-all's feature step found none, and a
+    rerun reusing that BED took it for extraction's. No step fits an on-target table but
+    extraction, and the record says nothing of it.
     """
     bed_path = bed_as_extracted(bed_path)
-    places = [(bed_path.parent, bed_path.name.removesuffix(".gz").removesuffix(".bed"))]
-    if output_dir is not None:
-        places.append((Path(output_dir), sample))
-    searched = []
-    for directory, stem in places:
-        base = factor_table_base(directory, stem, population)
-        for kind, ext in FACTOR_KINDS:
-            candidate = base.with_name(base.name + ext)
-            if candidate.exists():
-                return GcFactorsChoice(candidate, kind)
-        searched.append(base.name + ".{parquet,tsv.gz,tsv}")
-    where = (
-        "beside the BED or in the output directory"
-        if output_dir is not None
-        else "beside the BED"
-    )
-    return GcFactorsChoice(
-        None, "none", f"not found {where}", tuple(dict.fromkeys(searched))
-    )
+    stem = bed_path.name.removesuffix(".gz").removesuffix(".bed")
+    base = factor_table_base(bed_path.parent, stem, population)
+    searched = (base.name + ".{parquet,tsv.gz,tsv}",)
+    for kind, ext in FACTOR_KINDS:
+        candidate = base.with_name(base.name + ext)
+        if candidate.exists():
+            if population == "off_target" and extraction_wrote_none_beside(
+                bed_path.parent, stem, ext
+            ):
+                return GcFactorsChoice(None, "none", NOT_EXTRACTIONS, searched)
+            return GcFactorsChoice(candidate, kind)
+    return GcFactorsChoice(None, "none", "not found beside the BED", searched)
 
 
 def resolve_feature_gc_tables(
-    bed_path: Path,
-    output_dir: Path,
-    sample: str,
-    gc_correct: bool,
-    panel_mode: bool,
-    refitted: bool,
+    bed_path: Path, gc_correct: bool, panel_mode: bool
 ) -> "tuple[GcFactorsChoice, GcFactorsChoice]":
-    """The (off-target, on-target) factor tables run_features' Python-side consumers use.
-
-    `refitted` is True when no table sat beside the BED, so the Rust pass refitted factors from
-    the BED itself (Phase 1, a different tally from extract's); that choice is recorded as
-    `recomputed` and warned about, because its values differ from run-all's.
+    """The (off-target, on-target) factor tables run_features corrects with: the Rust pass and
+    every Python-side consumer (gene FSC, panel WPS, TFBS, ATAC).
     """
     if not gc_correct:
         off = on = GcFactorsChoice(None, "none", "gc correction disabled")
         return off, on
-    off = resolve_gc_factors(bed_path, output_dir, sample, "off_target")
+    off = resolve_gc_factors(bed_path, "off_target")
     on = (
-        resolve_gc_factors(bed_path, output_dir, sample, "on_target")
+        resolve_gc_factors(bed_path, "on_target")
         if panel_mode
         else GcFactorsChoice(None, "none", "not panel mode")
     )
@@ -206,12 +194,6 @@ def resolve_feature_gc_tables(
                     f"{label} GC factor table {choice.path.name} cannot be read ({e}); "
                     "refusing to run rather than record a correction that did not happen"
                 ) from e
-    if off.found and refitted:
-        off = GcFactorsChoice(off.path, "recomputed")
-        logger.warning(
-            "GC factors were refitted from this BED because extract's table was not beside it; "
-            "values differ from run-all. Run the tool on the extract output directory to match."
-        )
     return off, on
 
 
@@ -229,70 +211,3 @@ def require_gc_for_pon(choices: dict, panel_mode: bool) -> None:
                 f"PON donor has no {population.replace('_', '-')} GC factor table ({reason}); "
                 "refusing to build a baseline from uncorrected features"
             )
-
-
-@dataclass
-class GcAssets:
-    """Resolved GC correction assets."""
-
-    gc_ref: Optional[Path] = None
-    valid_regions: Optional[Path] = None
-    factors_out: Optional[Path] = None
-    factors_input: Optional[Path] = None
-    gc_correct_enabled: bool = False
-
-
-def resolve_gc_assets(
-    assets: "AssetManager",
-    output_dir: Path,
-    sample_name: str,
-    bedgz_input: Path,
-    gc_correct: bool = True,
-    genome: str = "hg19",
-) -> GcAssets:
-    """
-    Resolve GC correction assets with automatic pre-computed factors detection.
-
-    This centralizes the GC asset resolution logic used by all standalone tools
-    (fsc, fsd, fsr, wps, ocf, etc.)
-
-    Args:
-        assets: AssetManager instance
-        output_dir: Output directory for correction_factors.tsv
-        sample_name: Sample name for output file naming
-        bedgz_input: Input BED.gz file (checked for adjacent correction_factors.tsv)
-        gc_correct: Whether GC correction is requested
-        genome: Genome build for logging
-
-    Returns:
-        GcAssets dataclass with resolved paths and enabled status
-    """
-    result = GcAssets()
-
-    if not gc_correct:
-        return result
-
-    # Pre-computed factors beside the input BED (extract writes them there). Only beside the BED:
-    # a table an earlier single-tool run left in output_dir must not be silently reused.
-    pre = resolve_gc_factors(bedgz_input, None, sample_name, "off_target")
-    if pre.path is not None:
-        result.factors_input = pre.path
-        result.gc_correct_enabled = True
-        logger.info(f"Using pre-computed GC factors: {pre.path.name}")
-        return result
-
-    # Resolve bundled GC assets
-    try:
-        result.gc_ref = assets.resolve("gc_reference")
-        result.valid_regions = assets.resolve("valid_regions")
-        result.factors_out = factor_table_path(output_dir, sample_name, "off_target")
-        result.gc_correct_enabled = True
-        logger.info(f"GC correction enabled ({genome})")
-    except FileNotFoundError as e:
-        logger.warning(f"GC correction assets not found: {e}")
-        logger.warning(
-            "Proceeding without GC correction. Use --no-gc-correct to suppress."
-        )
-        result.gc_correct_enabled = False
-
-    return result

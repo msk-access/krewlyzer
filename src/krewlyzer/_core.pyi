@@ -29,9 +29,6 @@ def configure_threads(num_threads: int = 0) -> None:
 
 def run_unified_pipeline(
     bed_path: str,
-    gc_ref_path: str | None,
-    valid_regions_path: str | None,
-    correction_out_path: str | None,
     correction_input_path: str | None,
     fsc_bins: str | None,
     fsc_output: str | None,
@@ -121,6 +118,9 @@ class gc:
         compress: bool = False,
     ) -> int:
         """Compute LOESS GC correction factors and write TSV/Parquet output.
+
+        Every format the call asks for is written, or none: when one fails (``"both"``), the
+        tables it had already written are removed before the error is raised.
 
         Returns:
             Number of correction factor bins written (0, and no file, when nothing could be fitted).

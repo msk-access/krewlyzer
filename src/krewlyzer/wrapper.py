@@ -60,7 +60,7 @@ from .core.asset_resolution import (
     resolve_target_regions,
 )
 from .core.fsc_processor import default_continue_n
-from .core.gc_assets import factor_table_path, resolve_gc_factors
+from .core.gc_assets import resolve_gc_factors
 
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
@@ -691,6 +691,7 @@ def run_all(
             extract_sample,
             write_motif_tables,
             write_extraction_outputs,
+            write_gc_factor_table,
             ExtractionResult,
         )
 
@@ -842,34 +843,16 @@ def run_all(
 
                     # Compute on-target GC factors for panel mode
                     # These are used by mFSD and gene-level FSC for accurate panel analysis
-                    if (
-                        is_panel_mode
-                        and len(extraction_result.gc_observations_ontarget) > 0
-                    ):
-                        try:
-                            gc_ref = assets.resolve("gc_reference")
-                            valid_regions = assets.resolve("valid_regions")
-                            factors_ontarget = factor_table_path(
-                                output, sample, "on_target"
-                            )
-                            logger.info(
-                                f"Computing on-target GC factors from {len(extraction_result.gc_observations_ontarget)} obs..."
-                            )
-                            n_factors_on = _core.gc.compute_and_write_gc_factors(
-                                extraction_result.gc_observations_ontarget,
-                                str(gc_ref),
-                                str(valid_regions),
-                                str(factors_ontarget),
-                                output_format=resolved_output_format,
-                                compress=resolved_compress,
-                            )
-                            logger.info(
-                                f"Wrote {n_factors_on} on-target GC factors: {factors_ontarget.name}"
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                f"On-target GC factor computation failed: {e}"
-                            )
+                    if is_panel_mode:
+                        write_gc_factor_table(
+                            extraction_result.gc_observations_ontarget,
+                            assets,
+                            output,
+                            sample,
+                            "on_target",
+                            output_format=resolved_output_format,
+                            compress=resolved_compress,
+                        )
 
                 # Write motif outputs (EDM, BPM, MDS with z-score)
                 _, motif_outcomes = write_motif_tables(
@@ -1043,9 +1026,7 @@ def run_all(
                 # variants sit in captured regions, whose GC bias differs from off-target.
                 gc_choice = None
                 if is_panel_mode:
-                    gc_choice = resolve_gc_factors(
-                        bedgz_file, output, sample, "on_target"
-                    )
+                    gc_choice = resolve_gc_factors(bedgz_file, "on_target")
                     if gc_choice.path is not None:
                         logger.info(
                             f"mFSD: on-target GC factors ({gc_choice.path.name})"
@@ -1056,9 +1037,7 @@ def run_all(
                             "using the off-target table"
                         )
                 if gc_choice is None or not gc_choice.found:
-                    gc_choice = resolve_gc_factors(
-                        bedgz_file, output, sample, "off_target"
-                    )
+                    gc_choice = resolve_gc_factors(bedgz_file, "off_target")
                 if not gc_choice.found:
                     logger.warning(
                         f"mFSD: no GC factors ({gc_choice.reason}); running uncorrected"

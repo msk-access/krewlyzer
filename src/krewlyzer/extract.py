@@ -41,7 +41,7 @@ from .core.bam_utils import check_bam_compatibility
 
 # Asset resolution for --assay auto-loading
 from .core.asset_resolution import resolve_exclude_regions, resolve_target_regions
-from .core.gc_assets import factor_table_base, factor_table_path
+from .core.gc_assets import factor_table_base
 
 
 def extract(
@@ -302,7 +302,11 @@ def extract(
             )
 
         # Use unified extract_sample() for extraction
-        from .core.sample_processor import extract_sample, write_extraction_outputs
+        from .core.sample_processor import (
+            extract_sample,
+            write_extraction_outputs,
+            write_gc_factor_table,
+        )
 
         result = extract_sample(
             input_path=bam_input,
@@ -336,36 +340,16 @@ def extract(
         )
 
         # On-target GC correction (panel mode only) - additional to standard outputs
-        if (
-            resolved_target_path
-            and gc_correct
-            and len(result.gc_observations_ontarget) > 0
-        ):
-            try:
-                gc_ref = assets.resolve("gc_reference")
-                valid_regions = assets.resolve("valid_regions")
-                factors_ontarget = factor_table_path(output, sample_name, "on_target")
-                logger.info(
-                    f"Computing ON-TARGET GC correction factors from {len(result.gc_observations_ontarget)} observation bins..."
-                )
-                n_factors_on = _core.gc.compute_and_write_gc_factors(
-                    result.gc_observations_ontarget,
-                    str(gc_ref),
-                    str(valid_regions),
-                    str(factors_ontarget),
-                    output_format=output_format,
-                    compress=compress,
-                )
-                if n_factors_on > 0:
-                    logger.info(
-                        f"Computed {n_factors_on} on-target correction factors: {factors_ontarget}"
-                    )
-                else:
-                    logger.warning(
-                        "No on-target GC factor could be fitted; no on-target table written"
-                    )
-            except Exception as e:
-                logger.warning(f"On-target GC correction failed: {e}")
+        if resolved_target_path and gc_correct:
+            write_gc_factor_table(
+                result.gc_observations_ontarget,
+                assets,
+                output,
+                sample_name,
+                "on_target",
+                output_format=output_format,
+                compress=compress,
+            )
 
         # Name only what was written: `written` holds a factor table only when one exists.
         logger.info(f"Output: {result.bed_path}")

@@ -105,10 +105,23 @@ When `--target-regions` is provided to `extract`:
 - Generates both `.correction_factors.*` (off-target) and `.correction_factors.ontarget.*` (on-target), in the run's `--output-format`
 
 **Which table a feature uses.** Every consumer finds its table through one resolver
-(`core.gc_assets.resolve_gc_factors`): beside the BED first, then in the output directory;
-Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
+(`core.gc_assets.resolve_gc_factors`): beside the BED only, where extraction wrote it with the
+BED's fragments; Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
 factors and GC correction does not depend on the output format. Each sample's metadata records
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
+
+**Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
+almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
+the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) run the features that correct
+with it uncorrected, and warn. run-all records `gc_correction_applied_offtarget=False`; a single
+tool records it only into extraction's record, and only while no run has recorded one. A table
+elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
+Nor is one beside the BED when extraction's record says it wrote none
+(`gc_correction_computed=False`): a feature step of an earlier build fitted it there, under
+extraction's name. With no record beside the BED, as in a `build-pon --keep-sample-outputs` cache,
+the table there is used, whatever wrote it. `build-pon` refuses a donor without extraction's table,
+from a BAM or a BED, and stops; with `--allow-failures` it leaves the donor out. `--from-outputs`
+refuses a donor recorded as corrected with a table extraction did not write.
 
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
