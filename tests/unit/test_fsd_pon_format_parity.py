@@ -230,6 +230,57 @@ def test_without_a_pon_rust_s_tables_ship_as_written(
     assert not [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
 
 
+@pytest.mark.parametrize("output_format,compress", RUNS)
+def test_a_pon_without_this_baseline_leaves_rust_s_tables(
+    tmp_path, output_format, compress, caplog
+):
+    """The normaliser writes nothing when the PON has no rows for the baseline asked for -- a
+    custom PON without `fsd_baseline_ontarget`, on a panel run. The write-back ran anyway and read
+    whatever file had the output name: under `--compress` an earlier run's plain log-ratio
+    `FSD.tsv`, shipped as this run's; under `both` the four-decimal TSV, written over the
+    full-precision Parquet; under `parquet` nothing, with a false "not found" warning.
+    """
+    pon = pd.read_parquet(FIXTURE_PON)
+    assert not (pon.table == "fsd_baseline_ontarget").any(), "the fixture PON gained it"
+    own = table_paths(
+        tmp_path / "s.FSD", output_format=output_format, compress=compress
+    )
+    rust = _fsd_frame()
+    rust.loc[0, "65-69"] = 100.123456  # finer than the four decimals Rust's TSV carries
+    for path in own:
+        if path.suffix == ".parquet":
+            rust.to_parquet(path, index=False)
+        else:
+            rust.to_csv(path, sep="\t", index=False, float_format="%.4f")
+    planted = set()
+    if compress:
+        earlier = _fsd_frame()
+        earlier["65-69_logR"] = 9.0
+        earlier.to_csv(tmp_path / "s.FSD.tsv", sep="\t", index=False)
+        planted.add("s.FSD.tsv")
+    as_written = {path.name: read_exact_table(path) for path in own}
+
+    with caplog.at_level(logging.WARNING):
+        process_fsd(
+            tmp_path / "s.FSD.tsv",
+            pon_parquet_path=FIXTURE_PON,
+            output_format=output_format,
+            compress=compress,
+            baseline_table="fsd_baseline_ontarget",
+        )
+
+    for name, frame in as_written.items():
+        pd.testing.assert_frame_equal(  # exact: the default tolerance hides the rounding
+            read_exact_table(tmp_path / name),
+            frame,
+            check_exact=True,
+            obj=f"{name} after the call",
+        )
+    assert _fsd_files(tmp_path) == set(as_written) | planted
+    warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1 and "fsd_baseline_ontarget" in warnings[0], warnings
+
+
 @pytest.mark.parametrize("output_format", ["tsv", "both"])
 def test_without_a_pon_an_earlier_run_s_tsv_is_never_shipped(tmp_path, output_format):
     """A compressed run with a PON used to leave its normalised `FSD.tsv` behind. A rerun

@@ -141,15 +141,23 @@ class TestParquetRoundtrip:
 class TestFsdOutputFormat:
     """Test that process_fsd() correctly produces requested output formats."""
 
+    # The normaliser writes its TSV under a private name; process_fsd removes it afterwards
+    # (tests/unit/test_fsd_pon_format_parity.py checks the files a run leaves).
+
     @pytest.mark.unit
     def test_fsd_both_format(self, tmp_path, fsd_df):
         """process_fsd with output_format='both' produces both .tsv and .parquet."""
         from krewlyzer.core.fsd_processor import _write_fsd_output
 
-        tsv = tmp_path / "sample.FSD.tsv"
-        fsd_df.to_csv(tsv, sep="\t", index=False)
+        normalised = tmp_path / "sample.FSD.pon_output.tsv"
+        fsd_df.to_csv(normalised, sep="\t", index=False)
 
-        _write_fsd_output(tsv, output_format="both", compress=False)
+        _write_fsd_output(
+            normalised,
+            tmp_path / "sample.FSD.tsv",
+            output_format="both",
+            compress=False,
+        )
 
         assert (tmp_path / "sample.FSD.tsv").exists()
         assert (tmp_path / "sample.FSD.parquet").exists()
@@ -159,38 +167,48 @@ class TestFsdOutputFormat:
         """process_fsd with compress=True produces .tsv.gz."""
         from krewlyzer.core.fsd_processor import _write_fsd_output
 
-        tsv = tmp_path / "sample.FSD.tsv"
-        fsd_df.to_csv(tsv, sep="\t", index=False)
+        normalised = tmp_path / "sample.FSD.pon_output.tsv"
+        fsd_df.to_csv(normalised, sep="\t", index=False)
 
-        _write_fsd_output(tsv, output_format="tsv", compress=True)
+        _write_fsd_output(
+            normalised, tmp_path / "sample.FSD.tsv", output_format="tsv", compress=True
+        )
 
         assert (tmp_path / "sample.FSD.tsv.gz").exists()
+        assert not (tmp_path / "sample.FSD.tsv").exists()
 
     @pytest.mark.unit
     def test_fsd_both_compress(self, tmp_path, fsd_df):
         """process_fsd with both+compress produces .tsv.gz AND .parquet."""
         from krewlyzer.core.fsd_processor import _write_fsd_output
 
-        tsv = tmp_path / "sample.FSD.tsv"
-        fsd_df.to_csv(tsv, sep="\t", index=False)
+        normalised = tmp_path / "sample.FSD.pon_output.tsv"
+        fsd_df.to_csv(normalised, sep="\t", index=False)
 
-        _write_fsd_output(tsv, output_format="both", compress=True)
+        _write_fsd_output(
+            normalised, tmp_path / "sample.FSD.tsv", output_format="both", compress=True
+        )
 
         assert (tmp_path / "sample.FSD.tsv.gz").exists()
         assert (tmp_path / "sample.FSD.parquet").exists()
 
     @pytest.mark.unit
-    def test_fsd_parquet_only_cleans_tsv(self, tmp_path, fsd_df):
-        """process_fsd with parquet only removes intermediate TSV."""
+    def test_fsd_parquet_only_writes_no_tsv(self, tmp_path, fsd_df):
+        """process_fsd with parquet only writes no TSV of the run's table."""
         from krewlyzer.core.fsd_processor import _write_fsd_output
 
-        tsv = tmp_path / "sample.FSD.tsv"
-        fsd_df.to_csv(tsv, sep="\t", index=False)
+        normalised = tmp_path / "sample.FSD.pon_output.tsv"
+        fsd_df.to_csv(normalised, sep="\t", index=False)
 
-        _write_fsd_output(tsv, output_format="parquet", compress=False)
+        _write_fsd_output(
+            normalised,
+            tmp_path / "sample.FSD.tsv",
+            output_format="parquet",
+            compress=False,
+        )
 
         assert (tmp_path / "sample.FSD.parquet").exists()
-        assert not tsv.exists(), "Intermediate TSV should be removed for parquet-only"
+        assert not (tmp_path / "sample.FSD.tsv").exists()
 
 
 # ── OCF processor output format tests ────────────────────────────────────────

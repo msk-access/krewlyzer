@@ -615,10 +615,13 @@ All notable changes to this project will be documented in this file.
   it took the uncompressed log-ratios an earlier run with a PON had left and normalised them a
   second time. `output_utils.written_table` names the file a run of a format wrote -- the Parquet
   where there is one, so under `both` the log-ratios now come from the full-precision table rather
-  than the TSV rounded to four decimals. Without a PON, FSD is no longer rewritten: Rust has written
-  exactly the run's formats, and its tables ship as written. The rewrite warned "FSD output not
-  found for format conversion" on every Parquet or compressed run, and under `--compress` could
-  ship an earlier run's log-ratios as this run's counts. A run with a PON no longer leaves an
+  than the TSV rounded to four decimals. Without a PON, or with one that has no rows for the
+  baseline asked for (a custom PON without `fsd_baseline_ontarget`, where the normaliser writes
+  nothing), FSD is no longer rewritten: Rust has written exactly the run's formats, and its tables
+  ship as written, the second case with a warning that they are raw counts. The rewrite warned
+  "FSD output not found for format conversion" on every Parquet or compressed run, and under
+  `--compress` could ship an earlier run's log-ratios as this run's counts. The normaliser now
+  writes to a name of its own, removed before and after, so what is read back is what it wrote. A run with a PON no longer leaves an
   uncompressed `FSD.tsv` beside its `FSD.tsv.gz` for the next run to read.
 
 - **MDS is the same in two runs of the same input.** `compute_mds` summed the entropy over a
