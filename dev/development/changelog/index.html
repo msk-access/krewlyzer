@@ -37,7 +37,7 @@
             body[data-md-color-scheme="slate"] .gslide-title { color: var(--md-default-fg-color); }
             body[data-md-color-scheme="slate"] .gslide-desc { color: var(--md-default-fg-color); }
         </style><meta name="panzoom-theme" content="material">
-<meta name="panzoom-data" content='{"selectors": [".d2", ".mermaid"], "initial_zoom_level": 1.0}'> </head>
+<meta name="panzoom-data" content='{"selectors": [".mermaid", ".d2"], "initial_zoom_level": 1.0}'> </head>
 <body data-md-color-accent="custom" data-md-color-primary="custom" data-md-color-scheme="default" dir="ltr">
 <input autocomplete="off" class="md-toggle" data-md-toggle="drawer" id="__drawer" type="checkbox">
 <input autocomplete="off" class="md-toggle" data-md-toggle="search" id="__search" type="checkbox">
@@ -3286,6 +3286,14 @@
   one-chromosome sample under a completion marker is indistinguishable from a whole one
   downstream. The <code>motif</code> docs listed the option; they no longer do
   (<code>tests/invariants/test_no_ignored_options.py</code>).</li>
+<li><strong><code>krewlyzer region-entropy --gc-factors</code>.</strong> It corrected with a table other than the one
+  extraction wrote beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, and the sample's record, which holds one choice per
+  population, then recorded that table for features that never used it. It is now refused as an
+  unknown option (exit 2), before anything is written. To correct with a table, keep extraction's
+  table beside the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, where every feature step looks; <code>--no-gc-correct</code> still runs uncorrected.
+  Its short flag <code>-F</code> was also <code>--output-format</code>'s, and Click gave it to <code>--output-format</code>, so it
+  never named a factor table and every run printed four warnings about it; <code>-F</code> is now only
+  <code>--output-format</code> (<code>tests/cli/test_cli.py</code> refuses a flag two options share).</li>
 <li><strong><code>statrs</code>, an unused Rust dependency, and the redundant <code>homepage</code> key.</strong>
   Cargo warned about both on every build of <code>rust/</code>, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04
@@ -3550,7 +3558,28 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   the base since, and the result is a tree nobody has tested.</p>
 <h3 id="fixed">Fixed</h3>
 <ul>
-<li><strong>A <code>build-pon --keep-sample-outputs</code> cache carries each donor's record, and only this build's
+<li><strong><code>region-entropy</code> finds, checks, reports and records its <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor tables as run-all does.</strong> It
+  looked the tables up itself and missed part of what run-all's feature pass does with them. It
+  warned of a missing off-target table without saying whether re-extracting helps (for a panel
+  whose targets hold almost every fragment it does not), and a panel with no on-target table
+  corrected its on-target fragments with the off-target one without a word. It recorded neither
+  table: into extraction's record it wrote the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr> fields only, and every later single tool keeps
+  a record that has them, so the sample's <code>gc_factors_*</code> columns never appeared and
+  <code>build-pon --from-outputs</code> refused it as written before the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-lookup fix. A table it could not
+  read ended in a traceback from Rust's loader. region-entropy and run-all's feature pass now find
+  and check their tables with <code>resolve_feature_gc_tables</code> and report them with
+  <code>report_gc_tables</code>, one warning text. region-entropy refuses an unreadable table before writing
+  anything, and records its tables as the unified-pipeline tools do, and only when it ran <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> or
+  <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>. run-all's <abbr title="Mutant Fragment Size Distribution - Size distribution around somatic mutations">mFSD</abbr> takes the tables the feature pass chose instead of looking them up again,
+  unchecked, and repeating its warnings without the remedy
+  (<code>tests/invariants/test_gc_table_consumers.py</code>).</li>
+</ul>
+<blockquote>
+<p><strong>Output change:</strong> a <code>region-entropy</code> run that ran <abbr title="Transcription Factor Binding Sites - DNA sequences bound by TFs">TFBS</abbr> or <abbr title="Assay for Transposase-Accessible Chromatin - Open chromatin assay">ATAC</abbr>, into extraction's record
+before another tool stamped it, adds <code>gc_factors_offtarget</code>, <code>gc_factors_ontarget</code> and
+<code>gc_correction_applied_*</code> to <code>{sample}.metadata</code>; with <code>--no-gc-correct</code> it records
+<code>none:gc correction disabled</code>. A record another tool stamped gains no <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> columns.
+- <strong>A <code>build-pon --keep-sample-outputs</code> cache carries each donor's record, and only this build's
   files.</strong> A successful build ends by printing the <code>--from-outputs</code> command that rebuilds the <abbr title="Panel of Normals - Reference model from healthy plasma samples">PON</abbr>
   from the cache without re-reading a <abbr title="Binary Alignment Map - Compressed sequence alignment file format">BAM</abbr>, and that rebuild refused every donor as written before
   the <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-lookup fix: it reads each donor's <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> provenance from its record (<code>{sample}.metadata</code>), and
@@ -3569,9 +3598,7 @@ folder, and do not give such a folder's BEDs to a single tool or <code>build-pon
   written. The printed command now comes with what <code>--from-outputs</code> would make of each folder
   (<code>incomplete_reason</code>): how many donors it can rebuild from, and each one it refuses with the
   reason, such as a donor given as a <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>, which the build does not extract, so its folder holds no
-  record and no motif tables. With none to rebuild from, no command is printed.</li>
-</ul>
-<blockquote>
+  record and no motif tables. With none to rebuild from, no command is printed.</p>
 <p><strong>Output change:</strong> each donor's folder in a kept cache gains <code>{sample}.metadata.tsv</code> and the
 <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr>'s tabix index. <code>build-pon</code> refuses a <code>--keep-sample-outputs</code> directory that holds
 anything, so a rerun of <code>scripts/build_pon.sh</code> needs a new <code>KEEP_DIR</code>.
@@ -3980,8 +4007,7 @@ anything, so a rerun of <code>scripts/build_pon.sh</code> needs a new <code>KEEP
     can no longer win. Columns are found by name, and a table with no rows, a missing column or a
     non-finite factor is an <strong>error</strong> at every consumer. A fit with no length bin writes no table.</li>
 <li>The single-tool <code>region-entropy</code> resolves both tables as run-all does, and gains
-    <code>--gc-correct/--no-gc-correct</code>. Its <code>--gc-factors</code> validation now accepts the six-column table
-    in any format; it used to reject run-all's own Parquet tables.</li>
+    <code>--gc-correct/--no-gc-correct</code>. Its <code>--gc-factors</code> is removed (see Removed).</li>
 <li>Nextflow tool-level mode passes extract's factor tables to every <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr>-weighted tool; each used to
     refit factors from the <abbr title="Browser Extensible Data - Genomic interval file format">BED</abbr> with a different algorithm. No tool refits now (see the entry on
     which step fits a <abbr title="Guanine-Cytosine content - Percentage of G and C nucleotides">GC</abbr> factor table).</li>
