@@ -206,6 +206,53 @@ def test_the_gc_tables_used_are_recorded(tmp_path):
     assert "S1" not in row["gc_factors_offtarget"] + row["gc_factors_ontarget"]
 
 
+def test_a_different_gc_choice_is_refused_and_two_nones_are_not(tmp_path):
+    """What a single tool compares before any work (`refuse_a_different_gc_choice`). A table on one
+    side only, or two kinds of table, is refused; two nones are both uncorrected whatever their
+    reasons; a population the run does not correct with, or a record without the field, is not
+    compared."""
+    from krewlyzer.core.gc_assets import GcFactorsChoice
+    from krewlyzer.core.output_provenance import (
+        ConfigurationMismatch,
+        GcChoiceMismatch,
+        refuse_a_different_gc_choice,
+    )
+
+    marker = _marker(tmp_path)
+    frame = pd.read_parquet(marker)
+    frame["gc_factors_offtarget"] = "parquet"
+    frame["gc_correction_applied_offtarget"] = True
+    frame["gc_factors_ontarget"] = "none:gc correction disabled"
+    frame["gc_correction_applied_ontarget"] = False
+    frame.to_parquet(marker, index=False)
+    parquet = GcFactorsChoice(tmp_path / "S1.correction_factors.parquet", "parquet")
+    tsv_gz = GcFactorsChoice(tmp_path / "S1.correction_factors.tsv.gz", "tsv.gz")
+    none = GcFactorsChoice(None, "none", "not found beside the BED")
+
+    def check(off, on, populations=("off_target", "on_target")):
+        refuse_a_different_gc_choice(
+            tmp_path,
+            "S1",
+            {"off_target": off, "on_target": on},
+            populations=populations,
+            output_format="parquet",
+            compress=False,
+        )
+
+    check(parquet, none)
+    for off in (none, tsv_gz):
+        with pytest.raises(GcChoiceMismatch, match="off-target") as refused:
+            check(off, none)
+        assert isinstance(refused.value, ConfigurationMismatch)
+    with pytest.raises(GcChoiceMismatch, match="on-target"):
+        check(parquet, parquet)
+    check(parquet, parquet, populations=("off_target",))
+    frame.drop(columns=[c for c in frame.columns if c.startswith("gc_")]).to_parquet(
+        marker, index=False
+    )
+    check(none, parquet)
+
+
 def test_the_contract_declares_the_gc_columns():
     from krewlyzer.validate.contract import CONTRACT, Vary
 

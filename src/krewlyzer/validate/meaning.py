@@ -486,8 +486,10 @@ MEANINGS: Dict[str, Meaning] = {
         ),
     ),
     ".correction_factors.parquet": Meaning(
-        "The GC bias model this run applied: the correction factor fitted for "
-        "each fragment-length and GC-content bin.",
+        "The GC bias model extraction fitted: the correction factor for each "
+        "fragment-length and GC-content bin. The sample's record "
+        "(`gc_correction_applied_offtarget`) says whether its features were "
+        "corrected with it.",
         None,
         "Diagnostic output. Factors far from 1 mean the correction is doing a "
         "lot of work, which is a fact about the library, not about the tumour.",

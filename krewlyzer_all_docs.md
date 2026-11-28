@@ -7307,15 +7307,15 @@ When `--target-regions` is provided to `extract`:
 (`core.gc_assets.resolve_gc_factors`): beside the BED only, where extraction wrote it with the
 BED's fragments; Parquet, then `.tsv.gz`, then `.tsv`. TSV keeps full precision, so all three carry identical
 factors and GC correction does not depend on the output format. Each sample's metadata records
-the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
+the kind of table each population corrects with (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
 **Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
 almost every fragment), or the table is not beside the BED, no feature step fits one: run-all, the
 tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) and `region-entropy` run the
-features that correct with it uncorrected, and warn, saying whether re-extracting can give one. A
-panel with no on-target table corrects panel WPS, TFBS and ATAC with the off-target one, runs gene
-FSC uncorrected, and warns. run-all records `gc_correction_applied_offtarget=False`; a single tool
-records it only into extraction's record, and only while no run has recorded one. A table
+features that correct with it uncorrected, and warn, saying whether re-extracting can give one; a
+single tool whose sample record names a table stops instead (below). A panel with no on-target
+table corrects panel WPS, TFBS and ATAC with the off-target one, runs gene FSC uncorrected, and
+warns. Extraction records it (`gc_correction_applied_offtarget=False`). A table
 that cannot be read stops the run before any feature that corrects with it is computed. A table
 elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
 Nor is one beside the BED when extraction's record says it wrote none
@@ -7324,6 +7324,26 @@ extraction's name. With no record beside the BED, as in a `build-pon --keep-samp
 kept by 0.9.2 or earlier, the table there is used, whatever wrote it. `build-pon` refuses a donor without extraction's table,
 from a BAM or a BED, and stops; with `--allow-failures` it leaves the donor out. `--from-outputs`
 refuses a donor recorded as corrected with a table extraction did not write.
+
+**Extraction records the choice, and every tool holds to it.** `extract`, run-all and `build-pon`
+from a BAM write each population's choice into `{sample}.metadata` (`gc_factors_*`,
+`gc_correction_applied_*`), found by the same resolver beside the BED they wrote, before any feature
+is computed. A single tool never writes these fields. One whose tables differ from the record's (a
+table on one side only, or two kinds) exits 1 before writing anything, as `wps --no-gc-correct`
+does over a corrected extraction, or `wps` once the table is removed; rerun it with the GC setting
+the record names, restore the table, or use a fresh output folder. Two runs without a table agree,
+whatever the reasons. A tool compares only the tables it corrects with: the on-target one only for
+gene FSC, for WPS, TFBS or ATAC over a panel's targets (`--assay`), or for region-entropy's target
+split. A record without these fields, as 0.9.x wrote, stays without them, and
+`build-pon --from-outputs` refuses it.
+
+So `gc_correction_applied_*` says how a population's features are corrected by run-all, the tools
+on the unified pipeline and `region-entropy`, with three exceptions. The main pass corrects every
+table it writes, its `.ontarget` tables included, with the off-target table. A panel with no
+on-target table records `gc_correction_applied_ontarget=False`, yet corrects panel WPS, TFBS and
+ATAC, and the on-target half of region-entropy's target split, with the off-target one (above). The
+single `mfsd` corrects with whatever `--correction-factors` names, which the record does not
+describe.
 
 !!! warning "0.9.x cohorts"
     Up to 0.9.2, panel WPS, every TFBS and ATAC table, and gene FSC looked only for a plain
@@ -10905,8 +10925,8 @@ print(meta["total_fragments"], meta["krewlyzer_version"], meta["pon_applied"])
 | `filters_skip_duplicates` / `filters_require_proper_pair` | bool | Whether the extraction skipped duplicate reads and required proper pairs (`--[no-]skip-duplicates` / `--[no-]require-proper-pair`). New in this release, so a record holding them is one whose filters can be trusted |
 | `filters_blacklist_sha256` | str | The SHA-256 of the blacklist file the extraction applied (`--exclude-regions`, else the genome's bundled one), by its bytes: the same file at another path gives the same value, an edited one another. Empty when none was applied. New in this release |
 | `gc_correction_computed` | bool | Whether extraction wrote an off-target GC factor table for this sample. `False` also when GC correction ran but no length bin had enough fragments to fit, which writes no table (before this release that case recorded `True`). No feature step fits one, so the features then correct nothing with an off-target table (`gc_correction_applied_offtarget=False`) |
-| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population was corrected with, by kind: `parquet`, `tsv.gz`, `tsv` (the table extraction wrote beside the BED), or `none:<reason>` |
-| `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features were corrected |
+| `gc_factors_offtarget` / `gc_factors_ontarget` | str | Which factor table each population's features correct with, by kind: `parquet`, `tsv.gz`, `tsv` (the table extraction wrote beside the BED), or `none:<reason>`. Written by extraction; a later tool whose tables differ stops before writing ([GC correction](../guides/gc-correction.md)) |
+| `gc_correction_applied_offtarget` / `gc_correction_applied_ontarget` | bool | Whether that population's GC-weighted features are corrected, with the three exceptions the [GC correction](../guides/gc-correction.md) guide names |
 | `fragments_on_missing_contig` | int | Fragments on contigs the reference FASTA lacks under either `chr` spelling, such as decoys and alts; their GC is unresolved and they enter no GC model. A non-primary contig at another length counts here too. Warned about above 1% of fragments. A primary contig the reference lacks, or has at another length, is refused before extraction |
 | `gc_fetch_failed` | int | Fragments whose reference sequence could not be fetched; they enter no GC model, and any is warned about |
 | `timestamp` | str | ISO timestamp of the run |

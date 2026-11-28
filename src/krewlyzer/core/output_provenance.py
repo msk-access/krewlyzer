@@ -184,6 +184,79 @@ class ConfigurationMismatch(ValueError):
     anything is written."""
 
 
+class GcChoiceMismatch(ConfigurationMismatch):
+    """A tool whose GC factor tables differ from the ones the sample's record names. Raised before
+    anything is written."""
+
+
+def gc_fields(choices: Mapping[str, Any]) -> Dict[str, Any]:
+    """The record's GC columns for a run's tables, one `gc_assets.GcFactorsChoice` per population:
+    which kind of table the population's features correct with, or why none (`record()`), and
+    whether one does. Every writer goes through it: extraction, and a run that owns the record.
+    Readers spell the column names themselves: `refuse_a_different_gc_choice`,
+    `from_outputs.gc_reason`, the validate report's GC chart and the output contract."""
+    fields: Dict[str, Any] = {}
+    for population, choice in choices.items():
+        tag = population.replace("_", "")  # off_target -> offtarget
+        fields[f"gc_factors_{tag}"] = choice.record()
+        fields[f"gc_correction_applied_{tag}"] = bool(choice.found)
+    return fields
+
+
+def refuse_a_different_gc_choice(
+    output_dir: Path,
+    sample: str,
+    choices: Mapping[str, Any],
+    *,
+    populations: Sequence[str],
+    output_format: str,
+    compress: bool,
+) -> None:
+    """Refuse a tool that would correct a sample's features with other GC tables than its record
+    names.
+
+    Extraction records the tables (`write_extraction_outputs`) and a single tool never rewrites
+    them (`stamp_metadata`), so a tool correcting otherwise (`--no-gc-correct` in a corrected
+    folder, or a table removed since) would leave features corrected two ways under a record that
+    names one. The first tool to reach the record used to write it, and every later one kept it:
+    `fsd` then `wps --no-gc-correct` left an uncorrected WPS recorded as corrected. Called by
+    `run_features` for a single tool and by `region-entropy`, once their tables are found and
+    before any work; not by run-all or the PON build, which own the record they write.
+
+    ``choices`` are this run's tables by population, ``populations`` the ones it corrects with.
+    Only those are compared, and only where the record holds the field: a record written before
+    extraction recorded them names none. Refused: a table on one side only, or two kinds. Two nones
+    are not: both runs are uncorrected, whatever their reasons.
+    """
+    frame = _read_record(
+        record_path(output_dir, sample, output_format=output_format, compress=compress)
+    )
+    if frame is None or frame.empty:
+        return
+    differing = []
+    for population in populations:
+        column = f"gc_factors_{population.replace('_', '')}"
+        recorded = _as_text(frame[column].iloc[0]) if column in frame.columns else ""
+        ours = choices[population]
+        if not recorded or recorded == ours.record():
+            continue
+        if recorded.startswith("none") and not ours.found:
+            continue
+        differing.append(
+            f"{population.replace('_', '-')}: the record says {recorded}, "
+            f"this run {ours.record()}"
+        )
+    if differing:
+        raise GcChoiceMismatch(
+            f"{sample} in {Path(output_dir).name}/ is GC-corrected with other tables than this "
+            "run would use: "
+            + "; ".join(differing)
+            + ". Its features would be corrected two ways under a record that names one. Rerun "
+            "with the GC setting the record names, restore the table extraction wrote beside the "
+            "BED, or use a fresh output folder."
+        )
+
+
 #: The read filters extraction applied, as the record names them. They decide which fragments
 #: the BED holds, and every table is made from those fragments or, for the motif, Region-MDS and
 #: mFSD tables, from the BAM read again under the filters that tool takes. (UXM reads the BAM at a
@@ -902,18 +975,13 @@ def record_pon_used(
     *,
     output_format: str,
     compress: bool,
-    gc_factors: Optional[dict] = None,
 ) -> bool:
     """A standalone scorer's entry in the sample's record, after it has scored.
 
     `motif`, `region-entropy` and `region-mds` do not go through `run_features`, so without this
     they checked the record (`refuse_a_second_pon`) but never wrote it: after `extract`, one could
-    score with PON A and a later tool with PON B, unnoticed. Raise-only, like every single tool.
-
-    ``gc_factors`` are the tables a scorer that corrects with them used (`region-entropy`), as
-    `stamp_metadata` takes them: recorded where no run has stamped the record, like the tools on
-    the unified pipeline. Without them region-entropy filled the record in with no GC columns,
-    and every later single tool keeps a record that has been filled in.
+    score with PON A and a later tool with PON B, unnoticed. Raise-only, like every single tool,
+    and never the GC fields, which extraction records.
     """
     return stamp_metadata(
         output_dir,
@@ -922,7 +990,6 @@ def record_pon_used(
         pon_path=pon_path if pon is not None else None,
         output_format=output_format,
         compress=compress,
-        gc_factors=gc_factors,
         owns_record=False,
     )
 
@@ -943,16 +1010,19 @@ def stamp_metadata(
 
     `gc_factors` maps "off_target"/"on_target" to the `GcFactorsChoice` the run used; it records
     which kind of factor table each population was corrected with, or why none was (redesign
-    item 0: production ran panel WPS, TFBS and ATAC uncorrected and nothing said so).
+    item 0: production ran panel WPS, TFBS and ATAC uncorrected and nothing said so). Written
+    only by a run that owns the record: extraction wrote them first (`write_extraction_outputs`).
 
     A no-op when there is no metadata table, which is the normal case for a
     single-feature CLI run: those write one feature table and no completion
     marker. Logged at debug rather than warned, because it is not a fault.
 
     `owns_record` is True for run-all and the PON build, which rewrite the whole record. A single
-    tool (False) fills it in where none exists, and otherwise may only raise ``pon_applied``, so
-    that flag does not depend on the order single tools ran in. Which PON is recorded is kept
-    consistent by `refuse_a_second_pon`, which stops a single tool before any work.
+    tool (False) fills the PON fields in where none exist, and otherwise may only raise
+    ``pon_applied``, so that flag does not depend on the order single tools ran in. It never
+    writes the GC fields. Which PON and which GC tables are recorded is kept consistent by
+    `refuse_a_second_pon` and `refuse_a_different_gc_choice`, which stop a single tool before any
+    work.
 
     Read-modify-write rather than appended at creation: the metadata table is
     written during extraction, before any PON is loaded, so the PON fields are
@@ -986,21 +1056,24 @@ def stamp_metadata(
 
     fields = provenance_fields(pon, pon_path)
     recorded = "pon_applied" in frame.columns
+    if not owns_record:
+        # A single tool never writes the GC fields: extraction records them, and a tool that would
+        # correct otherwise stops before any work (`refuse_a_different_gc_choice`). A record
+        # without them was written before extraction recorded them, maybe beside tables a build
+        # before the GC-lookup fix left uncorrected; `from_outputs.gc_reason` refuses such a
+        # folder on their absence. One tool's tables written in would vouch for features it never
+        # computed, and the first tool to reach the record decided it for every later one.
+        gc_factors = None
     if not owns_record and recorded:
         # A single tool keeps the sample's record (run-all's, or an earlier tool's): rewriting
-        # pon_applied and gc_factors_* from one tool's run made validate-output stop checking
-        # every other table. It may only *raise* pon_applied, so any order of single tools ends
-        # with the same record: a table one of them left unscored is then flagged, not hidden.
+        # pon_applied from one tool's run made validate-output stop checking every other table.
+        # It may only *raise* pon_applied, so any order of single tools ends with the same record:
+        # a table one of them left unscored is then flagged, not hidden.
         if not (fields["pon_applied"] and not _flag(frame["pon_applied"].iloc[0])):
             logger.info(
                 f"{existing.name} already records how this sample was run; a single tool keeps it"
             )
             return False
-        # Raising the PON record says nothing about this tool's GC tables, and GC fields absent
-        # from a stamped record are not filled in either: builds before the GC-lookup fix stamped
-        # the PON fields with none, and `from_outputs.gc_reason` refuses such a folder on their
-        # absence. One tool's tables written in would vouch for features it never computed.
-        gc_factors = None
 
     for name, value in fields.items():
         frame[name] = value
@@ -1011,10 +1084,8 @@ def stamp_metadata(
                     f"unknown setting {name!r}; one of {CONFIGURATION_FIELDS}"
                 )
             frame[name] = value
-    for population, choice in (gc_factors or {}).items():
-        tag = population.replace("_", "")  # off_target -> offtarget
-        frame[f"gc_factors_{tag}"] = choice.record()
-        frame[f"gc_correction_applied_{tag}"] = bool(choice.found)
+    for name, value in gc_fields(gc_factors or {}).items():
+        frame[name] = value
     frame[TABLE_FORMATS] = table_formats(output_format=output_format, compress=compress)
 
     write_table(frame, base, output_format=output_format, compress=compress)

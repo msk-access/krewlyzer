@@ -1,14 +1,13 @@
-"""region-entropy and run-all's mFSD find, check, report and record a sample's GC factor tables
-the way run-all's feature pass does (`resolve_feature_gc_tables`, `report_gc_tables`).
+"""region-entropy and run-all's mFSD find, check and report a sample's GC factor tables the way
+run-all's feature pass does (`resolve_feature_gc_tables`, `report_gc_tables`).
 
 region-entropy and run-all's mFSD looked the tables up themselves, with `resolve_gc_factors`, and
 each missed part of what the feature pass does:
 
 - region-entropy warned of a missing off-target table without saying whether re-extracting helps
   (for a dense panel it does not). It said nothing when a panel had no on-target table and its
-  on-target fragments fell back to the off-target one. And it recorded neither table: into
-  extraction's record it wrote the PON fields only, and every later single tool keeps a record
-  that has them, so the sample's GC columns never appeared.
+  on-target fragments fell back to the off-target one. And it recorded neither table, so the
+  sample's GC columns never appeared; extraction records them now (`test_gc_choice_record.py`).
 - It handed Rust a table it had never read, so an unreadable one ended in a traceback.
 - Its `--gc-factors` corrected with a table other than the sample's, which the sample's record,
   holding one choice, cannot describe; it is removed.
@@ -28,7 +27,7 @@ from conftest import requires_data
 from krewlyzer.cli import app
 
 from .pon_donor import dense_panel, extract, factor_tables
-from .runall import SAMPLE, outcomes, synth_run_all, write_arms, write_vcf
+from .runall import SAMPLE, outcomes, synth_run_all, write_vcf
 
 pytestmark = [pytest.mark.invariant, requires_data]
 
@@ -116,7 +115,9 @@ def test_a_panel_without_an_on_target_table_warns_of_the_fallback(
     dense, chr1, tmp_path, caplog
 ):
     """No on-target table beside the BED: the split's on-target fragments are corrected with the
-    off-target table, which Rust logged at debug only."""
+    off-target table, which Rust logged at debug only. Into a folder with no record: in
+    extraction's own, the record names the table removed, and region-entropy stops instead.
+    """
     sample, _ = dense
     out = tmp_path / "out"
     bed = _extracted(sample, out, chr1)
@@ -125,7 +126,7 @@ def test_a_panel_without_an_on_target_table_warns_of_the_fallback(
     for name in fitted:
         (out / name).unlink()
     with caplog.at_level(logging.WARNING):
-        result = _region_entropy(sample, bed, out, chr1)
+        result = _region_entropy(sample, bed, tmp_path / "elsewhere", chr1)
     assert result.exit_code == 0, result.output
     assert any(
         "GC factors (on-target)" in m and "off-target table" in m
@@ -134,12 +135,12 @@ def test_a_panel_without_an_on_target_table_warns_of_the_fallback(
 
 
 @pytest.mark.parametrize("panel", ["fitted", "unfittable"])
-def test_region_entropy_records_the_tables_it_corrected_with(
+def test_region_entropy_keeps_the_tables_extraction_recorded(
     dense, chr1, tmp_path, caplog, panel
 ):
-    """Into extraction's record, which no run has stamped, region-entropy records the tables it
-    used, as the unified-pipeline tools do: the kind when there is one, and why not when there is
-    none. Invariant 1: the two panels give two records. With every table there, nothing warns.
+    """Extraction records the tables region-entropy corrects with, and region-entropy keeps them:
+    the kind when there is one, and why not when there is none. Invariant 1: the two panels give
+    two records. With every table there, nothing warns.
     """
     sample, dense_targets = dense
     targets = chr1 if panel == "fitted" else dense_targets
@@ -188,66 +189,6 @@ def test_gc_factors_is_not_an_option(dense, chr1, tmp_path):
     result = _region_entropy(sample, bed, out, chr1, "--gc-factors", str(out / name))
     assert result.exit_code == 2, result.output
     assert _tfbs_tables(out) == []
-
-
-@pytest.mark.parametrize("tool", ["fsd", "region-entropy"])
-def test_a_single_tool_does_not_vouch_for_a_record_written_before_the_gc_fix(
-    dense, chr1, tmp_path, tool
-):
-    """0.9.x run-all stamped the PON fields and no GC columns, and its panel WPS, TFBS, ATAC and
-    gene FSC may be uncorrected, so `build-pon --from-outputs` refuses the folder on the missing
-    column. One current tool run into it (a region-entropy rerun after a failed TFBS stage) must
-    not add the column, or the donor is accepted with features that tool never computed.
-    """
-    from krewlyzer.core.output_provenance import stamp_metadata
-    from krewlyzer.pon.from_outputs import gc_reason
-
-    sample, _ = dense
-    out = tmp_path / "out"
-    bed = _extracted(sample, out, chr1)
-    # The record as 0.9.x run-all left it: the PON fields, no GC columns.
-    assert stamp_metadata(
-        out, SAMPLE, pon=None, output_format="parquet", compress=False
-    )
-    assert "gc_factors_offtarget" not in _record(out)
-    if tool == "fsd":
-        arms = write_arms(sample.directory / "arms.validated.bed", sample)
-        result = CliRunner().invoke(
-            app,
-            [
-                "fsd",
-                "-i",
-                str(bed),
-                "-o",
-                str(out),
-                "-s",
-                SAMPLE,
-                "-a",
-                str(arms),
-                "-T",
-                str(chr1),
-                "--skip-pon",
-                "--output-format",
-                "parquet",
-            ],
-        )
-    else:
-        result = _region_entropy(sample, bed, out, chr1)
-    assert result.exit_code == 0, result.output
-    assert "gc_factors_offtarget" not in _record(out)
-    assert "written before the GC-lookup fix" in (gc_reason(out, SAMPLE) or "")
-
-
-def test_region_entropy_that_ran_nothing_records_no_tables(dense, chr1, tmp_path):
-    """Outcome, not intent: with neither TFBS nor ATAC run, region-entropy corrected nothing, so
-    it records no GC tables."""
-    sample, _ = dense
-    out = tmp_path / "out"
-    bed = _extracted(sample, out, chr1)
-    result = _region_entropy(sample, bed, out, chr1, "--no-tfbs")
-    assert result.exit_code == 0, result.output
-    row = _record(out)
-    assert "pon_applied" in row and "gc_factors_offtarget" not in row
 
 
 def test_run_all_mfsd_does_not_repeat_the_gc_warning(dense, chr1, tmp_path, caplog):

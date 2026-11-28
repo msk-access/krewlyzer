@@ -1132,8 +1132,15 @@ def wps_panel_profile(wps: Optional[pd.DataFrame]) -> Chart:
     )
 
 
-def gc_correction_curve(factors: Optional[pd.DataFrame]) -> Chart:
-    """Is the GC model sane? Every corrected count depends on the answer."""
+def gc_correction_curve(
+    factors: Optional[pd.DataFrame], record: Optional[pd.DataFrame] = None
+) -> Chart:
+    """Is the GC model sane? Every corrected count depends on the answer.
+
+    ``record`` is the sample's `.metadata` row. A table beside it is no proof that a feature used
+    it (a refit no extraction wrote, for one), so where the record says the off-target table was
+    not applied, the curve is not drawn as the weight applied to each fragment.
+    """
     suffix, title = ".correction_factors.parquet", "GC correction factors"
     caption = (
         "The weight applied to each fragment before it is counted, by GC "
@@ -1141,11 +1148,21 @@ def gc_correction_curve(factors: Optional[pd.DataFrame]) -> Chart:
         "coverage — is multiplied by this, so a wild curve propagates "
         "everywhere. Values near 1 mean little bias to correct."
     )
+    # Absent before not-applied: with no table, the record's "not applied" names no table found.
+    if factors is None or "correction_factor" not in getattr(factors, "columns", []):
+        return _no(suffix, title, caption, "correction factors absent")
+    applied = _recorded(record, "gc_correction_applied_offtarget")
+    if applied is not None and not applied:
+        return _no(
+            suffix,
+            title,
+            caption,
+            "a table was found but not applied: the sample's record says "
+            f"{_recorded(record, 'gc_factors_offtarget')}",
+        )
     go = _plotly()
     if go is None:
         return _no(suffix, title, caption, _NO_PLOTLY)
-    if factors is None or "correction_factor" not in getattr(factors, "columns", []):
-        return _no(suffix, title, caption, "correction factors absent")
     if "gc_percent" not in factors.columns:
         return _no(suffix, title, caption, "no gc_percent column")
 
@@ -1205,6 +1222,17 @@ def gc_correction_curve(factors: Optional[pd.DataFrame]) -> Chart:
     return Chart(suffix, title, caption, fig)
 
 
+def _recorded(record: Optional[pd.DataFrame], column: str) -> Any:
+    """A value of the sample's record, or None when there is no record or no such column. A
+    recorded boolean read back as text ("False") is a boolean again."""
+    if record is None or column not in getattr(record, "columns", []) or record.empty:
+        return None
+    value = record[column].iloc[0]
+    if isinstance(value, str) and value.strip().lower() in ("true", "false"):
+        return value.strip().lower() == "true"
+    return None if pd.isna(value) else value
+
+
 def _first_present(tables: Dict, *suffixes: str):
     """The first suffix that resolved to a frame, and which one it was.
 
@@ -1248,7 +1276,7 @@ def build_charts(tables: Dict) -> List[Chart]:
         top_transcription_factors(g(".TFBS.parquet")),
         methylation_composition(g(".UXM.parquet")),
         # Diagnostic: everything GC-corrected depends on this curve.
-        gc_correction_curve(g(".correction_factors.parquet")),
+        gc_correction_curve(g(".correction_factors.parquet"), g(".metadata.parquet")),
     ]
 
 

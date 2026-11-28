@@ -167,6 +167,59 @@ def test_an_absent_table_gives_a_reason_not_an_empty_axis():
     assert "pon-model" in chart.reason.lower()
 
 
+def test_the_gc_curve_is_not_shown_as_applied_when_the_record_says_it_was_not():
+    """A factor table beside the record is no proof that any feature used it: a refit no
+    extraction wrote, for one. The chart captioned "the weight applied to each fragment" says so
+    instead of drawing it."""
+    factors = pd.DataFrame(
+        {
+            "gc_percent": [30, 50, 70, 30, 50, 70],
+            "correction_factor": [0.9, 1.0, 1.2, 0.8, 1.0, 1.3],
+        }
+    )
+    reason = "none:beside the BED but not extraction's, whose record says it wrote none"
+    record = pd.DataFrame(
+        [
+            {
+                "gc_correction_applied_offtarget": False,
+                "gc_factors_offtarget": reason,
+            }
+        ]
+    )
+    chart = plots.gc_correction_curve(factors, record)
+    assert not chart.drawn
+    assert "not applied" in chart.reason and "not extraction's" in chart.reason
+    tables = {".correction_factors.parquet": factors, ".metadata.parquet": record}
+    (built,) = [
+        c
+        for c in plots.build_charts(tables)
+        if c.suffix == ".correction_factors.parquet"
+    ]
+    assert not built.drawn and "not applied" in built.reason
+
+
+@pytest.mark.parametrize(
+    "reason", ["none:gc correction disabled", "none:not found beside the BED"]
+)
+def test_the_gc_curve_says_absent_when_there_is_no_table(reason):
+    """No table and a record saying none was applied, as `extract --no-gc-correct` or a panel whose
+    off-target table could not be fitted leaves: the chart says the factors are absent, never that
+    a table was found."""
+    record = pd.DataFrame(
+        [{"gc_correction_applied_offtarget": False, "gc_factors_offtarget": reason}]
+    )
+    for chart in (
+        plots.gc_correction_curve(None, record),
+        *[
+            c
+            for c in plots.build_charts({".metadata.parquet": record})
+            if c.suffix == ".correction_factors.parquet"
+        ],
+    ):
+        assert not chart.drawn
+        assert chart.reason == "correction factors absent", chart.reason
+
+
 def test_charts_are_tagged_with_the_table_they_explain():
     """They render inside that table's section, not in a gallery."""
     for chart in plots.build_charts({}):

@@ -92,18 +92,16 @@ All notable changes to this project will be documented in this file.
   may be another extraction's. With none, every feature that corrects with it runs uncorrected;
   run-all and the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) warn with each
   cause and its remedy, for the on-target table too: re-extract with GC correction, unless too few
-  fragments left nothing to fit. run-all records it (`gc_factors_offtarget=none:<reason>`,
-  `gc_correction_applied_offtarget=False`). A single tool records it only into extraction's record,
-  and only while no run has recorded one: into a folder without a record it records nothing.
-  `region-entropy` and `mfsd` record no GC choice. A table beside the BED is not used either when
-  extraction's record says it wrote none (`gc_correction_computed=False`): a feature step of an
+  fragments left nothing to fit. Extraction records it (`gc_factors_offtarget=none:<reason>`,
+  `gc_correction_applied_offtarget=False`); no single tool writes the GC choice, and one whose
+  sample record names a table stops instead (next entry). A table beside the BED is not used either
+  when extraction's record says it wrote none (`gc_correction_computed=False`): a feature step of an
   earlier build fitted it there, under extraction's name, and a rerun reusing the BED took it for
   extraction's. With no record beside the BED, the table there is used, whatever wrote it.
-  `build-pon` refuses a donor whose extraction fitted no table, from a BAM or a BED, and stops;
-  with `--allow-failures` it leaves the donor out. `build-pon --from-outputs` refuses a donor
-  recorded as corrected with a table extraction did not write.
-  `tests/invariants/test_factor_table_writes.py` pins these, and that the table extraction fitted
-  changes the features.
+  `build-pon` refuses a donor whose extraction fitted no table, from a BAM or a BED, and stops; with
+  `--allow-failures` it leaves the donor out. `build-pon --from-outputs` refuses a donor recorded as
+  corrected with a table extraction did not write. `tests/invariants/test_factor_table_writes.py`
+  pins these, and that the table extraction fitted changes the features.
 
   > **Output change:** where extraction fits no off-target table (a panel whose targets hold almost
   > every fragment), run-all, a single tool and Nextflow's tool-level mode now write uncorrected
@@ -121,6 +119,18 @@ All notable changes to this project will be documented in this file.
   > or where a 0.9.x record says a table was computed when none was written. run-all and `extract`
   > refuse a 0.9.x folder, whose record does not list the read filters: re-extract into a fresh
   > folder, and do not give such a folder's BEDs to a single tool or `build-pon`.
+- **A single tool whose GC tables differ from the sample's record exits 1 before writing.** `fsc`,
+  `fsr`, `fsd`, `wps`, `ocf` and `region-entropy` compare the tables they would correct with
+  against the ones extraction recorded, for the populations they correct only. A table found on
+  one side only, or two kinds, stops the run with the remedy: rerun with the GC setting the record
+  names, restore the table extraction wrote beside the BED, or use a fresh output folder. Two runs
+  without a table agree, whatever the reasons. They used to run, and leave the sample's features
+  corrected two ways under a record that names one.
+
+  > **Output change:** an `extract` record gains `gc_factors_offtarget`, `gc_factors_ontarget`
+  > and `gc_correction_applied_*`; run-all's are unchanged. A folder only `extract` wrote before
+  > this release has none, and no later tool adds them: re-extract it before
+  > `build-pon --from-outputs`.
 - **`krewlyzer fsc` and `fsr` choose the window by mode, as run-all does.** Without
   `--continue-n`, a run with target regions now writes one 100 kb bin per row, and one without
   writes 50 (5 Mb). Both tools defaulted to 50 whatever the mode, so a panel sample's single-tool
@@ -306,26 +316,29 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
-- **`region-entropy` finds, checks, reports and records its GC factor tables as run-all does.** It
+- **`region-entropy` finds, checks and reports its GC factor tables as run-all does.** It
   looked the tables up itself and missed part of what run-all's feature pass does with them. It
   warned of a missing off-target table without saying whether re-extracting helps (for a panel
   whose targets hold almost every fragment it does not), and a panel with no on-target table
-  corrected its on-target fragments with the off-target one without a word. It recorded neither
-  table: into extraction's record it wrote the PON fields only, and every later single tool keeps
-  a record that has them, so the sample's `gc_factors_*` columns never appeared and
-  `build-pon --from-outputs` refused it as written before the GC-lookup fix. A table it could not
+  corrected its on-target fragments with the off-target one without a word. A table it could not
   read ended in a traceback from Rust's loader. region-entropy and run-all's feature pass now find
   and check their tables with `resolve_feature_gc_tables` and report them with
   `report_gc_tables`, one warning text. region-entropy refuses an unreadable table before writing
-  anything, and records its tables as the unified-pipeline tools do, and only when it ran TFBS or
-  ATAC. run-all's mFSD takes the tables the feature pass chose instead of looking them up again,
+  anything. run-all's mFSD takes the tables the feature pass chose instead of looking them up again,
   unchecked, and repeating its warnings without the remedy
   (`tests/invariants/test_gc_table_consumers.py`).
-
-  > **Output change:** a `region-entropy` run that ran TFBS or ATAC, into extraction's record
-  > before another tool stamped it, adds `gc_factors_offtarget`, `gc_factors_ontarget` and
-  > `gc_correction_applied_*` to `{sample}.metadata`; with `--no-gc-correct` it records
-  > `none:gc correction disabled`. A record another tool stamped gains no GC columns.
+- **A sample's GC record is extraction's, and no later tool changes it.** The record's
+  `gc_factors_*` and `gc_correction_applied_*` were written by the first GC-correcting tool to reach
+  it, and every later single tool kept them, whatever it did itself. `fsd` then `wps
+  --no-gc-correct` left an uncorrected WPS recorded as corrected, and `build-pon --from-outputs`
+  accepted the donor; so did `fsd`, then `wps` once the off-target table was gone. `fsd
+  --no-gc-correct` then `fsc` left a corrected FSC recorded as uncorrected. A folder whose first
+  tool corrects nothing (`motif`) or records nothing (`region-entropy`) never got the columns, and
+  `--from-outputs` refused it as written before the GC-lookup fix. Extraction (`extract`, run-all,
+  `build-pon` from a BAM) now records the choice before any feature is computed, through the
+  resolver every tool uses, and a single tool never writes it: a record without the columns, as
+  0.9.x wrote, stays without them and is still refused. The validate report's GC chart says when the
+  record shows a table fitted but not applied (`tests/invariants/test_gc_choice_record.py`).
 - **A `build-pon --keep-sample-outputs` cache carries each donor's record, and only this build's
   files.** A successful build ends by printing the `--from-outputs` command that rebuilds the PON
   from the cache without re-reading a BAM, and that rebuild refused every donor as written before

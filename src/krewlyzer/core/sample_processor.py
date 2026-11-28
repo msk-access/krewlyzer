@@ -36,7 +36,7 @@ from .output_utils import (
 
 from krewlyzer import _core
 from .unified_processor import run_features, FeatureOutputs
-from .output_provenance import TABLE_FORMATS, Outcome, blacklist_digest
+from .output_provenance import TABLE_FORMATS, Outcome, blacklist_digest, gc_fields
 from .motif_processor import compute_mds
 from ..assets import AssetManager
 from .gc_assets import (
@@ -45,6 +45,7 @@ from .gc_assets import (
     factor_table_path,
     remove_factor_tables,
     require_gc_for_pon,
+    resolve_feature_gc_tables,
 )
 
 logger = logging.getLogger("krewlyzer.core.sample_processor")
@@ -847,7 +848,8 @@ def write_extraction_outputs(
     Files written:
     - {sample}.bed.gz.tbi: Tabix index (for random access)
     - {sample}.metadata.{tsv,tsv.gz,parquet}: The record: the filters the extraction applied,
-      and whether an off-target GC factor table was written
+      whether an off-target GC factor table was written, and the tables the sample's features
+      correct with (`gc_factors_*`, `gc_correction_applied_*`), which every later tool holds to
     - {sample}.correction_factors.{parquet,tsv.gz,tsv}: off-target GC correction factors, when
       any length bin could be fitted
     - {sample}.correction_factors.ontarget.{parquet,tsv.gz,tsv}: on-target ones, for a panel
@@ -975,6 +977,24 @@ def write_extraction_outputs(
 
     # Write metadata (after GC compute so gc_correction_computed is accurate)
     # TSV/Parquet only — consistent with all other feature outputs.
+    write_table(
+        pd.DataFrame([meta_flat]),
+        meta_base,
+        output_format=output_format,
+        compress=compress,
+    )
+    # The GC tables this sample's features correct with, found as every tool finds them, and
+    # recorded before any feature exists: a tool that would correct otherwise stops
+    # (`refuse_a_different_gc_choice`). The first tool to reach the record used to write them, and
+    # every later one kept its choice whatever it did itself. Found once the record above is
+    # written: the off-target lookup reads this extraction's `gc_correction_computed`, not that of
+    # a record this one replaced.
+    gc_off, gc_on = resolve_feature_gc_tables(
+        result.bed_path,
+        gc_correct=compute_gc_factors,
+        panel_mode=bool(result.is_panel_mode),
+    )
+    meta_flat.update(gc_fields({"off_target": gc_off, "on_target": gc_on}))
     write_table(
         pd.DataFrame([meta_flat]),
         meta_base,

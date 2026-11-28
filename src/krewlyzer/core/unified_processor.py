@@ -340,6 +340,27 @@ def run_features(
     gc_off, gc_on = resolve_feature_gc_tables(
         bed_path, gc_correct=gc_correct, panel_mode=bool(is_panel_mode)
     )
+    if not owns_sample_record:
+        from .output_provenance import refuse_a_different_gc_choice
+
+        # Before any work: the record names the tables this sample's features correct with. The
+        # Rust pass corrects every table it writes, its on-target ones too, with the off-target
+        # table; only gene FSC, panel WPS, TFBS and ATAC read the on-target one.
+        reads_on_target = bool(
+            is_panel_mode
+            and resolved_assay
+            and (enable_fsc or enable_wps or enable_tfbs or enable_atac)
+        )
+        refuse_a_different_gc_choice(
+            output_dir,
+            sample_name,
+            {"off_target": gc_off, "on_target": gc_on},
+            populations=(
+                ("off_target", "on_target") if reads_on_target else ("off_target",)
+            ),
+            output_format=resolved_output_format,
+            compress=resolved_compress,
+        )
     gc_str = str(gc_off.path) if gc_off.found else None
     gc_ontarget_str = str(gc_on.path) if gc_on.found else None
     report_gc_tables(
