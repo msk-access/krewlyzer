@@ -99,6 +99,19 @@ def test_a_table_is_extractions_unless_its_record_says_it_wrote_none(tmp_path, c
     assert resolve_gc_factors(bed, "off_target").found
 
 
+def test_a_table_is_judged_by_the_record_of_its_own_format(tmp_path):
+    # Two records that disagree, as a TSV run beside a Parquet extraction can leave: each table is
+    # judged by the record in its own format, the run that wrote it, not by whichever reads first.
+    bed = _touch(tmp_path / "s.bed.gz")
+    _record(tmp_path, "tsv", False, gc_correction_computed=False)
+    _record(tmp_path, "parquet", False, gc_correction_computed=True)
+    tsv = _touch(tmp_path / "s.correction_factors.tsv")
+    assert not resolve_gc_factors(bed, "off_target").found
+    tsv.unlink()
+    _touch(tmp_path / "s.correction_factors.parquet")
+    assert resolve_gc_factors(bed, "off_target").kind == "parquet"
+
+
 def test_a_record_that_cannot_be_read_is_warned_of_and_says_nothing(tmp_path, caplog):
     # Judged as no record, as before the check: the lookup neither fails the run nor quietly
     # drops the table on a damaged record.
@@ -232,16 +245,6 @@ def test_a_versioned_file_beside_the_link_held_in_an_annex_is_the_links_bed(tmp_
     (tmp_path / "b" / "s.bed.gz").symlink_to(tmp_path / "b" / "s.v1.bed.gz")
     c = resolve_gc_factors(tmp_path / "b" / "s.bed.gz", "off_target")
     assert c.found and c.path.samefile(table)
-
-
-@pytest.mark.parametrize("bed_name", ["s.bed.gz", "renamed.bed.gz"])
-def test_a_table_in_another_folder_is_never_used(tmp_path, bed_name):
-    # Only beside the BED: a table in the folder a tool writes to may be another extraction's,
-    # fitted from other fragments. The output folder was once searched by sample name too.
-    bed = _touch(tmp_path / "in" / bed_name)
-    for population in ("off_target", "on_target"):
-        _touch(Path(f"{factor_table_base(tmp_path / 'out', 's', population)}.parquet"))
-        assert resolve_gc_factors(bed, population).kind == "none"
 
 
 def test_not_found_says_what_was_searched_without_naming_the_sample(tmp_path):

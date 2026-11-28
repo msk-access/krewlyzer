@@ -4,9 +4,11 @@ GC factor tables: where a sample's table is, or why there is none.
 Only extraction fits a table, and writes it beside the BED it fitted it from. A feature step
 reads that table through `resolve_gc_factors`, or, with none, runs without GC correction.
 run_features (run-all and the unified-pipeline tools) and `region-entropy` find and check their
-tables with `resolve_feature_gc_tables`, say which they use and why one is missing with
-`report_gc_tables`, and record the choice (`GcFactorsChoice.record`); run-all's mFSD takes
-run_features' choice. The single `mfsd` tool takes its table by name (`--correction-factors`).
+tables with `resolve_feature_gc_tables` and say which they use and why one is missing with
+`report_gc_tables`; run-all's mFSD takes run_features' choice. Extraction records the choice
+(`GcFactorsChoice.record`) by the same call, before any feature is computed, and a single tool
+whose choice differs stops (`output_provenance.refuse_a_different_gc_choice`). The single `mfsd`
+tool takes its table by name (`--correction-factors`).
 """
 
 from dataclasses import dataclass

@@ -33,9 +33,17 @@ logger = logging.getLogger("region_entropy")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
-from .core.gc_assets import report_gc_tables, resolve_feature_gc_tables
+from .core.gc_assets import (
+    gc_populations_needed,
+    report_gc_tables,
+    resolve_feature_gc_tables,
+)
 from .core.logging import log_startup_banner, ResolvedAsset
-from .core.output_provenance import Outcome, record_stage_outcomes
+from .core.output_provenance import (
+    Outcome,
+    record_stage_outcomes,
+    refuse_a_different_gc_choice,
+)
 from . import __version__
 
 
@@ -222,12 +230,24 @@ def region_entropy(
     # GC factor tables, found, checked and reported as run-all's feature pass does: the tables
     # extract wrote beside the BED, and no other (a table from elsewhere may be another
     # extraction's, and the sample's record holds one choice). Before any work, so an unreadable
-    # table stops the run before a table is written.
+    # table, or tables other than the ones the record names, stop the run before a table is
+    # written.
     try:
         gc_off, gc_on = resolve_feature_gc_tables(
             bedgz_input, gc_correct=gc_correct, panel_mode=is_panel_mode
         )
-    except RuntimeError as e:
+        # The record names the tables this sample's features correct with: genome-wide TFBS and
+        # ATAC correct with the off-target table, and a panel's split its on-target half with
+        # the on-target one.
+        refuse_a_different_gc_choice(
+            output,
+            sample_name,
+            {"off_target": gc_off, "on_target": gc_on},
+            populations=gc_populations_needed(is_panel_mode) if (tfbs or atac) else (),
+            output_format=output_format,
+            compress=compress,
+        )
+    except (RuntimeError, ValueError) as e:  # a `GcChoiceMismatch` is a ValueError
         console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
         raise typer.Exit(1)
     report_gc_tables(
@@ -465,9 +485,6 @@ def region_entropy(
             entropy_pon_parquet,
             output_format=output_format,
             compress=compress,
-            # The tables it corrected with, only if it ran a stage: a run that computed nothing
-            # corrected nothing.
-            gc_factors={"off_target": gc_off, "on_target": gc_on} if ran else None,
         )
     except FileNotFoundError as e:
         logger.error(str(e))
