@@ -42,6 +42,14 @@ All notable changes to this project will be documented in this file.
   one-chromosome sample under a completion marker is indistinguishable from a whole one
   downstream. The `motif` docs listed the option; they no longer do
   (`tests/invariants/test_no_ignored_options.py`).
+- **`krewlyzer region-entropy --gc-factors`.** It corrected with a table other than the one
+  extraction wrote beside the BED, and the sample's record, which holds one choice per
+  population, then recorded that table for features that never used it. It is now refused as an
+  unknown option (exit 2), before anything is written. To correct with a table, keep extraction's
+  table beside the BED, where every feature step looks; `--no-gc-correct` still runs uncorrected.
+  Its short flag `-F` was also `--output-format`'s, and Click gave it to `--output-format`, so it
+  never named a factor table and every run printed four warnings about it; `-F` is now only
+  `--output-format` (`tests/cli/test_cli.py` refuses a flag two options share).
 - **`statrs`, an unused Rust dependency, and the redundant `homepage` key.**
   Cargo warned about both on every build of `rust/`, and a build whose output
   is always two warnings long is a build nobody reads — the ubuntu-26.04
@@ -298,6 +306,26 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **`region-entropy` finds, checks, reports and records its GC factor tables as run-all does.** It
+  looked the tables up itself and missed part of what run-all's feature pass does with them. It
+  warned of a missing off-target table without saying whether re-extracting helps (for a panel
+  whose targets hold almost every fragment it does not), and a panel with no on-target table
+  corrected its on-target fragments with the off-target one without a word. It recorded neither
+  table: into extraction's record it wrote the PON fields only, and every later single tool keeps
+  a record that has them, so the sample's `gc_factors_*` columns never appeared and
+  `build-pon --from-outputs` refused it as written before the GC-lookup fix. A table it could not
+  read ended in a traceback from Rust's loader. region-entropy and run-all's feature pass now find
+  and check their tables with `resolve_feature_gc_tables` and report them with
+  `report_gc_tables`, one warning text. region-entropy refuses an unreadable table before writing
+  anything, and records its tables as the unified-pipeline tools do, and only when it ran TFBS or
+  ATAC. run-all's mFSD takes the tables the feature pass chose instead of looking them up again,
+  unchecked, and repeating its warnings without the remedy
+  (`tests/invariants/test_gc_table_consumers.py`).
+
+  > **Output change:** a `region-entropy` run that ran TFBS or ATAC, into extraction's record
+  > before another tool stamped it, adds `gc_factors_offtarget`, `gc_factors_ontarget` and
+  > `gc_correction_applied_*` to `{sample}.metadata`; with `--no-gc-correct` it records
+  > `none:gc correction disabled`. A record another tool stamped gains no GC columns.
 - **A `build-pon --keep-sample-outputs` cache carries each donor's record, and only this build's
   files.** A successful build ends by printing the `--from-outputs` command that rebuilds the PON
   from the cache without re-reading a BAM, and that rebuild refused every donor as written before
@@ -716,8 +744,7 @@ All notable changes to this project will be documented in this file.
     can no longer win. Columns are found by name, and a table with no rows, a missing column or a
     non-finite factor is an **error** at every consumer. A fit with no length bin writes no table.
   - The single-tool `region-entropy` resolves both tables as run-all does, and gains
-    `--gc-correct/--no-gc-correct`. Its `--gc-factors` validation now accepts the six-column table
-    in any format; it used to reject run-all's own Parquet tables.
+    `--gc-correct/--no-gc-correct`. Its `--gc-factors` is removed (see Removed).
   - Nextflow tool-level mode passes extract's factor tables to every GC-weighted tool; each used to
     refit factors from the BED with a different algorithm. No tool refits now (see the entry on
     which step fits a GC factor table).

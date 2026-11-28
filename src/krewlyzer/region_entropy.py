@@ -33,7 +33,7 @@ logger = logging.getLogger("region_entropy")
 
 # Import asset resolution and startup banner
 from .core.asset_resolution import resolve_target_regions, resolve_pon_model
-from .core.gc_assets import resolve_gc_factors
+from .core.gc_assets import report_gc_tables, resolve_feature_gc_tables
 from .core.logging import log_startup_banner, ResolvedAsset
 from .core.output_provenance import Outcome, record_stage_outcomes
 from . import __version__
@@ -63,13 +63,6 @@ def region_entropy(
     ),
     gc_correct: bool = typer.Option(
         True, "--gc-correct/--no-gc-correct", help="Apply GC bias correction"
-    ),
-    gc_factors: Optional[Path] = typer.Option(
-        None,
-        "--gc-factors",
-        "-F",
-        help="Off-target GC factor table (.parquet/.tsv.gz/.tsv). "
-        "Default: the tables extract wrote beside the BED, as run-all uses",
     ),
     pon_model: Optional[Path] = typer.Option(
         None, "--pon-model", "-P", help="PON model for z-score computation"
@@ -147,9 +140,6 @@ def region_entropy(
     if atac_regions and atac_regions.exists():
         logger.debug(f"Validating user-provided ATAC regions: {atac_regions}")
         validate_file(atac_regions, FileSchema.REGION_BED)
-    if gc_factors and gc_factors.exists():
-        logger.debug(f"Validating user-provided GC factors: {gc_factors}")
-        validate_file(gc_factors, FileSchema.GC_FACTORS_TSV)
     if target_regions and target_regions.exists():
         logger.debug(f"Validating user-provided target regions: {target_regions}")
         validate_file(target_regions, FileSchema.BED3)
@@ -229,23 +219,31 @@ def region_entropy(
     is_panel_mode = resolved_target_path is not None and resolved_target_path.exists()
     target_regions_str = str(resolved_target_path) if is_panel_mode else None
 
-    # GC correction factors, as run-all resolves them: --gc-factors for the off-target table if
-    # given, otherwise the tables extract wrote beside the BED.
-    # Without this the single tool ran uncorrected unless the flag was passed, unlike run-all.
-    gc_str = gc_ontarget_str = None
-    if gc_correct:
-        if gc_factors and gc_factors.exists():
-            gc_str = str(gc_factors)
-        else:
-            off = resolve_gc_factors(bedgz_input, "off_target")
-            gc_str = str(off.path) if off.found else None
-            if not off.found:
-                logger.warning(
-                    f"No GC factors ({off.reason}); TFBS/ATAC run uncorrected"
-                )
-        if is_panel_mode:
-            on = resolve_gc_factors(bedgz_input, "on_target")
-            gc_ontarget_str = str(on.path) if on.found else None
+    # GC factor tables, found, checked and reported as run-all's feature pass does: the tables
+    # extract wrote beside the BED, and no other (a table from elsewhere may be another
+    # extraction's, and the sample's record holds one choice). Before any work, so an unreadable
+    # table stops the run before a table is written.
+    try:
+        gc_off, gc_on = resolve_feature_gc_tables(
+            bedgz_input, gc_correct=gc_correct, panel_mode=is_panel_mode
+        )
+    except RuntimeError as e:
+        console.print(f"[bold red]❌ ERROR:[/bold red] {e}")
+        raise typer.Exit(1)
+    report_gc_tables(
+        gc_off,
+        gc_on,
+        gc_correct=gc_correct,
+        panel_mode=is_panel_mode,
+        off_effect="Genome-wide TFBS and ATAC run without GC correction.",
+        on_effect=(
+            "the on-target half of the target split, and with --assay the panel TFBS and "
+            "ATAC, fall back to the off-target table."
+        ),
+        log=logger,
+    )
+    gc_str = str(gc_off.path) if gc_off.found else None
+    gc_ontarget_str = str(gc_on.path) if gc_on.found else None
 
     # Use PON parquet directly for Z-score normalization (Rust implementation)
     entropy_pon_parquet = (
@@ -467,6 +465,9 @@ def region_entropy(
             entropy_pon_parquet,
             output_format=output_format,
             compress=compress,
+            # The tables it corrected with, only if it ran a stage: a run that computed nothing
+            # corrected nothing.
+            gc_factors={"off_target": gc_off, "on_target": gc_on} if ran else None,
         )
     except FileNotFoundError as e:
         logger.error(str(e))

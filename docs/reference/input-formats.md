@@ -13,7 +13,7 @@ This page documents the expected formats for custom input files used as override
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
-| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--gc-factors` | `170\t175\t50\t100\t90\t1.25` |
+| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--correction-factors`, `validate --gc-factors` | `170\t175\t50\t100\t90\t1.25` |
 
 ---
 
@@ -344,9 +344,10 @@ length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
 
 ### Used By
 
-- `--gc-factors` / `-F` (`region-entropy`): the off-target table. Without it the tool uses the
-  tables `extract` wrote beside the BED, as `run-all` does.
+- Every feature step that corrects (`run-all`, the tools on the unified pipeline, and
+  `region-entropy`): the tables `extract` wrote beside the BED. No option names another.
 - `--correction-factors` (`mfsd`).
+- `--gc-factors` (`validate`): checks a table.
 
 ---
 

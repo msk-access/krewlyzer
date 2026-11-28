@@ -60,7 +60,6 @@ from .core.asset_resolution import (
     resolve_target_regions,
 )
 from .core.fsc_processor import default_continue_n
-from .core.gc_assets import resolve_gc_factors
 
 # Import startup banner logging
 from .core.logging import log_startup_banner, ResolvedAsset
@@ -1008,25 +1007,24 @@ def run_all(
             try:
                 from .mfsd import mfsd_stage
 
-                # GC factors through the one resolver. Panel mode prefers the on-target table:
-                # variants sit in captured regions, whose GC bias differs from off-target.
-                gc_choice = None
-                if is_panel_mode:
-                    gc_choice = resolve_gc_factors(bedgz_file, "on_target")
-                    if gc_choice.path is not None:
-                        logger.info(
-                            f"mFSD: on-target GC factors ({gc_choice.path.name})"
-                        )
-                    else:
-                        logger.warning(
-                            f"mFSD: on-target GC factors not found ({gc_choice.reason}); "
-                            "using the off-target table"
-                        )
-                if gc_choice is None or not gc_choice.found:
-                    gc_choice = resolve_gc_factors(bedgz_file, "off_target")
-                if not gc_choice.found:
-                    logger.warning(
-                        f"mFSD: no GC factors ({gc_choice.reason}); running uncorrected"
+                # The tables the feature pass found, checked, reported and recorded for this BED:
+                # the on-target one where there is one (variants sit in captured regions, whose GC
+                # bias differs from off-target), else the off-target one, as panel WPS, TFBS and
+                # ATAC do (gene FSC runs uncorrected instead). Looking again here skipped the
+                # check and repeated the feature pass's warnings without their remedy.
+                tables = feature_outputs.gc_factors_choice
+                # Set by run_features before any feature runs; its failure ended run-all above.
+                assert tables is not None, "the feature pass chose no GC factor tables"
+                population = "on_target" if tables["on_target"].found else "off_target"
+                gc_choice = tables[population]
+                if gc_choice.found:
+                    logger.info(
+                        f"mFSD: GC factors ({population.replace('_', '-')}): "
+                        f"{gc_choice.path.name} [{gc_choice.kind}]"
+                    )
+                else:
+                    logger.info(
+                        "mFSD: no GC factors; runs without GC correction (warned above)"
                     )
                 correction_factors_path = gc_choice.path
 

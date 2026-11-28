@@ -5172,7 +5172,6 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o output/
 | `--atac-regions` | | PATH | | Custom ATAC regions BED.gz |
 | `--genome` | `-G` | TEXT | hg19 | Genome build (hg19/GRCh37/hg38/GRCh38) |
 | `--gc-correct/--no-gc-correct` | | FLAG | `--gc-correct` | Apply GC bias correction |
-| `--gc-factors` | `-F` | PATH | | Off-target GC factor table (`.parquet`/`.tsv.gz`/`.tsv`); default: the tables `extract` wrote beside the BED, as `run-all` uses |
 | `--pon-model` | `-P` | PATH | | PON model for z-score normalization |
 | `--pon-variant` | | TEXT | all_unique | PON variant: `all_unique` or `duplex` |
 | `--skip-pon` | | FLAG | | Skip PON z-score normalization (for ML negatives) |
@@ -5275,7 +5274,8 @@ krewlyzer run-all -i sample.bam -r hg19.fa -o out/ \
 
 !!! note
     On-target outputs use on-target GC correction factors when available,
-    providing better accuracy for capture-biased data.
+    providing better accuracy for capture-biased data. Without an on-target table
+    they fall back to the off-target one, and the run warns, as run-all does.
 
 ---
 
@@ -7290,7 +7290,7 @@ krewlyzer mfsd -i sample.bam -V variants.vcf -g reference.fa \
 | **FSD** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **WPS** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
 | **OCF** | `--gc-correct` | From extract | Via `run_unified_pipeline` |
-| **Region Entropy** | `--gc-correct`, `--gc-factors` | From extract | TFBS/ATAC fragment weighting |
+| **Region Entropy** | `--gc-correct` | From extract | TFBS/ATAC fragment weighting |
 | **Region MDS** | | N/A | Uses raw motif counts (no GC correction) |
 | **mFSD** | `--correction-factors` | Manual input | Uses pre-computed CSV |
 | **motif** | N/A | N/A | No GC correction |
@@ -7310,10 +7310,13 @@ factors and GC correction does not depend on the output format. Each sample's me
 the kind of table each population used (`gc_factors_offtarget`, `gc_factors_ontarget`).
 
 **Only extraction fits a table.** When it fitted no off-target table (a panel whose targets hold
-almost every fragment), or the table is not beside the BED, no feature step fits one: run-all and
-the tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) run the features that correct
-with it uncorrected, and warn. run-all records `gc_correction_applied_offtarget=False`; a single
-tool records it only into extraction's record, and only while no run has recorded one. A table
+almost every fragment), or the table is not beside the BED, no feature step fits one: run-all, the
+tools on the unified pipeline (`fsc`, `fsr`, `fsd`, `wps`, `ocf`) and `region-entropy` run the
+features that correct with it uncorrected, and warn, saying whether re-extracting can give one. A
+panel with no on-target table corrects panel WPS, TFBS and ATAC with the off-target one, runs gene
+FSC uncorrected, and warns. run-all records `gc_correction_applied_offtarget=False`; a single tool
+records it only into extraction's record, and only while no run has recorded one. A table
+that cannot be read stops the run before any feature that corrects with it is computed. A table
 elsewhere, such as in the folder a tool writes to, is never used: it may be another extraction's.
 Nor is one beside the BED when extraction's record says it wrote none
 (`gc_correction_computed=False`): a feature step of an earlier build fitted it there, under
@@ -9356,7 +9359,7 @@ This page documents the expected formats for custom input files used as override
 | [Arms BED](#arms-bed) | chrom, start, end, arm | `--arms-file` | `chr1\t0\t125000000\t1p` |
 | [WPS Anchors](#wps-anchors) | BED6 format | `--wps-anchors`, `--wps-background` | `chr1\t1000\t2000\tGene_TSS\t0\t+` |
 | [Region BED](#region-bed) | chrom, start, end, label | `--ocr-file`, `--tfbs-regions`, `--atac-regions` | `chr1\t500\t800\tLiver` |
-| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--gc-factors` | `170\t175\t50\t100\t90\t1.25` |
+| [GC Factors table](#gc-factors-tsv) | length_bin_min, length_bin_max, gc_percent, observed, expected, correction_factor | `--correction-factors`, `validate --gc-factors` | `170\t175\t50\t100\t90\t1.25` |
 
 ---
 
@@ -9687,9 +9690,10 @@ length_bin_min	length_bin_max	gc_percent	observed	expected	correction_factor
 
 ### Used By
 
-- `--gc-factors` / `-F` (`region-entropy`): the off-target table. Without it the tool uses the
-  tables `extract` wrote beside the BED, as `run-all` does.
+- Every feature step that corrects (`run-all`, the tools on the unified pipeline, and
+  `region-entropy`): the tables `extract` wrote beside the BED. No option names another.
 - `--correction-factors` (`mfsd`).
+- `--gc-factors` (`validate`): checks a table.
 
 ---
 

@@ -710,7 +710,6 @@ def _fsd(sample, bed, out):
 
 
 def _region_entropy(sample, bed, out):
-    # --output-format by its long name: region-entropy gives -F to --gc-factors too.
     return _cli(
         "region-entropy",
         "-i",
